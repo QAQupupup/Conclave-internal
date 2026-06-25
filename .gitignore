@@ -1,0 +1,72 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# Virtual environments
+venv/
+env/
+.venv/
+env.bak/
+
+# ===== Node / React =====
+node_modules/
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+*.tsbuildinfo
+.vite/
+
+# ===== Environments / Secrets =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# ===== Databases / Data =====
+*.sqlite
+*.sqlite3
+*.db
+qdrant_data/
+uploads/
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ===== Logs =====
+logs/
+*.log
+
+# ===== Misc =====
+.trae-cn/
