@@ -313,17 +313,33 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             {"role": "engineer", "stance": "重可行性与风险"},
         ]
     # 解析 team_config 为 (role, stance) 列表，保持顺序
+    # 支持模糊匹配：LLM 可能返回中文角色名（"产品经理"、"后端架构师"等）
+    _ROLE_KEYWORDS: dict[str, list[str]] = {
+        Role.PRODUCT_ARCHITECT.value: ["product_architect", "产品", "产品经理", "pm", "architect", "架构师"],
+        Role.ENGINEER.value: ["engineer", "工程师", "后端", "开发", "developer", "前端"],
+    }
+
+    def _match_role(role_str: str) -> Role | None:
+        """模糊匹配角色名（支持中英文）"""
+        role_lower = role_str.lower()
+        for role, keywords in _ROLE_KEYWORDS.items():
+            for kw in keywords:
+                if kw in role_lower:
+                    return Role(role)
+        return None
+
     members: list[tuple[Role, str]] = []
     for member in state.team_config:
         role_str = member.get("role", "")
         stance = member.get("stance", "")
-        if role_str == Role.PRODUCT_ARCHITECT.value:
-            role = Role.PRODUCT_ARCHITECT
-        elif role_str == Role.ENGINEER.value:
-            role = Role.ENGINEER
-        else:
-            continue
-        members.append((role, stance))
+        matched = _match_role(role_str)
+        if matched is not None:
+            members.append((matched, stance))
+        # 未匹配的角色跳过（当前只支持两种角色，其他角色可作为借调处理）
+
+    # 兜底：如果模糊匹配后没有有效角色，使用默认配置
+    if not members:
+        members = [(Role.PRODUCT_ARCHITECT, "重价值与边界"), (Role.ENGINEER, "重可行性与风险")]
 
     # ---- Phase 1：前 N-1 个角色并行独立思考 ----
     parallel_members = members[:-1] if len(members) > 1 else members

@@ -379,9 +379,11 @@ class RealLLM:
             body["response_format"] = {"type": "json_object"}
 
         latency_ms = 0
+        # produce 阶段生成大量文本（OpenAPI），需要更长超时
+        stage_timeout = 300.0 if stage == "produce" else 120.0
         try:
             t0 = time.monotonic()
-            resp = await self._client.post(url, headers=headers, json=body)
+            resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
             resp.raise_for_status()
             latency_ms = int((time.monotonic() - t0) * 1000)
         except httpx.HTTPStatusError as e:
@@ -394,7 +396,7 @@ class RealLLM:
                 self._supports_json_mode = False
                 body.pop("response_format", None)
                 t0 = time.monotonic()
-                resp = await self._client.post(url, headers=headers, json=body)
+                resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
                 resp.raise_for_status()
                 latency_ms = int((time.monotonic() - t0) * 1000)
             else:
