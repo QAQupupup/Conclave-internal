@@ -18,6 +18,13 @@
   --warn: #f08c00;
   --danger: #e03131;
 
+  /* YAML 语法高亮配色（无外部依赖，正则按行着色） */
+  --yaml-key: #1971c2;       /* 键名：蓝 */
+  --yaml-string: #2f9e44;    /* 字符串：绿 */
+  --yaml-comment: #868e96;   /* 注释：灰 */
+  --yaml-colon: #c92a2a;     /* 冒号分隔：暗红 */
+  --yaml-default: #495057;  /* 值默认色 */
+
   /* 排版变量 */
   --radius: 8px;
   --radius-lg: 12px;
@@ -418,6 +425,83 @@ code {
   border-color: var(--accent);
 }
 
+/* ---------- 聊天流增强：动画 / 阶段分隔线 / 新消息提示 / 展开 ---------- */
+/* 消息卡片淡入 + 轻微上滑动画 */
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.message-card.message-in {
+  animation: message-in 0.3s ease-out;
+}
+/* 消息包裹层（卡片 + 可选分隔线） */
+.message-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* 阶段分隔线：两条消息阶段不同时插入，标注新阶段名 */
+.stage-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 2px;
+}
+.stage-sep-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.stage-sep-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-elev);
+  padding: 2px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+/* 新消息提示按钮：固定在聊天流底部，点击滚到底 */
+.chat-panel {
+  position: relative;
+}
+.new-msg-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 18px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(66, 99, 235, 0.35);
+  z-index: 10;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.new-msg-btn:hover {
+  transform: translateX(-50%) translateY(-1px);
+  box-shadow: 0 4px 12px rgba(66, 99, 235, 0.45);
+}
+/* 长消息"展开全部 / 收起"按钮 */
+.expand-btn {
+  margin-top: 6px;
+  padding: 2px 10px;
+  font-size: 11px;
+  align-self: flex-start;
+  color: var(--accent);
+}
+
 /* ---------- 议题面板 ---------- */
 .topic-panel {
   padding: 0;
@@ -632,29 +716,85 @@ code {
   padding: 14px 18px;
 }
 .prd-block {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+}
+/* PRD 头部：大标题 + 复制按钮同行 */
+.prd-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 .prd-title {
-  font-weight: 600;
-  font-size: 15px;
-  margin-bottom: 8px;
+  font-weight: 700;
+  font-size: 17px;
   letter-spacing: 0.02em;
+  color: var(--text);
+  line-height: 1.4;
 }
-.prd-row {
-  padding: 5px 0;
+/* PRD 结构化字段：带标签的段落，字段间距 */
+.prd-field {
+  padding: 8px 0;
   border-bottom: 1px solid var(--border-soft);
-  color: var(--text-secondary);
 }
+.prd-field:last-child {
+  border-bottom: none;
+}
+.prd-field .field-value {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+/* 带图标的列表 */
 .prd-list {
-  margin: 3px 0 5px;
-  padding-left: 18px;
+  list-style: none;
+  margin: 4px 0 2px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 .prd-list li {
-  margin: 2px 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
   color: var(--text-secondary);
+  line-height: 1.55;
 }
+.list-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  width: 14px;
+  text-align: center;
+}
+.list-icon.icon-assumption {
+  color: var(--accent);
+}
+.list-icon.icon-constraint {
+  color: var(--warn);
+}
+.list-icon.icon-api {
+  color: var(--role-engineer);
+}
+.list-icon.icon-question {
+  color: var(--danger);
+  font-weight: 700;
+}
+.list-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+/* OpenAPI 区域头部：标签 + 复制按钮 */
 .openapi-block {
-  margin-top: 10px;
+  margin-top: 14px;
+}
+.openapi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
 }
 .code-block {
   background: var(--bg-elev2);
@@ -669,6 +809,34 @@ code {
   overflow-y: auto;
   white-space: pre;
   color: var(--text-secondary);
+}
+/* YAML 高亮：每行一个块级 span，保留缩进 */
+.yaml-code {
+  color: var(--yaml-default);
+}
+.yaml-line {
+  display: block;
+}
+.yaml-key {
+  color: var(--yaml-key);
+  font-weight: 500;
+}
+.yaml-colon {
+  color: var(--yaml-colon);
+}
+.yaml-string {
+  color: var(--yaml-string);
+}
+.yaml-comment {
+  color: var(--yaml-comment);
+  font-style: italic;
+}
+/* 一键复制按钮 */
+.copy-btn {
+  font-size: 11px;
+  padding: 3px 12px;
+  flex-shrink: 0;
+  color: var(--accent);
 }
 .borrow-btn {
   font-size: 12px;
