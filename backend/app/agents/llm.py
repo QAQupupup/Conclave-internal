@@ -6,7 +6,9 @@ import uuid
 from typing import Any, Protocol
 
 import httpx
+from pydantic import BaseModel, ValidationError
 
+from app.agents.schemas import SCHEMA_MAP
 from app.config import settings
 
 
@@ -204,38 +206,124 @@ class RealLLM:
     """真实 LLM 客户端：调 openai 兼容接口（httpx）
 
     读取 env: CONCLAVE_LLM_API_KEY / CONCLAVE_LLM_BASE_URL / CONCLAVE_LLM_MODEL
+
+    三明治模式（结构化输出加固）：
+    1. 请求层：system message 注入对应 Pydantic 模型的 JSON Schema；
+       传 response_format={"type":"json_object"}（接口不支持时自动降级）。
+    2. 解析层：用 schemas.py 对应模型 model_validate 校验。
+    3. 重试层：解析失败把 ValidationError 信息追加到 prompt 再调，最多 3 次；
+       3 次都失败则降级用 StubLLM 同阶段数据，保证流程不中断。
     """
+
+    # 最大重试次数（含首次）
+    MAX_ATTEMPTS = 3
 
     def __init__(self) -> None:
         self.api_key = settings.llm_api_key
         self.base_url = settings.llm_base_url or "https://api.openai.com/v1"
         self.model = settings.llm_model
         self._client = httpx.AsyncClient(timeout=60.0)
+        # 接口是否支持 json_object 响应格式；遇到 400 时自动置 False 并回退
+        self._supports_json_mode: bool = True
 
     async def complete(self, prompt: str, schema_hint: str = "") -> dict[str, Any]:
-        """调用 chat completions，解析 JSON 返回"""
+        """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级"""
+        model_cls = SCHEMA_MAP.get(schema_hint)
+        schema_desc = self._schema_description(model_cls)
+
+        current_prompt = prompt
+        last_error = ""
+        for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            try:
+                content = await self._call_api(current_prompt, schema_desc)
+                parsed = self._extract_json(content)
+                if model_cls is not None:
+                    validated: BaseModel = model_cls.model_validate(parsed)
+                    return validated.model_dump()
+                # schema_hint 未注册时，仅做 JSON 解析兜底返回 dict
+                return parsed if isinstance(parsed, dict) else {"result": parsed}
+            except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                last_error = f"{type(e).__name__}: {e}"
+                # 重试层：把校验错误追加进 prompt，引导 LLM 修正
+                current_prompt = (
+                    f"{prompt}\n\n"
+                    f"【上一次输出校验失败（第 {attempt} 次），错误：{last_error}】\n"
+                    f"请严格按给定 JSON Schema 重新输出，仅输出合法 JSON，不要包含注释或围栏。"
+                )
+
+        # 3 次都失败：降级到 StubLLM 同阶段数据，保证流程不中断（不报错）
+        stub = StubLLM()
+        return await stub.complete(prompt, schema_hint=schema_hint)
+
+    # ---------- 请求层 ----------
+
+    @staticmethod
+    def _schema_description(model_cls: type[BaseModel] | None) -> str:
+        """把 Pydantic 模型转成 JSON Schema 文本，注入 system message"""
+        if model_cls is None:
+            return ""
+        schema = model_cls.model_json_schema()
+        return json.dumps(schema, ensure_ascii=False, indent=2)
+
+    async def _call_api(self, user_prompt: str, schema_desc: str) -> str:
+        """调用 chat completions，返回 message content 字符串"""
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        body = {
+        system_content = "你是会议决策助手，严格输出 JSON，不要输出多余文本。"
+        if schema_desc:
+            system_content += (
+                "\n输出必须严格符合以下 JSON Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n"
+                f"{schema_desc}"
+            )
+        body: dict[str, Any] = {
             "model": self.model,
             "messages": [
-                {
-                    "role": "system",
-                    "content": "你是会议决策助手，严格输出 JSON，不要输出多余文本。",
-                },
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.3,
         }
-        resp = await self._client.post(url, headers=headers, json=body)
-        resp.raise_for_status()
+        # 请求层：优先传 json_object 响应格式
+        if self._supports_json_mode:
+            body["response_format"] = {"type": "json_object"}
+
+        try:
+            resp = await self._client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # 接口可能不支持 response_format（返回 400），自动降级去掉该参数重试一次
+            if (
+                self._supports_json_mode
+                and e.response.status_code == 400
+                and self._looks_like_json_mode_error(e)
+            ):
+                self._supports_json_mode = False
+                body.pop("response_format", None)
+                resp = await self._client.post(url, headers=headers, json=body)
+                resp.raise_for_status()
+            else:
+                raise
+
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        # 尝试提取 JSON（容错：去掉可能的 ```json 围栏）
-        content = content.strip()
+        return content
+
+    @staticmethod
+    def _looks_like_json_mode_error(e: httpx.HTTPStatusError) -> bool:
+        """粗判 400 是否由 response_format 引起"""
+        try:
+            text = e.response.text.lower()
+        except Exception:
+            return False
+        return any(kw in text for kw in ("response_format", "json_object", "json_schema", "not support"))
+
+    @staticmethod
+    def _extract_json(content: str) -> Any:
+        """容错提取 JSON：去掉 ```json 围栏与多余文本"""
+        content = (content or "").strip()
         if content.startswith("```"):
             content = content.split("\n", 1)[1].rsplit("```", 1)[0]
         return json.loads(content)

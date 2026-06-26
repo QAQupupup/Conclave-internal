@@ -24,17 +24,18 @@ class Agent:
     role: Role
     llm: LLMClient = field(default_factory=get_llm)
 
-    async def clarify(self, topic: str, doc_summaries: list[str]) -> dict[str, Any]:
+    async def clarify(self, topic: str, doc_summaries: list[str], anchor: str = "") -> dict[str, Any]:
         """主持人澄清议题"""
         prompt = render(
             MODERATOR_CLARIFY,
             topic=topic,
             doc_summaries="; ".join(doc_summaries) if doc_summaries else "无",
         )
+        prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="clarify")
 
     async def intra_speak(
-        self, clarified_topic: str, stance: str
+        self, clarified_topic: str, stance: str, anchor: str = ""
     ) -> dict[str, Any]:
         """队内发言：按角色选择模板"""
         if self.role == Role.ENGINEER:
@@ -42,15 +43,17 @@ class Agent:
         else:
             template = ARCHITECT_INTRA
         prompt = render(template, clarified_topic=clarified_topic, stance=stance)
+        prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="intra_team")
 
-    async def cross_team(self, team_conclusions: list[dict[str, Any]]) -> dict[str, Any]:
+    async def cross_team(self, team_conclusions: list[dict[str, Any]], anchor: str = "") -> dict[str, Any]:
         """跨队辩论：找出冲突"""
         prompt = render(CROSS_TEAM, team_conclusions=str(team_conclusions))
+        prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="cross_team")
 
     async def evidence_check(
-        self, conflict: dict[str, Any], evidence_chunks: list[dict[str, Any]]
+        self, conflict: dict[str, Any], evidence_chunks: list[dict[str, Any]], anchor: str = ""
     ) -> dict[str, Any]:
         """证据对照"""
         prompt = render(
@@ -58,17 +61,27 @@ class Agent:
             conflict=str(conflict),
             evidence_chunks=str(evidence_chunks),
         )
+        prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="evidence_check")
 
-    async def arbitrate(self, evidence_set: list[dict[str, Any]]) -> dict[str, Any]:
+    async def arbitrate(self, evidence_set: list[dict[str, Any]], anchor: str = "") -> dict[str, Any]:
         """仲裁裁决"""
         prompt = render(ARBITRATE, evidence_set=str(evidence_set))
+        prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="arbitrate")
 
-    async def produce(self, decision_record: dict[str, Any]) -> dict[str, Any]:
+    async def produce(self, decision_record: dict[str, Any], anchor: str = "") -> dict[str, Any]:
         """产出 PRD + OpenAPI"""
         prompt = render(PRODUCE, decision_record=str(decision_record))
+        prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="produce")
+
+
+def _with_anchor(anchor: str, prompt: str) -> str:
+    """把会议宪章锚点拼到 prompt 前面（anchor 为空时原样返回）"""
+    if not anchor:
+        return prompt
+    return f"{anchor}\n\n{prompt}"
 
 
 # 角色单例缓存

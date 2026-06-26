@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.orchestrator.charter import MeetingCharter
+
 
 # ---------- 枚举 ----------
 
@@ -181,6 +183,10 @@ class MeetingState(BaseModel):
     artifact: Optional[dict[str, Any]] = None
     paused_snapshot: Optional[dict[str, Any]] = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
+    # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）
+    charter: Optional[MeetingCharter] = None
+    # 漂移检查日志（非阻塞，记录每条发言的 drift 判定）
+    drift_log: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def snapshot(self) -> dict[str, Any]:

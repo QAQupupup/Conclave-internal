@@ -70,12 +70,37 @@ def apply_signal(state: MeetingState, signal: str, payload: dict[str, Any] | Non
         return state
 
     if signal == "loan":
-        # 借调三问：迭代一仅记录请求，不触发裁决流程
+        # 借调三问裁决（基于会议宪章防重复借调）
+        target_role = str(payload.get("target_role", "")).strip()
+        charter = state.charter
+        if charter is None or not target_role:
+            # 宪章尚未建立或目标角色缺失：暂存请求，defer 等待 clarify 后再裁决
+            state.injected_messages.append(
+                {
+                    "signal": "loan",
+                    "request": payload,
+                    "at_stage": state.stage.value,
+                    "verdict": "defer",
+                    "reason": "会议宪章尚未建立或未指定 target_role，暂缓裁决",
+                }
+            )
+            return state
+        if charter.is_already_borrowed(target_role):
+            # 已借调过该角色：reject，防重复申请
+            verdict = "reject"
+            reason = f"角色 {target_role} 已借调过，拒绝重复借调"
+        else:
+            # 首次借调：记录到 borrow_history，临时批准（不真正加入团队）
+            verdict = "approve_temporary"
+            reason = f"角色 {target_role} 首次借调，临时批准（不真正加入团队）"
+            charter.register_borrow(target_role, verdict)
         state.injected_messages.append(
             {
                 "signal": "loan",
                 "request": payload,
                 "at_stage": state.stage.value,
+                "verdict": verdict,
+                "reason": reason,
             }
         )
         return state
