@@ -243,7 +243,7 @@ class RealLLM:
         self.api_key = settings.llm_api_key
         self.base_url = settings.llm_base_url or "https://api.openai.com/v1"
         self.model = settings.llm_model
-        self._client = httpx.AsyncClient(timeout=60.0)
+        self._client = httpx.AsyncClient(timeout=120.0)
         # 接口是否支持 json_object 响应格式；遇到 400 时自动置 False 并回退
         self._supports_json_mode: bool = True
 

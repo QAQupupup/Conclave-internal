@@ -184,6 +184,50 @@ def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: st
     )
 
 
+def build_intra_react_prompt(
+    role: Role,
+    clarified_topic: str,
+    stance: str,
+    prior_conclusions: list[dict],
+    anchor: str = "",
+) -> ThinkRequest:
+    """构造 intra_team 阶段的反应性思考请求（混合模式专用）
+
+    与 build_intra_prompt 的区别：prompt 中注入了前序角色的结论，
+    让当前角色可以看到其他人的观点并做出反应，提升辩论质量。
+
+    prior_conclusions: 前序角色的结论列表 [{"role": "...", "stance": "...", "claims": [...]}]
+    """
+    template = ENGINEER_INTRA if role == Role.ENGINEER else ARCHITECT_INTRA
+    # 构造前序结论摘要
+    prior_summary = ""
+    if prior_conclusions:
+        parts = []
+        for pc in prior_conclusions:
+            role_name = pc.get("role", "未知角色")
+            claims_text = json.dumps(pc.get("claims", []), ensure_ascii=False)
+            parts.append(f"【{role_name}的论点】{claims_text}")
+        prior_summary = (
+            "\n\n【前序发言参考】\n"
+            "以下是其他角色已发表的论点，请在你的分析中参考并考虑是否认同或反驳：\n"
+            + "\n".join(parts)
+            + "\n\n请基于上述参考，结合你的专业视角发表论点。"
+        )
+    prompt = render(template, clarified_topic=clarified_topic, stance=stance)
+    # 在模板渲染后注入前序结论
+    if prior_summary:
+        prompt = prompt + prior_summary
+    prompt = _inject_profile(prompt, role.value)
+    if anchor:
+        prompt = f"{anchor}\n\n{prompt}"
+    return ThinkRequest(
+        agent_role=role.value,
+        stage="intra_team",
+        prompt=prompt,
+        schema_hint="intra_team",
+    )
+
+
 def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> ThinkRequest:
     prompt = render(CROSS_TEAM, team_conclusions=str(team_conclusions))
     prompt = _inject_profile(prompt, Role.MODERATOR.value)

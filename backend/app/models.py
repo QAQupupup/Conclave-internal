@@ -199,6 +199,9 @@ class MeetingState(BaseModel):
     # 每项: {"role": "security_expert", "verdict": "approve_temporary",
     #        "spoken": False, "request": {...}}
     borrowed_agents: list[dict[str, Any]] = Field(default_factory=list)
+    # 流水线优化：cross_team 阶段预检索的证据（evidence_check 优先使用）
+    # 格式: {conflict_id: [evidence_chunks]}
+    _prefetched_evidence: Optional[dict[str, list[dict]]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def model_post_init(self, __context: Any) -> None:

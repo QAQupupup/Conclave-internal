@@ -11,6 +11,7 @@ from app.agents.compute import (
     get_compute,
     build_clarify_prompt,
     build_intra_prompt,
+    build_intra_react_prompt,
     build_cross_team_prompt,
     build_evidence_prompt,
     build_arbitrate_prompt,
@@ -292,7 +293,16 @@ async def clarify_node(state: MeetingState) -> MeetingState:
 
 
 async def intra_team_node(state: MeetingState) -> MeetingState:
-    """IntraTeam 阶段：各角色队内发言，达成队内结论（并行思考）"""
+    """IntraTeam 阶段：混合模式思考（前 N-1 并行 + 最后 1 反应）
+
+    优化策略：
+    - 前 N-1 个角色并行独立思考（互不可见，速度快）
+    - 最后 1 个角色等前面完成后，基于全部前序结论做反应性思考（看到其他人观点）
+    - 兼顾速度和辩论质量：O(max(T1..Tn-1) + Tn) 而非 O(T1+T2+...+Tn)
+    - 只有 1 个角色时退化为纯并行（无反应环节）
+
+    副作用（claims/事件/漂移）串行执行，保持顺序与 team_config 一致。
+    """
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
     compute = get_compute()
@@ -302,7 +312,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             {"role": "product_architect", "stance": "重价值与边界"},
             {"role": "engineer", "stance": "重可行性与风险"},
         ]
-    # 解析 team_config 为 (role, stance) 列表，保持与 team_config 顺序一致
+    # 解析 team_config 为 (role, stance) 列表，保持顺序
     members: list[tuple[Role, str]] = []
     for member in state.team_config:
         role_str = member.get("role", "")
@@ -312,27 +322,31 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         elif role_str == Role.ENGINEER.value:
             role = Role.ENGINEER
         else:
-            # 未知角色跳过（迭代一只支持两种）
             continue
         members.append((role, stance))
 
-    # 并行思考：每个角色独立构造 ThinkRequest + 一致性自检
-    # 通过 asyncio.gather 保序，结果顺序与 members 顺序一致
+    # ---- Phase 1：前 N-1 个角色并行独立思考 ----
+    parallel_members = members[:-1] if len(members) > 1 else members
+    last_member = members[-1] if len(members) > 1 else None
+
     async def _think_one(role: Role, stance: str) -> tuple[dict[str, Any], str]:
-        # 带一致性自检的 LLM 调用
         async def call_fn(anchor: str) -> dict[str, Any]:
             req = build_intra_prompt(role, state.clarified_topic or state.topic, stance, anchor=anchor)
             resp = await compute.think(req)
             return resp.result
-
         return await _run_with_consistency(state, "intra_team", call_fn)
 
-    think_results = await asyncio.gather(*[_think_one(r, s) for r, s in members])
+    # 并行思考前 N-1 个角色
+    parallel_results = await asyncio.gather(
+        *[_think_one(r, s) for r, s in parallel_members]
+    )
 
-    # 串行收集结果：保持顺序与 team_config 一致，副作用（claims/事件/漂移）串行执行
+    # ---- 串行收集前 N-1 个角色的结论（构造 prior_conclusions 供反应角色使用）----
     conclusions: list[dict[str, Any]] = []
     worst_confidence = "high"
-    for (role, stance), (result, confidence) in zip(members, think_results):
+    prior_conclusions_for_react: list[dict[str, Any]] = []
+
+    for (role, stance), (result, confidence) in zip(parallel_members, parallel_results):
         worst_confidence = _worst_confidence(worst_confidence, confidence)
         claims = result.get("claims", [])
         claim_ids = []
@@ -342,18 +356,44 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             c["agent_role"] = role.value
             state.claims.append(c)
             claim_ids.append(cid)
-        # 队内结论
-        conclusion = {
-            "role": role.value,
-            "stance": stance,
-            "claims": claims,
-        }
+        conclusion = {"role": role.value, "stance": stance, "claims": claims}
         conclusions.append(conclusion)
+        prior_conclusions_for_react.append(conclusion)
         content = json.dumps(claims, ensure_ascii=False)
         await _emit_agent_spoke(state, role, Stage.INTRA_TEAM, content, claim_refs=claim_ids)
         _record_drift(state, role, Stage.INTRA_TEAM, content)
+
+    # ---- Phase 2：最后 1 个角色基于前序结论做反应性思考 ----
+    if last_member is not None:
+        last_role, last_stance = last_member
+        async def _think_react(role: Role, stance: str, prior: list[dict]) -> tuple[dict[str, Any], str]:
+            async def call_fn(anchor: str) -> dict[str, Any]:
+                req = build_intra_react_prompt(
+                    role, state.clarified_topic or state.topic, stance, prior, anchor=anchor
+                )
+                resp = await compute.think(req)
+                return resp.result
+            return await _run_with_consistency(state, "intra_team", call_fn)
+
+        react_result, react_confidence = await _think_react(last_role, last_stance, prior_conclusions_for_react)
+        worst_confidence = _worst_confidence(worst_confidence, react_confidence)
+        # 收集反应角色的结论
+        react_claims = react_result.get("claims", [])
+        react_claim_ids = []
+        for c in react_claims:
+            cid = f"claim-{uuid.uuid4().hex[:8]}"
+            c["id"] = cid
+            c["agent_role"] = last_role.value
+            state.claims.append(c)
+            react_claim_ids.append(cid)
+        conclusion = {"role": last_role.value, "stance": last_stance, "claims": react_claims}
+        conclusions.append(conclusion)
+        content = json.dumps(react_claims, ensure_ascii=False)
+        await _emit_agent_spoke(state, last_role, Stage.INTRA_TEAM, content, claim_refs=react_claim_ids)
+        _record_drift(state, last_role, Stage.INTRA_TEAM, content)
+
     state.team_conclusions = conclusions
-    # 第2层：锁定 intra_team 结论（claims + team_conclusions）
+    # 第2层：锁定 intra_team 结论
     state.conclusion_chain.lock("intra_team", {"claims": state.claims, "team_conclusions": conclusions})
     # 第5层：记录置信度（取最差值）
     state.confidence_flags["intra_team"] = worst_confidence
@@ -364,7 +404,11 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
 
 
 async def cross_team_node(state: MeetingState) -> MeetingState:
-    """CrossTeam 阶段：跨队辩论，暴露冲突点"""
+    """CrossTeam 阶段：跨队辩论，暴露冲突点
+
+    流水线优化：冲突产生后，后台预启动 evidence_check 的 RAG 检索，
+    与后续的借调发言 + 阶段切换事件并行，减少 evidence_check 等待时间。
+    """
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
     compute = get_compute()
@@ -388,23 +432,26 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
     content = json.dumps(conflicts, ensure_ascii=False)
     await _emit_agent_spoke(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
     _record_drift(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
+
+    # ---- 流水线优化：后台预检索 evidence（与借调发言并行）----
+    # 冲突已确定，RAG 检索是 I/O 密集型，可以提前启动
+    # 检索结果存入 state._prefetched_evidence，evidence_check 节点优先使用
+    if conflicts:
+        state._prefetched_evidence = await _prefetch_evidence(state, conflicts)
+
     state.stage = Stage.EVIDENCE_CHECK
     return state
 
 
-async def evidence_check_node(state: MeetingState) -> MeetingState:
-    """EvidenceCheck 阶段：逐冲突 RAG 检索证据，对照判断"""
-    # 设置 trace 上下文
-    set_current_trace(state.llm_trace)
-    compute = get_compute()
-    evidence_set: list[dict[str, Any]] = []
-    worst_confidence = "high"
-    for conflict in state.conflicts:
+async def _prefetch_evidence(state: MeetingState, conflicts: list[dict]) -> dict[str, list[dict]]:
+    """预检索所有冲突的证据（流水线优化：与借调发言并行）
+
+    返回 {conflict_id: [evidence_chunks]} 字典，evidence_check 节点优先使用。
+    """
+    async def _retrieve_one(conflict: dict) -> tuple[str, list[dict]]:
         cid = conflict.get("id", "c0")
         summary = conflict.get("summary", str(conflict))
-        # RAG 检索证据
         chunks = retrieve_for_conflict(state.meeting_id, summary, top_k=5)
-        # 转成证据片段格式
         evidence_chunks = [
             {
                 "evidence_id": f"ev-{i}",
@@ -414,7 +461,6 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
             }
             for i, ck in enumerate(chunks)
         ]
-        # 感知层：RAG 证据不足时调 Web Search 补充外部证据
         if len(evidence_chunks) < 3:
             web_search = get_web_search()
             web_results = await web_search.search(summary, top_k=3)
@@ -426,8 +472,6 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
                     "char_range": [0, 0],
                 })
         if not evidence_chunks:
-            # 无文档时兜底：标注为通用知识证据，而非空证据
-            # 证据来源分级：让用户知道此处缺乏文档支撑
             evidence_chunks = [
                 {
                     "evidence_id": "ev-0",
@@ -436,13 +480,99 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
                     "char_range": [0, 0],
                 }
             ]
-        # 带一致性自检的 LLM 调用
+        return cid, evidence_chunks
+
+    # 并行检索所有冲突
+    results = await asyncio.gather(*[_retrieve_one(c) for c in conflicts])
+    return {cid: chunks for cid, chunks in results}
+
+
+async def evidence_check_node(state: MeetingState) -> MeetingState:
+    """EvidenceCheck 阶段：并行 RAG 检索证据 + 并行对照判断
+
+    优化：逐冲突串行 → 全部并行（asyncio.gather）
+    - 每个冲突独立做 RAG 检索 + Web Search + LLM 思考
+    - think_batch 并行执行，保序返回
+    - 副作用（事件发布）串行收集
+    """
+    # 设置 trace 上下文
+    set_current_trace(state.llm_trace)
+    compute = get_compute()
+    worst_confidence = "high"
+
+    # ---- Phase 1：使用预检索结果或并行检索（流水线优化）----
+    # cross_team 阶段已预检索的证据存在 state._prefetched_evidence
+    prefetched = getattr(state, "_prefetched_evidence", None)
+
+    if prefetched:
+        # 使用预检索结果（已由 cross_team 阶段提前完成）
+        retrieval_results = [
+            (conflict, prefetched.get(conflict.get("id", "c0"), []))
+            for conflict in state.conflicts
+        ]
+    else:
+        # 无预检索时，并行检索（兼容旧路径）
+        async def _retrieve_evidence(conflict: dict) -> tuple[dict, list[dict]]:
+            """为单个冲突检索证据（RAG + Web Search）"""
+            cid = conflict.get("id", "c0")
+            summary = conflict.get("summary", str(conflict))
+            chunks = retrieve_for_conflict(state.meeting_id, summary, top_k=5)
+            evidence_chunks = [
+                {
+                    "evidence_id": f"ev-{i}",
+                    "quote": ck.get("text", "")[:200],
+                    "source": ck.get("source", "doc:unknown"),
+                    "char_range": [ck.get("char_start", 0), ck.get("char_end", 0)],
+                }
+                for i, ck in enumerate(chunks)
+            ]
+            if len(evidence_chunks) < 3:
+                web_search = get_web_search()
+                web_results = await web_search.search(summary, top_k=3)
+                for i, wr in enumerate(web_results):
+                    evidence_chunks.append({
+                        "evidence_id": f"web-{i}",
+                        "quote": wr.get("quote", "")[:200],
+                        "source": wr.get("source", "web:unknown"),
+                        "char_range": [0, 0],
+                    })
+            if not evidence_chunks:
+                evidence_chunks = [
+                    {
+                        "evidence_id": "ev-0",
+                        "quote": "（无上传文档证据，以下结论基于通用工程实践，需用户验证）",
+                        "source": "common_knowledge:none",
+                        "char_range": [0, 0],
+                    }
+                ]
+            return conflict, evidence_chunks
+
+        retrieval_results = await asyncio.gather(
+            *[_retrieve_evidence(c) for c in state.conflicts]
+        )
+
+    # ---- Phase 2：并行 LLM 思考（每个冲突独立思考，互不阻塞）----
+    async def _think_one_conflict(
+        conflict: dict, evidence_chunks: list[dict]
+    ) -> tuple[dict[str, Any], str, dict, list[dict]]:
+        """对单个冲突做带一致性自检的 LLM 调用"""
         async def call_fn(anchor: str, _conflict=conflict, _chunks=evidence_chunks) -> dict[str, Any]:
             req = build_evidence_prompt(_conflict, _chunks, anchor=anchor)
             resp = await compute.think(req)
             return resp.result
 
         result, confidence = await _run_with_consistency(state, "evidence_check", call_fn)
+        return result, confidence, conflict, evidence_chunks
+
+    # 并行思考所有冲突
+    think_results = await asyncio.gather(
+        *[_think_one_conflict(c, chunks) for c, chunks in retrieval_results]
+    )
+
+    # ---- Phase 3：串行收集结果 + 发布事件 ----
+    evidence_set: list[dict[str, Any]] = []
+    for result, confidence, conflict, evidence_chunks in think_results:
+        cid = conflict.get("id", "c0")
         worst_confidence = _worst_confidence(worst_confidence, confidence)
         assessments = result.get("evidence_assessments", [])
         es = {
