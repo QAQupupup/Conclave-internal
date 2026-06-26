@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
 from app.agents.roles import engineer, moderator, product_architect
+from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, MeetingStatus, Role, Stage
 from app.orchestrator.charter import build_charter_from_clarify
@@ -83,10 +84,114 @@ async def _emit_agent_spoke(state: MeetingState, role: Role, stage: Stage, conte
     )
 
 
+# ---------- 第3层：一致性自检 + 结论锁定辅助 ----------
+
+# 置信度等级排序（值越大越差）
+_CONFIDENCE_RANK: dict[str, int] = {"high": 0, "low": 1, "fallback": 2}
+
+
+def _full_anchor(state: MeetingState, stage: str) -> str:
+    """构造完整锚点：宪章锚点 + 已锁定结论上下文
+
+    第3层：每个节点调 agent 前把 chain.get_locked_context(stage) 注入到 anchor 里
+    （和 charter anchor 一起拼到 prompt 前）。
+    """
+    parts: list[str] = []
+    charter_anchor = _anchor(state)
+    if charter_anchor:
+        parts.append(charter_anchor)
+    locked_context = state.conclusion_chain.get_locked_context(stage)
+    if locked_context:
+        parts.append(locked_context)
+    return "\n\n".join(parts) if parts else ""
+
+
+def _worst_confidence(a: str, b: str) -> str:
+    """返回两个置信度中较差的一个"""
+    return a if _CONFIDENCE_RANK.get(a, 0) >= _CONFIDENCE_RANK.get(b, 0) else b
+
+
+def _update_trace_consistency(state: MeetingState, start_pos: int, status: str) -> None:
+    """更新 trace 中自 start_pos 以来所有记录的 consistency_status"""
+    for call in state.llm_trace.calls[start_pos:]:
+        call.consistency_status = status
+
+
+async def _run_with_consistency(
+    state: MeetingState,
+    stage: str,
+    call_fn: Callable[[str], Awaitable[dict[str, Any]]],
+) -> tuple[dict[str, Any], str]:
+    """带一致性自检的 LLM 调用
+
+    流程：
+    1. 用完整锚点（宪章 + 已锁定结论上下文）调 LLM
+    2. 调 chain.check_consistency(result, stage) 检查一致性
+    3. 如果不一致：把矛盾信息追加到 anchor 重调 LLM（最多 2 次重试）
+    4. 重试后仍不一致：标记为 low_confidence，记录到 state 但不中断流程
+    5. 如果一致：返回结果和置信度
+
+    返回 (最终结果, confidence: "high" | "low" | "fallback")
+    """
+    chain = state.conclusion_chain
+    base_anchor = _full_anchor(state, stage)
+
+    # 记录 trace 起始位置（用于后续更新一致性状态）
+    start_pos = len(state.llm_trace.calls)
+
+    # 首次调用
+    result = await call_fn(base_anchor)
+    consistency = chain.check_consistency(result, stage)
+
+    retries = 0
+    while not consistency.is_consistent and retries < 2:
+        retries += 1
+        # 把矛盾信息追加到 anchor 重调
+        contradiction = "；".join(consistency.violations)
+        augmented_anchor = (
+            f"{base_anchor}\n\n"
+            f"【一致性警告】你的输出与已确认结论矛盾：{contradiction}。"
+            f"请基于已确认结论重新输出，不得与之矛盾。"
+        )
+        result = await call_fn(augmented_anchor)
+        consistency = chain.check_consistency(result, stage)
+
+    # 确定置信度并更新 trace 一致性状态
+    if not consistency.is_consistent:
+        # 重试后仍不一致：标记 low_confidence，不中断流程
+        _update_trace_consistency(state, start_pos, "low_confidence")
+        confidence = "low"
+    elif retries > 0:
+        # 重试后通过
+        _update_trace_consistency(state, start_pos, "inconsistent_retry")
+        confidence = "low"
+    else:
+        # 首次即通过
+        _update_trace_consistency(state, start_pos, "consistent")
+        confidence = "high"
+
+    # 检查是否有降级到 stub（仅 RealLLM 会记录 fallback_stub）
+    if any(
+        c.validation_status == "fallback_stub"
+        for c in state.llm_trace.calls[start_pos:]
+    ):
+        confidence = "fallback"
+
+    return result, confidence
+
+
 async def clarify_node(state: MeetingState) -> MeetingState:
     """Clarify 阶段：主持人澄清议题，确认团队组成，构造会议宪章"""
+    # 设置 trace 上下文（RealLLM 会记录调用，stub 静默跳过）
+    set_current_trace(state.llm_trace)
     agent = moderator()
-    result = await agent.clarify(state.topic, state.doc_summaries)
+
+    # 带一致性自检的 LLM 调用
+    async def call_fn(anchor: str) -> dict[str, Any]:
+        return await agent.clarify(state.topic, state.doc_summaries, anchor=anchor)
+
+    result, confidence = await _run_with_consistency(state, "clarify", call_fn)
+
     state.clarified_topic = result.get("clarified_topic", state.topic)
     state.key_questions = result.get("key_questions", [])
     state.team_config = result.get("team_config", [])
@@ -97,6 +202,10 @@ async def clarify_node(state: MeetingState) -> MeetingState:
         clarified_topic=state.clarified_topic,
         key_questions=state.key_questions,
     )
+    # 第2层：锁定 clarify 结论
+    state.conclusion_chain.lock("clarify", result)
+    # 第5层：记录置信度
+    state.confidence_flags["clarify"] = confidence
     # 主持人发言
     summary = (
         f"议题已澄清：{state.clarified_topic}。"
@@ -110,14 +219,16 @@ async def clarify_node(state: MeetingState) -> MeetingState:
 
 async def intra_team_node(state: MeetingState) -> MeetingState:
     """IntraTeam 阶段：各角色队内发言，达成队内结论"""
+    # 设置 trace 上下文
+    set_current_trace(state.llm_trace)
     if not state.team_config:
         # 兜底：默认两角色
         state.team_config = [
             {"role": "product_architect", "stance": "重价值与边界"},
             {"role": "engineer", "stance": "重可行性与风险"},
         ]
-    anchor = _anchor(state)
     conclusions: list[dict[str, Any]] = []
+    worst_confidence = "high"
     for member in state.team_config:
         role_str = member.get("role", "")
         stance = member.get("stance", "")
@@ -130,7 +241,12 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         else:
             # 未知角色跳过（迭代一只支持两种）
             continue
-        result = await agent.intra_speak(state.clarified_topic or state.topic, stance, anchor=anchor)
+        # 带一致性自检的 LLM 调用
+        async def call_fn(anchor: str, _agent=agent, _stance=stance) -> dict[str, Any]:
+            return await _agent.intra_speak(state.clarified_topic or state.topic, _stance, anchor=anchor)
+
+        result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
+        worst_confidence = _worst_confidence(worst_confidence, confidence)
         claims = result.get("claims", [])
         claim_ids = []
         for c in claims:
@@ -150,20 +266,34 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         await _emit_agent_spoke(state, role, Stage.INTRA_TEAM, content, claim_refs=claim_ids)
         _record_drift(state, role, Stage.INTRA_TEAM, content)
     state.team_conclusions = conclusions
+    # 第2层：锁定 intra_team 结论（claims + team_conclusions）
+    state.conclusion_chain.lock("intra_team", {"claims": state.claims, "team_conclusions": conclusions})
+    # 第5层：记录置信度（取最差值）
+    state.confidence_flags["intra_team"] = worst_confidence
     state.stage = Stage.CROSS_TEAM
     return state
 
 
 async def cross_team_node(state: MeetingState) -> MeetingState:
     """CrossTeam 阶段：跨队辩论，暴露冲突点"""
+    # 设置 trace 上下文
+    set_current_trace(state.llm_trace)
     agent = moderator()
-    result = await agent.cross_team(state.team_conclusions, anchor=_anchor(state))
+    # 带一致性自检的 LLM 调用
+    async def call_fn(anchor: str) -> dict[str, Any]:
+        return await agent.cross_team(state.team_conclusions, anchor=anchor)
+
+    result, confidence = await _run_with_consistency(state, "cross_team", call_fn)
     conflicts = result.get("conflicts", [])
     # 规范化冲突类型
     for c in conflicts:
         if "conflict_type" not in c and "type" in c:
             c["conflict_type"] = c.pop("type")
     state.conflicts = conflicts
+    # 第2层：锁定 cross_team 结论
+    state.conclusion_chain.lock("cross_team", {"conflicts": conflicts})
+    # 第5层：记录置信度
+    state.confidence_flags["cross_team"] = confidence
     content = json.dumps(conflicts, ensure_ascii=False)
     await _emit_agent_spoke(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
     _record_drift(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
@@ -173,9 +303,11 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
 
 async def evidence_check_node(state: MeetingState) -> MeetingState:
     """EvidenceCheck 阶段：逐冲突 RAG 检索证据，对照判断"""
+    # 设置 trace 上下文
+    set_current_trace(state.llm_trace)
     agent = moderator()
-    anchor = _anchor(state)
     evidence_set: list[dict[str, Any]] = []
+    worst_confidence = "high"
     for conflict in state.conflicts:
         cid = conflict.get("id", "c0")
         summary = conflict.get("summary", str(conflict))
@@ -201,7 +333,12 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
                     "char_range": [0, 0],
                 }
             ]
-        result = await agent.evidence_check(conflict, evidence_chunks, anchor=anchor)
+        # 带一致性自检的 LLM 调用
+        async def call_fn(anchor: str, _conflict=conflict, _chunks=evidence_chunks) -> dict[str, Any]:
+            return await agent.evidence_check(_conflict, _chunks, anchor=anchor)
+
+        result, confidence = await _run_with_consistency(state, "evidence_check", call_fn)
+        worst_confidence = _worst_confidence(worst_confidence, confidence)
         assessments = result.get("evidence_assessments", [])
         es = {
             "conflict_id": result.get("conflict_id", cid),
@@ -224,18 +361,32 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
                 )
             )
     state.evidence_set = evidence_set
+    # 第2层：锁定 evidence_check 结论
+    state.conclusion_chain.lock("evidence_check", {"evidence_set": evidence_set})
+    # 第5层：记录置信度（取最差值）
+    state.confidence_flags["evidence_check"] = worst_confidence
     state.stage = Stage.ARBITRATE
     return state
 
 
 async def arbitrate_node(state: MeetingState) -> MeetingState:
     """Arbitrate 阶段：仲裁者裁决，形成结论"""
+    # 设置 trace 上下文
+    set_current_trace(state.llm_trace)
     agent = moderator()
-    result = await agent.arbitrate(state.evidence_set, anchor=_anchor(state))
+    # 带一致性自检的 LLM 调用
+    async def call_fn(anchor: str) -> dict[str, Any]:
+        return await agent.arbitrate(state.evidence_set, anchor=anchor)
+
+    result, confidence = await _run_with_consistency(state, "arbitrate", call_fn)
     state.decision_record = {
         "decisions": result.get("decisions", []),
         "adopted_claims": result.get("adopted_claims", []),
     }
+    # 第2层：锁定 arbitrate 结论
+    state.conclusion_chain.lock("arbitrate", state.decision_record)
+    # 第5层：记录置信度
+    state.confidence_flags["arbitrate"] = confidence
     content = json.dumps(state.decision_record, ensure_ascii=False)
     await _emit_agent_spoke(state, Role.MODERATOR, Stage.ARBITRATE, content)
     _record_drift(state, Role.MODERATOR, Stage.ARBITRATE, content)
@@ -245,8 +396,14 @@ async def arbitrate_node(state: MeetingState) -> MeetingState:
 
 async def produce_node(state: MeetingState) -> MeetingState:
     """Produce 阶段：生成结构化 PRD 与 OpenAPI 片段"""
+    # 设置 trace 上下文
+    set_current_trace(state.llm_trace)
     agent = moderator()
-    result = await agent.produce(state.decision_record or {}, anchor=_anchor(state))
+    # 带一致性自检的 LLM 调用
+    async def call_fn(anchor: str) -> dict[str, Any]:
+        return await agent.produce(state.decision_record or {}, anchor=anchor)
+
+    result, confidence = await _run_with_consistency(state, "produce", call_fn)
     prd = result.get("prd", {})
     openapi = result.get("openapi", "")
     state.artifact = {
@@ -254,6 +411,10 @@ async def produce_node(state: MeetingState) -> MeetingState:
         "prd": prd,
         "openapi": openapi,
     }
+    # 第2层：锁定 produce 结论
+    state.conclusion_chain.lock("produce", state.artifact)
+    # 第5层：记录置信度
+    state.confidence_flags["produce"] = confidence
     # 发布 artifact.generated 事件
     await bus.publish(
         make_event(

@@ -89,13 +89,15 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
         record = get_meeting(meeting_id)
         if record is None:
             raise HTTPException(status_code=404, detail="会议不存在")
+        payload = record["payload"]
         return {
             "meeting_id": meeting_id,
             "topic": record["topic"],
             "stage": record["stage"],
             "status": record["status"],
-            "artifact": record["payload"].get("artifact"),
+            "artifact": payload.get("artifact"),
             "messages": list_messages(meeting_id),
+            "confidence_flags": payload.get("confidence_flags", {}),
         }
     return {
         "meeting_id": meeting_id,
@@ -110,6 +112,7 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
         "decision_record": state.decision_record,
         "artifact": state.artifact,
         "messages": state.messages,
+        "confidence_flags": state.confidence_flags,
     }
 
 

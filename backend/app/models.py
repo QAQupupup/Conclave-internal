@@ -7,7 +7,9 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.agents.trace import CallTrace
 from app.orchestrator.charter import MeetingCharter
+from app.orchestrator.conclusion_chain import ConclusionChain
 
 
 # ---------- 枚举 ----------
@@ -187,7 +189,20 @@ class MeetingState(BaseModel):
     charter: Optional[MeetingCharter] = None
     # 漂移检查日志（非阻塞，记录每条发言的 drift 判定）
     drift_log: list[dict[str, Any]] = Field(default_factory=list)
+    # 第2层：结论锁定链（记录每阶段锁定结论，供后续引用和一致性校验）
+    conclusion_chain: ConclusionChain = Field(default_factory=ConclusionChain)
+    # 第4层：LLM 调用追踪（仅 RealLLM 记录调用，stub 为空记录）
+    llm_trace: CallTrace = Field(default_factory=CallTrace)
+    # 第5层：置信度标记（stage -> "high"|"low"|"fallback"）
+    confidence_flags: dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def model_post_init(self, __context: Any) -> None:
+        """初始化后确保 conclusion_chain 和 llm_trace 的 meeting_id 正确"""
+        if not self.conclusion_chain.meeting_id:
+            self.conclusion_chain.meeting_id = self.meeting_id
+        if not self.llm_trace.meeting_id:
+            self.llm_trace.meeting_id = self.meeting_id
 
     def snapshot(self) -> dict[str, Any]:
         """生成快照用于 pause 暂存 / WS 回放"""

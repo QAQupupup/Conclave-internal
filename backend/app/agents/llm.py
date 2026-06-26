@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.agents.schemas import SCHEMA_MAP
+from app.agents.trace import record_call, update_last_record
 from app.config import settings
 
 
@@ -230,20 +231,31 @@ class RealLLM:
         """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级"""
         model_cls = SCHEMA_MAP.get(schema_hint)
         schema_desc = self._schema_description(model_cls)
+        # schema_hint 即阶段名，用于 trace 记录
+        stage = schema_hint
 
         current_prompt = prompt
         last_error = ""
         for attempt in range(1, self.MAX_ATTEMPTS + 1):
             try:
-                content = await self._call_api(current_prompt, schema_desc)
+                content = await self._call_api(current_prompt, schema_desc, stage, attempt)
                 parsed = self._extract_json(content)
                 if model_cls is not None:
                     validated: BaseModel = model_cls.model_validate(parsed)
-                    return validated.model_dump()
-                # schema_hint 未注册时，仅做 JSON 解析兜底返回 dict
-                return parsed if isinstance(parsed, dict) else {"result": parsed}
+                    result = validated.model_dump()
+                else:
+                    # schema_hint 未注册时，仅做 JSON 解析兜底返回 dict
+                    result = parsed if isinstance(parsed, dict) else {"result": parsed}
+                # 解析成功：更新最后一条 trace 记录的解析结果和验证状态
+                update_last_record(
+                    parsed_result=result if isinstance(result, dict) else None,
+                    validation_status="valid",
+                )
+                return result
             except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
                 last_error = f"{type(e).__name__}: {e}"
+                # 更新 trace 记录：本次调用校验失败
+                update_last_record(validation_status="invalid")
                 # 重试层：把校验错误追加进 prompt，引导 LLM 修正
                 current_prompt = (
                     f"{prompt}\n\n"
@@ -252,6 +264,19 @@ class RealLLM:
                 )
 
         # 3 次都失败：降级到 StubLLM 同阶段数据，保证流程不中断（不报错）
+        # 记录降级到 trace
+        record_call(
+            stage=stage,
+            model=self.model,
+            temperature=0,
+            seed=42,
+            prompt=prompt,
+            raw_response="",
+            parsed_result=None,
+            validation_status="fallback_stub",
+            attempt=self.MAX_ATTEMPTS,
+            latency_ms=0,
+        )
         stub = StubLLM()
         return await stub.complete(prompt, schema_hint=schema_hint)
 
@@ -265,8 +290,17 @@ class RealLLM:
         schema = model_cls.model_json_schema()
         return json.dumps(schema, ensure_ascii=False, indent=2)
 
-    async def _call_api(self, user_prompt: str, schema_desc: str) -> str:
-        """调用 chat completions，返回 message content 字符串"""
+    async def _call_api(self, user_prompt: str, schema_desc: str, stage: str = "", attempt: int = 1) -> str:
+        """调用 chat completions，返回 message content 字符串
+
+        第1层确定性约束：
+        - temperature 强制为 0（不可配）
+        - top_p 固定 1.0
+        - seed 固定 42（API 支持则同一输入必同一输出）
+        - system message 末尾加 /no_think（关闭 Qwen3.5 思考模式）
+        """
+        import time
+
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -278,21 +312,29 @@ class RealLLM:
                 "\n输出必须严格符合以下 JSON Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n"
                 f"{schema_desc}"
             )
+        # 关闭 Qwen3.5 思考模式，防止思考过程干扰 JSON 输出
+        system_content += "\n/no_think"
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.3,
+            # 第1层：参数确定性 —— temperature=0, top_p=1.0, seed=42
+            "temperature": 0,
+            "top_p": 1.0,
+            "seed": 42,
         }
         # 请求层：优先传 json_object 响应格式
         if self._supports_json_mode:
             body["response_format"] = {"type": "json_object"}
 
+        latency_ms = 0
         try:
+            t0 = time.monotonic()
             resp = await self._client.post(url, headers=headers, json=body)
             resp.raise_for_status()
+            latency_ms = int((time.monotonic() - t0) * 1000)
         except httpx.HTTPStatusError as e:
             # 接口可能不支持 response_format（返回 400），自动降级去掉该参数重试一次
             if (
@@ -302,13 +344,40 @@ class RealLLM:
             ):
                 self._supports_json_mode = False
                 body.pop("response_format", None)
+                t0 = time.monotonic()
                 resp = await self._client.post(url, headers=headers, json=body)
                 resp.raise_for_status()
+                latency_ms = int((time.monotonic() - t0) * 1000)
             else:
+                # 记录失败的调用到 trace
+                record_call(
+                    stage=stage,
+                    model=self.model,
+                    temperature=0,
+                    seed=42,
+                    prompt=user_prompt,
+                    raw_response=str(e),
+                    validation_status="invalid",
+                    attempt=attempt,
+                    latency_ms=latency_ms,
+                )
                 raise
 
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
+        # 第1层：记录完整调用信息到 trace
+        record_call(
+            stage=stage,
+            model=self.model,
+            temperature=0,
+            seed=42,
+            prompt=user_prompt,
+            raw_response=content,
+            parsed_result=None,  # 解析后由 complete() 更新
+            validation_status="valid",  # 默认，complete() 会根据解析结果更新
+            attempt=attempt,
+            latency_ms=latency_ms,
+        )
         return content
 
     @staticmethod
