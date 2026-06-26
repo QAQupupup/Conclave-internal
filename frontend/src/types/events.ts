@@ -253,6 +253,8 @@ export interface MeetingState {
   paused_snapshot?: Record<string, unknown> | null
   doc_summaries?: string[]
   created_at?: string
+  /** 各阶段置信度：high=一次通过 / low=重试后通过 / fallback=降级stub */
+  confidence_flags?: Record<string, 'high' | 'low' | 'fallback'>
 }
 
 // ---------- REST 请求 / 响应 ----------

@@ -245,6 +245,29 @@ code {
   font-weight: 600;
 }
 
+/* 置信度标记 */
+.conf-mark {
+  font-size: 10px;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+.conf-mark.conf-low {
+  color: var(--warn);
+  background: rgba(240, 140, 0, 0.08);
+}
+.conf-mark.conf-fallback {
+  color: var(--danger);
+  background: rgba(224, 49, 49, 0.08);
+}
+.stage-dot.conf-low {
+  box-shadow: 0 0 0 3px rgba(240, 140, 0, 0.15);
+}
+.stage-dot.conf-fallback {
+  box-shadow: 0 0 0 3px rgba(224, 49, 49, 0.15);
+}
+
 .header-actions {
   display: flex;
   gap: 8px;
@@ -520,6 +543,31 @@ code {
   background: var(--bg-elev);
   border-radius: 6px;
   padding: 8px 10px;
+}
+.evidence-type-tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  margin-bottom: 5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+.evidence-type-tag.src-doc {
+  color: var(--role-engineer);
+  background: rgba(47, 158, 68, 0.08);
+}
+.evidence-type-tag.src-web {
+  color: var(--accent);
+  background: rgba(66, 99, 235, 0.08);
+}
+.evidence-type-tag.src-common {
+  color: var(--warn);
+  background: rgba(240, 140, 0, 0.08);
+}
+.evidence-type-tag.src-unknown {
+  color: var(--text-muted);
+  background: var(--bg-elev2);
 }
 .evidence-quote {
   margin: 0;

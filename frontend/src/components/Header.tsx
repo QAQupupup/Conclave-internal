@@ -35,13 +35,21 @@ export function Header() {
         {STAGE_ORDER.map((stage, idx) => {
           const isCurrent = stage === m.stage
           const isDone = idx < currentIdx
+          const conf = m.confidence_flags?.[stage]
           return (
             <div
               key={stage}
               className={`stage-step ${isCurrent ? 'current' : ''} ${isDone ? 'done' : ''}`}
             >
-              <div className="stage-dot">{idx + 1}</div>
+              <div className={`stage-dot ${conf ? `conf-${conf}` : ''}`} title={conf ? `置信度: ${conf}` : undefined}>
+                {idx + 1}
+              </div>
               <div className="stage-name">{STAGE_LABELS[stage]}</div>
+              {conf && conf !== 'high' && (
+                <div className={`conf-mark conf-${conf}`}>
+                  {conf === 'low' ? '低置信' : '降级'}
+                </div>
+              )}
             </div>
           )
         })}

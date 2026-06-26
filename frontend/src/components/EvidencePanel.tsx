@@ -21,6 +21,22 @@ const SUPPORTS_LABEL: Record<string, string> = {
   irrelevant: '无关',
 }
 
+// 证据来源分类着色
+function sourceType(source: string | undefined): 'doc' | 'web' | 'common' | 'unknown' {
+  if (!source) return 'unknown'
+  if (source.startsWith('doc:')) return 'doc'
+  if (source.startsWith('web:')) return 'web'
+  if (source.startsWith('common_knowledge')) return 'common'
+  return 'unknown'
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  doc: '文档证据',
+  web: '网络检索',
+  common: '通用知识',
+  unknown: '未知来源',
+}
+
 export function EvidencePanel({ selectedConflictId, onSelectConflict }: EvidencePanelProps) {
   const { store } = useMeeting()
   const m = store.meeting
@@ -66,8 +82,11 @@ export function EvidencePanel({ selectedConflictId, onSelectConflict }: Evidence
                       <div className="muted">暂无证据</div>
                     ) : (
                       <ul className="evidence-list">
-                        {ev.assessments.map((a, i) => (
+                        {ev.assessments.map((a, i) => {
+                          const st = sourceType(a.source)
+                          return (
                           <li key={i} className="evidence-item">
+                            <div className={`evidence-type-tag src-${st}`}>{SOURCE_LABEL[st]}</div>
                             <blockquote className="evidence-quote">{a.quote}</blockquote>
                             <div className="evidence-meta">
                               <span className="evidence-source">{a.source}</span>
@@ -78,7 +97,8 @@ export function EvidencePanel({ selectedConflictId, onSelectConflict }: Evidence
                               )}
                             </div>
                           </li>
-                        ))}
+                          )
+                        })}
                       </ul>
                     )}
                   </div>
