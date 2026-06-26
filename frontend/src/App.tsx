@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { Header } from './components/Header.tsx'
+import { AgentGraph } from './components/AgentGraph.tsx'
 import { ChatPanel } from './components/ChatPanel.tsx'
 import { TopicPanel } from './components/TopicPanel.tsx'
 import { EvidencePanel } from './components/EvidencePanel.tsx'
@@ -21,6 +22,7 @@ function MeetingView() {
   return (
     <div className="app-layout">
       <Header />
+      <AgentGraph />
       <div className="app-body">
         <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
         <div className="right-column">

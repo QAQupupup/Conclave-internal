@@ -255,6 +255,16 @@ export interface MeetingState {
   created_at?: string
   /** 各阶段置信度：high=一次通过 / low=重试后通过 / fallback=降级stub */
   confidence_flags?: Record<string, 'high' | 'low' | 'fallback'>
+  /** 借调的 agent 列表（loan 信号裁决通过后追加） */
+  borrowed_agents?: BorrowedAgent[]
+}
+
+/** 借调 agent 信息 */
+export interface BorrowedAgent {
+  role: string
+  verdict?: string
+  spoken: boolean
+  request?: Record<string, unknown>
 }
 
 // ---------- REST 请求 / 响应 ----------
