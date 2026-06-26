@@ -25,6 +25,7 @@ class LLMCallRecord(BaseModel):
     consistency_status: str = "consistent"  # "consistent" | "inconsistent_retry" | "low_confidence"
     attempt: int = 1              # 第几次尝试（校验重试）
     latency_ms: int = 0
+    error_detail: str = ""        # 错误详情（HTTP 错误响应体、异常信息等，便于排查）
 
 
 class CallTrace(BaseModel):

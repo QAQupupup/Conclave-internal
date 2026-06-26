@@ -270,9 +270,13 @@ class RealLLM:
                 )
                 return result
             except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                last_error = f"{type(e).__name__}: {e}"
+                # 提取 HTTP 错误的响应体（便于排查 403 余额不足等问题）
+                error_detail = ""
+                if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
+                    error_detail = f" [HTTP {e.response.status_code}: {e.response.text[:200]}]"
+                last_error = f"{type(e).__name__}: {e}{error_detail}"
                 # 更新 trace 记录：本次调用校验失败
-                update_last_record(validation_status="invalid")
+                update_last_record(validation_status="invalid", error_detail=last_error)
                 # 重试层：把校验错误追加进 prompt，引导 LLM 修正
                 current_prompt = (
                     f"{prompt}\n\n"
@@ -384,11 +388,11 @@ class RealLLM:
 
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        # 第1层：记录完整调用信息到 trace
+        # 第1层：记录完整调用信息到 trace（temperature 用实际阶段温度）
         record_call(
             stage=stage,
             model=self.model,
-            temperature=0,
+            temperature=temp,
             seed=42,
             prompt=user_prompt,
             raw_response=content,
