@@ -78,7 +78,42 @@ WebSocket 是出口，不是核心。
 
 ---
 
-## 三、现阶段取舍速查
+## 三、LLM 确定性与证据原则
+
+### 原则 9：分阶段温度
+
+创意应来自系统结构（角色差异、立场碰撞、证据驱动），而非采样随机性。temperature 不全局锁死，按阶段分级：
+
+| 阶段 | temperature | 理由 |
+|---|---|---|
+| clarify / cross_team / evidence_check / arbitrate | 0 | 必须可复现，不能发散 |
+| intra_team | 0.3 | 允许有限发散，角色差异已提供足够多样性 |
+| produce | 0.1 | PRD 要稳定，允许微小表达差异 |
+
+即使讨论阶段用了 0.3，后续阶段有结论锁定链 + 一致性自检兜底，不会让发散导致悖论。
+
+### 原则 10：证据来源三级分级
+
+agent 论点必须标注证据来源，让用户区分"有据可查"与"待验证建议"：
+
+| 标记 | 含义 | 强度 |
+|---|---|---|
+| `[doc:section]` | 上传文档中的证据 | 强 |
+| `[web:url]` | Web Search 检索的外部证据 | 中 |
+| `[common_knowledge]` | 通用工程实践或行业常识 | 弱，需用户验证 |
+| `[assumption]` | 基于当前信息的推理假设 | 最弱，需确认 |
+
+无文档证据时，evidence_check 标注 `common_knowledge:none` 并降级置信度，而非虚构证据。
+
+### 原则 11：感知层工具端口
+
+工具调用的结果**不直接进结论链**，而是作为"证据"注入 evidence_check，和 RAG 证据一起走仲裁。工具的不可靠性被仲裁层过滤，不会污染最终决策。
+
+首期只做结构化检索（Web Search API），浏览器自动化与桌面感知终态预留接口但不实现（见 [`ideal-design.md`](./ideal-design.md) §10）。
+
+---
+
+## 四、现阶段取舍速查
 
 | 终态特性 | 第一阶段处置 |
 |---|---|
@@ -90,5 +125,7 @@ WebSocket 是出口，不是核心。
 | 借调自动化 | 暂缓，先人工触发 + 三问表单 |
 | 多 sink 可观测管线 | 暂缓，先单一 WS 出口 |
 | Docker 执行 | 视情况，见 [`architecture-review.md`](./architecture-review.md) 风险评估 |
+| Web Search 工具 | 接口已建，stub 实现，接 Tavily/SerpAPI 即可启用 |
+| 浏览器自动化 / 桌面感知 | 终态预留接口，不实现 |
 
 > 注：上述“暂缓”不等于“放弃”。接口边界画好，后续按 [`ideal-design.md`](./ideal-design.md) 装配。
