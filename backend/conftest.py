@@ -11,3 +11,6 @@ os.environ.setdefault("CONCLAVE_RERANK_API_KEY", "")
 os.environ.setdefault(
     "CONCLAVE_DB_PATH", os.path.join(tempfile.gettempdir(), "conclave_test.db")
 )
+
+# 迭代二：测试时禁用记忆提取，避免历史画像干扰断言
+os.environ.setdefault("CONCLAVE_MEMORY_DISABLED", "1")

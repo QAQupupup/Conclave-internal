@@ -15,6 +15,7 @@ class DomainEvent(BaseModel):
     payload: dict[str, Any]
     ts: datetime
     trace_id: str | None = None
+    seq: int = 0  # 事件序列号，按 meeting_id 自增（0 开始）
 
 
 # 订阅者签名：async def handler(event: DomainEvent) -> None
@@ -32,6 +33,8 @@ class InMemoryEventBus:
 
     async def publish(self, event: DomainEvent) -> None:
         """发布事件：广播给所有订阅者，并写入历史缓存"""
+        # 设置序列号（基于当前历史长度，从 0 自增）
+        event.seq = len(self._history.get(event.meeting_id, []))
         # 写入历史
         self._history.setdefault(event.meeting_id, []).append(event)
         # 广播给 topic 级订阅者
@@ -62,6 +65,18 @@ class InMemoryEventBus:
     def history(self, meeting_id: str) -> list[DomainEvent]:
         """取某会议已发布事件，供 WS 新连接回放"""
         return list(self._history.get(meeting_id, []))
+
+    def replay(self, meeting_id: str, from_seq: int = 0) -> list[DomainEvent]:
+        """增量回放：from_seq=0 返回全部事件，from_seq>0 返回 seq > from_seq 的事件"""
+        events = self._history.get(meeting_id, [])
+        if from_seq <= 0:
+            return list(events)
+        return [e for e in events if e.seq > from_seq]
+
+    def last_seq(self, meeting_id: str) -> int:
+        """取某会议最后一条事件的 seq，无事件返回 0"""
+        events = self._history.get(meeting_id, [])
+        return events[-1].seq if events else 0
 
     def clear(self, meeting_id: str) -> None:
         """清理某会议的历史缓存"""

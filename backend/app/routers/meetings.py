@@ -297,3 +297,25 @@ async def get_charter_detail(meeting_id: str) -> dict[str, Any]:
         "confidence_flags": state.confidence_flags,
         "drift_log": state.drift_log,
     }
+
+
+@router.get("/{meeting_id}/events")
+async def get_events(meeting_id: str, from_seq: int = 0) -> dict[str, Any]:
+    """导出会议事件历史（审计/回放用）
+
+    - from_seq > 0 时返回增量事件（seq > from_seq）
+    - from_seq = 0 时返回全部事件
+    - 会议不存在返回 404
+    """
+    state = get_state(meeting_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+
+    events = bus.replay(meeting_id, from_seq)
+    return {
+        "meeting_id": meeting_id,
+        "from_seq": from_seq,
+        "last_seq": bus.last_seq(meeting_id),
+        "count": len(events),
+        "events": [e.model_dump(mode="json") for e in events],
+    }

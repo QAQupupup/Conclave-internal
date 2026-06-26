@@ -56,6 +56,9 @@ class Settings:
     # StubEmbedding 伪向量维度（仅 stub 模式用）
     embed_dim: int = int(_env("CONCLAVE_EMBED_DIM", "64"))
 
+    # 三层记忆开关：CONCLAVE_MEMORY_DISABLED 环境变量存在（非空）时禁用
+    memory_enabled: bool = _env("CONCLAVE_MEMORY_DISABLED", "") == ""
+
     @property
     def use_real_llm(self) -> bool:
         return bool(self.llm_api_key)

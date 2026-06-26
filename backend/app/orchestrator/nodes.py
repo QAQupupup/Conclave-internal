@@ -91,12 +91,8 @@ async def _emit_agent_spoke(state: MeetingState, role: Role, stage: Stage, conte
 
 # ---------- 改造三：借调 agent 发言 ----------
 
-# 借调角色 prompt 模板（先硬编码几个，不需要完整 RoleTemplate 系统）
-BORROW_ROLE_PROMPTS: dict[str, str] = {
-    "security_expert": "你是安全专家。关注认证、授权、数据安全、注入防护。决策偏置：先找安全漏洞，重风险。",
-    "data_engineer": "你是数据工程师。关注数据模型、存储、迁移、一致性。决策偏置：重数据完整性。",
-    "ux_designer": "你是用户体验设计师。关注交互流程、可用性、错误处理。决策偏置：重用户视角。",
-}
+# 迭代二：借调角色 prompt 改为从动态角色库获取（替换原硬编码 BORROW_ROLE_PROMPTS）
+from app.agents.role_templates import get_borrow_prompt
 
 
 async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
@@ -113,9 +109,7 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
         if agent_info.get("spoken"):
             continue
         role_str = agent_info.get("role", "")
-        prompt = BORROW_ROLE_PROMPTS.get(
-            role_str, f"你是{role_str}专家。从你的专业视角给出论点。"
-        )
+        prompt = get_borrow_prompt(role_str)
         content = (
             f"【借调发言 - {role_str}】\n"
             f"{prompt}\n"
@@ -518,6 +512,9 @@ async def produce_node(state: MeetingState) -> MeetingState:
     # 终态
     state.stage = Stage.PRODUCE
     state.status = MeetingStatus.DONE
+    # 迭代二：会议结束后触发记忆提取（失败不影响主流程）
+    from app.memory.profile import trigger_extraction
+    trigger_extraction(state)
     return state
 
 

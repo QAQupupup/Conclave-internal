@@ -20,30 +20,44 @@ async def _send_event(ws: WebSocket, event: DomainEvent) -> None:
 
 
 @router.websocket("/ws/meetings/{meeting_id}")
-async def meeting_ws(ws: WebSocket, meeting_id: str) -> None:
+async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     """会议 WebSocket
 
     - 连接时回放当前 MeetingState 快照 + 历史事件
     - 之后每有事件就推送
     - 接收 control.signal 转发给 Orchestrator
+    - from_seq > 0 时跳过 snapshot，只推 seq > from_seq 的增量事件（断线重连）
     """
     await ws.accept()
 
-    # 1. 回放快照
-    state = get_state(meeting_id)
-    snapshot: dict[str, Any] = state.snapshot() if state else {}
-    await ws.send_text(json.dumps({"type": "snapshot", "meeting_id": meeting_id, "payload": snapshot},
-                                  ensure_ascii=False, default=str))
-
-    # 2. 回放历史事件
-    for ev in bus.history(meeting_id):
-        await _send_event(ws, ev)
-    # 回放结束标记，便于客户端判断初始化完成
-    await ws.send_text(json.dumps(
-        {"type": "replay.done", "meeting_id": meeting_id,
-         "events": len(bus.history(meeting_id))},
-        ensure_ascii=False,
-    ))
+    if from_seq > 0:
+        # 增量回放：客户端已有状态，只推 seq > from_seq 的事件
+        new_events = bus.replay(meeting_id, from_seq)
+        for ev in new_events:
+            await _send_event(ws, ev)
+        await ws.send_text(json.dumps(
+            {"type": "replay.done", "meeting_id": meeting_id,
+             "events": len(new_events), "from_seq": from_seq,
+             "last_seq": bus.last_seq(meeting_id)},
+            ensure_ascii=False,
+        ))
+    else:
+        # 完整回放：snapshot + 全部历史事件
+        # 1. 回放快照
+        state = get_state(meeting_id)
+        snapshot: dict[str, Any] = state.snapshot() if state else {}
+        await ws.send_text(json.dumps({"type": "snapshot", "meeting_id": meeting_id, "payload": snapshot},
+                                      ensure_ascii=False, default=str))
+        # 2. 回放历史事件
+        for ev in bus.history(meeting_id):
+            await _send_event(ws, ev)
+        # 回放结束标记，便于客户端判断初始化完成
+        await ws.send_text(json.dumps(
+            {"type": "replay.done", "meeting_id": meeting_id,
+             "events": len(bus.history(meeting_id)), "from_seq": 0,
+             "last_seq": bus.last_seq(meeting_id)},
+            ensure_ascii=False,
+        ))
 
     # 3. 订阅后续事件，推送到 WS
     queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue()

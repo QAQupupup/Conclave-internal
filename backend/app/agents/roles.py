@@ -24,6 +24,22 @@ class Agent:
     role: Role
     llm: LLMClient = field(default_factory=get_llm)
 
+    def _inject_profile(self, prompt: str) -> str:
+        """注入角色画像锚点到 prompt 前（无画像时原样返回）
+
+        迭代二：在 _with_anchor 之前注入，确保画像信息随角色绑定。
+        记忆子系统失败时不影响主流程。
+        """
+        try:
+            from app.memory.store import memory_store
+
+            profile_anchor = memory_store.get_profile_anchor(self.role.value)
+            if profile_anchor:
+                return f"{profile_anchor}\n\n{prompt}"
+            return prompt
+        except Exception:
+            return prompt
+
     async def clarify(self, topic: str, doc_summaries: list[str], anchor: str = "") -> dict[str, Any]:
         """主持人澄清议题"""
         prompt = render(
@@ -31,6 +47,7 @@ class Agent:
             topic=topic,
             doc_summaries="; ".join(doc_summaries) if doc_summaries else "无",
         )
+        prompt = self._inject_profile(prompt)
         prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="clarify")
 
@@ -43,12 +60,14 @@ class Agent:
         else:
             template = ARCHITECT_INTRA
         prompt = render(template, clarified_topic=clarified_topic, stance=stance)
+        prompt = self._inject_profile(prompt)
         prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="intra_team")
 
     async def cross_team(self, team_conclusions: list[dict[str, Any]], anchor: str = "") -> dict[str, Any]:
         """跨队辩论：找出冲突"""
         prompt = render(CROSS_TEAM, team_conclusions=str(team_conclusions))
+        prompt = self._inject_profile(prompt)
         prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="cross_team")
 
@@ -61,18 +80,21 @@ class Agent:
             conflict=str(conflict),
             evidence_chunks=str(evidence_chunks),
         )
+        prompt = self._inject_profile(prompt)
         prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="evidence_check")
 
     async def arbitrate(self, evidence_set: list[dict[str, Any]], anchor: str = "") -> dict[str, Any]:
         """仲裁裁决"""
         prompt = render(ARBITRATE, evidence_set=str(evidence_set))
+        prompt = self._inject_profile(prompt)
         prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="arbitrate")
 
     async def produce(self, decision_record: dict[str, Any], anchor: str = "") -> dict[str, Any]:
         """产出 PRD + OpenAPI"""
         prompt = render(PRODUCE, decision_record=str(decision_record))
+        prompt = self._inject_profile(prompt)
         prompt = _with_anchor(anchor, prompt)
         return await self.llm.complete(prompt, schema_hint="produce")
 
