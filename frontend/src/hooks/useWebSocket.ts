@@ -17,6 +17,8 @@ interface UseWebSocketResult {
   connected: boolean
   /** 连接错误信息（便于 UI 提示） */
   connectionError: string | null
+  /** 最后收到的事件序列号（用于增量回放） */
+  lastSeq: number
   /** 向后端发送控制信号（经 WS 转发给 Orchestrator） */
   sendControl: (signal: ControlRequest['signal'], payload?: Record<string, unknown>) => void
   /** 发送借调请求（loan 控制信号，payload 为借调三问） */
@@ -43,6 +45,7 @@ export function useWebSocket(
 ): UseWebSocketResult {
   const [connected, setConnected] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [lastSeq, setLastSeq] = useState(0)
   const wsRef = useRef<WebSocket | null>(null)
   // dispatch 引用稳定（来自 useReducer），但用 ref 规避闭包陈旧问题
   const dispatchRef = useRef(dispatch)
@@ -84,6 +87,10 @@ export function useWebSocket(
           })
           break
         case 'replay.done':
+          // 追踪最后事件序列号（用于增量回放重连）
+          if (typeof frame.last_seq === 'number') {
+            setLastSeq(frame.last_seq)
+          }
           dispatchRef.current({
             type: 'replay.done',
             events: typeof frame.events === 'number' ? frame.events : 0,
@@ -148,5 +155,5 @@ export function useWebSocket(
     [sendControl],
   )
 
-  return { connected, connectionError, sendControl, sendBorrow }
+  return { connected, connectionError, lastSeq, sendControl, sendBorrow }
 }

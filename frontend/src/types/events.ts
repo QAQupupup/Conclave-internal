@@ -210,6 +210,10 @@ export interface ReplayDoneFrame {
   type: 'replay.done'
   meeting_id: string
   events: number
+  /** 增量回放的起始 seq（0 表示完整回放） */
+  from_seq?: number
+  /** 当前会议最后事件的 seq */
+  last_seq?: number
 }
 
 /** 控制信号回执（WS 端单独发送） */
