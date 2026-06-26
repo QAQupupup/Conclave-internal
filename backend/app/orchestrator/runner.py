@@ -19,6 +19,8 @@ class Runner:
 
     async def run(self, state: MeetingState) -> MeetingState:
         """从当前阶段跑到底（或被 pause / abort 打断）"""
+        # 进入运行态（resume / 首次执行统一标记为 running）
+        state.status = MeetingStatus.RUNNING
         # 起始事件：进入首个阶段
         await bus.publish(
             make_event(

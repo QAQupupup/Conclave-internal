@@ -71,6 +71,7 @@ def apply_signal(state: MeetingState, signal: str, payload: dict[str, Any] | Non
 
     if signal == "loan":
         # 借调三问裁决（基于会议宪章防重复借调）
+        # 改造三：完整借调流程 —— 真正登记借调 agent 并标记待发言
         target_role = str(payload.get("target_role", "")).strip()
         charter = state.charter
         if charter is None or not target_role:
@@ -85,15 +86,29 @@ def apply_signal(state: MeetingState, signal: str, payload: dict[str, Any] | Non
                 }
             )
             return state
+
+        # 1. 防重复借调：已借调过该角色则 reject
         if charter.is_already_borrowed(target_role):
-            # 已借调过该角色：reject，防重复申请
             verdict = "reject"
             reason = f"角色 {target_role} 已借调过，拒绝重复借调"
+        # 2. 借调数量上限：单次会议最多 2 个借调 agent
+        elif len(state.borrowed_agents) >= 2:
+            verdict = "reject"
+            reason = f"借调数量已达上限（2），拒绝借调 {target_role}"
         else:
-            # 首次借调：记录到 borrow_history，临时批准（不真正加入团队）
+            # 3. 登记借调：register_borrow 记入 borrow_history，临时批准
             verdict = "approve_temporary"
-            reason = f"角色 {target_role} 首次借调，临时批准（不真正加入团队）"
+            reason = f"角色 {target_role} 借调批准（临时加入，待发言）"
             charter.register_borrow(target_role, verdict)
+            # 4. 追加到 borrowed_agents，标记为待发言（不立即加入 frozen scope）
+            state.borrowed_agents.append(
+                {
+                    "role": target_role,
+                    "verdict": "approve_temporary",
+                    "spoken": False,
+                    "request": payload,
+                }
+            )
         state.injected_messages.append(
             {
                 "signal": "loan",

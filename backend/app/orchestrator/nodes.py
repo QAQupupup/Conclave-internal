@@ -25,14 +25,18 @@ def _anchor(state: MeetingState) -> str:
     return state.charter.to_prompt_anchor()
 
 
-def _record_drift(state: MeetingState, role: Role, stage: Stage, content: str) -> None:
-    """对发言做宪章漂移检查并记录到 drift_log（非阻塞）"""
+def _record_drift(state: MeetingState, role: Role | str, stage: Stage, content: str) -> None:
+    """对发言做宪章漂移检查并记录到 drift_log（非阻塞）
+
+    role 支持枚举角色与借调角色的字符串角色名。
+    """
     if state.charter is None or not content:
         return
     result = state.charter.check_drift(content)
+    role_value = role.value if isinstance(role, Role) else str(role)
     state.drift_log.append(
         {
-            "role": role.value,
+            "role": role_value,
             "stage": stage.value,
             "is_drift": result.is_drift,
             "severity": result.severity,
@@ -83,6 +87,70 @@ async def _emit_agent_spoke(state: MeetingState, role: Role, stage: Stage, conte
             },
         )
     )
+
+
+# ---------- 改造三：借调 agent 发言 ----------
+
+# 借调角色 prompt 模板（先硬编码几个，不需要完整 RoleTemplate 系统）
+BORROW_ROLE_PROMPTS: dict[str, str] = {
+    "security_expert": "你是安全专家。关注认证、授权、数据安全、注入防护。决策偏置：先找安全漏洞，重风险。",
+    "data_engineer": "你是数据工程师。关注数据模型、存储、迁移、一致性。决策偏置：重数据完整性。",
+    "ux_designer": "你是用户体验设计师。关注交互流程、可用性、错误处理。决策偏置：重用户视角。",
+}
+
+
+async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
+    """让待发言（spoken=False）的借调 agent 发言一次，然后标记 spoken=True
+
+    借调的 agent 不立即加入 frozen scope，而是在下一个 intra_team / evidence_check
+    节点执行时检查 borrowed_agents，对待发言的用对应角色模板发一次言。
+    借调角色不在 Role 枚举中，直接构造消息并发布事件。
+    """
+    if not state.borrowed_agents:
+        return
+    topic = state.clarified_topic or state.topic
+    for agent_info in state.borrowed_agents:
+        if agent_info.get("spoken"):
+            continue
+        role_str = agent_info.get("role", "")
+        prompt = BORROW_ROLE_PROMPTS.get(
+            role_str, f"你是{role_str}专家。从你的专业视角给出论点。"
+        )
+        content = (
+            f"【借调发言 - {role_str}】\n"
+            f"{prompt}\n"
+            f"针对议题「{topic}」，我基于上述专业偏置补充意见："
+            f"建议在决策中重点考虑本领域的关键风险与约束，避免遗漏。"
+        )
+        # 直接构造消息（借调角色不在 Role 枚举中，不走 _record_message）
+        msg = {
+            "id": f"msg-{uuid.uuid4().hex[:8]}",
+            "meeting_id": state.meeting_id,
+            "agent_role": role_str,
+            "stage": stage.value,
+            "content": content,
+            "claim_refs": [],
+            "evidence_refs": [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        state.messages.append(msg)
+        await bus.publish(
+            make_event(
+                "agent.spoke",
+                state.meeting_id,
+                {
+                    "meeting_id": state.meeting_id,
+                    "role": role_str,
+                    "stage": stage.value,
+                    "content": content,
+                    "claim_refs": [],
+                    "message_id": msg["id"],
+                    "borrowed": True,
+                },
+            )
+        )
+        _record_drift(state, role_str, stage, content)
+        agent_info["spoken"] = True
 
 
 # ---------- 第3层：一致性自检 + 结论锁定辅助 ----------
@@ -271,6 +339,8 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
     state.conclusion_chain.lock("intra_team", {"claims": state.claims, "team_conclusions": conclusions})
     # 第5层：记录置信度（取最差值）
     state.confidence_flags["intra_team"] = worst_confidence
+    # 改造三：让待发言的借调 agent 在队内讨论末尾发言一次
+    await _let_borrowed_agents_speak(state, Stage.INTRA_TEAM)
     state.stage = Stage.CROSS_TEAM
     return state
 
@@ -378,6 +448,8 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     state.conclusion_chain.lock("evidence_check", {"evidence_set": evidence_set})
     # 第5层：记录置信度（取最差值）
     state.confidence_flags["evidence_check"] = worst_confidence
+    # 改造三：让待发言的借调 agent 在证据对照阶段也发言一次（兜底）
+    await _let_borrowed_agents_speak(state, Stage.EVIDENCE_CHECK)
     state.stage = Stage.ARBITRATE
     return state
 

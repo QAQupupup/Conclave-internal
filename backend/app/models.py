@@ -195,6 +195,10 @@ class MeetingState(BaseModel):
     llm_trace: CallTrace = Field(default_factory=CallTrace)
     # 第5层：置信度标记（stage -> "high"|"low"|"fallback"）
     confidence_flags: dict[str, str] = Field(default_factory=dict)
+    # 借调的 agent 列表（loan 信号裁决通过后追加，待发言）
+    # 每项: {"role": "security_expert", "verdict": "approve_temporary",
+    #        "spoken": False, "request": {...}}
+    borrowed_agents: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def model_post_init(self, __context: Any) -> None:
