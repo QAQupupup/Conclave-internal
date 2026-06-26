@@ -368,10 +368,13 @@ def test_trace_endpoint(client):
     assert "calls" in data
     summary = data["summary"]
     assert "total_calls" in summary
-    assert "successful" in summary
-    assert "fallback" in summary
-    assert "inconsistent" in summary
+    assert "valid_calls" in summary
+    assert "fallback_calls" in summary
+    assert "invalid_calls" in summary
+    assert "inconsistent_calls" in summary
+    assert "success_rate" in summary
     assert "avg_latency_ms" in summary
+    assert "stage_stats" in summary
     # stub 模式下不记录调用，calls 为空但结构完整
     assert isinstance(data["calls"], list)
 

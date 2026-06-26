@@ -7,9 +7,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
+from app.logging_config import setup_logging
+from app.middleware import setup_trace_middleware
 from app.routers import documents as documents_router
 from app.routers import meetings as meetings_router
 from app.routers import ws as ws_router
+
+# 应用启动时初始化日志系统
+setup_logging()
 
 
 @asynccontextmanager
@@ -23,8 +28,8 @@ def create_app() -> FastAPI:
     """构造 FastAPI 应用"""
     app = FastAPI(
         title="Conclave",
-        description="会议型多智能体系统后端（迭代一）",
-        version="0.1.0",
+        description="会议型多智能体系统后端（迭代二）",
+        version="0.2.0",
         lifespan=lifespan,
     )
     # CORS：开发期全放开
@@ -35,6 +40,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # 请求追踪中间件：分配 request_id，注入日志
+    setup_trace_middleware(app)
     # 挂载路由
     app.include_router(meetings_router.router)
     app.include_router(documents_router.router)

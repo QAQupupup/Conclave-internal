@@ -62,7 +62,21 @@ class RunResponse(BaseModel):
 @router.post("", response_model=CreateMeetingResponse)
 async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     """创建会议"""
+    from app.observability.log_bus import log_bus
+    from app.context import get_request_id
+
     meeting_id = f"mtg-{uuid.uuid4().hex[:12]}"
+    # 旁路日志：记录会议创建（因果链起点 - 用户请求）
+    log_bus.info(
+        f"会议创建: topic={req.topic[:80]}",
+        logger="routers.meetings",
+        extra={
+            "meeting_id": meeting_id,
+            "topic": req.topic,
+            "action": "create_meeting",
+            "request_id": get_request_id(),
+        },
+    )
     # 初始化运行态
     state = load_or_create(meeting_id, req.topic)
     # 持久化
@@ -162,6 +176,19 @@ async def run_meeting(meeting_id: str) -> dict[str, Any]:
         state.paused_snapshot = None
 
     # 启动后台任务执行完整六阶段流程
+    from app.observability.log_bus import log_bus
+    from app.context import get_request_id
+
+    log_bus.info(
+        f"触发会议运行: meeting={meeting_id}",
+        logger="routers.meetings",
+        extra={
+            "meeting_id": meeting_id,
+            "action": "run_meeting",
+            "trigger": "http_api",
+            "request_id": get_request_id(),
+        },
+    )
     task = asyncio.create_task(_run_meeting_bg(meeting_id))
     _running_tasks[meeting_id] = task
     return {
@@ -253,22 +280,56 @@ async def get_trace(meeting_id: str) -> dict[str, Any]:
 
     trace = state.llm_trace
     calls = [c.model_dump(mode="json") for c in trace.calls]
-    total = len(trace.calls)
-    successful = sum(1 for c in trace.calls if c.validation_status == "valid")
-    fallback = sum(1 for c in trace.calls if c.validation_status == "fallback_stub")
-    inconsistent = sum(1 for c in trace.calls if c.consistency_status != "consistent")
-    latencies = [c.latency_ms for c in trace.calls if c.latency_ms > 0]
-    avg_latency = sum(latencies) / len(latencies) if latencies else 0
+    # 使用增强的 summary（含阶段统计、错误列表、延迟分布）
     return {
         "meeting_id": meeting_id,
-        "summary": {
-            "total_calls": total,
-            "successful": successful,
-            "fallback": fallback,
-            "inconsistent": inconsistent,
-            "avg_latency_ms": avg_latency,
-        },
+        "summary": trace.summary(),
         "calls": calls,
+    }
+
+
+@router.get("/{meeting_id}/stats")
+async def get_stats(meeting_id: str) -> dict[str, Any]:
+    """会议运行统计：阶段耗时、置信度、消息数、冲突数、降级率
+
+    用于快速评估一次会议的运行质量和系统健康度。
+    - 会议不存在返回 404
+    """
+    state = get_state(meeting_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+
+    # LLM 调用统计
+    trace_summary = state.llm_trace.summary()
+    # 漂移统计
+    drift_count = sum(1 for d in state.drift_log if d.get("is_drift"))
+    # 证据来源分布
+    evidence_sources: dict[str, int] = {}
+    for es in state.evidence_set:
+        for a in es.get("assessments", []):
+            src = a.get("source", "unknown")
+            # 归类：doc:* → doc, web:* → web, common_knowledge* → common_knowledge, 其他 → assumption
+            category = src.split(":")[0] if ":" in src else src.split("_")[0] if "_" in src else "unknown"
+            evidence_sources[category] = evidence_sources.get(category, 0) + 1
+
+    return {
+        "meeting_id": meeting_id,
+        "topic": state.topic,
+        "stage": state.stage.value,
+        "status": state.status.value,
+        "llm_trace": trace_summary,
+        "confidence_flags": state.confidence_flags,
+        "message_count": len(state.messages),
+        "claim_count": len(state.claims),
+        "conflict_count": len(state.conflicts),
+        "evidence_count": sum(len(es.get("assessments", [])) for es in state.evidence_set),
+        "evidence_source_distribution": evidence_sources,
+        "drift": {
+            "total_checks": len(state.drift_log),
+            "drift_detected": drift_count,
+        },
+        "borrowed_agents": len(state.borrowed_agents) if state.borrowed_agents else 0,
+        "conclusion_chain_length": len(state.conclusion_chain.conclusions),
     }
 
 

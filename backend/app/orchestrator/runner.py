@@ -1,13 +1,17 @@
 # 编排运行器：按序跑节点，每步 publish 阶段切换事件
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from app.db import list_messages, save_meeting, save_message
 from app.events import bus, make_event
+from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus, Stage
 from app.orchestrator.nodes import NODES
 from app.orchestrator.state import STAGE_ORDER, is_terminal, should_pause
+
+logger = get_logger("orchestrator.runner")
 
 
 class Runner:
@@ -19,6 +23,36 @@ class Runner:
 
     async def run(self, state: MeetingState) -> MeetingState:
         """从当前阶段跑到底（或被 pause / abort 打断）"""
+        # 设置追踪上下文（后续所有日志/事件/LLM 调用自动关联）
+        from app.context import (
+            set_meeting_id, reset_meeting_id,
+            get_request_id, set_request_id, reset_request_id, new_request_id,
+            set_runner_session_id, reset_runner_session_id, new_runner_session_id,
+        )
+        from app.observability.log_bus import log_bus
+
+        mid_token = set_meeting_id(state.meeting_id)
+        # 分配 runner 执行会话 ID（关联一次 run 期间的所有操作）
+        rsid = new_runner_session_id()
+        rsid_token = set_runner_session_id(rsid)
+        # 如果不在 HTTP 请求上下文中（request_id 为默认值），生成一个用于会议运行期间
+        rid_token = None
+        if get_request_id() == "-":
+            rid_token = set_request_id(new_request_id())
+
+        # 旁路日志：记录 runner session 开始（因果链起点）
+        log_bus.info(
+            f"Runner session 开始: meeting={state.meeting_id}, start_stage={state.stage.value}",
+            logger="orchestrator.runner",
+            extra={
+                "meeting_id": state.meeting_id,
+                "runner_session_id": rsid,
+                "start_stage": state.stage.value,
+                "start_status": state.status.value,
+                "trigger": "http_api" if rid_token is None else "internal",
+            },
+        )
+        logger.info("会议 %s 开始运行，起始阶段: %s (session=%s)", state.meeting_id, state.stage.value, rsid)
         # 进入运行态（resume / 首次执行统一标记为 running）
         state.status = MeetingStatus.RUNNING
         # 起始事件：进入首个阶段
@@ -33,6 +67,7 @@ class Runner:
         while not is_terminal(state):
             # 暂停时阻塞下一节点
             if should_pause(state):
+                logger.info("会议 %s 已暂停，等待 resume", state.meeting_id)
                 # 等待 resume：迭代一同步实现里直接退出，由 control 接口恢复后再调 run
                 self._persist(state)
                 return state
@@ -40,10 +75,16 @@ class Runner:
             current_stage = state.stage
             node = NODES.get(current_stage)
             if node is None:
+                logger.warning("会议 %s 阶段 %s 无对应节点，终止", state.meeting_id, current_stage.value)
                 break
 
             # 执行节点
+            t0 = time.monotonic()
+            logger.debug("会议 %s 执行阶段: %s", state.meeting_id, current_stage.value)
             state = await node(state)
+            elapsed = time.monotonic() - t0
+            conf = state.confidence_flags.get(current_stage.value, "unknown")
+            logger.info("会议 %s 阶段 %s 完成 (%.2fs, confidence=%s)", state.meeting_id, current_stage.value, elapsed, conf)
 
             # 持久化中间态
             self._persist(state)
@@ -63,6 +104,23 @@ class Runner:
                 )
             )
 
+        logger.info("会议 %s 运行结束: stage=%s, status=%s", state.meeting_id, state.stage.value, state.status.value)
+        # 旁路日志：记录 runner session 结束（因果链终点）
+        log_bus.info(
+            f"Runner session 结束: meeting={state.meeting_id}, end_stage={state.stage.value}, status={state.status.value}",
+            logger="orchestrator.runner",
+            extra={
+                "meeting_id": state.meeting_id,
+                "runner_session_id": rsid,
+                "end_stage": state.stage.value,
+                "end_status": state.status.value,
+            },
+        )
+        # 恢复追踪上下文
+        reset_meeting_id(mid_token)
+        reset_runner_session_id(rsid_token)
+        if rid_token is not None:
+            reset_request_id(rid_token)
         return state
 
     def _persist(self, state: MeetingState) -> None:

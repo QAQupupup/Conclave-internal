@@ -11,6 +11,9 @@ from pydantic import BaseModel, ValidationError
 from app.agents.schemas import SCHEMA_MAP
 from app.agents.trace import record_call, update_last_record
 from app.config import settings
+from app.logging_config import get_logger
+
+logger = get_logger("agents.llm")
 
 
 class LLMClient(Protocol):
@@ -250,6 +253,7 @@ class RealLLM:
         schema_desc = self._schema_description(model_cls)
         # schema_hint 即阶段名，用于 trace 记录
         stage = schema_hint
+        temp = STAGE_TEMPERATURES.get(stage, 0.0)
 
         current_prompt = prompt
         last_error = ""
@@ -268,6 +272,14 @@ class RealLLM:
                     parsed_result=result if isinstance(result, dict) else None,
                     validation_status="valid",
                 )
+                logger.info("阶段=%s attempt=%d 解析成功 (temp=%.1f)", stage, attempt, temp)
+                # 旁路日志：LLM 调用成功
+                from app.observability.log_bus import log_bus
+                log_bus.info(
+                    f"LLM 调用成功: stage={stage}, attempt={attempt}",
+                    logger="agents.llm",
+                    extra={"stage": stage, "attempt": attempt, "model": self.model, "temp": temp},
+                )
                 return result
             except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
                 # 提取 HTTP 错误的响应体（便于排查 403 余额不足等问题）
@@ -275,6 +287,7 @@ class RealLLM:
                 if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
                     error_detail = f" [HTTP {e.response.status_code}: {e.response.text[:200]}]"
                 last_error = f"{type(e).__name__}: {e}{error_detail}"
+                logger.warning("阶段=%s attempt=%d 失败: %s", stage, attempt, last_error[:200])
                 # 更新 trace 记录：本次调用校验失败
                 update_last_record(validation_status="invalid", error_detail=last_error)
                 # 重试层：把校验错误追加进 prompt，引导 LLM 修正
@@ -285,6 +298,19 @@ class RealLLM:
                 )
 
         # 3 次都失败：降级到 StubLLM 同阶段数据，保证流程不中断（不报错）
+        logger.error("阶段=%s 三次重试全部失败，降级到 StubLLM。最后错误: %s", stage, last_error[:300])
+        # 旁路日志：LLM 降级
+        from app.observability.log_bus import log_bus
+        log_bus.error(
+            f"LLM 降级到 StubLLM: stage={stage}",
+            logger="agents.llm",
+            extra={
+                "stage": stage,
+                "attempts": self.MAX_ATTEMPTS,
+                "last_error": last_error[:500],
+                "action": "fallback_stub",
+            },
+        )
         # 记录降级到 trace
         record_call(
             stage=stage,

@@ -93,7 +93,17 @@ def make_event(
     payload: dict[str, Any],
     trace_id: str | None = None,
 ) -> DomainEvent:
-    """构造领域事件的便捷工厂"""
+    """构造领域事件的便捷工厂
+
+    trace_id 未传时，自动从追踪上下文取 request_id，
+    确保事件与触发它的 HTTP 请求关联。
+    """
+    if trace_id is None:
+        # 从追踪上下文取 request_id（异步安全）
+        from app.context import get_request_id
+        rid = get_request_id()
+        trace_id = rid if rid != "-" else None
+
     return DomainEvent(
         type=event_type,
         meeting_id=meeting_id,
