@@ -2,6 +2,11 @@
 import os
 import tempfile
 
+# 测试强制走 stub 模式，不调真实 API
+os.environ.setdefault("CONCLAVE_LLM_API_KEY", "")
+os.environ.setdefault("CONCLAVE_EMBED_API_KEY", "")
+os.environ.setdefault("CONCLAVE_RERANK_API_KEY", "")
+
 # SQLite 路径指向临时目录，避免污染工作目录
 os.environ.setdefault(
     "CONCLAVE_DB_PATH", os.path.join(tempfile.gettempdir(), "conclave_test.db")
