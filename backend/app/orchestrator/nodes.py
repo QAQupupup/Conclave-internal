@@ -12,6 +12,7 @@ from app.events import bus, make_event
 from app.models import MeetingState, MeetingStatus, Role, Stage
 from app.orchestrator.charter import build_charter_from_clarify
 from app.rag.retriever import retrieve_for_conflict
+from app.tools.web_search import get_web_search
 
 # 节点签名：async def(state) -> state
 Node = Callable[[MeetingState], Awaitable[MeetingState]]
@@ -323,6 +324,17 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
             }
             for i, ck in enumerate(chunks)
         ]
+        # 感知层：RAG 证据不足时调 Web Search 补充外部证据
+        if len(evidence_chunks) < 3:
+            web_search = get_web_search()
+            web_results = await web_search.search(summary, top_k=3)
+            for i, wr in enumerate(web_results):
+                evidence_chunks.append({
+                    "evidence_id": f"web-{i}",
+                    "quote": wr.get("quote", "")[:200],
+                    "source": wr.get("source", "web:unknown"),
+                    "char_range": [0, 0],
+                })
         if not evidence_chunks:
             # 无文档时兜底：标注为通用知识证据，而非空证据
             # 证据来源分级：让用户知道此处缺乏文档支撑

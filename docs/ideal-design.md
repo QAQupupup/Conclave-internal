@@ -286,7 +286,58 @@ Python 在原型期有三大优势：熟悉、AI/RAG/编排生态成熟、原型
 
 ---
 
-## 10. 本文与其它文档的关系
+## 10. 感知层与工具端口（终态愿景，接口先行）
+
+终态 Conclave 的 agent 不只是"推理引擎"，还能主动从环境获取信息。这些能力不是角色，而是**工具**——agent 在需要时调用的外部能力。介入点明确：clarify 阶段补充议题背景、evidence_check 阶段补充外部证据、produce 阶段验证产物可行性。
+
+### 10.1 三类感知能力
+
+| 类别 | 具体能力 | 本质 | 集成成本 |
+|---|---|---|---|
+| 结构化检索 | Web Search API、平台 API（GitHub/npm/PyPI） | 调接口拿 JSON，确定性高 | 低 |
+| 非结构化抓取 | 浏览器自动化、网页读取 | 模拟人类浏览，提取内容 | 中高 |
+| 环境感知 | 鼠标/键盘/摄像头/系统事件 | 桌面级交互，实时流 | 高，超出会议系统范畴 |
+
+首期只做第一类（结构化检索），后两类终态愿景预留接口。
+
+### 10.2 工具端口协议
+
+所有感知能力走统一接口，编排核心不感知具体实现：
+
+```python
+class ToolPort(Protocol):
+    """工具端口：agent 可调用的外部感知能力"""
+    name: str
+    evidence_type: str        # "web" | "platform_api" | "browser" | "desktop"
+
+    async def search(self, query: str, top_k: int = 5) -> list[Evidence]:
+        """检索并返回证据列表，结果标注来源类型"""
+        ...
+```
+
+返回的 `Evidence` 带有 `source_type` 字段（`[doc:section]` / `[web:url]` / `[api:platform]` / `[common_knowledge]`），和文档证据一起进入仲裁流程。工具的不可靠性被仲裁层过滤，不直接进结论链。
+
+### 10.3 介入点
+
+| 阶段 | 触发条件 | 工具 | 效果 |
+|---|---|---|---|
+| Clarify | 议题涉及外部依赖 | Web Search | 补充议题背景注入上下文 |
+| EvidenceCheck | RAG 证据不足 | Web Search / Platform API | 补充外部证据 |
+| Produce | 生成 OpenAPI | npm registry / PyPI API | 验证依赖包真实存在 |
+
+### 10.4 首期实现边界
+
+- 仅 Web Search：接 Tavily 或 SerpAPI，一个 HTTP 调用拿结构化结果
+- 结果标注 `[web:source]`，和 `[doc:section]` 一起走仲裁
+- 浏览器自动化与桌面感知：接口定义好，实现推迟
+
+### 10.5 设计原则
+
+工具调用的结果**不直接进结论链**，而是作为"证据"注入 evidence_check，和 RAG 证据一起走仲裁。这样工具的不可靠性被仲裁层过滤，不会污染最终决策。
+
+---
+
+## 11. 本文与其它文档的关系
 
 - 终态愿景的落地约束与“现在该做/暂缓/不做”分级，见 [`architecture-review.md`](./architecture-review.md)。
 - RAG 五原则、广播 runner 原则等固化条款，见 [`design-principles.md`](./design-principles.md)。
