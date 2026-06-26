@@ -59,6 +59,11 @@ class Settings:
     # 三层记忆开关：CONCLAVE_MEMORY_DISABLED 环境变量存在（非空）时禁用
     memory_enabled: bool = _env("CONCLAVE_MEMORY_DISABLED", "") == ""
 
+    # Agent 计算解耦：CONCLAVE_GRPC_COMPUTE=1 时启用远程 gRPC Worker，否则走本地进程内计算
+    use_grpc_compute: bool = _env("CONCLAVE_GRPC_COMPUTE", "") == "1"
+    # gRPC Worker 端点地址
+    grpc_compute_endpoint: str = _env("CONCLAVE_GRPC_ENDPOINT", "localhost:50051")
+
     @property
     def use_real_llm(self) -> bool:
         return bool(self.llm_api_key)

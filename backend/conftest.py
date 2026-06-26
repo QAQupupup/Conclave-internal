@@ -62,6 +62,9 @@ def _reset_state():
     # 清理角色单例缓存（确保 get_agent 每次测试新建）
     from app.agents import roles as roles_mod
     roles_mod._agents.clear()
+    # 清理 Agent 计算单例（确保 get_compute 每次测试重建，避免 mock/配置泄漏）
+    from app.agents.compute import reset_compute
+    reset_compute()
     yield
     runner_mod._states.clear()
     meetings_mod._running_tasks.clear()
@@ -69,6 +72,7 @@ def _reset_state():
     bus._history.clear()
     store_mod._stores.clear()
     roles_mod._agents.clear()
+    reset_compute()
 
 
 # ---------- 公共 fixture：同步运行会议到完成 ----------

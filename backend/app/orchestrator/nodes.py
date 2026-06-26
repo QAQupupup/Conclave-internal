@@ -1,12 +1,21 @@
 # 六阶段节点：每个 async def run(state) -> state，纯函数风格，副作用通过事件总线外溢
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
-from app.agents.roles import engineer, moderator, product_architect
+from app.agents.compute import (
+    get_compute,
+    build_clarify_prompt,
+    build_intra_prompt,
+    build_cross_team_prompt,
+    build_evidence_prompt,
+    build_arbitrate_prompt,
+    build_produce_prompt,
+)
 from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, MeetingStatus, Role, Stage
@@ -247,11 +256,13 @@ async def clarify_node(state: MeetingState) -> MeetingState:
     """Clarify 阶段：主持人澄清议题，确认团队组成，构造会议宪章"""
     # 设置 trace 上下文（RealLLM 会记录调用，stub 静默跳过）
     set_current_trace(state.llm_trace)
-    agent = moderator()
+    compute = get_compute()
 
-    # 带一致性自检的 LLM 调用
+    # 带一致性自检的 LLM 调用：构造 ThinkRequest 并经 compute 接口执行
     async def call_fn(anchor: str) -> dict[str, Any]:
-        return await agent.clarify(state.topic, state.doc_summaries, anchor=anchor)
+        req = build_clarify_prompt(state.topic, state.doc_summaries, anchor=anchor)
+        resp = await compute.think(req)
+        return resp.result
 
     result, confidence = await _run_with_consistency(state, "clarify", call_fn)
 
@@ -281,34 +292,47 @@ async def clarify_node(state: MeetingState) -> MeetingState:
 
 
 async def intra_team_node(state: MeetingState) -> MeetingState:
-    """IntraTeam 阶段：各角色队内发言，达成队内结论"""
+    """IntraTeam 阶段：各角色队内发言，达成队内结论（并行思考）"""
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
+    compute = get_compute()
     if not state.team_config:
         # 兜底：默认两角色
         state.team_config = [
             {"role": "product_architect", "stance": "重价值与边界"},
             {"role": "engineer", "stance": "重可行性与风险"},
         ]
-    conclusions: list[dict[str, Any]] = []
-    worst_confidence = "high"
+    # 解析 team_config 为 (role, stance) 列表，保持与 team_config 顺序一致
+    members: list[tuple[Role, str]] = []
     for member in state.team_config:
         role_str = member.get("role", "")
         stance = member.get("stance", "")
         if role_str == Role.PRODUCT_ARCHITECT.value:
-            agent = product_architect()
             role = Role.PRODUCT_ARCHITECT
         elif role_str == Role.ENGINEER.value:
-            agent = engineer()
             role = Role.ENGINEER
         else:
             # 未知角色跳过（迭代一只支持两种）
             continue
-        # 带一致性自检的 LLM 调用
-        async def call_fn(anchor: str, _agent=agent, _stance=stance) -> dict[str, Any]:
-            return await _agent.intra_speak(state.clarified_topic or state.topic, _stance, anchor=anchor)
+        members.append((role, stance))
 
-        result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
+    # 并行思考：每个角色独立构造 ThinkRequest + 一致性自检
+    # 通过 asyncio.gather 保序，结果顺序与 members 顺序一致
+    async def _think_one(role: Role, stance: str) -> tuple[dict[str, Any], str]:
+        # 带一致性自检的 LLM 调用
+        async def call_fn(anchor: str) -> dict[str, Any]:
+            req = build_intra_prompt(role, state.clarified_topic or state.topic, stance, anchor=anchor)
+            resp = await compute.think(req)
+            return resp.result
+
+        return await _run_with_consistency(state, "intra_team", call_fn)
+
+    think_results = await asyncio.gather(*[_think_one(r, s) for r, s in members])
+
+    # 串行收集结果：保持顺序与 team_config 一致，副作用（claims/事件/漂移）串行执行
+    conclusions: list[dict[str, Any]] = []
+    worst_confidence = "high"
+    for (role, stance), (result, confidence) in zip(members, think_results):
         worst_confidence = _worst_confidence(worst_confidence, confidence)
         claims = result.get("claims", [])
         claim_ids = []
@@ -343,10 +367,12 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
     """CrossTeam 阶段：跨队辩论，暴露冲突点"""
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
-    agent = moderator()
+    compute = get_compute()
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
-        return await agent.cross_team(state.team_conclusions, anchor=anchor)
+        req = build_cross_team_prompt(state.team_conclusions, anchor=anchor)
+        resp = await compute.think(req)
+        return resp.result
 
     result, confidence = await _run_with_consistency(state, "cross_team", call_fn)
     conflicts = result.get("conflicts", [])
@@ -370,7 +396,7 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     """EvidenceCheck 阶段：逐冲突 RAG 检索证据，对照判断"""
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
-    agent = moderator()
+    compute = get_compute()
     evidence_set: list[dict[str, Any]] = []
     worst_confidence = "high"
     for conflict in state.conflicts:
@@ -412,7 +438,9 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
             ]
         # 带一致性自检的 LLM 调用
         async def call_fn(anchor: str, _conflict=conflict, _chunks=evidence_chunks) -> dict[str, Any]:
-            return await agent.evidence_check(_conflict, _chunks, anchor=anchor)
+            req = build_evidence_prompt(_conflict, _chunks, anchor=anchor)
+            resp = await compute.think(req)
+            return resp.result
 
         result, confidence = await _run_with_consistency(state, "evidence_check", call_fn)
         worst_confidence = _worst_confidence(worst_confidence, confidence)
@@ -452,10 +480,12 @@ async def arbitrate_node(state: MeetingState) -> MeetingState:
     """Arbitrate 阶段：仲裁者裁决，形成结论"""
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
-    agent = moderator()
+    compute = get_compute()
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
-        return await agent.arbitrate(state.evidence_set, anchor=anchor)
+        req = build_arbitrate_prompt(state.evidence_set, anchor=anchor)
+        resp = await compute.think(req)
+        return resp.result
 
     result, confidence = await _run_with_consistency(state, "arbitrate", call_fn)
     state.decision_record = {
@@ -477,10 +507,12 @@ async def produce_node(state: MeetingState) -> MeetingState:
     """Produce 阶段：生成结构化 PRD 与 OpenAPI 片段"""
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
-    agent = moderator()
+    compute = get_compute()
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
-        return await agent.produce(state.decision_record or {}, anchor=anchor)
+        req = build_produce_prompt(state.decision_record or {}, anchor=anchor)
+        resp = await compute.think(req)
+        return resp.result
 
     result, confidence = await _run_with_consistency(state, "produce", call_fn)
     prd = result.get("prd", {})

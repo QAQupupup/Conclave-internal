@@ -1,0 +1,34 @@
+syntax = "proto3";
+package conclave;
+
+// Agent 思考请求
+message ThinkRequest {
+  string request_id = 1;       // 追踪 ID
+  string meeting_id = 2;       // 会议 ID
+  string runner_session_id = 3; // Runner 会话 ID
+  string agent_role = 4;       // 角色名
+  string stage = 5;            // 阶段名
+  string prompt = 6;           // 完整 prompt
+  string schema_hint = 7;      // schema 提示
+  double temperature = 8;     // 温度
+  int32 seed = 9;             // 种子
+  string trace_context_json = 10; // 追踪上下文 JSON
+}
+
+// Agent 思考响应
+message ThinkResponse {
+  bool success = 1;
+  string result_json = 2;     // 解析后的结果 JSON
+  string error = 3;           // 失败时的错误信息
+  int32 latency_ms = 4;       // 耗时
+  string validation_status = 5; // valid/invalid/fallback_stub
+  string raw_response = 6;    // LLM 原始返回
+}
+
+// Agent 计算服务
+service AgentComputeService {
+  // 单次思考
+  rpc Think(ThinkRequest) returns (ThinkResponse);
+  // 批量并行思考（多角色同时思考）
+  rpc ThinkBatch(stream ThinkRequest) returns (stream ThinkResponse);
+}
