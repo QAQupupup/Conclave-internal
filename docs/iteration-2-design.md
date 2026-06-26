@@ -27,7 +27,7 @@
 | §6 | run 异步化（asyncio.create_task） | ✅ 已实现（第一周） | 4 个 |
 | §7 | 审计端点（trace + charter） | ✅ 已实现（第一周） | 6 个 |
 
-全部 62 个测试通过，前端构建通过。三层记忆的 SQLite 持久化预留接口（当前内存存储），画像自动更新阈值调参待后续迭代。
+全部 75 个测试通过（22 smoke + 24 memory + 8 role_library + 8 event_replay + 13 determinism），前端构建通过。三层记忆的 SQLite 持久化预留接口（当前内存存储），画像自动更新阈值调参待后续迭代。
 
 ---
 
