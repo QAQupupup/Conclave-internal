@@ -203,6 +203,20 @@ class StubLLM:
         return m.group(1) if m else "c1"
 
 
+# 分阶段温度策略：需要确定性的阶段锁死，允许有限发散的阶段适度放开
+# 依据：关键阶段（clarify/evidence_check/arbitrate/produce）必须可复现，
+# 讨论阶段（intra_team）保留创意空间，但角色差异已提供足够多样性。
+# cross_team 找冲突要客观不能虚构矛盾，因此也锁死。
+STAGE_TEMPERATURES: dict[str, float] = {
+    "clarify": 0.0,        # 准确理解议题，不能发散
+    "intra_team": 0.3,     # 允许有限发散，角色差异已提供多样性
+    "cross_team": 0.0,     # 找冲突要客观，不能虚构
+    "evidence_check": 0.0,  # 证据对照必须客观
+    "arbitrate": 0.0,      # 裁决必须确定且可复现
+    "produce": 0.1,        # PRD 要稳定，允许微小表达差异
+}
+
+
 class RealLLM:
     """真实 LLM 客户端：调 openai 兼容接口（httpx）
 
@@ -214,6 +228,9 @@ class RealLLM:
     2. 解析层：用 schemas.py 对应模型 model_validate 校验。
     3. 重试层：解析失败把 ValidationError 信息追加到 prompt 再调，最多 3 次；
        3 次都失败则降级用 StubLLM 同阶段数据，保证流程不中断。
+
+    分阶段温度：temperature 不再全局锁死为 0，而是按 schema_hint（阶段名）
+    查 STAGE_TEMPERATURES 取值。关键阶段锁死，讨论阶段适度放开。
     """
 
     # 最大重试次数（含首次）
@@ -268,7 +285,7 @@ class RealLLM:
         record_call(
             stage=stage,
             model=self.model,
-            temperature=0,
+            temperature=STAGE_TEMPERATURES.get(stage, 0.0),
             seed=42,
             prompt=prompt,
             raw_response="",
@@ -294,7 +311,7 @@ class RealLLM:
         """调用 chat completions，返回 message content 字符串
 
         第1层确定性约束：
-        - temperature 强制为 0（不可配）
+        - temperature 按阶段查 STAGE_TEMPERATURES（关键阶段=0，讨论阶段=0.3）
         - top_p 固定 1.0
         - seed 固定 42（API 支持则同一输入必同一输出）
         - system message 末尾加 /no_think（关闭 Qwen3.5 思考模式）
@@ -314,14 +331,16 @@ class RealLLM:
             )
         # 关闭 Qwen3.5 思考模式，防止思考过程干扰 JSON 输出
         system_content += "\n/no_think"
+        # 分阶段温度：按 stage 查表，默认 0（最严格）
+        temp = STAGE_TEMPERATURES.get(stage, 0.0)
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_prompt},
             ],
-            # 第1层：参数确定性 —— temperature=0, top_p=1.0, seed=42
-            "temperature": 0,
+            # 第1层：参数确定性 —— 分阶段温度, top_p=1.0, seed=42
+            "temperature": temp,
             "top_p": 1.0,
             "seed": 42,
         }

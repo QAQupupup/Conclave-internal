@@ -324,12 +324,13 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
             for i, ck in enumerate(chunks)
         ]
         if not evidence_chunks:
-            # 无文档时兜底：构造一条空证据
+            # 无文档时兜底：标注为通用知识证据，而非空证据
+            # 证据来源分级：让用户知道此处缺乏文档支撑
             evidence_chunks = [
                 {
                     "evidence_id": "ev-0",
-                    "quote": "（无可用文档证据）",
-                    "source": "doc:none",
+                    "quote": "（无上传文档证据，以下结论基于通用工程实践，需用户验证）",
+                    "source": "common_knowledge:none",
                     "char_range": [0, 0],
                 }
             ]
