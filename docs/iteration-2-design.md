@@ -16,6 +16,19 @@
 
 迭代二不引入新的外部依赖，全部在现有 Python + FastAPI + React 栈内完成。
 
+### 1.1 实现状态（2026-06-27 更新）
+
+| 章节 | 功能 | 状态 | 测试 |
+|---|---|---|---|
+| §2 | 三层记忆系统（RawMemory + FeatureMemory + ProfileMemory） | ✅ 已实现 | 24 个 |
+| §3 | 动态角色库（RoleTemplate + ROLE_LIBRARY 6 角色） | ✅ 已实现 | 8 个 |
+| §4 | 事件总线序列号 + 增量回放 + GET /events | ✅ 已实现 | 8 个 |
+| §5 | 力导向图（d3-force SVG 可视化） | ✅ 已实现 | npm build 通过 |
+| §6 | run 异步化（asyncio.create_task） | ✅ 已实现（第一周） | 4 个 |
+| §7 | 审计端点（trace + charter） | ✅ 已实现（第一周） | 6 个 |
+
+全部 62 个测试通过，前端构建通过。三层记忆的 SQLite 持久化预留接口（当前内存存储），画像自动更新阈值调参待后续迭代。
+
 ---
 
 ## 2. 三层记忆系统
