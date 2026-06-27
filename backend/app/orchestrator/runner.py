@@ -86,11 +86,29 @@ class Runner:
             conf = state.confidence_flags.get(current_stage.value, "unknown")
             logger.info("会议 %s 阶段 %s 完成 (%.2fs, confidence=%s)", state.meeting_id, current_stage.value, elapsed, conf)
 
+            # 诊断日志：节点返回后、_persist 前
+            log_bus.info(
+                f"节点返回: stage={current_stage.value}, status={state.status.value}, elapsed={elapsed:.2f}s",
+                logger="orchestrator.runner",
+                extra={"stage": current_stage.value, "status": state.status.value, "elapsed_s": round(elapsed, 2)},
+            )
+
             # 持久化中间态
             self._persist(state)
 
+            # 诊断日志：_persist 完成
+            log_bus.info(
+                f"持久化完成: stage={current_stage.value}, messages={len(state.messages)}",
+                logger="orchestrator.runner",
+                extra={"stage": current_stage.value, "messages_count": len(state.messages)},
+            )
+
             # 终止判断
             if is_terminal(state):
+                log_bus.info(
+                    f"检测到终态: stage={state.stage.value}, status={state.status.value}",
+                    logger="orchestrator.runner",
+                )
                 break
 
             # 发布阶段切换事件

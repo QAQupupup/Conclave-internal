@@ -247,6 +247,13 @@ class RealLLM:
         # 接口是否支持 json_object 响应格式；遇到 400 时自动置 False 并回退
         self._supports_json_mode: bool = True
 
+    async def aclose(self) -> None:
+        """关闭底层 httpx 连接池，防止事件循环关闭时挂起"""
+        try:
+            await self._client.aclose()
+        except Exception:
+            pass
+
     async def complete(self, prompt: str, schema_hint: str = "") -> dict[str, Any]:
         """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级"""
         model_cls = SCHEMA_MAP.get(schema_hint)
@@ -380,7 +387,8 @@ class RealLLM:
 
         latency_ms = 0
         # produce 阶段生成大量文本（OpenAPI），需要更长超时
-        stage_timeout = 300.0 if stage == "produce" else 120.0
+        # DeepSeek-V3.2 生成 PRD+OpenAPI 可能需要 200-400s
+        stage_timeout = 600.0 if stage == "produce" else 120.0
         try:
             t0 = time.monotonic()
             resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)

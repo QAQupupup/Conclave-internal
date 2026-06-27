@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 import asyncio
+import inspect
 import json
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -91,6 +92,12 @@ class LocalAgentCompute:
         """并行执行多个思考请求（asyncio.gather）"""
         tasks = [self.think(req) for req in requests]
         return await asyncio.gather(*tasks)
+
+    async def aclose(self) -> None:
+        """关闭底层 LLM 客户端的连接池（RealLLM 的 httpx.AsyncClient）"""
+        close_fn = getattr(self._llm, "aclose", None)
+        if close_fn and inspect.iscoroutinefunction(close_fn):
+            await close_fn()
 
 
 class GRPCAgentCompute:
@@ -298,6 +305,25 @@ def get_compute() -> AgentCompute:
 
 
 def reset_compute() -> None:
-    """重置计算实例（测试用）"""
+    """重置计算实例（测试用，同步）
+
+    注意：StubLLM 模式下无连接池需关闭。
+    RealLLM 模式下 httpx.AsyncClient 未关闭可能导致事件循环挂起，
+    真实 LLM 脚本应调用 shutdown_compute() 代替。
+    """
     global _compute
+    _compute = None
+
+
+async def shutdown_compute() -> None:
+    """异步关闭计算实例并释放连接池（真实 LLM 脚本必须调用）
+
+    先关闭底层 httpx.AsyncClient，再清空全局引用，
+    防止 asyncio.run() 关闭事件循环时因未关闭的连接池挂起。
+    """
+    global _compute
+    if _compute is not None:
+        close_fn = getattr(_compute, "aclose", None)
+        if close_fn and inspect.iscoroutinefunction(close_fn):
+            await close_fn()
     _compute = None

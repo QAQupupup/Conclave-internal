@@ -89,3 +89,123 @@ export async function uploadDocument(
 export async function healthCheck(): Promise<{ status: string }> {
   return request<{ status: string }>('/health', { method: 'GET' })
 }
+
+// ---- Workspace API ----
+
+/** 工作区文件项 */
+export interface FileItem {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number
+  modified: number
+}
+
+/** 列出工作区文件：GET /workspace/files?path= */
+export async function listFiles(path = ''): Promise<{
+  path: string
+  type: string
+  items: FileItem[]
+}> {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : ''
+  return request(`/workspace/files${qs}`, { method: 'GET' })
+}
+
+/** 读取文件：GET /workspace/files/:path */
+export async function readFile(filePath: string): Promise<{
+  path: string
+  content: string
+  size: number
+  language: string
+}> {
+  return request(`/workspace/files/${encodeURIComponent(filePath)}`, { method: 'GET' })
+}
+
+/** 写入文件：POST /workspace/files body {path, content} */
+export async function writeFile(path: string, content: string): Promise<{
+  path: string
+  size: number
+  saved: boolean
+}> {
+  return request('/workspace/files', {
+    method: 'POST',
+    body: JSON.stringify({ path, content }),
+  })
+}
+
+/** 删除文件：DELETE /workspace/files/:path */
+export async function deleteFile(filePath: string): Promise<{
+  path: string
+  deleted: boolean
+}> {
+  return request(`/workspace/files/${encodeURIComponent(filePath)}`, {
+    method: 'DELETE',
+  })
+}
+
+/** 执行命令：POST /workspace/exec body {command, cwd} */
+export async function execCommand(command: string, cwd = ''): Promise<{
+  command: string
+  exit_code: number
+  stdout: string
+  stderr: string
+  sandboxed: boolean
+  image: string
+  fallback_reason: string
+  duration_hint: string
+}> {
+  return request('/workspace/exec', {
+    method: 'POST',
+    body: JSON.stringify({ command, cwd }),
+  })
+}
+
+/** 运行代码：POST /workspace/run body {code, language} */
+export async function runCode(code: string, language = 'python'): Promise<{
+  language: string
+  exit_code: number
+  stdout: string
+  stderr: string
+  sandboxed: boolean
+  image: string
+  fallback_reason: string
+  duration_hint: string
+}> {
+  return request('/workspace/run', {
+    method: 'POST',
+    body: JSON.stringify({ code, language }),
+  })
+}
+
+/** 沙箱状态：GET /workspace/sandbox/status */
+export async function sandboxStatus(): Promise<{
+  mode: string
+  docker_available: boolean
+  image: string
+  mem_limit: string
+  cpu_limit: string
+  active: boolean
+}> {
+  return request('/workspace/sandbox/status', { method: 'GET' })
+}
+
+/** 工作区信息：GET /workspace/info */
+export async function workspaceInfo(): Promise<{
+  root: string
+  exists: boolean
+  cmd_timeout: number
+  code_timeout: number
+  max_output: number
+  python: string
+  python_version: string
+  sandbox: {
+    mode: string
+    docker_available: boolean
+    image: string
+    mem_limit: string
+    cpu_limit: string
+    active: boolean
+  }
+}> {
+  return request('/workspace/info', { method: 'GET' })
+}

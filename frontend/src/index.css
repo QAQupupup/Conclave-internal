@@ -1125,3 +1125,294 @@ code {
   white-space: nowrap;
   line-height: 1.5;
 }
+
+/* ---------- 迭代三：工作区面板（文件树 + 编辑器 + 终端） ---------- */
+
+/* Tab 切换条 */
+.tab-bar {
+  display: flex;
+  gap: 0;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+.tab-btn {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  font-family: inherit;
+}
+.tab-btn:hover {
+  color: var(--text-secondary);
+}
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* 工作区视图容器 */
+.workspace-view {
+  flex: 1;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.workspace-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-elev);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/* 工具栏 */
+.ws-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-elev);
+  flex-shrink: 0;
+}
+.ws-toolbar .btn-sm {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ws-toolbar .btn-sm:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ws-toolbar .btn-sm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ws-toolbar .btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.ws-toolbar .btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+  color: #fff;
+}
+.ws-dirty {
+  color: var(--warn);
+  font-size: 14px;
+  margin-left: 4px;
+}
+
+/* 沙箱状态徽章 */
+.ws-sandbox-badge {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.ws-sandbox-badge.active {
+  color: var(--role-engineer);
+  background: rgba(47, 158, 68, 0.08);
+  border: 1px solid rgba(47, 158, 68, 0.2);
+}
+.ws-sandbox-badge.inactive {
+  color: var(--warn);
+  background: rgba(240, 140, 0, 0.08);
+  border: 1px solid rgba(240, 140, 0, 0.2);
+}
+
+/* 主体三列布局 */
+.ws-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 左侧文件树 */
+.ws-sidebar {
+  width: 200px;
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.ws-sidebar-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-soft);
+  font-family: "SF Mono", Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-file-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.ws-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background 0.12s ease;
+  user-select: none;
+}
+.ws-tree-item:hover {
+  background: var(--bg-elev2);
+}
+.ws-tree-item.active {
+  background: rgba(66, 99, 235, 0.08);
+  color: var(--accent);
+}
+.ws-tree-item .ws-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.ws-tree-item .ws-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 中间编辑器 */
+.ws-editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ws-file-tab {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elev2);
+  border-bottom: 1px solid var(--border-soft);
+  font-family: "SF Mono", Consolas, monospace;
+  flex-shrink: 0;
+}
+.ws-editor-container {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 右侧终端 */
+.ws-terminal {
+  width: 320px;
+  border-left: 1px solid var(--border-soft);
+  background: #1e1e2e;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.ws-terminal-header {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: #cdd6f4;
+  border-bottom: 1px solid #313244;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.ws-running {
+  color: #f9e2af;
+  font-size: 10px;
+}
+.ws-terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ws-terminal-empty {
+  color: #6c7086;
+  font-style: italic;
+}
+.ws-terminal-line {
+  margin-bottom: 4px;
+}
+.ws-terminal-line pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ws-cmd {
+  color: #89b4fa;
+}
+.ws-cmd::before {
+  content: "$ ";
+  color: #6c7086;
+}
+.ws-out {
+  color: #cdd6f4;
+}
+.ws-err {
+  color: #f38ba8;
+}
+.ws-terminal-input-row {
+  padding: 6px 8px;
+  border-top: 1px solid #313244;
+  flex-shrink: 0;
+}
+.ws-terminal-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #cdd6f4;
+  font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+  outline: none;
+  padding: 4px 6px;
+}
+.ws-terminal-input::placeholder {
+  color: #6c7086;
+}
+
+/* 响应式：窄屏隐藏文件树，终端变窄 */
+@media (max-width: 1024px) {
+  .ws-sidebar {
+    width: 160px;
+  }
+  .ws-terminal {
+    width: 260px;
+  }
+}
+@media (max-width: 768px) {
+  .ws-sidebar {
+    display: none;
+  }
+  .ws-terminal {
+    width: 200px;
+  }
+}

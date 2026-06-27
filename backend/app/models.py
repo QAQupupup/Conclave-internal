@@ -19,6 +19,10 @@ class Role(str, Enum):
     MODERATOR = "moderator"
     PRODUCT_ARCHITECT = "product_architect"
     ENGINEER = "engineer"
+    SECURITY_EXPERT = "security_expert"
+    DATA_ENGINEER = "data_engineer"
+    UX_DESIGNER = "ux_designer"
+    MARKETING_EXPERT = "marketing_expert"
 
 
 class ClaimType(str, Enum):

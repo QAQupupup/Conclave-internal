@@ -1,0 +1,56 @@
+# ===== Conclave Docker Compose =====
+# 完整部署：前端(nginx) + 后端(FastAPI) + Docker socket
+#
+# 启动: docker compose up -d
+# 日志: docker compose logs -f backend
+# 停止: docker compose down
+#
+# 沙箱架构:
+#   后端容器通过挂载的 /var/run/docker.sock 创建 sibling 容器执行用户代码
+#   工作区通过 named volume 在后端和沙箱容器间共享
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: conclave-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Docker socket：让后端能创建沙箱 sibling 容器
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 工作区命名卷：后端和沙箱容器共享
+      - conclave-workspace:/workspace
+      # 数据库持久化
+      - conclave-data:/app/data
+    env_file:
+      - .env
+    environment:
+      - CONCLAVE_WORKSPACE_DIR=/workspace
+      - CONCLAVE_DB_PATH=/app/data/conclave.db
+      - CONCLAVE_SANDBOX_MODE=auto
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: conclave-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  conclave-workspace:
+    driver: local
+  conclave-data:
+    driver: local

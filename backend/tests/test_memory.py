@@ -408,7 +408,11 @@ def test_trigger_extraction_from_state():
 
 
 def test_trigger_extraction_borrowed_role_no_profile():
-    """测试借调角色发言记录但不沉淀画像"""
+    """测试借调角色发言记录但不沉淀画像
+
+    security_expert 现在是正式 Role 枚举成员，改用 financial_advisor
+    作为不在 Role 枚举中的借调角色示例。
+    """
     from app.memory.profile import trigger_extraction
     from app.models import MeetingState
 
@@ -419,9 +423,9 @@ def test_trigger_extraction_borrowed_role_no_profile():
             {
                 "id": "msg-1",
                 "meeting_id": "m2",
-                "agent_role": "security_expert",
+                "agent_role": "financial_advisor",
                 "stage": "intra_team",
-                "content": "存在高风险漏洞，认证模块有隐患",
+                "content": "预算超支风险高，认证模块有隐患",
                 "evidence_refs": [],
                 "claim_refs": [],
                 "created_at": "2026-01-01T00:00:00Z",
@@ -432,15 +436,15 @@ def test_trigger_extraction_borrowed_role_no_profile():
         trigger_extraction(state)
 
         # 借调角色发言被记录到 RawMemory
-        raw = memory_store.get_raw("security_expert")
+        raw = memory_store.get_raw("financial_advisor")
         assert len(raw) == 1
-        assert raw[0].content == "存在高风险漏洞，认证模块有隐患"
+        assert raw[0].content == "预算超支风险高，认证模块有隐患"
 
         # 但不沉淀画像（无特征、无画像锚点）
-        features = memory_store.get_features("security_expert")
+        features = memory_store.get_features("financial_advisor")
         assert len(features) == 0
 
-        anchor = memory_store.get_profile_anchor("security_expert")
+        anchor = memory_store.get_profile_anchor("financial_advisor")
         assert anchor == ""
     finally:
         _restore_memory(original)
@@ -472,7 +476,11 @@ def test_trigger_extraction_disabled():
 
 
 def test_trigger_extraction_mixed_roles():
-    """正式角色与借调角色混合：正式角色沉淀画像，借调角色只记录"""
+    """正式角色与借调角色混合：正式角色沉淀画像，借调角色只记录
+
+    data_engineer 现在是正式 Role 枚举成员，改用 legal_counsel
+    作为不在 Role 枚举中的借调角色示例。
+    """
     from app.memory.profile import trigger_extraction
     from app.models import MeetingState
 
@@ -488,9 +496,9 @@ def test_trigger_extraction_mixed_roles():
                 "claim_refs": [],
             },
             {
-                "agent_role": "data_engineer",
+                "agent_role": "legal_counsel",
                 "stage": "intra_team",
-                "content": "数据模型需关注一致性，存在风险",
+                "content": "数据模型需关注合规性，存在法律风险",
                 "evidence_refs": [],
                 "claim_refs": [],
             },
@@ -504,10 +512,10 @@ def test_trigger_extraction_mixed_roles():
         assert len(memory_store.get_features("engineer")) == 4
         assert memory_store.get_profile_anchor("engineer") != ""
 
-        # 借调角色 data_engineer：只记录，不沉淀
-        assert len(memory_store.get_raw("data_engineer")) == 1
-        assert len(memory_store.get_features("data_engineer")) == 0
-        assert memory_store.get_profile_anchor("data_engineer") == ""
+        # 借调角色 legal_counsel：只记录，不沉淀
+        assert len(memory_store.get_raw("legal_counsel")) == 1
+        assert len(memory_store.get_features("legal_counsel")) == 0
+        assert memory_store.get_profile_anchor("legal_counsel") == ""
     finally:
         _restore_memory(original)
 

@@ -10,6 +10,30 @@ import { EvidencePanel } from './components/EvidencePanel.tsx'
 import { ArtifactPanel } from './components/ArtifactPanel.tsx'
 import { BorrowDialog } from './components/BorrowDialog.tsx'
 import { CreateMeeting } from './components/CreateMeeting.tsx'
+import { WorkspacePanel } from './components/WorkspacePanel.tsx'
+
+/** 全局视图切换：会议 / 工作区 */
+type ViewTab = 'meeting' | 'workspace'
+
+/** 顶部 Tab 切换条 */
+function TabBar({ tab, onChange }: { tab: ViewTab; onChange: (t: ViewTab) => void }) {
+  return (
+    <div className="tab-bar">
+      <button
+        className={`tab-btn ${tab === 'meeting' ? 'active' : ''}`}
+        onClick={() => onChange('meeting')}
+      >
+        会议
+      </button>
+      <button
+        className={`tab-btn ${tab === 'workspace' ? 'active' : ''}`}
+        onClick={() => onChange('workspace')}
+      >
+        工作区
+      </button>
+    </div>
+  )
+}
 
 /** 会议主视图：四块布局 + 借调模态 + 冲突联动选中态 */
 function MeetingView() {
@@ -42,11 +66,30 @@ function MeetingView() {
   )
 }
 
+/** 工作区视图：文件树 + 编辑器 + 终端 */
+function WorkspaceView() {
+  return (
+    <div className="app-layout">
+      <div className="workspace-view">
+        <WorkspacePanel />
+      </div>
+    </div>
+  )
+}
+
 /** 根据是否已选会议切换视图 */
 function AppShell() {
   const { meetingId } = useMeeting()
+  const [tab, setTab] = useState<ViewTab>('meeting')
+
   if (!meetingId) return <CreateMeeting />
-  return <MeetingView />
+
+  return (
+    <>
+      <TabBar tab={tab} onChange={setTab} />
+      {tab === 'meeting' ? <MeetingView /> : <WorkspaceView />}
+    </>
+  )
 }
 
 export default function App() {

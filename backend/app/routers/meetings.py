@@ -116,6 +116,7 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
             "status": record["status"],
             "artifact": payload.get("artifact"),
             "messages": list_messages(meeting_id),
+            "claims": payload.get("claims", []),
             "confidence_flags": payload.get("confidence_flags", {}),
         }
     return {
@@ -131,6 +132,8 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
         "decision_record": state.decision_record,
         "artifact": state.artifact,
         "messages": state.messages,
+        "claims": state.claims,
+        "llm_trace": state.llm_trace.summary(),
         "confidence_flags": state.confidence_flags,
     }
 

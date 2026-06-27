@@ -11,6 +11,8 @@ from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware
 from app.routers import documents as documents_router
 from app.routers import meetings as meetings_router
+from app.routers import regression as regression_router
+from app.routers import workspace as workspace_router
 from app.routers import ws as ws_router
 
 # 应用启动时初始化日志系统
@@ -45,7 +47,9 @@ def create_app() -> FastAPI:
     # 挂载路由
     app.include_router(meetings_router.router)
     app.include_router(documents_router.router)
+    app.include_router(workspace_router.router)
     app.include_router(ws_router.router)
+    app.include_router(regression_router.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

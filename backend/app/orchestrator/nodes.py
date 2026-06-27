@@ -27,6 +27,33 @@ from app.tools.web_search import get_web_search
 # 节点签名：async def(state) -> state
 Node = Callable[[MeetingState], Awaitable[MeetingState]]
 
+# ---- 角色模糊匹配（模块级，支持中英文角色名）----
+# 真实 LLM 可能返回中文角色名（"产品经理"、"后端架构师"等），
+# StubLLM 返回英文角色名，此处统一模糊匹配。
+_ROLE_KEYWORDS: dict[str, list[str]] = {
+    Role.PRODUCT_ARCHITECT.value: ["product", "architect", "产品", "架构", "pm", "产品经理", "产品架构"],
+    Role.SECURITY_EXPERT.value: ["security", "安全", "风控", "sec"],
+    Role.DATA_ENGINEER.value: ["data", "数据", "analytics", "分析"],
+    Role.UX_DESIGNER.value: ["ux", "design", "设计", "体验", "ui"],
+    Role.MARKETING_EXPERT.value: ["marketing", "市场", "营销", "brand", "growth"],
+    Role.ENGINEER.value: ["engineer", "develop", "开发", "工程", "后端", "前端", "技术"],
+    Role.MODERATOR.value: ["moderator", "host", "主持", "协调", "facilitator"],
+}
+
+
+def _match_role(role_str: str) -> Role | None:
+    """模糊匹配角色名（支持中英文）
+
+    匹配规则：角色字符串（小写）中包含任一关键词即匹配。
+    返回匹配的 Role 枚举，未匹配返回 None。
+    """
+    role_lower = role_str.lower()
+    for role, keywords in _ROLE_KEYWORDS.items():
+        for kw in keywords:
+            if kw in role_lower:
+                return Role(role)
+    return None
+
 
 def _anchor(state: MeetingState) -> str:
     """取会议宪章锚点文本，charter 不存在时返回空串"""
@@ -314,19 +341,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         ]
     # 解析 team_config 为 (role, stance) 列表，保持顺序
     # 支持模糊匹配：LLM 可能返回中文角色名（"产品经理"、"后端架构师"等）
-    _ROLE_KEYWORDS: dict[str, list[str]] = {
-        Role.PRODUCT_ARCHITECT.value: ["product_architect", "产品", "产品经理", "pm", "architect", "架构师"],
-        Role.ENGINEER.value: ["engineer", "工程师", "后端", "开发", "developer", "前端"],
-    }
-
-    def _match_role(role_str: str) -> Role | None:
-        """模糊匹配角色名（支持中英文）"""
-        role_lower = role_str.lower()
-        for role, keywords in _ROLE_KEYWORDS.items():
-            for kw in keywords:
-                if kw in role_lower:
-                    return Role(role)
-        return None
+    # _ROLE_KEYWORDS 和 _match_role 已提升为模块级函数
 
     members: list[tuple[Role, str]] = []
     for member in state.team_config:
@@ -335,7 +350,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         matched = _match_role(role_str)
         if matched is not None:
             members.append((matched, stance))
-        # 未匹配的角色跳过（当前只支持两种角色，其他角色可作为借调处理）
+        # 未匹配的角色跳过（当前支持 7 种角色，其他角色可作为借调处理）
 
     # 兜底：如果模糊匹配后没有有效角色，使用默认配置
     if not members:
@@ -661,6 +676,9 @@ async def produce_node(state: MeetingState) -> MeetingState:
         return resp.result
 
     result, confidence = await _run_with_consistency(state, "produce", call_fn)
+    from app.observability.log_bus import log_bus as _lb
+    _lb.info("produce: LLM 调用+一致性检查完成", logger="orchestrator.nodes.produce",
+             extra={"confidence": confidence, "has_prd": bool(result.get("prd")), "openapi_len": len(result.get("openapi", ""))})
     prd = result.get("prd", {})
     openapi = result.get("openapi", "")
     state.artifact = {
@@ -672,6 +690,8 @@ async def produce_node(state: MeetingState) -> MeetingState:
     state.conclusion_chain.lock("produce", state.artifact)
     # 第5层：记录置信度
     state.confidence_flags["produce"] = confidence
+    _lb.info("produce: artifact 已构造, 锁定结论完成", logger="orchestrator.nodes.produce",
+             extra={"prd_title": prd.get("title", "?"), "openapi_len": len(openapi)})
     # 发布 artifact.generated 事件
     await bus.publish(
         make_event(
@@ -684,15 +704,19 @@ async def produce_node(state: MeetingState) -> MeetingState:
             },
         )
     )
+    _lb.info("produce: artifact.generated 事件已发布", logger="orchestrator.nodes.produce")
     # 产物阶段也做一次漂移检查（针对 PRD 文本）
     prd_text = json.dumps(prd, ensure_ascii=False)
     _record_drift(state, Role.MODERATOR, Stage.PRODUCE, prd_text)
+    _lb.info("produce: 漂移检查完成", logger="orchestrator.nodes.produce")
     # 终态
     state.stage = Stage.PRODUCE
     state.status = MeetingStatus.DONE
+    _lb.info("produce: 状态已设为 DONE", logger="orchestrator.nodes.produce")
     # 迭代二：会议结束后触发记忆提取（失败不影响主流程）
     from app.memory.profile import trigger_extraction
     trigger_extraction(state)
+    _lb.info("produce: 记忆提取完成, 准备返回", logger="orchestrator.nodes.produce")
     return state
 
 

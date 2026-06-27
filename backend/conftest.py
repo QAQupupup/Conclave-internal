@@ -3,10 +3,13 @@
 import os
 import tempfile
 
-# 测试强制走 stub 模式，不调真实 API
-os.environ.setdefault("CONCLAVE_LLM_API_KEY", "")
-os.environ.setdefault("CONCLAVE_EMBED_API_KEY", "")
-os.environ.setdefault("CONCLAVE_RERANK_API_KEY", "")
+# CONCLAVE_TEST_REAL_LLM=1 时加载 .env 使用真实 LLM；默认走 StubLLM
+# 用法：CONCLAVE_TEST_REAL_LLM=1 python -m pytest -m real_llm
+if os.environ.get("CONCLAVE_TEST_REAL_LLM") != "1":
+    os.environ.setdefault("CONCLAVE_LLM_API_KEY", "")
+    os.environ.setdefault("CONCLAVE_EMBED_API_KEY", "")
+    os.environ.setdefault("CONCLAVE_RERANK_API_KEY", "")
+# 真实 LLM 模式下不设置空值，让 config.py 的 _load_dotenv() 从 .env 加载真实 key
 
 # SQLite 路径指向临时目录，避免污染工作目录
 os.environ.setdefault(
@@ -27,6 +30,12 @@ from app.events import bus
 from app.main import create_app
 from app.orchestrator import runner as runner_mod
 from app.routers import meetings as meetings_mod
+
+
+# ---------- pytest 标记注册 ----------
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_llm: 需要真实 LLM API key 的集成测试")
 
 
 # ---------- 公共 fixture：TestClient ----------
@@ -72,6 +81,19 @@ def _reset_state():
     bus._history.clear()
     store_mod._stores.clear()
     roles_mod._agents.clear()
+    # 关闭 RealLLM 的 httpx 连接池（如有），防止事件循环挂起
+    try:
+        import inspect
+        from app.agents.compute import _compute
+        if _compute is not None and hasattr(_compute, "aclose"):
+            loop = asyncio.new_event_loop()
+            try:
+                if inspect.iscoroutinefunction(_compute.aclose):
+                    loop.run_until_complete(_compute.aclose())
+            finally:
+                loop.close()
+    except Exception:
+        pass
     reset_compute()
 
 

@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+.idea
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+*.egg-info
+
+# Node
+node_modules
+dist
+
+# Docker
+Dockerfile
+docker-compose.yml
+
+# Docs
+docs
+*.md
+conclave-design-rationale
+
+# IDE
+.vscode
+.idea
+.trae
+
+# Env
+.env
+.env.example
+
+# OS
+Thumbs.db
+.DS_Store

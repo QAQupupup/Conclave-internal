@@ -14,6 +14,11 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 工作区接口（文件读写/命令执行/代码运行）
+      '/workspace': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       // WebSocket 端点 /ws/meetings/{meeting_id}
       '/ws': {
         target: 'ws://127.0.0.1:8000',
