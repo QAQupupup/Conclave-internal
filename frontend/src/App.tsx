@@ -1,8 +1,9 @@
 // 应用根组件：组装四块布局
-// meetingId 为空 → 创建页；否则 → Header(顶部) + 左侧 ChatPanel + 右侧三块
+// meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧 ChatPanel + 右侧三块
 import { useState } from 'react'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
-import { Header } from './components/Header.tsx'
+import { StageIndicator } from './components/StageIndicator.tsx'
+import { MeetingControls } from './components/MeetingControls.tsx'
 import { AgentGraph } from './components/AgentGraph.tsx'
 import { ChatPanel } from './components/ChatPanel.tsx'
 import { TopicPanel } from './components/TopicPanel.tsx'
@@ -41,7 +42,7 @@ function TabBar({ tab, onChange }: { tab: ViewTab; onChange: (t: ViewTab) => voi
 /** 右侧面板 Tab：议题 / 证据 / 产出 / 报告 / Token */
 type RightPanelTab = 'topic' | 'evidence' | 'artifact' | 'report' | 'token'
 
-/** 会议主视图：四块布局 + 借调模态 + 冲突联动选中态 + 右侧 Tab 切换 */
+/** 会议主视图：顶部流程指示器+控制按钮 / 拓扑图 / 聊天流 + 右侧面板，借调模态 + 冲突联动选中态 + 右侧 Tab 切换 */
 function MeetingView() {
   const { reset } = useMeeting()
   // 右侧证据面板选中冲突（聊天流点击证据 ref 时联动高亮）
@@ -52,60 +53,68 @@ function MeetingView() {
   const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
 
   return (
-    <div className="app-layout">
-      <Header />
-      <AgentGraph />
-      <div className="app-body">
-        <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
-        <div className="right-column">
-          <div className="right-tabs">
-            <button
-              className={`right-tab ${rightTab === 'topic' ? 'active' : ''}`}
-              onClick={() => setRightTab('topic')}
-            >
-              议题
-            </button>
-            <button
-              className={`right-tab ${rightTab === 'evidence' ? 'active' : ''}`}
-              onClick={() => setRightTab('evidence')}
-            >
-              证据
-            </button>
-            <button
-              className={`right-tab ${rightTab === 'artifact' ? 'active' : ''}`}
-              onClick={() => setRightTab('artifact')}
-            >
-              产出
-            </button>
-            <button
-              className={`right-tab ${rightTab === 'report' ? 'active' : ''}`}
-              onClick={() => setRightTab('report')}
-            >
-              报告
-            </button>
-            <button
-              className={`right-tab ${rightTab === 'token' ? 'active' : ''}`}
-              onClick={() => setRightTab('token')}
-            >
-              Token
-            </button>
-          </div>
-          {rightTab === 'topic' && <TopicPanel />}
-          {rightTab === 'evidence' && (
-            <EvidencePanel
-              selectedConflictId={selectedConflictId}
-              onSelectConflict={setSelectedConflictId}
-            />
-          )}
-          {rightTab === 'artifact' && <ArtifactPanel onOpenBorrow={() => setBorrowOpen(true)} />}
-          {rightTab === 'report' && <ReportViewer />}
-          {rightTab === 'token' && <TokenPanel />}
-        </div>
+    <div className="meeting-view">
+      {/* 顶部：六步流程指示器 + 会议控制按钮（替代原 Header） */}
+      <div className="meeting-top-bar">
+        <StageIndicator />
+        <MeetingControls />
       </div>
-      <button type="button" className="btn btn-ghost new-meeting-btn" onClick={reset}>
-        新建会议
-      </button>
-      <BorrowDialog open={borrowOpen} onClose={() => setBorrowOpen(false)} />
+
+      {/* 主体：拓扑图 + 左侧聊天流 + 右侧三块面板 */}
+      <div className="app-layout">
+        <AgentGraph />
+        <div className="app-body">
+          <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
+          <div className="right-column">
+            <div className="right-tabs">
+              <button
+                className={`right-tab ${rightTab === 'topic' ? 'active' : ''}`}
+                onClick={() => setRightTab('topic')}
+              >
+                议题
+              </button>
+              <button
+                className={`right-tab ${rightTab === 'evidence' ? 'active' : ''}`}
+                onClick={() => setRightTab('evidence')}
+              >
+                证据
+              </button>
+              <button
+                className={`right-tab ${rightTab === 'artifact' ? 'active' : ''}`}
+                onClick={() => setRightTab('artifact')}
+              >
+                产出
+              </button>
+              <button
+                className={`right-tab ${rightTab === 'report' ? 'active' : ''}`}
+                onClick={() => setRightTab('report')}
+              >
+                报告
+              </button>
+              <button
+                className={`right-tab ${rightTab === 'token' ? 'active' : ''}`}
+                onClick={() => setRightTab('token')}
+              >
+                Token
+              </button>
+            </div>
+            {rightTab === 'topic' && <TopicPanel />}
+            {rightTab === 'evidence' && (
+              <EvidencePanel
+                selectedConflictId={selectedConflictId}
+                onSelectConflict={setSelectedConflictId}
+              />
+            )}
+            {rightTab === 'artifact' && <ArtifactPanel onOpenBorrow={() => setBorrowOpen(true)} />}
+            {rightTab === 'report' && <ReportViewer />}
+            {rightTab === 'token' && <TokenPanel />}
+          </div>
+        </div>
+        <button type="button" className="btn btn-ghost new-meeting-btn" onClick={reset}>
+          新建会议
+        </button>
+        <BorrowDialog open={borrowOpen} onClose={() => setBorrowOpen(false)} />
+      </div>
     </div>
   )
 }
