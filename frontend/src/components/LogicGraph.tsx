@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
+import { FocusMode } from './FocusMode.tsx'
 
 /* ---------------- 尺寸常量 ---------------- */
 const NODE_WIDTH = 240          // 节点宽
@@ -149,6 +150,31 @@ interface NodePos {
 export function LogicGraph() {
   const { store } = useMeeting()
   const state = store.meeting
+  const [focused, setFocused] = useState(false)
+  // 当 focused 时，渲染为全屏模式（FocusMode 包裹）；否则为嵌入式
+  if (state === null) return null
+  return (
+    <LogicGraphInner
+      state={state}
+      focused={focused}
+      onFocus={() => setFocused(true)}
+      onClose={() => setFocused(false)}
+    />
+  )
+}
+
+/* ---------------- FocusMode 包装层 ---------------- */
+function LogicGraphInner({
+  state,
+  focused,
+  onFocus,
+  onClose,
+}: {
+  state: any
+  focused: boolean
+  onFocus: () => void
+  onClose: () => void
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
 
@@ -417,8 +443,14 @@ export function LogicGraph() {
   // overflowBadge 已在 hooks 阶段计算
   // 不把 overflowBadge 加到 allNodes，避免被三列视图逻辑重复渲染（独立渲染在 claim 列底部）
 
-  return (
-    <div className="logic-graph-container">
+  const viewportStyle: React.CSSProperties = {
+    cursor: dragging ? 'grabbing' : 'grab',
+  }
+  if (!focused) {
+    viewportStyle.height = 520
+  }
+  const body = (
+    <div className={`logic-graph-container ${focused ? 'is-focused' : ''}`}>
       <div className="logic-graph-toolbar">
         <span className="logic-graph-title">逻辑关系图</span>
         <span className="logic-graph-stats">
@@ -430,13 +462,28 @@ export function LogicGraph() {
           <button className="btn btn-sm" onClick={zoomIn} title="放大">+</button>
           <button className="btn btn-sm" onClick={fit} title="适应窗口">适应</button>
           <button className="btn btn-sm" onClick={reset} title="重置">重置</button>
+          <button
+            className="btn btn-sm btn-primary logic-graph-focus-btn"
+            onClick={onFocus}
+            title="聚焦模式（临时撑起画布放大展示）"
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ marginRight: 4 }}>
+              <path
+                d="M2 5V2H5M11 5V2H8M2 8V11H5M11 8V11H8"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+            放大展示
+          </button>
         </div>
       </div>
 
       <div
         ref={containerRef}
         className="logic-graph-viewport"
-        style={{ cursor: dragging ? 'grabbing' : 'grab' }}
+        style={viewportStyle}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={stopDrag}
@@ -593,9 +640,27 @@ export function LogicGraph() {
         </div>
 
         {/* 提示：滚轮缩放、拖拽平移 */}
-        <div className="logic-graph-hint">滚轮缩放 · 空白处拖拽</div>
+        <div className="logic-graph-hint">滚轮缩放 · 空白处拖拽 · 节点 hover 查看完整内容</div>
       </div>
     </div>
+  )
+
+  return (
+    <FocusMode
+      open={focused}
+      onClose={onClose}
+      title={
+        <span>
+          逻辑关系图 ·{' '}
+          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 12 }}>
+            {claimNodes.length} 主张 · {conflictNodes.length} 冲突 · {decisionNodes.length} 裁决
+          </span>
+        </span>
+      }
+      hint="按 Esc 或点击背景关闭"
+    >
+      {body}
+    </FocusMode>
   )
 }
 
