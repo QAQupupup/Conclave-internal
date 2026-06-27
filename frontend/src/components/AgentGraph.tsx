@@ -15,22 +15,22 @@ import type { ForceGraphData, GraphLink, GraphNode } from '../types/graph.ts'
 // 节点半径（agent 圆形 / conflict 菱形半对角线 / evidence 方形半边长）
 const NODE_RADIUS = { agent: 20, conflict: 18, evidence: 14 } as const
 
-// agent 节点按角色着色（与 index.css 角色变量一致）
+// agent 节点按角色着色（与 index.css 角色变量一致，温润低饱和）
 const ROLE_COLORS: Record<string, string> = {
-  moderator: '#1971c2',
-  product_architect: '#7048e8',
-  engineer: '#2f9e44',
+  moderator: '#5b8a8a',
+  product_architect: '#8a7ab8',
+  engineer: '#7a9a6a',
 }
-const OTHER_AGENT_COLOR = '#868e96'
-const CONFLICT_COLOR = '#e8590c'
-const EVIDENCE_COLOR = '#15aabf'
+const OTHER_AGENT_COLOR = '#a09a92'
+const CONFLICT_COLOR = '#c47a6a'
+const EVIDENCE_COLOR = '#6a8aaa'
 
 // 连线样式：颜色 + 虚线模式（argues 实线 / conflicts 红色虚线 / supports 绿色实线 / cites 灰色点线）
 const LINK_STYLE: Record<GraphLink['type'], { stroke: string; dash: string }> = {
-  argues: { stroke: '#868e96', dash: '' },
-  conflicts: { stroke: '#e03131', dash: '6 4' },
-  supports: { stroke: '#2f9e44', dash: '' },
-  cites: { stroke: '#adb5bd', dash: '2 4' },
+  argues: { stroke: '#a09a92', dash: '' },
+  conflicts: { stroke: '#c47a6a', dash: '6 4' },
+  supports: { stroke: '#7a9a6a', dash: '' },
+  cites: { stroke: '#b8b0a6', dash: '2 4' },
 }
 
 // ---------- d3-force 模拟用的节点 / 连线类型 ----------

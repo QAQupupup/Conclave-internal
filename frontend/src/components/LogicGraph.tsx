@@ -114,13 +114,13 @@ export function LogicGraph() {
   const nodeColor = (type: string): string => {
     switch (type) {
       case 'claim':
-        return '#4a9eff'
+        return '#6b7fa3'
       case 'conflict':
-        return '#ff6f6f'
+        return '#c47a6a'
       case 'decision':
-        return '#6fdc6f'
+        return '#7a9a6a'
       default:
-        return '#888'
+        return '#a09a92'
     }
   }
 
@@ -158,20 +158,20 @@ export function LogicGraph() {
         >
           <g transform={`translate(${translate.x}, ${translate.y}) scale(${scale})`}>
             {/* 列标题 */}
-            <text x={padding + 60} y={20} fill="#888" fontSize="12">
+            <text x={padding + 60} y={20} fill="#6b6560" fontSize="12">
               主张 (Claims)
             </text>
-            <text x={padding + colWidth + 50} y={20} fill="#888" fontSize="12">
+            <text x={padding + colWidth + 50} y={20} fill="#6b6560" fontSize="12">
               冲突 (Conflicts)
             </text>
-            <text x={padding + colWidth * 2 + 50} y={20} fill="#888" fontSize="12">
+            <text x={padding + colWidth * 2 + 50} y={20} fill="#6b6560" fontSize="12">
               裁决 (Decisions)
             </text>
 
             {/* 箭头定义 */}
             <defs>
               <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill="#666" />
+                <polygon points="0 0, 8 3, 0 6" fill="#6b6560" />
               </marker>
             </defs>
 
@@ -190,7 +190,7 @@ export function LogicGraph() {
                   key={`edge-${i}`}
                   d={`M ${x1},${y1} C ${midX},${y1} ${midX},${y2} ${x2},${y2}`}
                   fill="none"
-                  stroke={e.type === 'resolves' ? '#6fdc6f' : '#666'}
+                  stroke={e.type === 'resolves' ? '#7a9a6a' : '#6b6560'}
                   strokeWidth="1.5"
                   strokeDasharray={e.type === 'resolves' ? 'none' : '4 2'}
                   markerEnd="url(#arrowhead)"
@@ -205,7 +205,7 @@ export function LogicGraph() {
                   width="200"
                   height={nodeHeight}
                   rx="6"
-                  fill="var(--bg-card, #1e1e32)"
+                  fill="var(--bg-elev)"
                   stroke={nodeColor(node.type)}
                   strokeWidth="1.5"
                 />
@@ -219,12 +219,12 @@ export function LogicGraph() {
                     ✓ {node.verdict}
                   </text>
                 )}
-                <text x="10" y={node.type === 'claim' ? 20 : 32} fill="#e0e0e0" fontSize="11">
+                <text x="10" y={node.type === 'claim' ? 20 : 32} fill="#2d2a26" fontSize="11">
                   {node.text.slice(0, 35)}
                   {node.text.length > 35 ? '...' : ''}
                 </text>
                 {node.type === 'claim' && node.adopted && (
-                  <circle cx="190" cy="10" r="4" fill="#6fdc6f" />
+                  <circle cx="190" cy="10" r="4" fill="#7a9a6a" />
                 )}
               </g>
             ))}

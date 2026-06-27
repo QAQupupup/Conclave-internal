@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Untitled</title>
+    <style id="theme-vars">
+/* Conclave UI Redesign — Brand CSS */
+/* Tone: Editorial precision — clean, airy, restrained */
+/* Primary hue: Indigo-blue family, single brand identity color */
+
+:root {
+  /* ── Brand Identity ── */
+  --color-primary: #335c8e;
+  --color-primary-light: #4a7ab5;
+  --color-primary-dark: #264670;
+  --color-primary-tint: rgba(51, 92, 142, 0.06);
+  --color-primary-subtle: rgba(51, 92, 142, 0.10);
+
+  /* ── Neutrals ── */
+  --color-bg: #fafbfc;
+  --color-bg-elevated: #ffffff;
+  --color-bg-inset: #f3f5f7;
+  --color-bg-sunken: #edf0f3;
+  --color-border: #e2e6eb;
+  --color-border-subtle: #eceff2;
+
+  /* ── Text ── */
+  --color-text: #1a1d23;
+  --color-text-secondary: #5a6270;
+  --color-text-tertiary: #8b929e;
+  --color-text-inverse: #ffffff;
+
+  /* ── State colors (semantic only) ── */
+  --state-success: #2d8a56;
+  --state-success-bg: rgba(45, 138, 86, 0.06);
+  --state-warning: #b87d2b;
+  --state-warning-bg: rgba(184, 125, 43, 0.06);
+  --state-error: #c53030;
+  --state-error-bg: rgba(197, 48, 48, 0.06);
+  --state-info: #335c8e;
+  --state-info-bg: rgba(51, 92, 142, 0.06);
+
+  /* ── Role colors (derived from neutral + primary tints) ── */
+  --role-moderator: var(--color-primary);
+  --role-moderator-bg: var(--color-primary-tint);
+  --role-architect: #6b4fa0;
+  --role-architect-bg: rgba(107, 79, 160, 0.06);
+  --role-engineer: #3a8a5c;
+  --role-engineer-bg: rgba(58, 138, 92, 0.06);
+
+  /* ── Typography ── */
+  --font-sans: "Inter", -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", Consolas, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 28px;
+  --font-size-3xl: 36px;
+
+  --line-height-tight: 1.3;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.65;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --letter-spacing-tight: -0.01em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.04em;
+  --letter-spacing-wider: 0.08em;
+
+  /* ── Spacing ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Shape ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* ── Surface depth ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+
+  /* ── Layout ── */
+  --sidebar-width: 256px;
+  --header-height: 56px;
+  --panel-min-width: 320px;
+}
+
+/* ── Global reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  letter-spacing: var(--letter-spacing-normal);
+}
+
+/* ── Typography scale ── */
+.conclave-h1 {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-tight);
+  color: var(--color-text);
+}
+
+.conclave-h2 {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-tight);
+  color: var(--color-text);
+}
+
+.conclave-h3 {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  color: var(--color-text);
+}
+
+.conclave-body {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+}
+
+.conclave-caption {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-tertiary);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+.conclave-mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-secondary);
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-primary: var(--color-primary);
+    --color-border: var(--color-border);
+  }
+  @layer base {
+    body { background: var(--color-background); color: var(--color-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main class="flex h-screen overflow-hidden" style="background: var(--color-bg);">
+
+      <!-- ========== TOP TAB BAR ========== -->
+      <div class="flex items-center border-b shrink-0" style="border-color: var(--color-border); background: var(--color-bg-elevated);">
+        <button class="px-5 py-2.5 text-[13px] font-medium transition-colors duration-150" style="color: var(--color-primary); border-bottom: 2px solid var(--color-primary);">会议</button>
+        <button data-dom-id="tab-workspace" class="px-5 py-2.5 text-[13px] font-medium transition-colors duration-150 hover:text-[var(--color-text-secondary)]" style="color: var(--color-text-tertiary); border-bottom: 2px solid transparent;">工作区</button>
+      </div>
+
+      <!-- ========== LEFT SIDEBAR (256px) ========== -->
+      <aside class="flex flex-col shrink-0 border-r" style="width: var(--sidebar-width); border-color: var(--color-border); background: var(--color-bg-elevated);">
+        <!-- Sidebar Header -->
+        <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: var(--color-border);">
+          <h2 class="text-sm font-semibold" style="color: var(--color-text); letter-spacing: -0.01em;">会议列表</h2>
+          <button class="flex items-center justify-center w-7 h-7 rounded transition-colors duration-150 hover:bg-[var(--color-bg-inset)]" style="color: var(--color-text-tertiary);" aria-label="刷新">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+        <!-- New Meeting Button -->
+        <div class="px-3 pt-3">
+          <button data-dom-id="btn-new-meeting" class="flex items-center justify-center gap-1.5 w-full h-8 rounded-md text-xs font-semibold transition-all duration-150 hover:brightness-110 active:scale-[.98] focus-visible:outline-2 focus-visible:outline-offset-2" style="background: var(--color-primary); color: var(--color-text-inverse); outline-color: var(--color-primary);">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            新建会议
+          </button>
+        </div>
+        <!-- Meeting List -->
+        <nav class="flex-1 overflow-y-auto no-scrollbar mt-2 px-2 space-y-1">
+          <!-- Active Meeting -->
+          <a href="#" class="flex items-start gap-2 px-2.5 py-2.5 rounded-md transition-colors duration-150" style="background: var(--color-primary-tint); border-left: 2px solid var(--color-primary);">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="relative flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style="background: var(--state-success);"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2" style="background: var(--state-success);"></span>
+                </span>
+                <span class="text-xs font-medium truncate" style="color: var(--color-text);">微服务拆分策略讨论</span>
+              </div>
+              <div class="flex items-center gap-1.5 mt-1">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style="background: var(--state-info-bg); color: var(--state-info);">运行中</span>
+                <span class="text-[10px] font-mono" style="color: var(--color-text-tertiary);">a3f8…c2d1</span>
+              </div>
+            </div>
+          </a>
+          <!-- Paused Meeting -->
+          <a href="#" class="flex items-start gap-2 px-2.5 py-2.5 rounded-md transition-colors duration-150 hover:bg-[var(--color-bg-inset)]" style="border-left: 2px solid transparent;">
+            <div class="flex-1 min-w-0">
+              <span class="text-xs font-medium truncate block" style="color: var(--color-text);">API网关选型评审</span>
+              <div class="flex items-center gap-1.5 mt-1">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style="background: var(--state-warning-bg); color: var(--state-warning);">已暂停</span>
+                <span class="text-[10px] font-mono" style="color: var(--color-text-tertiary);">7b2e…91a4</span>
+              </div>
+            </div>
+          </a>
+          <!-- Completed Meeting -->
+          <a href="#" class="flex items-start gap-2 px-2.5 py-2.5 rounded-md transition-colors duration-150 hover:bg-[var(--color-bg-inset)]" style="border-left: 2px solid transparent;">
+            <div class="flex-1 min-w-0">
+              <span class="text-xs font-medium truncate block" style="color: var(--color-text);">数据库迁移方案</span>
+              <div class="flex items-center gap-1.5 mt-1">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style="background: var(--state-success-bg); color: var(--state-success);">已完成</span>
+                <span class="text-[10px] font-mono" style="color: var(--color-text-tertiary);">e5c1…d7f3</span>
+              </div>
+            </div>
+          </a>
+          <!-- Terminated Meeting -->
+          <a href="#" class="flex items-start gap-2 px-2.5 py-2.5 rounded-md transition-colors duration-150 hover:bg-[var(--color-bg-inset)]" style="border-left: 2px solid transparent;">
+            <div class="flex-1 min-w-0">
+              <span class="text-xs font-medium truncate block" style="color: var(--color-text);">前端框架统一</span>
+              <div class="flex items-center gap-1.5 mt-1">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style="background: var(--state-error-bg); color: var(--state-error);">已终止</span>
+                <span class="text-[10px] font-mono" style="color: var(--color-text-tertiary);">0d9a…4b6e</span>
+              </div>
+            </div>
+          </a>
+        </nav>
+        <!-- Sidebar Footer Stats -->
+        <div class="px-4 py-2.5 border-t text-[11px]" style="border-color: var(--color-border); color: var(--color-text-tertiary);">
+          运行中 1 / 上限 3
+        </div>
+      </aside>
+
+      <!-- ========== MAIN CONTENT AREA ========== -->
+      <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+        <!-- ===== HEADER (meeting title + progress + controls) ===== -->
+        <header class="shrink-0 border-b" style="height: var(--header-height); border-color: var(--color-border); background: var(--color-bg-elevated);">
+          <div class="flex items-center h-full px-5 gap-4">
+            <!-- Left: Title + Status + Connection -->
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              <h1 class="text-sm font-bold truncate" style="color: var(--color-text); max-width: 240px;">微服务拆分策略讨论</h1>
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0" style="background: var(--state-info-bg); color: var(--state-info);">交叉辩论</span>
+              <span class="flex items-center gap-1 text-[10px] shrink-0" style="color: var(--state-success);">
+                <span class="w-1.5 h-1.5 rounded-full inline-block" style="background: var(--state-success);"></span>
+                WS 已连接
+              </span>
+            </div>
+
+            <!-- Center: 6-Stage Progress Indicator -->
+            <div class="flex items-center gap-0 shrink-0">
+              <!-- Stage 1: Done -->
+              <div class="flex items-center">
+                <div class="flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold" style="background: var(--state-success); color: var(--color-text-inverse);">
+                  <i data-lucide="check" class="w-2.5 h-2.5"></i>
+                </div>
+                <span class="ml-1 text-[10px] font-medium" style="color: var(--state-success);">厘清</span>
+              </div>
+              <div class="w-4 h-px mx-0.5" style="background: var(--state-success);"></div>
+              <!-- Stage 2: Done -->
+              <div class="flex items-center">
+                <div class="flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold" style="background: var(--state-success); color: var(--color-text-inverse);">
+                  <i data-lucide="check" class="w-2.5 h-2.5"></i>
+                </div>
+                <span class="ml-1 text-[10px] font-medium" style="color: var(--state-success);">队内讨论</span>
+              </div>
+              <div class="w-4 h-px mx-0.5" style="background: var(--state-success);"></div>
+              <!-- Stage 3: Current (primary) -->
+              <div class="flex items-center">
+                <div class="flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold" style="background: var(--color-primary); color: var(--color-text-inverse);">3</div>
+                <span class="ml-1 text-[10px] font-semibold" style="color: var(--color-primary);">交叉辩论</span>
+              </div>
+              <div class="w-4 h-px mx-0.5" style="background: var(--color-border);"></div>
+              <!-- Stage 4: Future -->
+              <div class="flex items-center">
+                <div class="flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-medium" style="border: 1.5px solid var(--color-border); color: var(--color-text-tertiary); background: transparent;">4</div>
+                <span class="ml-1 text-[10px]" style="color: var(--color-text-tertiary);">证据审查</span>
+              </div>
+              <div class="w-4 h-px mx-0.5" style="background: var(--color-border);"></div>
+              <!-- Stage 5: Future -->
+              <div class="flex items-center">
+                <div class="flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-medium" style="border: 1.5px solid var(--color-border); color: var(--color-text-tertiary); background: transparent;">5</div>
+                <span class="ml-1 text-[10px]" style="color: var(--color-text-tertiary);">仲裁</span>
+              </div>
+              <div class="w-4 h-px mx-0.5" style="background: var(--color-border);"></div>
+              <!-- Stage 6: Low-confidence (amber glow) -->
+              <div class="flex items-center">
+                <div class="flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-medium" style="border: 1.5px solid var(--state-warning); color: var(--state-warning); background: var(--state-warning-bg); box-shadow: 0 0 6px rgba(184, 125, 43, 0.25);">6</div>
+                <span class="ml-1 text-[10px]" style="color: var(--state-warning);">产出</span>
+              </div>
+            </div>
+
+            <!-- Right: Control Buttons -->
+            <div class="flex items-center gap-2 shrink-0">
+              <button class="flex items-center justify-center gap-1 px-3 h-7 rounded-md text-[11px] font-medium transition-colors duration-150 hover:bg-[var(--color-bg-inset)] focus-visible:outline-2 focus-visible:outline-offset-2" style="border: 1px solid var(--color-border); color: var(--color-text-secondary); outline-color: var(--color-primary);">
+                <i data-lucide="pause" class="w-3 h-3"></i>
+                暂停
+              </button>
+              <button class="flex items-center justify-center gap-1 px-3 h-7 rounded-md text-[11px] font-medium transition-colors duration-150 hover:bg-[var(--color-bg-inset)] focus-visible:outline-2 focus-visible:outline-offset-2" style="border: 1px solid var(--color-border); color: var(--color-text-secondary); outline-color: var(--color-primary);">
+                <i data-lucide="skip-forward" class="w-3 h-3"></i>
+                恢复
+              </button>
+              <button class="flex items-center justify-center gap-1 px-3 h-7 rounded-md text-[11px] font-medium transition-colors duration-150 hover:bg-[var(--state-error-bg)] focus-visible:outline-2 focus-visible:outline-offset-2" style="border: 1px solid var(--color-border); color: var(--state-error); outline-color: var(--color-primary);">
+                <i data-lucide="square" class="w-3 h-3"></i>
+                终止
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- ===== COLLAPSIBLE GRAPH AREA ===== -->
+        <div class="shrink-0 border-b" style="border-color: var(--color-border); background: var(--color-bg-elevated);">
+          <!-- Collapsed state -->
+          <div id="graph-collapsed" class="flex items-center justify-center py-2">
+            <button id="btn-toggle-graph" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors duration-150 hover:bg-[var(--color-bg-inset)] focus-visible:outline-2 focus-visible:outline-offset-2" style="color: var(--color-primary); outline-color: var(--color-primary);">
+              <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
+              展开拓扑图（8 节点 / 12 连线）
+              <i data-lucide="chevron-down" class="w-3 h-3"></i>
+            </button>
+          </div>
+          <!-- Expanded state (hidden by default) -->
+          <div id="graph-expanded" class="hidden px-5 py-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-[11px] font-medium" style="color: var(--color-text-secondary);">Agent 拓扑图</span>
+              <button id="btn-collapse-graph" class="flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-colors duration-150 hover:bg-[var(--color-bg-inset)]" style="color: var(--color-text-tertiary);">
+                <i data-lucide="chevron-up" class="w-3 h-3"></i>
+                收起
+              </button>
+            </div>
+            <svg viewBox="0 0 680 180" class="w-full" style="max-height: 180px;">
+              <!-- Connecting Lines -->
+              <line x1="100" y1="60" x2="200" y2="90" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="100" y1="60" x2="160" y2="140" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="200" y1="90" x2="320" y2="60" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="200" y1="90" x2="300" y2="140" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="320" y1="60" x2="440" y2="90" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="320" y1="60" x2="440" y2="140" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="440" y1="90" x2="560" y2="60" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="440" y1="90" x2="560" y2="140" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="160" y1="140" x2="300" y2="140" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="300" y1="140" x2="440" y2="140" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="560" y1="60" x2="620" y2="100" stroke="var(--color-border)" stroke-width="1.5"/>
+              <line x1="560" y1="140" x2="620" y2="100" stroke="var(--color-border)" stroke-width="1.5"/>
+              <!-- Agent Nodes (circles) -->
+              <circle cx="100" cy="60" r="18" fill="var(--color-primary)" opacity="0.15" stroke="var(--color-primary)" stroke-width="1.5"/>
+              <text x="100" y="63" text-anchor="middle" font-size="9" fill="var(--color-primary)" font-weight="600" font-family="Inter, sans-serif">主持</text>
+              <circle cx="320" cy="60" r="18" fill="var(--role-architect-bg)" stroke="#6b4fa0" stroke-width="1.5"/>
+              <text x="320" y="63" text-anchor="middle" font-size="9" fill="#6b4fa0" font-weight="600" font-family="Inter, sans-serif">架构</text>
+              <circle cx="560" cy="60" r="18" fill="var(--role-engineer-bg)" stroke="var(--role-engineer)" stroke-width="1.5"/>
+              <text x="560" y="63" text-anchor="middle" font-size="9" fill="var(--role-engineer)" font-weight="600" font-family="Inter, sans-serif">工程</text>
+              <!-- Conflict Nodes (diamonds) -->
+              <rect x="190" y="82" width="20" height="20" rx="2" transform="rotate(45 200 92)" fill="var(--state-warning-bg)" stroke="var(--state-warning)" stroke-width="1.5"/>
+              <rect x="430" y="82" width="20" height="20" rx="2" transform="rotate(45 440 92)" fill="var(--state-warning-bg)" stroke="var(--state-warning)" stroke-width="1.5"/>
+              <!-- Evidence Nodes (squares) -->
+              <rect x="147" y="130" width="26" height="20" rx="3" fill="var(--state-info-bg)" stroke="var(--state-info)" stroke-width="1.5"/>
+              <text x="160" y="143" text-anchor="middle" font-size="8" fill="var(--state-info)" font-weight="500" font-family="Inter, sans-serif">E1</text>
+              <rect x="287" y="130" width="26" height="20" rx="3" fill="var(--state-info-bg)" stroke="var(--state-info)" stroke-width="1.5"/>
+              <text x="300" y="143" text-anchor="middle" font-size="8" fill="var(--state-info)" font-weight="500" font-family="Inter, sans-serif">E2</text>
+              <rect x="427" y="130" width="26" height="20" rx="3" fill="var(--state-info-bg)" stroke="var(--state-info)" stroke-width="1.5"/>
+              <text x="440" y="143" text-anchor="middle" font-size="8" fill="var(--state-info)" font-weight="500" font-family="Inter, sans-serif">E3</text>
+              <!-- Output Node -->
+              <circle cx="620" cy="100" r="16" fill="var(--color-bg-elevated)" stroke="var(--color-primary)" stroke-width="1.5" stroke-dasharray="4 2"/>
+              <text x="620" y="103" text-anchor="middle" font-size="8" fill="var(--color-primary)" font-weight="600" font-family="Inter, sans-serif">产出</text>
+            </svg>
+          </div>
+        </div>
+
+        <!-- ===== BODY (two-column: chat stream + right panel) ===== -->
+        <div class="flex-1 flex min-h-0 overflow-hidden">
+
+          <!-- LEFT COLUMN: Chat Stream (~60%) -->
+          <section class="flex flex-col min-w-0 overflow-hidden" style="flex: 6;">
+            <!-- Panel Title -->
+            <div class="flex items-center justify-between px-5 py-2 border-b" style="border-color: var(--color-border);">
+              <h2 class="text-xs font-semibold" style="color: var(--color-text);">聊天流</h2>
+              <span class="text-[10px]" style="color: var(--color-text-tertiary);">12 条消息</span>
+            </div>
+            <!-- Chat Messages -->
+            <div class="flex-1 overflow-y-auto no-scrollbar px-5 py-3 space-y-2.5">
+
+              <!-- Message Card: Moderator (blue border) -->
+              <article class="rounded-md p-3" style="background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid var(--color-primary);">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] font-semibold" style="color: var(--color-primary);">主持人</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium" style="background: var(--color-primary-tint); color: var(--color-primary);">交叉辩论</span>
+                  </div>
+                  <span class="text-[10px]" style="color: var(--color-text-tertiary);">14:23:05</span>
+                </div>
+                <pre class="text-xs leading-relaxed whitespace-pre-wrap font-mono" style="color: var(--color-text-secondary);">各位，现在进入交叉辩论阶段。请架构师和工程师就"是否应该将用户服务拆分为独立的认证服务和用户资料服务"展开辩论。</pre>
+              </article>
+
+              <!-- Message Card: Architect (purple border) -->
+              <article class="rounded-md p-3" style="background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid #6b4fa0;">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] font-semibold" style="color: #6b4fa0;">架构师</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium" style="background: var(--role-architect-bg); color: #6b4fa0;">交叉辩论</span>
+                  </div>
+                  <span class="text-[10px]" style="color: var(--color-text-tertiary);">14:23:18</span>
+                </div>
+                <pre class="text-xs leading-relaxed whitespace-pre-wrap font-mono" style="color: var(--color-text-secondary);">建议拆分。理由：
+1. 认证服务的安全策略变更频率远高于用户资料服务
+2. 认证服务需要独立扩容（登录高峰与资料查询高峰不同步）
+3. 认证模块可替换性强，独立部署便于切换 OAuth 方案</pre>
+                <div class="flex gap-1.5 mt-2">
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors duration-150 hover:bg-[var(--color-primary-tint)]" style="border: 1px solid var(--color-primary); color: var(--color-primary);">E1: 扩容数据</span>
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors duration-150 hover:bg-[var(--color-primary-tint)]" style="border: 1px solid var(--color-primary); color: var(--color-primary);">E2: 安全策略</span>
+                </div>
+              </article>
+
+              <!-- Message Card: Engineer (green border) -->
+              <article class="rounded-md p-3" style="background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid var(--role-engineer);">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] font-semibold" style="color: var(--role-engineer);">工程师</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium" style="background: var(--role-engineer-bg); color: var(--role-engineer);">交叉辩论</span>
+                  </div>
+                  <span class="text-[10px]" style="color: var(--color-text-tertiary);">14:23:35</span>
+                </div>
+                <pre class="text-xs leading-relaxed whitespace-pre-wrap font-mono" style="color: var(--color-text-secondary);">反对拆分。原因：
+1. 当前认证逻辑深度耦合用户资料（手机号验证需查用户表）
+2. 拆分后需要维护分布式事务（注册流程涉及两张表）
+3. 团队只有 5 人，服务数量增加带来运维负担</pre>
+                <div class="flex gap-1.5 mt-2">
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors duration-150 hover:bg-[var(--color-primary-tint)]" style="border: 1px solid var(--color-primary); color: var(--color-primary);">E3: 耦合分析</span>
+                </div>
+              </article>
+
+              <!-- Message Card: Moderator -->
+              <article class="rounded-md p-3" style="background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid var(--color-primary);">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] font-semibold" style="color: var(--color-primary);">主持人</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium" style="background: var(--color-primary-tint); color: var(--color-primary);">交叉辩论</span>
+                  </div>
+                  <span class="text-[10px]" style="color: var(--color-text-tertiary);">14:24:02</span>
+                </div>
+                <pre class="text-xs leading-relaxed whitespace-pre-wrap font-mono" style="color: var(--color-text-secondary);">双方观点已记录。架构师强调安全隔离与弹性扩容，工程师强调耦合成本与运维负担。请各自补充一轮反驳论据。</pre>
+              </article>
+
+              <!-- Message Card: Architect -->
+              <article class="rounded-md p-3" style="background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid #6b4fa0;">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] font-semibold" style="color: #6b4fa0;">架构师</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium" style="background: var(--role-architect-bg); color: #6b4fa0;">交叉辩论</span>
+                  </div>
+                  <span class="text-[10px]" style="color: var(--color-text-tertiary);">14:24:21</span>
+                </div>
+                <pre class="text-xs leading-relaxed whitespace-pre-wrap font-mono" style="color: var(--color-text-secondary);">反驳：手机号验证可通过 RPC 调用解决，不必共享数据库。分布式事务可用 Saga 模式替代 2PC，降低一致性成本。</pre>
+              </article>
+
+              <!-- Message Card: Engineer -->
+              <article class="rounded-md p-3" style="background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid var(--role-engineer);">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] font-semibold" style="color: var(--role-engineer);">工程师</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium" style="background: var(--role-engineer-bg); color: var(--role-engineer);">交叉辩论</span>
+                  </div>
+                  <span class="text-[10px]" style="color: var(--color-text-tertiary);">14:24:45</span>
+                </div>
+                <pre class="text-xs leading-relaxed whitespace-pre-wrap font-mono" style="color: var(--color-text-secondary);">补充：Saga 模式引入了补偿逻辑的复杂度，5 人团队目前的 CI/CD 管线无法支撑多服务编排。建议先做模块化，等团队扩大后再拆服务。</pre>
+              </article>
+
+            </div>
+          </section>
+
+          <!-- Divider -->
+          <div class="shrink-0" style="width: 1px; background: var(--color-border);"></div>
+
+          <!-- RIGHT COLUMN: Tabbed Panel (~40%) -->
+          <section class="flex flex-col min-w-0 overflow-hidden" style="flex: 4;">
+            <!-- Tab Bar -->
+            <div class="flex items-center gap-0 border-b px-4 shrink-0" style="border-color: var(--color-border);">
+              <button class="tab-btn relative px-3 py-2.5 text-[11px] font-medium transition-colors duration-150" style="color: var(--color-primary);">
+                议题
+                <span class="absolute bottom-0 left-3 right-3 h-0.5 rounded-full" style="background: var(--color-primary);"></span>
+              </button>
+              <button class="tab-btn relative px-3 py-2.5 text-[11px] font-medium transition-colors duration-150 hover:text-[var(--color-text-secondary)]" style="color: var(--color-text-tertiary);">
+                证据
+              </button>
+              <button class="tab-btn relative px-3 py-2.5 text-[11px] font-medium transition-colors duration-150 hover:text-[var(--color-text-secondary)]" style="color: var(--color-text-tertiary);">
+                产出
+              </button>
+              <button class="tab-btn relative px-3 py-2.5 text-[11px] font-medium transition-colors duration-150 hover:text-[var(--color-text-secondary)]" style="color: var(--color-text-tertiary);">
+                报告
+              </button>
+              <button class="tab-btn relative px-3 py-2.5 text-[11px] font-medium transition-colors duration-150 hover:text-[var(--color-text-secondary)]" style="color: var(--color-text-tertiary);">
+                Token
+              </button>
+            </div>
+            <!-- Tab Content: 议题 (default active) -->
+            <div class="flex-1 overflow-y-auto no-scrollbar px-4 py-3">
+              <!-- Topic Section -->
+              <div class="mb-4">
+                <h3 class="text-[11px] font-semibold mb-2" style="color: var(--color-text);">核心议题</h3>
+                <div class="rounded-md p-3 space-y-2" style="background: var(--color-bg-inset); border: 1px solid var(--color-border-subtle);">
+                  <div class="flex items-start gap-2">
+                    <span class="shrink-0 w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold mt-0.5" style="background: var(--color-primary-tint); color: var(--color-primary);">1</span>
+                    <div>
+                      <p class="text-[11px] font-medium" style="color: var(--color-text);">用户服务是否应该拆分为独立的认证服务和用户资料服务？</p>
+                    </div>
+                  </div>
+                  <div class="flex items-start gap-2">
+                    <span class="shrink-0 w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold mt-0.5" style="background: var(--color-primary-tint); color: var(--color-primary);">2</span>
+                    <div>
+                      <p class="text-[11px] font-medium" style="color: var(--color-text);">分布式事务方案选择：Saga 还是 TCC？</p>
+                    </div>
+                  </div>
+                  <div class="flex items-start gap-2">
+                    <span class="shrink-0 w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold mt-0.5" style="background: var(--color-primary-tint); color: var(--color-primary);">3</span>
+                    <div>
+                      <p class="text-[11px] font-medium" style="color: var(--color-text);">拆分后的服务间通信协议：gRPC 还是 REST？</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Key Questions -->
+              <div class="mb-4">
+                <h3 class="text-[11px] font-semibold mb-2" style="color: var(--color-text);">关键问题</h3>
+                <ul class="space-y-1.5">
+                  <li class="flex items-start gap-2 text-[11px]" style="color: var(--color-text-secondary);">
+                    <span class="mt-1 shrink-0 w-1 h-1 rounded-full" style="background: var(--color-text-tertiary);"></span>
+                    认证与用户资料的耦合点是否可以通过接口抽象解耦？
+                  </li>
+                  <li class="flex items-start gap-2 text-[11px]" style="color: var(--color-text-secondary);">
+                    <span class="mt-1 shrink-0 w-1 h-1 rounded-full" style="background: var(--color-text-tertiary);"></span>
+                    当前团队规模是否足以支撑微服务运维复杂度？
+                  </li>
+                  <li class="flex items-start gap-2 text-[11px]" style="color: var(--color-text-secondary);">
+                    <span class="mt-1 shrink-0 w-1 h-1 rounded-full" style="background: var(--color-text-tertiary);"></span>
+                    模块化单体是否可以作为拆分前的过渡方案？
+                  </li>
+                  <li class="flex items-start gap-2 text-[11px]" style="color: var(--color-text-secondary);">
+                    <span class="mt-1 shrink-0 w-1 h-1 rounded-full" style="background: var(--color-text-tertiary);"></span>
+                    拆分后对现有 CI/CD 管线和监控体系的影响范围？
+                  </li>
+                </ul>
+              </div>
+              <!-- Team Members -->
+              <div>
+                <h3 class="text-[11px] font-semibold mb-2" style="color: var(--color-text);">参与角色</h3>
+                <div class="flex flex-wrap gap-1.5">
+                  <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium" style="background: var(--color-primary-tint); color: var(--color-primary); border: 1px solid rgba(51, 92, 142, 0.15);">
+                    <i data-lucide="shield" class="w-3 h-3"></i>
+                    主持人
+                  </span>
+                  <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium" style="background: var(--role-architect-bg); color: #6b4fa0; border: 1px solid rgba(107, 79, 160, 0.15);">
+                    <i data-lucide="compass" class="w-3 h-3"></i>
+                    架构师
+                  </span>
+                  <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium" style="background: var(--role-engineer-bg); color: var(--role-engineer); border: 1px solid rgba(58, 138, 92, 0.15);">
+                    <i data-lucide="wrench" class="w-3 h-3"></i>
+                    工程师
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- ===== FLOATING ACTION: New Meeting Button ===== -->
+      <button data-dom-id="btn-new-meeting" class="fixed flex items-center gap-1.5 px-4 py-2 rounded-md text-[11px] font-semibold transition-all duration-150 hover:translate-y-[-1px] active:translate-y-0 focus-visible:outline-2 focus-visible:outline-offset-2" style="bottom: 20px; right: 20px; color: var(--color-primary); background: var(--color-bg-elevated); border: 1px solid var(--color-border); outline-color: var(--color-primary);">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+        新建会议
+      </button>
+
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

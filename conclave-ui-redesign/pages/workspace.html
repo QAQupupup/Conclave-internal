@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conclave — 工作区</title>
+    <style id="theme-vars">
+/* Conclave UI Redesign — Brand CSS */
+/* Tone: Editorial precision — clean, airy, restrained */
+/* Primary hue: Indigo-blue family, single brand identity color */
+
+:root {
+  /* ── Brand Identity ── */
+  --color-primary: #335c8e;
+  --color-primary-light: #4a7ab5;
+  --color-primary-dark: #264670;
+  --color-primary-tint: rgba(51, 92, 142, 0.06);
+  --color-primary-subtle: rgba(51, 92, 142, 0.10);
+
+  /* ── Neutrals ── */
+  --color-bg: #fafbfc;
+  --color-bg-elevated: #ffffff;
+  --color-bg-inset: #f3f5f7;
+  --color-bg-sunken: #edf0f3;
+  --color-border: #e2e6eb;
+  --color-border-subtle: #eceff2;
+
+  /* ── Text ── */
+  --color-text: #1a1d23;
+  --color-text-secondary: #5a6270;
+  --color-text-tertiary: #8b929e;
+  --color-text-inverse: #ffffff;
+
+  /* ── State colors (semantic only) ── */
+  --state-success: #2d8a56;
+  --state-success-bg: rgba(45, 138, 86, 0.06);
+  --state-warning: #b87d2b;
+  --state-warning-bg: rgba(184, 125, 43, 0.06);
+  --state-error: #c53030;
+  --state-error-bg: rgba(197, 48, 48, 0.06);
+  --state-info: #335c8e;
+  --state-info-bg: rgba(51, 92, 142, 0.06);
+
+  /* ── Role colors (derived from neutral + primary tints) ── */
+  --role-moderator: var(--color-primary);
+  --role-moderator-bg: var(--color-primary-tint);
+  --role-architect: #6b4fa0;
+  --role-architect-bg: rgba(107, 79, 160, 0.06);
+  --role-engineer: #3a8a5c;
+  --role-engineer-bg: rgba(58, 138, 92, 0.06);
+
+  /* ── Typography ── */
+  --font-sans: "Inter", -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", Consolas, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 28px;
+  --font-size-3xl: 36px;
+
+  --line-height-tight: 1.3;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.65;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --letter-spacing-tight: -0.01em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.04em;
+  --letter-spacing-wider: 0.08em;
+
+  /* ── Spacing ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Shape ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* ── Surface depth ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+
+  /* ── Layout ── */
+  --sidebar-width: 256px;
+  --header-height: 56px;
+  --panel-min-width: 320px;
+}
+
+/* ── Global reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  letter-spacing: var(--letter-spacing-normal);
+}
+
+/* ── Typography scale ── */
+.conclave-h1 {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-tight);
+  color: var(--color-text);
+}
+
+.conclave-h2 {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-tight);
+  color: var(--color-text);
+}
+
+.conclave-h3 {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  color: var(--color-text);
+}
+
+.conclave-body {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+}
+
+.conclave-caption {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-tertiary);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+.conclave-mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-secondary);
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-primary: var(--color-primary);
+    --color-border: var(--color-border);
+  }
+  @layer base {
+    body { background: var(--color-background); color: var(--color-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main class="h-screen flex flex-col overflow-hidden" style="background: var(--color-bg);">
+
+      <!-- Top tab bar -->
+      <header class="flex items-center gap-0 px-6 shrink-0" style="height: var(--header-height); border-bottom: 1px solid var(--color-border);">
+        <button data-dom-id="tab-meeting" class="flex items-center px-4 text-sm font-medium transition-colors duration-150 hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2" style="color: var(--color-text-tertiary); height: 100%;">
+          会议
+        </button>
+        <button class="flex items-center px-4 text-sm font-semibold transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2" style="color: var(--color-primary); border-bottom: 2px solid var(--color-primary); height: 100%;">
+          工作区
+        </button>
+        <div class="ml-auto flex items-center gap-2">
+          <button class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors duration-150 rounded-md hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2" style="background: var(--color-primary-tint); color: var(--color-primary);">
+            <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
+            沙箱就绪
+          </button>
+        </div>
+      </header>
+
+      <!-- Workspace container -->
+      <div class="flex-1 flex flex-col overflow-hidden" style="padding: 12px;">
+
+        <!-- Workspace outer container -->
+        <div class="flex-1 flex flex-col overflow-hidden rounded-xl" style="background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+
+          <!-- Toolbar -->
+          <div class="flex items-center gap-2 px-4 shrink-0" style="height: 40px; border-bottom: 1px solid var(--color-border);">
+            <button class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium transition-colors duration-150 rounded-md hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2" style="color: var(--color-text-secondary);">
+              <i data-lucide="file-plus" class="w-3.5 h-3.5"></i>
+              新建文件
+            </button>
+            <button class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium transition-colors duration-150 rounded-md hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2" style="color: var(--color-text-secondary);">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i>
+              保存
+            </button>
+            <button class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold transition-colors duration-150 rounded-md hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2" style="background: var(--color-primary); color: var(--color-text-inverse);">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i>
+              运行
+            </button>
+            <div class="ml-auto flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium" style="background: var(--state-success-bg); color: var(--state-success);">
+              <span class="w-1.5 h-1.5 rounded-full" style="background: var(--state-success);"></span>
+              沙箱就绪
+            </div>
+          </div>
+
+          <!-- Main three-panel area -->
+          <div class="flex-1 flex overflow-hidden">
+
+            <!-- File tree sidebar -->
+            <aside class="shrink-0 overflow-y-auto" style="width: 200px; border-right: 1px solid var(--color-border);">
+              <div class="px-3 py-2 text-xs font-medium truncate" style="font-family: var(--font-mono); color: var(--color-text-tertiary); border-bottom: 1px solid var(--color-border-subtle);">
+                meeting-abc123/
+              </div>
+              <nav class="py-1" aria-label="文件树">
+                <!-- Folder: src -->
+                <div class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="chevron-down" class="w-3 h-3 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <i data-lucide="folder" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-primary);"></i>
+                  <span class="truncate">src</span>
+                </div>
+                <!-- Active file -->
+                <div class="flex items-center gap-2 px-3 py-1.5 pl-8 text-xs cursor-pointer transition-colors duration-150" style="font-family: var(--font-mono); color: var(--color-primary); background: var(--color-primary-tint);">
+                  <i data-lucide="file-code-2" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-primary);"></i>
+                  <span class="truncate font-medium">main.py</span>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-1.5 pl-8 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="file" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <span class="truncate">config.yaml</span>
+                </div>
+                <!-- Folder: artifacts -->
+                <div class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="chevron-down" class="w-3 h-3 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <i data-lucide="folder" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-primary);"></i>
+                  <span class="truncate">artifacts</span>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-1.5 pl-8 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="file" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <span class="truncate">prd.yaml</span>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-1.5 pl-8 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="file" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <span class="truncate">openapi.yaml</span>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-1.5 pl-8 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="file" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <span class="truncate">api_test.py</span>
+                </div>
+                <!-- Folder: tests -->
+                <div class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="chevron-right" class="w-3 h-3 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <i data-lucide="folder" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <span class="truncate">tests</span>
+                </div>
+                <!-- Root files -->
+                <div class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="file" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <span class="truncate">test_main.py</span>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="font-family: var(--font-mono); color: var(--color-text-secondary);">
+                  <i data-lucide="file" class="w-3.5 h-3.5 shrink-0" style="color: var(--color-text-tertiary);"></i>
+                  <span class="truncate">README.md</span>
+                </div>
+              </nav>
+            </aside>
+
+            <!-- Editor area (center) -->
+            <div class="flex-1 flex flex-col overflow-hidden">
+
+              <!-- File tab bar -->
+              <div class="flex items-center shrink-0 overflow-x-auto" style="border-bottom: 1px solid var(--color-border);">
+                <!-- Open file tab -->
+                <div class="flex items-center gap-2 px-4 shrink-0 text-xs cursor-pointer" style="height: 34px; font-family: var(--font-mono); color: var(--color-text); border-bottom: 2px solid var(--color-primary); background: var(--color-bg-elevated);">
+                  <i data-lucide="file-code-2" class="w-3 h-3" style="color: var(--color-primary);"></i>
+                  <span>main.py</span>
+                  <button class="ml-1 opacity-40 hover:opacity-80 transition-opacity duration-150 focus-visible:outline-2 focus-visible:outline-offset-2" aria-label="关闭标签">
+                    <i data-lucide="x" class="w-3 h-3"></i>
+                  </button>
+                </div>
+                <div class="flex items-center gap-2 px-4 shrink-0 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="height: 34px; font-family: var(--font-mono); color: var(--color-text-tertiary);">
+                  <i data-lucide="file" class="w-3 h-3"></i>
+                  <span>config.yaml</span>
+                  <button class="ml-1 opacity-40 hover:opacity-80 transition-opacity duration-150 focus-visible:outline-2 focus-visible:outline-offset-2" aria-label="关闭标签">
+                    <i data-lucide="x" class="w-3 h-3"></i>
+                  </button>
+                </div>
+                <div class="flex items-center gap-2 px-4 shrink-0 text-xs cursor-pointer transition-colors duration-150 hover:opacity-80" style="height: 34px; font-family: var(--font-mono); color: var(--color-text-tertiary);">
+                  <i data-lucide="file" class="w-3 h-3"></i>
+                  <span>prd.yaml</span>
+                  <button class="ml-1 opacity-40 hover:opacity-80 transition-opacity duration-150 focus-visible:outline-2 focus-visible:outline-offset-2" aria-label="关闭标签">
+                    <i data-lucide="x" class="w-3 h-3"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Code editor display -->
+              <div class="flex-1 overflow-auto" style="background: var(--color-bg-elevated);">
+                <div class="flex" style="font-family: var(--font-mono); font-size: var(--font-size-sm); line-height: 1.65;">
+
+                  <!-- Line numbers -->
+                  <div class="shrink-0 select-none text-right pr-4 pl-4" style="color: var(--color-text-tertiary); user-select: none; min-width: 52px; padding-top: 12px;">
+                    <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div><div>11</div><div>12</div><div>13</div><div>14</div><div>15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div><div>21</div><div>22</div><div>23</div><div>24</div><div>25</div><div>26</div><div>27</div><div>28</div><div>29</div><div>30</div><div>31</div><div>32</div><div>33</div><div>34</div><div>35</div><div>36</div><div>37</div><div>38</div><div>39</div><div>40</div>
+                  </div>
+
+                  <!-- Code content -->
+                  <pre class="flex-1 overflow-x-auto" style="padding: 12px 16px 12px 0; margin: 0; background: transparent; border: none; color: var(--color-text);"><code><span style="color: #5a6270;"># Meeting Artifact PRD</span>
+<span style="color: #5a6270;"># Generated by Conclave Agent System</span>
+<span style="color: #5a6270;"># Meeting ID: abc-123-def</span>
+
+<span style="color: var(--color-primary-dark);">meeting</span><span style="color: #b34a3e;">:</span>
+  <span style="color: var(--color-primary-dark);">id</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"abc-123-def"</span>
+  <span style="color: var(--color-primary-dark);">title</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"用户认证模块重构"</span>
+  <span style="color: var(--color-primary-dark);">status</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"completed"</span>
+  <span style="color: var(--color-primary-dark);">created_at</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"2026-06-28T10:30:00Z"</span>
+
+  <span style="color: var(--color-primary-dark);">participants</span><span style="color: #b34a3e;">:</span>
+    <span style="color: var(--color-primary-dark);">- role</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"moderator"</span>
+      <span style="color: var(--color-primary-dark);">name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"产品经理助手"</span>
+    <span style="color: var(--color-primary-dark);">- role</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"architect"</span>
+      <span style="color: var(--color-primary-dark);">name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"系统架构师"</span>
+    <span style="color: var(--color-primary-dark);">- role</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"engineer"</span>
+      <span style="color: var(--color-primary-dark);">name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"前端工程师"</span>
+
+  <span style="color: var(--color-primary-dark);">artifacts</span><span style="color: #b34a3e;">:</span>
+    <span style="color: var(--color-primary-dark);">- name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"prd.yaml"</span>
+      <span style="color: var(--color-primary-dark);">type</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"product_requirements"</span>
+      <span style="color: var(--color-primary-dark);">status</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"approved"</span>
+    <span style="color: var(--color-primary-dark);">- name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"openapi.yaml"</span>
+      <span style="color: var(--color-primary-dark);">type</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"api_specification"</span>
+      <span style="color: var(--color-primary-dark);">status</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"draft"</span>
+    <span style="color: var(--color-primary-dark);">- name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"test_main.py"</span>
+      <span style="color: var(--color-primary-dark);">type</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"test_suite"</span>
+      <span style="color: var(--color-primary-dark);">status</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"pending"</span>
+
+  <span style="color: var(--color-primary-dark);">stages</span><span style="color: #b34a3e;">:</span>
+    <span style="color: var(--color-primary-dark);">- stage</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">1</span>
+      <span style="color: var(--color-primary-dark);">name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"clarify"</span>
+      <span style="color: var(--color-primary-dark);">status</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"complete"</span>
+    <span style="color: var(--color-primary-dark);">- stage</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">2</span>
+      <span style="color: var(--color-primary-dark);">name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"design"</span>
+      <span style="color: var(--color-primary-dark);">status</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"complete"</span>
+    <span style="color: var(--color-primary-dark);">- stage</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">3</span>
+      <span style="color: var(--color-primary-dark);">name</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"review"</span>
+      <span style="color: var(--color-primary-dark);">status</span><span style="color: #b34a3e;">:</span> <span style="color: #2d8a56;">"in_progress"</span></code></pre>
+                </div>
+              </div>
+            </div>
+
+            <!-- Terminal panel (right) -->
+            <aside class="shrink-0 flex flex-col overflow-hidden" style="width: 320px; background: #1e1e2e; border-left: 1px solid #313244;">
+
+              <!-- Terminal header -->
+              <div class="flex items-center justify-between px-4 shrink-0" style="height: 36px; border-bottom: 1px solid #313244;">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="terminal" class="w-3.5 h-3.5" style="color: #a6adc8;"></i>
+                  <span class="text-xs font-medium" style="color: #cdd6f4; font-family: var(--font-mono);">终端</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full" style="background: var(--state-warning);"></span>
+                  <span class="text-xs" style="color: var(--state-warning); font-family: var(--font-mono);">运行中</span>
+                </div>
+              </div>
+
+              <!-- Terminal output -->
+              <div class="flex-1 overflow-y-auto px-4 py-3" style="font-family: var(--font-mono); font-size: var(--font-size-sm); line-height: 1.65;">
+                <div style="color: #89b4fa;">$ python main.py</div>
+                <div style="color: #a6adc8; margin-top: 4px;">Starting meeting runner...</div>
+                <div style="color: #a6adc8; margin-top: 4px;">Meeting ID: abc-123-def</div>
+                <div style="color: #a6adc8; margin-top: 4px;">Loading config from config.yaml</div>
+                <div style="color: #6c7086; margin-top: 8px;">─────────────────────────</div>
+                <div style="color: #89b4fa; margin-top: 4px;">Stage 1/6: clarify</div>
+                <div style="color: #a6e3a1; margin-top: 2px;">✓ Complete — requirements gathered</div>
+                <div style="color: #89b4fa; margin-top: 4px;">Stage 2/6: design</div>
+                <div style="color: #a6e3a1; margin-top: 2px;">✓ Complete — system design finalized</div>
+                <div style="color: #89b4fa; margin-top: 4px;">Stage 3/6: review</div>
+                <div style="color: #f9e2af; margin-top: 2px;">⟳ In progress — awaiting approval</div>
+                <div style="color: #6c7086; margin-top: 8px;">─────────────────────────</div>
+                <div style="color: #a6adc8; margin-top: 4px;">Artifacts generated: 3/4</div>
+                <div style="color: #a6adc8; margin-top: 2px;">  ✓ prd.yaml (approved)</div>
+                <div style="color: #a6adc8; margin-top: 2px;">  ✓ openapi.yaml (draft)</div>
+                <div style="color: #a6adc8; margin-top: 2px;">  ✓ config.yaml (active)</div>
+                <div style="color: #a6adc8; margin-top: 2px;">  ○ test_main.py (pending)</div>
+                <div style="color: #6c7086; margin-top: 8px;">─────────────────────────</div>
+                <div style="color: #f38ba8; margin-top: 4px;">Warning: test suite not yet generated</div>
+                <div style="color: #a6adc8; margin-top: 2px;">Run 'generate-tests' to create test files</div>
+              </div>
+
+              <!-- Terminal input -->
+              <div class="flex items-center px-4 shrink-0" style="height: 36px; border-top: 1px solid #313244);">
+                <span class="text-xs" style="color: #89b4fa; font-family: var(--font-mono);">$</span>
+                <span class="ml-2 text-xs" style="color: #a6adc8; font-family: var(--font-mono); animation: blink 1s step-end infinite;">&#9646;</span>
+              </div>
+
+            </aside>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </main>
+    <style>
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+    </style>
+    <script>lucide.createIcons();</script>
+</body>
+</html>
