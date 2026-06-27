@@ -290,7 +290,7 @@ code {
 }
 .right-column {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   gap: 1px;
   background: var(--border);
   min-height: 0;
@@ -1076,6 +1076,30 @@ code {
   text-transform: uppercase;
 }
 
+/* 力导向图缩放 / 平移控制 */
+.graph-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.graph-zoom-controls .btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+.graph-zoom-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 40px;
+  text-align: center;
+}
+
 /* 图区域：节点超过 20 个时此处出现滚动条（svg 加高超出 max-height） */
 .graph-scroll {
   max-height: 360px;
@@ -1416,3 +1440,229 @@ code {
     width: 200px;
   }
 }
+
+/* ---------- 会议侧边栏 ---------- */
+.app-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-main {
+  flex: 1;
+  overflow: auto;
+}
+
+.meeting-sidebar {
+  width: 240px;
+  min-width: 240px;
+  height: 100vh;
+  background: var(--bg-sidebar, #1a1a2e);
+  border-right: 1px solid var(--border, #2a2a3e);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, #2a2a3e);
+}
+
+.sidebar-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text, #e0e0e0);
+}
+
+.sidebar-new-btn {
+  margin: 8px 12px;
+  width: calc(100% - 24px);
+}
+
+.meeting-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.meeting-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted, #666);
+  font-size: 13px;
+}
+
+.meeting-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border, #2a2a3e);
+  transition: background 0.15s;
+}
+
+.meeting-item:hover {
+  background: var(--bg-hover, #2a2a3e);
+}
+
+.meeting-item.active {
+  background: var(--bg-active, #16213e);
+  border-left: 3px solid var(--accent, #4a9eff);
+}
+
+.meeting-topic {
+  font-size: 13px;
+  color: var(--text, #e0e0e0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.meeting-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.meeting-status {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.meeting-status.done { background: #1a3a1a; color: #6fdc6f; }
+.meeting-status.running { background: #3a3a1a; color: #ffd66f; }
+.meeting-status.paused { background: #3a2a1a; color: #ffaa6f; }
+.meeting-status.aborted { background: #3a1a1a; color: #ff6f6f; }
+
+.meeting-id {
+  color: var(--text-muted, #666);
+  font-family: monospace;
+}
+
+/* 运行中脉动指示器 */
+.running-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #ffd66f;
+  vertical-align: middle;
+  animation: conclave-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes conclave-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* 侧边栏底部：并发统计 */
+.sidebar-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border, #2a2a3e);
+  font-size: 11px;
+  color: var(--text-muted, #666);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ============================ 报告查看器 ============================ */
+.report-viewer { padding: 16px; height: 100%; overflow-y: auto; }
+.report-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.report-toolbar h2 { margin: 0; font-size: 18px; }
+.report-section { border: 1px solid var(--border, #2a2a3e); border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+.report-section-header { display: flex; align-items: center; padding: 10px 14px; cursor: pointer; background: var(--bg-card, #1e1e32); user-select: none; }
+.report-section-header:hover { background: var(--bg-hover, #2a2a3e); }
+.report-toggle { display: inline-block; transition: transform 0.2s; font-size: 10px; color: var(--text-muted, #888); margin-right: 8px; }
+.report-toggle.open { transform: rotate(90deg); }
+.report-section-title { font-size: 14px; font-weight: 500; }
+.report-section-body { padding: 12px 14px; }
+.report-info > div { margin-bottom: 6px; font-size: 13px; }
+.report-summary { font-size: 13px; }
+.summary-row { display: flex; justify-content: space-between; padding: 4px 0; }
+.summary-stage { color: var(--text-muted, #888); }
+.summary-conf.high { color: #6fdc6f; }
+.summary-conf.low { color: #ffd66f; }
+.summary-conf.fallback { color: #ff6f6f; }
+.trace-summary { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border, #2a2a3e); }
+.trace-summary > div { margin-bottom: 4px; font-size: 12px; }
+.report-questions { margin: 0; padding-left: 20px; font-size: 13px; }
+.report-questions li { margin-bottom: 6px; }
+.report-team { display: flex; flex-direction: column; gap: 8px; }
+.team-member { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border, #2a2a3e); }
+.member-role { font-weight: 500; font-size: 13px; }
+.member-stance { color: var(--text-muted, #888); font-size: 12px; }
+.report-messages { display: flex; flex-direction: column; gap: 12px; }
+.report-message { border-left: 2px solid var(--accent, #4a9eff); padding-left: 12px; }
+.message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 8px; }
+.message-role { font-weight: 500; font-size: 13px; color: var(--accent, #4a9eff); }
+.message-time { font-size: 11px; color: var(--text-muted, #888); }
+.message-content { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.logic-graph { display: flex; flex-direction: column; gap: 16px; }
+.logic-chain { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.logic-node { border: 1px solid var(--border, #2a2a3e); border-radius: 6px; padding: 10px; width: 100%; }
+.logic-node.conflict { border-color: #ff6f6f33; background: #ff6f6f0a; }
+.logic-node.decision { border-color: #6fdc6f33; background: #6fdc6f0a; }
+.logic-node.decision.compromise { border-color: #ffd66f33; background: #ffd66f0a; }
+.logic-label { font-size: 11px; color: var(--text-muted, #888); margin-bottom: 4px; }
+.logic-text { font-size: 13px; }
+.logic-sides { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; }
+.logic-sides span { flex: 1; }
+.logic-arrow { font-size: 18px; color: var(--text-muted, #666); }
+
+/* SVG 逻辑关系图（LogicGraph 组件）：三列因果链 + 缩放 / 拖拽 */
+.logic-graph-container { display: flex; flex-direction: column; }
+.logic-graph-controls { display: flex; align-items: center; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border, #2a2a3e); }
+.logic-graph-controls .btn { min-width: 28px; height: 28px; padding: 0 8px; display: flex; align-items: center; justify-content: center; }
+.logic-graph-zoom { font-size: 12px; color: var(--text-muted, #888); min-width: 40px; text-align: center; }
+.logic-graph-viewport { height: 440px; overflow: hidden; position: relative; background: #0d0d1a; }
+.logic-graph-empty { padding: 40px; text-align: center; color: var(--text-muted, #666); }
+
+.report-artifact { font-size: 13px; }
+.artifact-block { margin-bottom: 16px; padding: 12px; border: 1px solid var(--border, #2a2a3e); border-radius: 6px; }
+.artifact-block h4 { margin: 0 0 8px; font-size: 14px; }
+.artifact-block h5 { margin: 12px 0 6px; font-size: 13px; }
+.code-block { background: #0d0d1a; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 12px; font-family: monospace; max-height: 400px; overflow-y: auto; }
+.code-block.error { border: 1px solid #ff6f6f33; }
+.execution-result { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border, #2a2a3e); }
+.execution-result h5 { margin: 0 0 6px; font-size: 13px; }
+
+/* ============================ Token 面板 ============================ */
+.token-panel { padding: 16px; height: 100%; overflow-y: auto; }
+.token-panel-empty { padding: 40px; text-align: center; color: var(--text-muted, #666); }
+.token-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.token-panel-header h3 { margin: 0; font-size: 16px; }
+.token-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px; }
+.token-card { background: var(--bg-card, #1e1e32); border: 1px solid var(--border, #2a2a3e); border-radius: 6px; padding: 12px; text-align: center; }
+.token-card-label { font-size: 11px; color: var(--text-muted, #888); margin-bottom: 4px; }
+.token-card-value { font-size: 20px; font-weight: 600; }
+.token-card-value.in { color: #4a9eff; }
+.token-card-value.out { color: #6fdc6f; }
+.token-chart { margin-bottom: 20px; }
+.token-chart h4 { font-size: 13px; margin-bottom: 8px; }
+.token-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.token-bar-label { width: 80px; font-size: 12px; text-align: right; }
+.token-bar-track { flex: 1; height: 16px; background: var(--bg-card, #1e1e32); border-radius: 3px; overflow: hidden; }
+.token-bar-fill { height: 100%; background: linear-gradient(90deg, #4a9eff, #6fdc6f); border-radius: 3px; }
+.token-bar-value { width: 60px; font-size: 12px; }
+.token-calls h4 { font-size: 13px; margin-bottom: 8px; }
+.token-call-list { display: flex; flex-direction: column; gap: 4px; }
+.token-call-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-card, #1e1e32); border-radius: 4px; font-size: 12px; }
+.call-stage { flex: 1; }
+.call-tokens { color: #4a9eff; }
+.call-latency { color: var(--text-muted, #888); }
+.call-status.valid { color: #6fdc6f; }
+.call-status.invalid { color: #ff6f6f; }
+.call-status.fallback_stub { color: #ffd66f; }
+
+/* ============================ 右侧面板 Tab ============================ */
+.right-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border, #2a2a3e); margin-bottom: 8px; padding: 0 8px; background: var(--bg-elev, #161628); }
+.right-tab { padding: 6px 12px; font-size: 12px; background: none; border: none; color: var(--text-muted, #888); cursor: pointer; border-bottom: 2px solid transparent; }
+.right-tab:hover { color: var(--text, #e0e0e0); }
+.right-tab.active { color: var(--accent, #4a9eff); border-bottom-color: var(--accent, #4a9eff); }

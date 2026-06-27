@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from datetime import datetime
 from typing import Any
@@ -26,12 +27,18 @@ router = APIRouter(prefix="/meetings", tags=["meetings"])
 # 维护引用防止被 GC 回收，并用于 409 冲突检测
 _running_tasks: dict[str, asyncio.Task] = {}
 
+# 最大并行会议数（防止资源耗尽），可通过环境变量 CONCLAVE_MAX_CONCURRENT 配置
+MAX_CONCURRENT_MEETINGS = int(os.environ.get("CONCLAVE_MAX_CONCURRENT", "5"))
+# 信号量控制并发：限制同时运行的会议数量，超出上限的会议排队等待
+_meeting_semaphore = asyncio.Semaphore(MAX_CONCURRENT_MEETINGS)
+
 
 # ---------- 请求/响应模型 ----------
 
 class CreateMeetingRequest(BaseModel):
     """创建会议请求"""
     topic: str = Field(..., description="会议议题")
+    deliverable_type: str = Field("prd_openapi", description="产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|code_analysis|tested_system")
 
 
 class CreateMeetingResponse(BaseModel):
@@ -79,6 +86,7 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     )
     # 初始化运行态
     state = load_or_create(meeting_id, req.topic)
+    state.deliverable_type = req.deliverable_type
     # 持久化
     save_meeting(
         meeting_id=meeting_id,
@@ -105,20 +113,12 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
     """取会议详情（含状态、产物、发言）"""
     state = get_state(meeting_id)
     if state is None:
-        record = get_meeting(meeting_id)
-        if record is None:
+        # 尝试从 SQLite 恢复到内存
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            # 恢复失败，返回 404
             raise HTTPException(status_code=404, detail="会议不存在")
-        payload = record["payload"]
-        return {
-            "meeting_id": meeting_id,
-            "topic": record["topic"],
-            "stage": record["stage"],
-            "status": record["status"],
-            "artifact": payload.get("artifact"),
-            "messages": list_messages(meeting_id),
-            "claims": payload.get("claims", []),
-            "confidence_flags": payload.get("confidence_flags", {}),
-        }
+    # 统一走内存分支返回完整数据
     return {
         "meeting_id": meeting_id,
         "topic": state.topic,
@@ -127,21 +127,44 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
         "clarified_topic": state.clarified_topic,
         "key_questions": state.key_questions,
         "team_config": state.team_config,
+        "claims": state.claims,
         "conflicts": state.conflicts,
         "evidence_set": state.evidence_set,
         "decision_record": state.decision_record,
         "artifact": state.artifact,
         "messages": state.messages,
-        "claims": state.claims,
         "llm_trace": state.llm_trace.summary(),
         "confidence_flags": state.confidence_flags,
     }
 
 
-@router.get("", response_model=list[dict[str, Any]])
-async def list_all_meetings() -> list[dict[str, Any]]:
-    """列出全部会议"""
-    return list_meetings()
+@router.get("")
+async def list_meetings_with_status() -> dict[str, Any]:
+    """列出所有会议及其运行状态
+
+    返回 {meetings[], concurrent_limit, running_count}：
+    - meetings：每个会议含 meeting_id/topic/stage/status/created_at/is_running
+    - concurrent_limit：最大并发会议数
+    - running_count：当前正在运行的会议数
+    """
+    meetings = list_meetings()
+    result = []
+    for m in meetings:
+        mid = m["id"]
+        is_running = mid in _running_tasks and not _running_tasks[mid].done()
+        result.append({
+            "meeting_id": mid,
+            "topic": m["topic"],
+            "stage": m["stage"],
+            "status": m["status"],
+            "created_at": m.get("created_at"),
+            "is_running": is_running,
+        })
+    return {
+        "meetings": result,
+        "concurrent_limit": MAX_CONCURRENT_MEETINGS,
+        "running_count": sum(1 for t in _running_tasks.values() if not t.done()),
+    }
 
 
 @router.post("/{meeting_id}/run")
@@ -202,33 +225,35 @@ async def run_meeting(meeting_id: str) -> dict[str, Any]:
 
 
 async def _run_meeting_bg(meeting_id: str) -> None:
-    """后台执行会议完整流程
+    """后台执行会议完整流程（受并发信号量保护）
 
+    - 通过 _meeting_semaphore 限制同时运行的会议数量，防止资源耗尽
     - runner.run 内部会在开始时设置 status=running，结束时由 produce_node 设置 done
     - 异常时回滚状态避免卡死，并清理任务引用
     """
-    try:
-        state = get_state(meeting_id)
-        if state is None:
-            return
-        runner = Runner()
-        state = await runner.run(state)
-        set_state(state)
-    except Exception as e:  # noqa: BLE001 后台任务异常不应崩溃事件循环
-        state = get_state(meeting_id)
-        if state is not None:
-            state.status = MeetingStatus.ABORTED
+    async with _meeting_semaphore:
+        try:
+            state = get_state(meeting_id)
+            if state is None:
+                return
+            runner = Runner()
+            state = await runner.run(state)
             set_state(state)
-        # 记录异常到事件总线便于排查
-        await bus.publish(
-            make_event(
-                "meeting.error",
-                meeting_id,
-                {"meeting_id": meeting_id, "error": str(e)},
+        except Exception as e:  # noqa: BLE001 后台任务异常不应崩溃事件循环
+            state = get_state(meeting_id)
+            if state is not None:
+                state.status = MeetingStatus.ABORTED
+                set_state(state)
+            # 记录异常到事件总线便于排查
+            await bus.publish(
+                make_event(
+                    "meeting.error",
+                    meeting_id,
+                    {"meeting_id": meeting_id, "error": str(e)},
+                )
             )
-        )
-    finally:
-        _running_tasks.pop(meeting_id, None)
+        finally:
+            _running_tasks.pop(meeting_id, None)
 
 
 @router.post("/{meeting_id}/control")
@@ -279,7 +304,11 @@ async def get_trace(meeting_id: str) -> dict[str, Any]:
     """
     state = get_state(meeting_id)
     if state is None:
-        raise HTTPException(status_code=404, detail="会议不存在")
+        # 尝试从 SQLite 恢复到内存
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            # 恢复失败，返回 404
+            raise HTTPException(status_code=404, detail="会议不存在")
 
     trace = state.llm_trace
     calls = [c.model_dump(mode="json") for c in trace.calls]
@@ -300,7 +329,11 @@ async def get_stats(meeting_id: str) -> dict[str, Any]:
     """
     state = get_state(meeting_id)
     if state is None:
-        raise HTTPException(status_code=404, detail="会议不存在")
+        # 尝试从 SQLite 恢复到内存
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            # 恢复失败，返回 404
+            raise HTTPException(status_code=404, detail="会议不存在")
 
     # LLM 调用统计
     trace_summary = state.llm_trace.summary()
@@ -345,7 +378,11 @@ async def get_charter_detail(meeting_id: str) -> dict[str, Any]:
     """
     state = get_state(meeting_id)
     if state is None:
-        raise HTTPException(status_code=404, detail="会议不存在")
+        # 尝试从 SQLite 恢复到内存
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            # 恢复失败，返回 404
+            raise HTTPException(status_code=404, detail="会议不存在")
 
     if state.charter is None:
         return {
@@ -373,7 +410,11 @@ async def get_events(meeting_id: str, from_seq: int = 0) -> dict[str, Any]:
     """
     state = get_state(meeting_id)
     if state is None:
-        raise HTTPException(status_code=404, detail="会议不存在")
+        # 尝试从 SQLite 恢复到内存
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            # 恢复失败，返回 404
+            raise HTTPException(status_code=404, detail="会议不存在")
 
     events = bus.replay(meeting_id, from_seq)
     return {

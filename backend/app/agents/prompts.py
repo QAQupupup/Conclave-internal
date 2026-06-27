@@ -80,6 +80,143 @@ PRODUCE = """[阶段: Produce]
   "openapi": "<OpenAPI 3.0 YAML 片段>"
 }}"""
 
+# ---------- 产出阶段：设计文档 ----------
+PRODUCE_DESIGN_DOC = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：产出架构设计文档。严格遵守给定 schema。
+
+输出 JSON:
+{{
+  "design_doc": {{
+    "title": "...",
+    "overview": "系统概述",
+    "architecture": "架构设计（组件关系、分层、数据流）",
+    "tech_stack": ["技术选型1", "技术选型2"],
+    "data_model": "数据模型设计",
+    "api_design": "接口设计概述",
+    "deployment": "部署方案",
+    "risks": ["风险1", "风险2"],
+    "open_questions": ["遗留问题1"]
+  }}
+}}"""
+
+# ---------- 产出阶段：综合文档 ----------
+PRODUCE_COMPREHENSIVE = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：产出综合设计文档，包含需求、系统设计、接口设计、数据模型四个部分。
+
+输出 JSON:
+{{
+  "comprehensive": {{
+    "title": "...",
+    "requirements": {{
+      "goal": "项目目标",
+      "functional": ["功能需求1", "功能需求2"],
+      "non_functional": ["非功能需求1"],
+      "constraints": ["约束1"]
+    }},
+    "system_design": {{
+      "architecture": "架构概述",
+      "components": ["组件1: 职责描述", "组件2: 职责描述"],
+      "data_flow": "数据流描述"
+    }},
+    "api_design": {{
+      "endpoints": ["GET /api/resource - 描述", "POST /api/resource - 描述"],
+      "auth": "认证方案",
+      "error_handling": "错误处理策略"
+    }},
+    "data_model": {{
+      "entities": ["实体1: 字段描述", "实体2: 字段描述"],
+      "relationships": "实体关系",
+      "storage": "存储方案"
+    }}
+  }}
+}}"""
+
+# ---------- 产出阶段：调研报告 ----------
+PRODUCE_RESEARCH_REPORT = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：产出调研报告，总结讨论中的发现和建议。
+
+输出 JSON:
+{{
+  "research_report": {{
+    "title": "...",
+    "summary": "摘要",
+    "findings": [
+      {{"topic": "发现1", "detail": "详细描述", "source": "来源"}}
+    ],
+    "analysis": "分析结论",
+    "recommendations": ["建议1", "建议2"],
+    "references": ["引用1", "引用2"]
+  }}
+}}"""
+
+# ---------- 产出阶段：商业报告 ----------
+PRODUCE_BUSINESS_REPORT = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：产出商业报告，面向决策层。
+
+输出 JSON:
+{{
+  "business_report": {{
+    "title": "...",
+    "executive_summary": "执行摘要",
+    "market_analysis": "市场分析",
+    "financial_projection": "财务预测",
+    "risk_assessment": "风险评估",
+    "strategic_recommendation": "战略建议",
+    "next_steps": ["下一步1", "下一步2"]
+  }}
+}}"""
+
+# ---------- 产出阶段：代码分析 ----------
+PRODUCE_CODE_ANALYSIS = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：基于讨论结论，生成 Python 数据分析代码。代码将在沙箱中执行，结果会回填到报告中。
+
+输出 JSON:
+{{
+  "code_analysis": {{
+    "title": "...",
+    "description": "分析目的说明",
+    "code": "完整的 Python 代码（可直接执行）",
+    "expected_output": "预期输出说明"
+  }}
+}}"""
+
+# ---------- 产出阶段：测试系统 ----------
+PRODUCE_TESTED_SYSTEM = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：基于讨论结论，生成完整的 Python 代码和对应的 pytest 测试。代码将在沙箱中执行测试。
+
+输出 JSON:
+{{
+  "tested_system": {{
+    "title": "...",
+    "description": "系统说明",
+    "main_code": "主代码（可被 import 的模块）",
+    "test_code": "pytest 测试代码",
+    "run_command": "python -m pytest test_code.py -v"
+  }}
+}}"""
+
+# 产出模板映射
+PRODUCE_TEMPLATES = {
+    "prd_openapi": PRODUCE,
+    "design_doc": PRODUCE_DESIGN_DOC,
+    "comprehensive": PRODUCE_COMPREHENSIVE,
+    "research_report": PRODUCE_RESEARCH_REPORT,
+    "business_report": PRODUCE_BUSINESS_REPORT,
+    "code_analysis": PRODUCE_CODE_ANALYSIS,
+    "tested_system": PRODUCE_TESTED_SYSTEM,
+}
+
+
+def get_produce_template(deliverable_type: str) -> str:
+    """根据产出类型获取对应的 produce prompt 模板"""
+    return PRODUCE_TEMPLATES.get(deliverable_type, PRODUCE)
+
 
 def render(template: str, **kwargs) -> str:
     """安全填充 Prompt 模板，缺省字段填空串避免 KeyError"""

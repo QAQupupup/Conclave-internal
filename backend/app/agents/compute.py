@@ -274,8 +274,10 @@ def build_arbitrate_prompt(evidence_set: list[dict], anchor: str = "") -> ThinkR
     )
 
 
-def build_produce_prompt(decision_record: dict, anchor: str = "") -> ThinkRequest:
-    prompt = render(PRODUCE, decision_record=str(decision_record))
+def build_produce_prompt(decision_record: dict, anchor: str = "", template: str | None = None) -> ThinkRequest:
+    if template is None:
+        template = PRODUCE
+    prompt = render(template, decision_record=str(decision_record))
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"

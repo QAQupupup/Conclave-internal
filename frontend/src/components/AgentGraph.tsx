@@ -1,7 +1,8 @@
 // 力导向图可视化组件：展示 agent / 冲突 / 证据 拓扑关系
 // 使用 d3-force 物理模拟 + SVG 渲染（仅依赖 d3-force 子包，不引入完整 d3）
 // 对齐 docs/iteration-2-design.md §5
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } from 'd3-force'
 import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force'
 import { useMeeting } from '../store/MeetingContext.tsx'
@@ -188,6 +189,12 @@ export function AgentGraph() {
   const [expanded, setExpanded] = useState(false)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  // SVG 缩放 / 平移状态：在 <g> 上叠加 transform，不破坏 d3-force 模拟
+  const groupRef = useRef<SVGGElement>(null)
+  const [scale, setScale] = useState(1)
+  const [translate, setTranslate] = useState({ x: 0, y: 0 })
+  const [dragging, setDragging] = useState(false)
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
 
   const meeting = store.meeting
   const graphData = useMemo<ForceGraphData>(
@@ -208,11 +215,43 @@ export function AgentGraph() {
   const nodeCount = graphData.nodes.length
   const linkCount = graphData.links.length
 
+  // 滚轮缩放：原生非被动监听器，确保 preventDefault 生效，避免外层容器滚动
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const delta = e.deltaY > 0 ? -0.1 : 0.1
+      setScale((s) => Math.min(3, Math.max(0.3, s + delta)))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [expanded])
+
+  // 拖拽平移：在 SVG 画布层平移，不影响节点本身的悬停 tooltip
+  const handleMouseDown = useCallback(
+    (e: ReactMouseEvent) => {
+      e.preventDefault()
+      setDragging(true)
+      setDragStart({ x: e.clientX - translate.x, y: e.clientY - translate.y })
+    },
+    [translate],
+  )
+  const handleMouseMove = useCallback(
+    (e: ReactMouseEvent) => {
+      if (!dragging) return
+      setTranslate({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y })
+    },
+    [dragging, dragStart],
+  )
+  const handleMouseUp = useCallback(() => setDragging(false), [])
+
   useEffect(() => {
     if (!expanded) return
     const svg = svgRef.current
+    const group = groupRef.current
     const data = graphDataRef.current
-    if (!svg || data.nodes.length === 0) return
+    if (!svg || !group || data.nodes.length === 0) return
 
     const svgNS = 'http://www.w3.org/2000/svg'
     const create = (tag: string): SVGElement => document.createElementNS(svgNS, tag)
@@ -221,8 +260,8 @@ export function AgentGraph() {
     const width = rect.width || 800
     const height = svg.clientHeight || 300
 
-    // 清空旧内容
-    while (svg.firstChild) svg.removeChild(svg.firstChild)
+    // 清空旧内容（仅清空 <g> 的子节点，<g> 本身由 React 管理 transform，保留缩放/平移状态）
+    while (group.firstChild) group.removeChild(group.firstChild)
 
     // 拷贝一份供模拟使用（force 会向其写入坐标）
     const simNodes: SimNode[] = data.nodes.map((n) => ({ ...n }))
@@ -231,7 +270,7 @@ export function AgentGraph() {
     // 连线层
     const linkLayer = create('g') as SVGGElement
     linkLayer.setAttribute('class', 'ag-links')
-    svg.appendChild(linkLayer)
+    group.appendChild(linkLayer)
     const linkEls: SVGLineElement[] = simLinks.map((l) => {
       const line = create('line') as SVGLineElement
       const style = LINK_STYLE[l.type]
@@ -246,7 +285,7 @@ export function AgentGraph() {
     // 节点层
     const nodeLayer = create('g') as SVGGElement
     nodeLayer.setAttribute('class', 'ag-nodes')
-    svg.appendChild(nodeLayer)
+    group.appendChild(nodeLayer)
 
     interface NodeEl {
       g: SVGGElement
@@ -372,12 +411,43 @@ export function AgentGraph() {
     <div className="graph-container">
       <div className="graph-header">
         <span className="graph-title">Agent / 冲突 / 证据 拓扑图</span>
+        <div className="graph-zoom-controls">
+          <button type="button" className="btn btn-sm" onClick={() => setScale((s) => Math.min(3, s + 0.2))}>
+            +
+          </button>
+          <span className="graph-zoom-label">{Math.round(scale * 100)}%</span>
+          <button type="button" className="btn btn-sm" onClick={() => setScale((s) => Math.max(0.3, s - 0.2))}>
+            −
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setScale(1)
+              setTranslate({ x: 0, y: 0 })
+            }}
+          >
+            重置
+          </button>
+        </div>
         <button type="button" className="btn btn-ghost" onClick={() => setExpanded(false)}>
           收起
         </button>
       </div>
       <div className="graph-scroll">
-        <svg ref={svgRef} width="100%" height={svgHeight} className="agent-graph-svg" />
+        <svg
+          ref={svgRef}
+          width="100%"
+          height={svgHeight}
+          className="agent-graph-svg"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          style={{ cursor: dragging ? 'grabbing' : 'grab' }}
+        >
+          <g ref={groupRef} transform={`translate(${translate.x}, ${translate.y}) scale(${scale})`} />
+        </svg>
       </div>
       {tooltip && (
         <div className="ag-tooltip" style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}>

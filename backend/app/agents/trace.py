@@ -25,6 +25,9 @@ class LLMCallRecord(BaseModel):
     consistency_status: str = "consistent"  # "consistent" | "inconsistent_retry" | "low_confidence"
     attempt: int = 1              # 第几次尝试（校验重试）
     latency_ms: int = 0
+    input_tokens: int = 0          # prompt tokens
+    output_tokens: int = 0         # completion tokens
+    total_tokens: int = 0          # 总 tokens
     error_detail: str = ""        # 错误详情（HTTP 错误响应体、异常信息等，便于排查）
     request_id: str = ""          # 关联的 HTTP 请求 ID（全链路追踪）
     meeting_id: str = ""          # 关联的会议 ID（全链路追踪）
@@ -41,17 +44,24 @@ class CallTrace(BaseModel):
         self.calls.append(record)
 
     def summary(self) -> dict[str, Any]:
-        """返回追踪摘要：总调用数、成功率、降级数、不一致数、延迟分布"""
+        """返回追踪摘要：总调用数、成功率、降级数、不一致数、延迟分布、token 统计"""
         total = len(self.calls)
         valid = sum(1 for c in self.calls if c.validation_status == "valid")
         fallback = sum(1 for c in self.calls if c.validation_status == "fallback_stub")
         invalid = sum(1 for c in self.calls if c.validation_status == "invalid")
         inconsistent = sum(1 for c in self.calls if c.consistency_status != "consistent")
         latencies = [c.latency_ms for c in self.calls if c.latency_ms > 0]
+        # token 统计
+        total_input_tokens = sum(c.input_tokens for c in self.calls)
+        total_output_tokens = sum(c.output_tokens for c in self.calls)
+        total_tokens = sum(c.total_tokens for c in self.calls)
         # 按阶段分组统计
         stage_stats: dict[str, dict[str, Any]] = {}
         for c in self.calls:
-            s = stage_stats.setdefault(c.stage, {"calls": 0, "valid": 0, "fallback": 0, "latencies": []})
+            s = stage_stats.setdefault(
+                c.stage,
+                {"calls": 0, "valid": 0, "fallback": 0, "latencies": [], "input_tokens": 0, "output_tokens": 0},
+            )
             s["calls"] += 1
             if c.validation_status == "valid":
                 s["valid"] += 1
@@ -59,6 +69,8 @@ class CallTrace(BaseModel):
                 s["fallback"] += 1
             if c.latency_ms > 0:
                 s["latencies"].append(c.latency_ms)
+            s["input_tokens"] += c.input_tokens
+            s["output_tokens"] += c.output_tokens
         # 计算各阶段平均延迟
         for s in stage_stats.values():
             lats = s.pop("latencies")
@@ -74,6 +86,10 @@ class CallTrace(BaseModel):
             "success_rate": f"{valid / total * 100:.1f}%" if total > 0 else "N/A",
             "avg_latency_ms": sum(latencies) / len(latencies) if latencies else 0,
             "max_latency_ms": max(latencies) if latencies else 0,
+            "total_input_tokens": total_input_tokens,
+            "total_output_tokens": total_output_tokens,
+            "total_tokens": total_tokens,
+            "avg_tokens_per_call": total_tokens // total if total > 0 else 0,
             "stage_stats": stage_stats,
             "errors": errors[:10],  # 最多返回前 10 条错误
         }
@@ -107,6 +123,9 @@ def record_call(
     validation_status: str = "valid",
     attempt: int = 1,
     latency_ms: int = 0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    total_tokens: int = 0,
 ) -> None:
     """记录一次 LLM 调用到当前 trace（仅 RealLLM._call_api 调用）
 
@@ -131,6 +150,9 @@ def record_call(
         validation_status=validation_status,
         attempt=attempt,
         latency_ms=latency_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
         request_id=get_request_id(),
         meeting_id=trace.meeting_id,
         runner_session_id=get_runner_session_id(),

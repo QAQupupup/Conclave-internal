@@ -267,13 +267,25 @@ def test_run_without_creation(client):
 
 
 def test_list_meetings(client):
-    """列出会议"""
+    """列出会议（含运行状态与并发统计）"""
     client.post("/meetings", json={"topic": "会议A"})
     client.post("/meetings", json={"topic": "会议B"})
     resp = client.get("/meetings")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) >= 2
+    # 新格式：{ meetings[], concurrent_limit, running_count }
+    assert "meetings" in data
+    assert "concurrent_limit" in data
+    assert "running_count" in data
+    assert isinstance(data["meetings"], list)
+    assert len(data["meetings"]) >= 2
+    assert data["concurrent_limit"] >= 1
+    assert data["running_count"] == 0
+    # 每个会议含 is_running 字段，未启动后台任务时为 False
+    for m in data["meetings"]:
+        assert "meeting_id" in m
+        assert "is_running" in m
+        assert m["is_running"] is False
 
 
 # ---------- WebSocket 测试 ----------

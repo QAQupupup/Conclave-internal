@@ -187,6 +187,8 @@ class MeetingState(BaseModel):
     evidence_set: list[dict[str, Any]] = Field(default_factory=list)
     decision_record: Optional[dict[str, Any]] = None
     artifact: Optional[dict[str, Any]] = None
+    # 产出类型（创建会议时指定，produce 阶段据此切换模板）
+    deliverable_type: str = "prd_openapi"
     paused_snapshot: Optional[dict[str, Any]] = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
     # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）

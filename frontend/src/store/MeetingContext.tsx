@@ -1,6 +1,6 @@
 // 会议状态 Context：组装 reducer + WebSocket + REST API
 // 对外暴露统一的会议上下文，组件通过 useMeeting() 消费
-import { createContext, useContext, useMemo, useReducer, useState, useCallback } from 'react'
+import { createContext, useContext, useMemo, useReducer, useState, useCallback, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket.ts'
 import {
@@ -55,18 +55,26 @@ const MeetingContext = createContext<MeetingContextValue | null>(null)
 /** Context Provider 组件 */
 export function MeetingProvider({ children }: { children: ReactNode }) {
   const [store, dispatch] = useReducer(meetingReducer, initialStore)
-  const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [meetingId, setMeetingId] = useState<string | null>(() => {
+    return localStorage.getItem('conclave_meeting_id')
+  })
 
   // WS 连接管理（meetingId 变化时重连）
   const { connected, connectionError, sendControl, sendBorrow } = useWebSocket(meetingId, dispatch)
 
   const selectMeeting = useCallback((id: string | null) => {
     setMeetingId(id)
-    if (id === null) dispatch({ type: 'reset' })
+    if (id === null) {
+      localStorage.removeItem('conclave_meeting_id')
+      dispatch({ type: 'reset' })
+    } else {
+      localStorage.setItem('conclave_meeting_id', id)
+    }
   }, [])
 
   const reset = useCallback(() => {
     setMeetingId(null)
+    localStorage.removeItem('conclave_meeting_id')
     dispatch({ type: 'reset' })
   }, [])
 
@@ -110,6 +118,14 @@ export function MeetingProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshMeeting = refreshMeetingImpl
+
+  // 首次挂载：若 localStorage 中恢复出 meetingId，自动拉取会议状态
+  useEffect(() => {
+    if (meetingId) {
+      refreshMeetingImpl(meetingId)
+    }
+    // 仅首次挂载时执行一次
+  }, [])
 
   const value = useMemo<MeetingContextValue>(
     () => ({

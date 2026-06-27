@@ -145,6 +145,94 @@ class StubLLM:
                 ],
             }
         if "Produce" in prompt or schema_hint == "produce":
+            # 根据产出模板中的任务描述关键字区分交付物类型
+            if "产出架构设计文档" in prompt:
+                return {
+                    "design_doc": {
+                        "title": "系统架构设计文档",
+                        "overview": "本系统基于多智能体协作实现会议决策结构化产出。",
+                        "architecture": "分层架构：API 层（FastAPI）、编排层（状态机）、Agent 层（LLM 调用）、存储层（SQLite + 向量库）。",
+                        "tech_stack": ["Python 3.12", "FastAPI", "Pydantic", "SQLite"],
+                        "data_model": "核心实体：Meeting、Message、Claim、Conflict、Artifact。",
+                        "api_design": "RESTful API，JSON 格式，支持 WebSocket 实时推送。",
+                        "deployment": "Docker 容器部署，支持水平扩展。",
+                        "risks": ["LLM 调用延迟", "并发会议资源隔离"],
+                        "open_questions": ["是否需要分布式部署？"],
+                    }
+                }
+            if "产出综合设计文档" in prompt:
+                return {
+                    "comprehensive": {
+                        "title": "综合设计文档",
+                        "requirements": {
+                            "goal": "构建多智能体会议决策系统",
+                            "functional": ["会议创建与管理", "多阶段讨论流程", "结构化产出"],
+                            "non_functional": ["响应时间 < 5s", "支持并发会议"],
+                            "constraints": ["单会议串行执行"],
+                        },
+                        "system_design": {
+                            "architecture": "分层架构，状态机驱动",
+                            "components": ["编排器: 控制阶段流转", "Agent 层: 调用 LLM 生成内容"],
+                            "data_flow": "用户请求 → 编排器 → Agent → LLM → 产出物",
+                        },
+                        "api_design": {
+                            "endpoints": ["POST /meetings - 创建会议", "POST /meetings/{id}/run - 运行会议"],
+                            "auth": "API Key 认证",
+                            "error_handling": "统一 JSON 错误响应",
+                        },
+                        "data_model": {
+                            "entities": ["Meeting: 会议聚合根", "Artifact: 产出物"],
+                            "relationships": "Meeting 1:1 Artifact",
+                            "storage": "SQLite 持久化",
+                        },
+                    }
+                }
+            if "产出调研报告" in prompt:
+                return {
+                    "research_report": {
+                        "title": "技术调研报告",
+                        "summary": "围绕会议决策系统的技术选型与可行性进行了调研。",
+                        "findings": [
+                            {"topic": "LLM 集成方案", "detail": "采用 OpenAI 兼容接口，支持多模型切换。", "source": "技术调研"},
+                            {"topic": "沙箱隔离", "detail": "Docker 容器隔离用户代码执行。", "source": "安全评估"},
+                        ],
+                        "analysis": "当前技术方案可行，需关注 LLM 调用成本和延迟。",
+                        "recommendations": ["优先使用 stub 模式进行开发测试", "生产环境接入真实 LLM"],
+                        "references": ["OpenAI API 文档", "Docker 安全最佳实践"],
+                    }
+                }
+            if "产出商业报告" in prompt:
+                return {
+                    "business_report": {
+                        "title": "商业分析报告",
+                        "executive_summary": "会议决策系统可显著降低团队决策成本。",
+                        "market_analysis": "目标市场为中小型技术团队，存在明确的效率痛点。",
+                        "financial_projection": "预计首年覆盖 1000+ 团队，营收增长稳定。",
+                        "risk_assessment": "主要风险为 LLM 成本波动和竞品压力。",
+                        "strategic_recommendation": "建议以 SaaS 模式切入，先免费后付费。",
+                        "next_steps": ["完成 MVP 开发", "小范围内测", "收集用户反馈"],
+                    }
+                }
+            if "生成 Python 数据分析代码" in prompt:
+                return {
+                    "code_analysis": {
+                        "title": "数据分析示例",
+                        "description": "基础数据统计与输出",
+                        "code": "data = [10, 20, 30, 40, 50]\nprint('count:', len(data))\nprint('sum:', sum(data))\nprint('mean:', sum(data) / len(data))",
+                        "expected_output": "输出数据计数、总和与均值",
+                    }
+                }
+            if "生成完整的 Python 代码和对应的 pytest 测试" in prompt:
+                return {
+                    "tested_system": {
+                        "title": "计算器模块测试",
+                        "description": "基础加法运算模块及测试",
+                        "main_code": "def add(a, b):\n    return a + b\n\ndef multiply(a, b):\n    return a * b\n",
+                        "test_code": "from main_generated import add, multiply\n\ndef test_add():\n    assert add(1, 2) == 3\n\ndef test_add_negative():\n    assert add(-1, -1) == -2\n\ndef test_multiply():\n    assert multiply(3, 4) == 12\n",
+                        "run_command": "python -m pytest test_generated.py -v",
+                    }
+                }
+            # 默认：PRD + OpenAPI
             return {
                 "prd": {
                     "title": "Conclave 会议决策系统",
@@ -419,11 +507,19 @@ class RealLLM:
                     validation_status="invalid",
                     attempt=attempt,
                     latency_ms=latency_ms,
+                    input_tokens=0,
+                    output_tokens=0,
+                    total_tokens=0,
                 )
                 raise
 
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
+        # 解析 token 用量
+        usage = data.get("usage", {})
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
         # 第1层：记录完整调用信息到 trace（temperature 用实际阶段温度）
         record_call(
             stage=stage,
@@ -436,6 +532,9 @@ class RealLLM:
             validation_status="valid",  # 默认，complete() 会根据解析结果更新
             attempt=attempt,
             latency_ms=latency_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
         )
         return content
 

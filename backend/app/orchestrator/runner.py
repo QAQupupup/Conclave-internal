@@ -182,8 +182,20 @@ def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = Non
 
 
 def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
-    """从内存取或新建运行态"""
+    """从内存取或新建运行态；内存未命中时从 SQLite 恢复"""
     existing = get_state(meeting_id)
     if existing is not None:
         return existing
+    # 尝试从 SQLite 恢复
+    from app.db import get_meeting
+    record = get_meeting(meeting_id)
+    if record is not None:
+        payload = record["payload"]
+        try:
+            state = MeetingState(**payload)
+            set_state(state)
+            logger.info("会议 %s 从 SQLite 恢复运行态", meeting_id)
+            return state
+        except Exception as e:
+            logger.warning("会议 %s 从 SQLite 恢复失败: %s，创建新状态", meeting_id, e)
     return new_state(meeting_id, topic, doc_summaries)

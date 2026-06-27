@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
@@ -665,33 +666,99 @@ async def arbitrate_node(state: MeetingState) -> MeetingState:
 
 
 async def produce_node(state: MeetingState) -> MeetingState:
-    """Produce 阶段：生成结构化 PRD 与 OpenAPI 片段"""
+    """Produce 阶段：根据 deliverable_type 切换模板，生成对应交付物"""
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
     compute = get_compute()
+    # 根据产出类型选择模板
+    from app.agents.prompts import get_produce_template
+    template = get_produce_template(state.deliverable_type)
+
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
-        req = build_produce_prompt(state.decision_record or {}, anchor=anchor)
+        req = build_produce_prompt(state.decision_record or {}, anchor=anchor, template=template)
         resp = await compute.think(req)
         return resp.result
 
     result, confidence = await _run_with_consistency(state, "produce", call_fn)
     from app.observability.log_bus import log_bus as _lb
     _lb.info("produce: LLM 调用+一致性检查完成", logger="orchestrator.nodes.produce",
-             extra={"confidence": confidence, "has_prd": bool(result.get("prd")), "openapi_len": len(result.get("openapi", ""))})
+             extra={"confidence": confidence, "deliverable_type": state.deliverable_type,
+                    "has_prd": bool(result.get("prd")), "openapi_len": len(result.get("openapi", ""))})
+    # 构建 artifact
     prd = result.get("prd", {})
     openapi = result.get("openapi", "")
     state.artifact = {
         "meeting_id": state.meeting_id,
+        "deliverable_type": state.deliverable_type,
         "prd": prd,
         "openapi": openapi,
     }
+
+    # 代码执行类产出：调用沙箱执行代码
+    if state.deliverable_type == "code_analysis":
+        code_data = result.get("code_analysis", {})
+        code = code_data.get("code", "")
+        if code:
+            from app.sandbox import run_python
+            from pathlib import Path
+            import tempfile
+            ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
+            ws_root = Path(ws_env) if ws_env and Path(ws_env).exists() else Path(tempfile.mkdtemp())
+            ws_root.mkdir(parents=True, exist_ok=True)
+            try:
+                exec_result = await run_python(code, ws_root, timeout=30)
+                state.artifact["code_analysis"] = code_data
+                state.artifact["execution"] = exec_result.to_dict()
+            except Exception as e:
+                state.artifact["code_analysis"] = code_data
+                state.artifact["execution"] = {"error": str(e), "exit_code": -1}
+        else:
+            state.artifact["code_analysis"] = code_data
+
+    elif state.deliverable_type == "tested_system":
+        ts_data = result.get("tested_system", {})
+        main_code = ts_data.get("main_code", "")
+        test_code = ts_data.get("test_code", "")
+        if test_code:
+            from app.sandbox import run_command
+            from pathlib import Path
+            import tempfile
+            ws_root = Path(os.environ.get("CONCLAVE_WORKSPACE_DIR", ""))
+            if not str(ws_root) or not ws_root.exists():
+                ws_root = Path(tempfile.mkdtemp())
+            ws_root.mkdir(parents=True, exist_ok=True)
+            try:
+                # 把代码写入工作区
+                test_file = ws_root / "test_generated.py"
+                test_file.write_text(test_code, encoding="utf-8")
+                main_file = ws_root / "main_generated.py"
+                if main_code:
+                    main_file.write_text(main_code, encoding="utf-8")
+                exec_result = await run_command(
+                    "python -m pytest test_generated.py -v",
+                    ws_root, timeout=30
+                )
+                state.artifact["tested_system"] = ts_data
+                state.artifact["execution"] = exec_result.to_dict()
+            except Exception as e:
+                state.artifact["tested_system"] = ts_data
+                state.artifact["execution"] = {"error": str(e), "exit_code": -1}
+        else:
+            state.artifact["tested_system"] = ts_data
+    else:
+        # 其他类型直接存入 artifact
+        for key in ["design_doc", "comprehensive", "research_report", "business_report"]:
+            if key in result:
+                state.artifact[key] = result[key]
+
     # 第2层：锁定 produce 结论
     state.conclusion_chain.lock("produce", state.artifact)
     # 第5层：记录置信度
     state.confidence_flags["produce"] = confidence
     _lb.info("produce: artifact 已构造, 锁定结论完成", logger="orchestrator.nodes.produce",
-             extra={"prd_title": prd.get("title", "?"), "openapi_len": len(openapi)})
+             extra={"prd_title": prd.get("title", "?"), "openapi_len": len(openapi),
+                    "deliverable_type": state.deliverable_type})
     # 发布 artifact.generated 事件
     await bus.publish(
         make_event(
@@ -699,15 +766,16 @@ async def produce_node(state: MeetingState) -> MeetingState:
             state.meeting_id,
             {
                 "meeting_id": state.meeting_id,
+                "deliverable_type": state.deliverable_type,
                 "prd": prd,
                 "openapi": openapi,
             },
         )
     )
     _lb.info("produce: artifact.generated 事件已发布", logger="orchestrator.nodes.produce")
-    # 产物阶段也做一次漂移检查（针对 PRD 文本）
-    prd_text = json.dumps(prd, ensure_ascii=False)
-    _record_drift(state, Role.MODERATOR, Stage.PRODUCE, prd_text)
+    # 产物阶段也做一次漂移检查（针对产出文本）
+    artifact_text = json.dumps(state.artifact, ensure_ascii=False, default=str)
+    _record_drift(state, Role.MODERATOR, Stage.PRODUCE, artifact_text)
     _lb.info("produce: 漂移检查完成", logger="orchestrator.nodes.produce")
     # 终态
     state.stage = Stage.PRODUCE

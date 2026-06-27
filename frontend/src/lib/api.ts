@@ -52,6 +52,23 @@ export async function getMeetingDetail(meetingId: string) {
   })
 }
 
+/** 列出所有会议：GET /meetings
+ *  返回 { meetings, concurrent_limit, running_count }，每个会议含 is_running 运行态标记 */
+export async function listMeetings(): Promise<{
+  meetings: Array<{
+    meeting_id: string
+    topic: string
+    stage: string
+    status: string
+    created_at?: string
+    is_running?: boolean
+  }>
+  concurrent_limit: number
+  running_count: number
+}> {
+  return request('/meetings', { method: 'GET' })
+}
+
 /** 触发会议运行（同步阻塞到六阶段完成）：POST /meetings/:id/run */
 export async function runMeeting(meetingId: string): Promise<RunMeetingResponse> {
   return request<RunMeetingResponse>(`/meetings/${encodeURIComponent(meetingId)}/run`, {
