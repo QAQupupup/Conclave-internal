@@ -426,6 +426,54 @@ async def get_events(meeting_id: str, from_seq: int = 0) -> dict[str, Any]:
     }
 
 
+@router.get("/{meeting_id}/budget")
+async def get_token_budget(meeting_id: str) -> dict[str, Any]:
+    """token 预算状态：已消耗/剩余/百分比
+
+    方案二（token 计量，不依赖厂商定价）：
+    - 默认预算 500000 token
+    - 超过 80% 标记 warning
+    - 超过 100% 标记 exceeded
+    """
+    state = get_state(meeting_id)
+    if state is None:
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            raise HTTPException(status_code=404, detail="会议不存在")
+
+    summary = state.llm_trace.summary()
+    used = summary.get("total_tokens", 0)
+    budget = getattr(state, "token_budget", 500000) or 500000
+    remaining = max(0, budget - used)
+    pct = (used / budget * 100) if budget > 0 else 0
+
+    status = "normal"
+    if pct >= 100:
+        status = "exceeded"
+    elif pct >= 80:
+        status = "warning"
+
+    return {
+        "meeting_id": meeting_id,
+        "budget": budget,
+        "used": used,
+        "remaining": remaining,
+        "percentage": round(pct, 1),
+        "status": status,
+        "input_tokens": summary.get("total_input_tokens", 0),
+        "output_tokens": summary.get("total_output_tokens", 0),
+        "total_calls": summary.get("total_calls", 0),
+        "stage_breakdown": {
+            stage: {
+                "input_tokens": s.get("input_tokens", 0),
+                "output_tokens": s.get("output_tokens", 0),
+                "calls": s.get("calls", 0),
+            }
+            for stage, s in summary.get("stage_stats", {}).items()
+        },
+    }
+
+
 @router.get("/{meeting_id}/attachments")
 async def list_attachments(meeting_id: str) -> dict[str, Any]:
     """列出会议产出的附件文件（沙箱执行产出的 PNG/CSV/MD 等）"""

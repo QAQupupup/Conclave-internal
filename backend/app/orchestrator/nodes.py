@@ -803,16 +803,24 @@ async def produce_node(state: MeetingState) -> MeetingState:
             from app.sandbox import run_python, SANDBOX_IMAGE_DATASCIENCE
             from pathlib import Path
             import tempfile
+            from app.orchestrator.refine_loop import refine_python_code, _summarize_task
             ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
             ws_root = Path(ws_env) if ws_env and Path(ws_env).exists() else Path(tempfile.mkdtemp())
             ws_root.mkdir(parents=True, exist_ok=True)
             try:
                 # code_analysis 模板更可能需要数据分析库，使用数据科学镜像
-                exec_result = await run_python(
-                    code, ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE
-                )
+                async def _run(code):
+                    r = await run_python(code, ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE)
+                    return r.to_dict()
+                task_summary = _summarize_task("code_analysis", result)
+                refined = await refine_python_code(code, task_summary, _run, max_rounds=5)
+                code_data["code"] = refined["code"]
                 state.artifact["code_analysis"] = code_data
-                state.artifact["execution"] = exec_result.to_dict()
+                state.artifact["execution"] = refined["execution"]
+                state.artifact["refine_info"] = {
+                    "rounds_used": refined["rounds_used"],
+                    "success": refined["success"],
+                }
             except Exception as e:
                 state.artifact["code_analysis"] = code_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}
@@ -827,6 +835,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             from app.sandbox import run_command, SANDBOX_IMAGE_DATASCIENCE
             from pathlib import Path
             import tempfile
+            from app.orchestrator.refine_loop import refine_python_code, _summarize_task
             ws_root = Path(os.environ.get("CONCLAVE_WORKSPACE_DIR", ""))
             if not str(ws_root) or not ws_root.exists():
                 ws_root = Path(tempfile.mkdtemp())
@@ -839,12 +848,22 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 if main_code:
                     main_file.write_text(main_code, encoding="utf-8")
                 # tested_system 模板更可能需要数据分析库，使用数据科学镜像
-                exec_result = await run_command(
-                    "python -m pytest test_generated.py -v",
-                    ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE
-                )
+                async def _run_tests(code):
+                    test_file.write_text(code, encoding="utf-8")
+                    r = await run_command(
+                        "python -m pytest test_generated.py -v",
+                        ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE
+                    )
+                    return r.to_dict()
+                task_summary = _summarize_task("tested_system", result)
+                refined = await refine_python_code(test_code, task_summary, _run_tests, max_rounds=5)
+                ts_data["test_code"] = refined["code"]
                 state.artifact["tested_system"] = ts_data
-                state.artifact["execution"] = exec_result.to_dict()
+                state.artifact["execution"] = refined["execution"]
+                state.artifact["refine_info"] = {
+                    "rounds_used": refined["rounds_used"],
+                    "success": refined["success"],
+                }
             except Exception as e:
                 state.artifact["tested_system"] = ts_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}

@@ -31,19 +31,36 @@ interface TraceData {
   }>
 }
 
+interface BudgetData {
+  budget: number
+  used: number
+  remaining: number
+  percentage: number
+  status: 'normal' | 'warning' | 'exceeded'
+  total_calls: number
+}
+
 export function TokenPanel() {
   const { meetingId } = useMeeting()
   const [trace, setTrace] = useState<TraceData | null>(null)
+  const [budget, setBudget] = useState<BudgetData | null>(null)
   const [loading, setLoading] = useState(false)
 
   const refresh = async () => {
     if (!meetingId) return
     setLoading(true)
     try {
-      const resp = await fetch(`/meetings/${encodeURIComponent(meetingId)}/trace`)
-      if (resp.ok) {
-        const data = await resp.json()
+      const [traceResp, budgetResp] = await Promise.all([
+        fetch(`/meetings/${encodeURIComponent(meetingId)}/trace`),
+        fetch(`/meetings/${encodeURIComponent(meetingId)}/budget`),
+      ])
+      if (traceResp.ok) {
+        const data = await traceResp.json()
         setTrace(data)
+      }
+      if (budgetResp.ok) {
+        const bd = await budgetResp.json()
+        setBudget(bd)
       }
     } catch {
       // 静默
@@ -77,6 +94,22 @@ export function TokenPanel() {
           ↻
         </button>
       </div>
+
+      {/* 预算进度条 */}
+      {budget && budget.budget > 0 && (
+        <div className={`token-budget-bar ${budget.status}`}>
+          <div className="budget-label">
+            <span>预算 {budget.used.toLocaleString()} / {budget.budget.toLocaleString()}</span>
+            <span className="budget-pct">{budget.percentage}%</span>
+          </div>
+          <div className="budget-track">
+            <div className="budget-fill" style={{ width: `${Math.min(budget.percentage, 100)}%` }} />
+          </div>
+          <div className="budget-meta">
+            剩余 {budget.remaining.toLocaleString()} · {budget.total_calls} 次调用
+          </div>
+        </div>
+      )}
 
       {/* 总览卡片 */}
       <div className="token-cards">
