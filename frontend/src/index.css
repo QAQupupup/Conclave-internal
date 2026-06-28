@@ -387,6 +387,70 @@ code {
   grid-template-rows: auto 1fr;
 }
 
+/* 拓扑图槽：作为 AgentGraph 的容器，提供折叠功能 + 折叠按钮定位 */
+.graph-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  transition: max-height 0.25s ease;
+}
+.graph-slot .graph-container {
+  flex: 1;
+  min-height: 0;
+}
+/* 折叠态：隐藏拓扑图主体，仅保留一行细带子显示标题 + 节点统计 + 展开按钮 */
+.meeting-view.graph-collapsed .graph-slot {
+  max-height: 32px;
+  flex: 0 0 32px;
+}
+.meeting-view.graph-collapsed .graph-slot .graph-container {
+  /* 折叠时不整体隐藏，而是让 AgentGraph 自己渲染一个极简的"折叠条" */
+  padding: 4px 18px;
+  flex: 0 0 32px;
+  min-height: 32px;
+  border-bottom: 1px solid var(--border);
+}
+.meeting-view.graph-collapsed .graph-slot .graph-header {
+  margin: 0;
+}
+/* 折叠态隐藏 SVG 图体和提示 */
+.meeting-view.graph-collapsed .graph-slot .graph-scroll,
+.meeting-view.graph-collapsed .graph-slot .graph-legend,
+.meeting-view.graph-collapsed .graph-slot .graph-zoom-controls,
+.meeting-view.graph-collapsed .graph-slot .graph-empty-hint {
+  display: none !important;
+}
+/* 折叠按钮：浮在拓扑图下边缘的小横条，水平居中 */
+.graph-collapse-btn {
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: 44px;
+  height: 14px;
+  padding: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, height 0.15s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+.graph-collapse-btn:hover {
+  background: var(--bg);
+  color: var(--accent);
+  border-color: var(--accent);
+  height: 18px;
+}
+
 .meeting-top-bar {
   display: flex;
   align-items: center;

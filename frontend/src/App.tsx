@@ -51,9 +51,24 @@ function MeetingView() {
   const [borrowOpen, setBorrowOpen] = useState(false)
   // 右侧面板当前激活 Tab
   const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
+  // 拓扑图折叠/展开状态（持久化到 localStorage）
+  const [graphCollapsed, setGraphCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('conclave-graph-collapsed') === '1'
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('conclave-graph-collapsed', graphCollapsed ? '1' : '0')
+    } catch {
+      /* noop */
+    }
+  }, [graphCollapsed])
 
   return (
-    <div className="meeting-view">
+    <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}`}>
       {/* 顶部：六步流程指示器 + 会议控制按钮（替代原 Header） */}
       <div className="meeting-top-bar">
         <StageIndicator />
@@ -62,7 +77,18 @@ function MeetingView() {
 
       {/* 主体：拓扑图 + 左侧聊天流 + 右侧三块面板 */}
       <div className="app-layout">
-        <AgentGraph />
+        <div className="graph-slot">
+          <AgentGraph />
+          <button
+            type="button"
+            className="graph-collapse-btn"
+            onClick={() => setGraphCollapsed(v => !v)}
+            title={graphCollapsed ? '展开拓扑图' : '收起拓扑图（专注聊天/内容）'}
+            aria-label={graphCollapsed ? '展开拓扑图' : '收起拓扑图'}
+          >
+            {graphCollapsed ? '▼' : '▲'}
+          </button>
+        </div>
         <div className="app-body">
           <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
           <div className="right-column">
