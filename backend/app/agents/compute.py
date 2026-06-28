@@ -18,6 +18,19 @@ from app.agents.prompts import (
 )
 from app.models import Role
 
+# IntraTeam 阶段的角色 → 模板注册表（Registry 模式）
+# 消除 build_intra_prompt / build_intra_react_prompt 中的 if/elif 硬编码分派
+# 新增角色只需在此注册，无需改业务逻辑（开闭原则）
+_INTRA_TEAM_TEMPLATES: dict[Role, str] = {
+    Role.ENGINEER: ENGINEER_INTRA,
+    Role.PRODUCT_ARCHITECT: ARCHITECT_INTRA,
+}
+
+
+def _get_intra_template(role: Role) -> str:
+    """取 IntraTeam 阶段的角色模板，未注册时回退到架构师模板"""
+    return _INTRA_TEAM_TEMPLATES.get(role, ARCHITECT_INTRA)
+
 
 @dataclass
 class ThinkRequest:
@@ -178,7 +191,7 @@ def build_clarify_prompt(topic: str, doc_summaries: list[str], anchor: str = "")
 
 def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: str = "") -> ThinkRequest:
     """构造 intra_team 阶段的思考请求"""
-    template = ENGINEER_INTRA if role == Role.ENGINEER else ARCHITECT_INTRA
+    template = _get_intra_template(role)
     prompt = render(template, clarified_topic=clarified_topic, stance=stance)
     prompt = _inject_profile(prompt, role.value)
     if anchor:
@@ -205,7 +218,7 @@ def build_intra_react_prompt(
 
     prior_conclusions: 前序角色的结论列表 [{"role": "...", "stance": "...", "claims": [...]}]
     """
-    template = ENGINEER_INTRA if role == Role.ENGINEER else ARCHITECT_INTRA
+    template = _get_intra_template(role)
     # 构造前序结论摘要
     prior_summary = ""
     if prior_conclusions:

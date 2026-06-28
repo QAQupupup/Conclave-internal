@@ -1,132 +1,61 @@
-# 角色实例化：把角色与 Prompt 模板、LLM 绑定
+# §3.1 角色定义 + Agent 工厂
+# 注意：Agent 类的 clarify/intra_speak/cross_team/evidence_check/arbitrate/produce 六个方法
+# 已被 compute.py 的 build_xxx_prompt + get_compute().think() 取代（主流程不再调用 Agent 方法）。
+# 此处保留 Agent 类作为"角色 + LLM"的薄壳，仅为向后兼容测试 fixture 而存在。
+# 设计模式：Facade —— 旧的 Agent 接口保留，实际计算委托 compute.py。
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from enum import Enum
+from typing import TYPE_CHECKING
 
-from app.agents.llm import LLMClient, get_llm
-from app.agents.prompts import (
-    ARBITRATE,
-    ARCHITECT_INTRA,
-    CROSS_TEAM,
-    EVIDENCE_CHECK,
-    ENGINEER_INTRA,
-    MODERATOR_CLARIFY,
-    PRODUCE,
-    render,
-)
-from app.models import Role
+from app.agents import llm as llm_mod
+from app.agents.llm import LLMClient
+
+if TYPE_CHECKING:
+    pass
 
 
-@dataclass
+class Role(str, Enum):
+    """会议中可用的角色（与前端 types/events.ts 保持一致）"""
+
+    MODERATOR = "moderator"
+    PRODUCT_ARCHITECT = "product_architect"
+    ENGINEER = "engineer"
+
+
 class Agent:
-    """单个智能体：角色 + LLM"""
-    role: Role
-    llm: LLMClient = field(default_factory=get_llm)
+    """角色 Agent 壳：持有 role + LLM 引用。
 
-    def _inject_profile(self, prompt: str) -> str:
-        """注入角色画像锚点到 prompt 前（无画像时原样返回）
+    历史职责（已迁移到 compute.py）：
+    - clarify / intra_speak / cross_team / evidence_check / arbitrate / produce
+    - 这些方法曾是 Agent 的实例方法，现已由 compute.build_xxx_prompt + Compute.think() 取代。
+    - 保留此类仅为向后兼容（conftest.py 的 mock_llm fixture 仍 patch get_agent）。
+    """
 
-        迭代二：在 _with_anchor 之前注入，确保画像信息随角色绑定。
-        记忆子系统失败时不影响主流程。
-        """
-        try:
-            from app.memory.store import memory_store
-
-            profile_anchor = memory_store.get_profile_anchor(self.role.value)
-            if profile_anchor:
-                return f"{profile_anchor}\n\n{prompt}"
-            return prompt
-        except Exception:
-            return prompt
-
-    async def clarify(self, topic: str, doc_summaries: list[str], anchor: str = "") -> dict[str, Any]:
-        """主持人澄清议题"""
-        prompt = render(
-            MODERATOR_CLARIFY,
-            topic=topic,
-            doc_summaries="; ".join(doc_summaries) if doc_summaries else "无",
-        )
-        prompt = self._inject_profile(prompt)
-        prompt = _with_anchor(anchor, prompt)
-        return await self.llm.complete(prompt, schema_hint="clarify")
-
-    async def intra_speak(
-        self, clarified_topic: str, stance: str, anchor: str = ""
-    ) -> dict[str, Any]:
-        """队内发言：按角色选择模板"""
-        if self.role == Role.ENGINEER:
-            template = ENGINEER_INTRA
-        else:
-            template = ARCHITECT_INTRA
-        prompt = render(template, clarified_topic=clarified_topic, stance=stance)
-        prompt = self._inject_profile(prompt)
-        prompt = _with_anchor(anchor, prompt)
-        return await self.llm.complete(prompt, schema_hint="intra_team")
-
-    async def cross_team(self, team_conclusions: list[dict[str, Any]], anchor: str = "") -> dict[str, Any]:
-        """跨队辩论：找出冲突"""
-        prompt = render(CROSS_TEAM, team_conclusions=str(team_conclusions))
-        prompt = self._inject_profile(prompt)
-        prompt = _with_anchor(anchor, prompt)
-        return await self.llm.complete(prompt, schema_hint="cross_team")
-
-    async def evidence_check(
-        self, conflict: dict[str, Any], evidence_chunks: list[dict[str, Any]], anchor: str = ""
-    ) -> dict[str, Any]:
-        """证据对照"""
-        prompt = render(
-            EVIDENCE_CHECK,
-            conflict=str(conflict),
-            evidence_chunks=str(evidence_chunks),
-        )
-        prompt = self._inject_profile(prompt)
-        prompt = _with_anchor(anchor, prompt)
-        return await self.llm.complete(prompt, schema_hint="evidence_check")
-
-    async def arbitrate(self, evidence_set: list[dict[str, Any]], anchor: str = "") -> dict[str, Any]:
-        """仲裁裁决"""
-        prompt = render(ARBITRATE, evidence_set=str(evidence_set))
-        prompt = self._inject_profile(prompt)
-        prompt = _with_anchor(anchor, prompt)
-        return await self.llm.complete(prompt, schema_hint="arbitrate")
-
-    async def produce(self, decision_record: dict[str, Any], anchor: str = "") -> dict[str, Any]:
-        """产出 PRD + OpenAPI"""
-        prompt = render(PRODUCE, decision_record=str(decision_record))
-        prompt = self._inject_profile(prompt)
-        prompt = _with_anchor(anchor, prompt)
-        return await self.llm.complete(prompt, schema_hint="produce")
+    def __init__(self, role: Role, llm: LLMClient | None = None):
+        self.role = role
+        self.llm = llm or llm_mod.get_llm()
 
 
-def _with_anchor(anchor: str, prompt: str) -> str:
-    """把会议宪章锚点拼到 prompt 前面（anchor 为空时原样返回）"""
-    if not anchor:
-        return prompt
-    return f"{anchor}\n\n{prompt}"
-
-
-# 角色单例缓存
+# 角色单例缓存（role → Agent）
 _agents: dict[Role, Agent] = {}
 
 
 def get_agent(role: Role) -> Agent:
-    """获取角色实例（单例）"""
+    """获取角色 Agent（单例缓存）"""
     if role not in _agents:
         _agents[role] = Agent(role=role)
     return _agents[role]
 
 
+# 工厂函数：便捷构造各角色 Agent
 def moderator() -> Agent:
-    """主持人（兼仲裁者）"""
     return get_agent(Role.MODERATOR)
 
 
 def product_architect() -> Agent:
-    """产品架构师"""
     return get_agent(Role.PRODUCT_ARCHITECT)
 
 
 def engineer() -> Agent:
-    """工程师"""
     return get_agent(Role.ENGINEER)
