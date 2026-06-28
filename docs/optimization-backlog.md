@@ -171,6 +171,41 @@
 
 ---
 
+## 6.1 设计缺陷记录（2026-06-29 端到端验证发现）
+
+> 以下缺陷在端到端真实 LLM 验证中发现并已修复。记录根因和教训，避免后续重犯。
+
+### 缺陷 1：ProduceResult schema 丢弃 code_analysis 字段（已修复，commit `84a66ce`）
+
+**现象**：deliverable_type=code_analysis 时，LLM 生成了代码，但 artifact 中 code_analysis 是空字典。
+
+**根因**：`ProduceResult` 只有 `prd` 和 `openapi` 字段。LLM 返回的 `code_analysis` 被 Pydantic 校验丢弃。**设计时只考虑了 PRD 场景，没考虑多产出类型的 schema 扩展。**
+
+**教训**：新增产出类型时，必须同步更新 schema 定义，不能只改 prompt 模板。schema 是契约，prompt 是指导，两者必须对齐。
+
+### 缺陷 2：沙箱 stdin 管道在 Windows Docker 下阻塞（已修复，commit `8975ca2`）
+
+**现象**：produce 阶段 LLM 成功后，RefineLoop 调 `run_python` 时无限卡住，无日志无超时。
+
+**根因**：`docker run python -` + `proc.communicate(input=data)` 的 stdin 管道在 Windows Docker Desktop 下不兼容。Python 进程在容器内等待 stdin EOF，但宿主机的字节流没被正确传递。**当时选 stdin 方式是为了"避免写临时文件"，但忽略了一个更根本的约束：跨 Docker 容器的 stdin 管道在 Windows 上不可靠。**
+
+**教训**：
+1. 跨容器数据传递优先用文件系统（volume 挂载），不用 stdin 管道。文件系统是 Docker 的可靠抽象，stdin 管道不是。
+2. 设计选择要考虑部署环境。Conclave 运行在 Windows Docker Desktop 上，不是 Linux 原生。跨容器 stdin 兼容性在 Windows 上是已知问题。
+3. "避免临时文件"不是好的设计理由。临时文件可清理、可检查、可调试，stdin 管道不可检查、不可调试。可调试性比"干净"更重要。
+
+### 缺陷 3：Docker 卷名前缀不一致（已修复，commit `8975ca2`）
+
+**现象**：沙箱容器挂载 `conclave-workspace:/workspace`，但 backend 容器实际挂载的卷是 `conclave_conclave-workspace`（compose 自动加项目前缀）。两个不同的卷，文件互不可见。
+
+**根因**：docker-compose 的卷名默认带项目名前缀（`{project}_{volume}`）。沙箱是 sibling 容器，用 `docker run` 直接创建，不走 compose，所以卷名不带前缀。**设计时假设卷名就是 `conclave-workspace`，但 compose 实际创建的是 `conclave_conclave-workspace`。**
+
+**教训**：
+1. Sibling 容器挂载 compose 管理的卷时，必须用 compose 实际的卷名（带项目前缀），不能用逻辑卷名。
+2. 跨 Docker 管理方式（compose vs docker run）的卷名不一致是隐蔽的 bug——不报错，只是文件互不可见。需要在沙箱初始化时校验卷名。
+
+---
+
 ## 7. 建议的处理顺序
 
 若继续推进，建议按以下顺序（优先做收益高、风险低的）：
