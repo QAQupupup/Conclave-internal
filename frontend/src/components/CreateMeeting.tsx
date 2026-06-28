@@ -7,6 +7,7 @@ import { useMeeting } from '../store/MeetingContext.tsx'
 export function CreateMeeting() {
   const { createMeeting, uploadDocument, selectMeeting, runMeeting } = useMeeting()
   const [topic, setTopic] = useState('')
+  const [deliverableType, setDeliverableType] = useState('prd_openapi')
   const [file, setFile] = useState<File | null>(null)
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -24,7 +25,7 @@ export function CreateMeeting() {
     setError(null)
     setInfo(null)
     try {
-      const res = await createMeeting(topic.trim())
+      const res = await createMeeting(topic.trim(), deliverableType)
       setCreatedId(res.meeting_id)
       // 可选：上传 md 文档
       if (file) {
@@ -74,6 +75,26 @@ export function CreateMeeting() {
               rows={3}
               disabled={!!createdId || busy}
             />
+          </label>
+
+          <label className="form-row">
+            <span className="field-label">产出类型</span>
+            <select
+              className="topic-input"
+              value={deliverableType}
+              onChange={(e) => setDeliverableType(e.target.value)}
+              disabled={!!createdId || busy}
+              style={{ height: 'auto', minHeight: '38px', padding: '6px 10px' }}
+            >
+              <option value="prd_openapi">PRD + OpenAPI（产品设计文档）</option>
+              <option value="design_doc">设计文档</option>
+              <option value="comprehensive">综合文档</option>
+              <option value="research_report">调研报告</option>
+              <option value="business_report">商业报告</option>
+              <option value="code_analysis">代码分析（数据科学沙箱）</option>
+              <option value="tested_system">测试系统（代码 + pytest）</option>
+              <option value="deployable_service">可部署服务（Docker 镜像）</option>
+            </select>
           </label>
 
           <label className="form-row">

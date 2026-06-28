@@ -210,6 +210,30 @@ PRODUCE_TESTED_SYSTEM = """[阶段: Produce]
   }}
 }}"""
 
+# ---------- 产出阶段：可部署服务 ----------
+PRODUCE_DEPLOYABLE_SERVICE = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：基于讨论结论，生成可直接部署的完整服务。包含应用代码、Dockerfile 和 docker-compose.yml。
+要求：
+1. 应用代码应是一个完整的可运行 Web 服务（如 FastAPI/Flask 应用）
+2. Dockerfile 基于 python:3.12-slim，安装依赖，暴露端口
+3. docker-compose.yml 定义服务，映射端口，挂载数据卷
+4. 包含 requirements.txt 依赖清单
+
+输出 JSON:
+{{
+  "deployable_service": {{
+    "title": "...",
+    "description": "服务说明",
+    "app_code": "完整的 Python 应用代码（FastAPI/Flask，可直接运行）",
+    "requirements_txt": "依赖清单（每行一个包名==版本）",
+    "dockerfile": "Dockerfile 内容",
+    "docker_compose": "docker-compose.yml 内容",
+    "port": 8000,
+    "run_command": "uvicorn app:main --host 0.0.0.0 --port 8000"
+  }}
+}}"""
+
 # 产出模板映射
 PRODUCE_TEMPLATES = {
     "prd_openapi": PRODUCE,
@@ -219,6 +243,7 @@ PRODUCE_TEMPLATES = {
     "business_report": PRODUCE_BUSINESS_REPORT,
     "code_analysis": PRODUCE_CODE_ANALYSIS,
     "tested_system": PRODUCE_TESTED_SYSTEM,
+    "deployable_service": PRODUCE_DEPLOYABLE_SERVICE,
 }
 
 

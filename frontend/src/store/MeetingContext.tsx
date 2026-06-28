@@ -32,7 +32,7 @@ interface MeetingContextValue {
   /** 重置全部状态 */
   reset: () => void
   // REST 能力
-  createMeeting: (topic: string) => Promise<CreateMeetingResponse>
+  createMeeting: (topic: string, deliverableType?: string) => Promise<CreateMeetingResponse>
   uploadDocument: (meetingId: string, file: File) => Promise<UploadDocumentResponse>
   runMeeting: (meetingId: string) => Promise<RunMeetingResponse>
   /** 控场信号 REST（pause/resume/abort，按钮调用） */
@@ -79,8 +79,8 @@ export function MeetingProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // 创建会议：REST，成功后 hydrate 初始字段
-  const createMeeting = useCallback(async (topic: string) => {
-    const res = await apiCreateMeeting(topic)
+  const createMeeting = useCallback(async (topic: string, deliverableType?: string) => {
+    const res = await apiCreateMeeting(topic, deliverableType)
     dispatch({
       type: 'hydrate',
       payload: { meeting_id: res.meeting_id, topic: res.topic, stage: res.stage, status: res.status },

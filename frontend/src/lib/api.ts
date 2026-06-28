@@ -38,10 +38,10 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 /** 创建会议：POST /meetings body {topic} */
-export async function createMeeting(topic: string): Promise<CreateMeetingResponse> {
+export async function createMeeting(topic: string, deliverableType?: string): Promise<CreateMeetingResponse> {
   return request<CreateMeetingResponse>('/meetings', {
     method: 'POST',
-    body: JSON.stringify({ topic }),
+    body: JSON.stringify({ topic, deliverable_type: deliverableType }),
   })
 }
 

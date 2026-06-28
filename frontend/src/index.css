@@ -2605,6 +2605,36 @@ code {
   font-weight: 500;
 }
 
+/* 附件列表（沿用现有 artifact-block 风格，不引入新设计语言） */
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.attachment-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 13px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.attachment-link:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+.attachment-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: auto;
+}
+
 /* ============================ Token 面板 ============================ */
 .token-panel {
   padding: 24px;

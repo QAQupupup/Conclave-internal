@@ -424,3 +424,40 @@ async def get_events(meeting_id: str, from_seq: int = 0) -> dict[str, Any]:
         "count": len(events),
         "events": [e.model_dump(mode="json") for e in events],
     }
+
+
+@router.get("/{meeting_id}/attachments")
+async def list_attachments(meeting_id: str) -> dict[str, Any]:
+    """列出会议产出的附件文件（沙箱执行产出的 PNG/CSV/MD 等）"""
+    state = get_state(meeting_id)
+    if state is None:
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            raise HTTPException(status_code=404, detail="会议不存在")
+    attachments = (state.artifact or {}).get("attachments", [])
+    return {"meeting_id": meeting_id, "attachments": attachments, "count": len(attachments)}
+
+
+@router.get("/{meeting_id}/attachments/{filename}")
+async def download_attachment(meeting_id: str, filename: str):
+    """下载附件文件"""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+
+    state = get_state(meeting_id)
+    if state is None:
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            raise HTTPException(status_code=404, detail="会议不存在")
+    attachments = (state.artifact or {}).get("attachments", [])
+    target = next((a for a in attachments if a.get("filename") == filename), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="附件不存在")
+    file_path = Path(target["path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="附件文件已丢失")
+    return FileResponse(
+        str(file_path),
+        filename=filename,
+        media_type="application/octet-stream",
+    )

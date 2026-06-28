@@ -300,6 +300,53 @@ export function ReportViewer() {
                 )}
               </div>
             )}
+            {ext.artifact.deployable_service && (
+              <div className="artifact-block">
+                <h4>{ext.artifact.deployable_service.title}</h4>
+                <p>{ext.artifact.deployable_service.description}</p>
+                <pre className="code-block">{ext.artifact.deployable_service.app_code}</pre>
+                {ext.artifact.deployable_service.requirements_txt && (
+                  <pre className="code-block">{ext.artifact.deployable_service.requirements_txt}</pre>
+                )}
+                {ext.artifact.deployable_service.dockerfile && (
+                  <>
+                    <h5>Dockerfile</h5>
+                    <pre className="code-block">{ext.artifact.deployable_service.dockerfile}</pre>
+                  </>
+                )}
+                {ext.artifact.deployable_service.docker_compose && (
+                  <>
+                    <h5>docker-compose.yml</h5>
+                    <pre className="code-block">{ext.artifact.deployable_service.docker_compose}</pre>
+                  </>
+                )}
+                {ext.artifact.execution && (
+                  <div className="execution-result">
+                    <h5>部署文件</h5>
+                    <pre className="code-block">{ext.artifact.execution.stdout}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+            {ext.artifact.attachments && ext.artifact.attachments.length > 0 && (
+              <div className="artifact-block">
+                <h4>附件文件（{ext.artifact.attachments.length}）</h4>
+                <div className="attachment-list">
+                  {ext.artifact.attachments.map((att: any, i: number) => (
+                    <a
+                      key={i}
+                      className="attachment-link"
+                      href={`/api/meetings/${ext.artifact.meeting_id}/attachments/${att.filename}`}
+                      download={att.filename}
+                      title={`${att.filename}（${(att.size / 1024).toFixed(1)} KB）`}
+                    >
+                      {att.filename}
+                      <span className="attachment-meta">.{att.ext} · {(att.size / 1024).toFixed(1)} KB</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </CollapsibleSection>
       )}

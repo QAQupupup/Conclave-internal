@@ -566,6 +566,29 @@ def _make_common_knowledge_evidence(conflict: dict) -> list[dict]:
     ]
 
 
+def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
+    """扫描沙箱工作区，收集产出的文件作为附件。
+
+    支持的文件类型：png/jpg/svg/csv/md/html/json/txt/log
+    返回附件元数据列表，文件本体保留在 workspace 中通过 API 下载。
+    """
+    attachments: list[dict[str, Any]] = []
+    supported_exts = {".png", ".jpg", ".jpeg", ".svg", ".csv", ".md", ".html", ".json", ".txt", ".log"}
+    if not ws_root.exists():
+        return attachments
+    for f in ws_root.iterdir():
+        if f.is_file() and f.suffix.lower() in supported_exts:
+            stat = f.stat()
+            attachments.append({
+                "filename": f.name,
+                "path": str(f),
+                "size": stat.st_size,
+                "ext": f.suffix.lower().lstrip("."),
+                "meeting_id": meeting_id,
+            })
+    return attachments
+
+
 async def _prefetch_evidence(state: MeetingState, conflicts: list[dict]) -> dict[str, list[dict]]:
     """预检索所有冲突的证据（流水线优化：与借调发言并行）
 
@@ -827,11 +850,77 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}
         else:
             state.artifact["tested_system"] = ts_data
+
+    elif state.deliverable_type == "deployable_service":
+        ds_data = result.get("deployable_service", {})
+        app_code = ds_data.get("app_code", "")
+        requirements_txt = ds_data.get("requirements_txt", "")
+        dockerfile_content = ds_data.get("dockerfile", "")
+        docker_compose_content = ds_data.get("docker_compose", "")
+        if app_code:
+            from pathlib import Path
+            import tempfile
+            ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
+            ws_root = Path(ws_env) if ws_env and Path(ws_env).exists() else Path(tempfile.mkdtemp())
+            ws_root = ws_root / state.meeting_id
+            ws_root.mkdir(parents=True, exist_ok=True)
+            # 写入所有部署文件到工作区
+            (ws_root / "app.py").write_text(app_code, encoding="utf-8")
+            if requirements_txt:
+                (ws_root / "requirements.txt").write_text(requirements_txt, encoding="utf-8")
+            if dockerfile_content:
+                (ws_root / "Dockerfile").write_text(dockerfile_content, encoding="utf-8")
+            if docker_compose_content:
+                (ws_root / "docker-compose.yml").write_text(docker_compose_content, encoding="utf-8")
+            # 写入 README 启动说明
+            readme = f"""# {ds_data.get('title', 'Deployable Service')}
+
+{ds_data.get('description', '')}
+
+## 部署方式
+
+### 方式一：Docker Compose（推荐）
+```bash
+docker compose up -d --build
+```
+服务将在端口 {ds_data.get('port', 8000)} 启动。
+
+### 方式二：直接运行
+```bash
+pip install -r requirements.txt
+{ds_data.get('run_command', 'uvicorn app:main --host 0.0.0.0 --port 8000')}
+```
+"""
+            (ws_root / "README.md").write_text(readme, encoding="utf-8")
+            state.artifact["deployable_service"] = ds_data
+            state.artifact["deployment_dir"] = str(ws_root)
+            state.artifact["execution"] = {
+                "exit_code": 0,
+                "stdout": f"部署文件已生成到 {ws_root}，包含 app.py / requirements.txt / Dockerfile / docker-compose.yml / README.md",
+                "stderr": "",
+                "sandboxed": False,
+                "files": ["app.py", "requirements.txt", "Dockerfile", "docker-compose.yml", "README.md"],
+            }
+        else:
+            state.artifact["deployable_service"] = ds_data
     else:
         # 其他类型直接存入 artifact
         for key in ["design_doc", "comprehensive", "research_report", "business_report"]:
             if key in result:
                 state.artifact[key] = result[key]
+
+    # 附件扫描：代码执行类产出（code_analysis/tested_system）扫描工作区收集产出文件
+    if state.deliverable_type in ("code_analysis", "tested_system"):
+        from pathlib import Path
+        import tempfile
+        ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
+        ws_root = Path(ws_env) if ws_env and Path(ws_env).exists() else Path(tempfile.mkdtemp())
+        attachments = _scan_artifacts(ws_root, state.meeting_id)
+        if attachments:
+            state.artifact["attachments"] = attachments
+            _lb.info("produce: 扫描到 %d 个附件文件", len(attachments),
+                     logger="orchestrator.nodes.produce",
+                     extra={"attachment_files": [a["filename"] for a in attachments]})
 
     # 第2层：锁定 produce 结论
     state.conclusion_chain.lock("produce", state.artifact)
