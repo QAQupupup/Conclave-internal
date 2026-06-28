@@ -832,7 +832,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
 
     # 代码执行类产出：调用沙箱执行代码
     if state.deliverable_type == "code_analysis":
-        code_data = result.get("code_analysis", {})
+        code_data = result.get("code_analysis") or {}
         code = code_data.get("code", "")
         if code:
             from app.sandbox import run_python, SANDBOX_IMAGE_DATASCIENCE
@@ -888,7 +888,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             state.artifact["code_analysis"] = code_data
 
     elif state.deliverable_type == "tested_system":
-        ts_data = result.get("tested_system", {})
+        ts_data = result.get("tested_system") or {}
         main_code = ts_data.get("main_code", "")
         test_code = ts_data.get("test_code", "")
         if test_code:
@@ -957,7 +957,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             state.artifact["tested_system"] = ts_data
 
     elif state.deliverable_type == "deployable_service":
-        ds_data = result.get("deployable_service", {})
+        ds_data = result.get("deployable_service") or {}
         app_code = ds_data.get("app_code", "")
         requirements_txt = ds_data.get("requirements_txt", "")
         dockerfile_content = ds_data.get("dockerfile", "")

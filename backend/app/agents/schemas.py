@@ -125,6 +125,44 @@ class PRDResult(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
 
 
+class CodeAnalysisArtifact(BaseModel):
+    """code_analysis 产出：数据分析代码
+
+    关键字段 code 为必填，LLM 漏输出时校验失败触发重试。
+    """
+    model_config = _SCHEMA_CONFIG
+    title: str = ""
+    description: str = ""
+    code: str  # 必填：分析代码
+    expected_output: str = ""
+
+
+class TestedSystemArtifact(BaseModel):
+    """tested_system 产出：可测试代码系统
+
+    关键字段 main_code / test_code 为必填。
+    """
+    model_config = _SCHEMA_CONFIG
+    title: str = ""
+    description: str = ""
+    main_code: str  # 必填：实现代码
+    test_code: str   # 必填：测试代码
+    run_command: str = "python -m pytest test_generated.py -v"
+
+
+class DeployableServiceArtifact(BaseModel):
+    """deployable_service 产出：可部署服务
+
+    关键字段 app_code / dockerfile 为必填。
+    """
+    model_config = _SCHEMA_CONFIG
+    app_code: str       # 必填：应用代码
+    dockerfile: str = "" # 必填但允许空（生成时可能只给内容）
+    docker_compose: str = ""
+    requirements_txt: str = ""
+    readme: str = ""
+
+
 class ProduceResult(BaseModel):
     """Produce 阶段输出：PRD + OpenAPI（可选 code_analysis/tested_system/deployable_service）
 
@@ -133,15 +171,15 @@ class ProduceResult(BaseModel):
     - code_analysis: prd + openapi + code_analysis
     - tested_system: prd + openapi + tested_system
     - deployable_service: prd + openapi + deployable_service
-    所有扩展字段可选，避免校验丢弃 LLM 输出。
+    扩展字段使用具体 Pydantic 模型，关键字段缺失时触发校验失败→重试。
     """
     model_config = _SCHEMA_CONFIG
     prd: PRDResult
     openapi: str = ""
     # 可选产出字段（根据 deliverable_type 动态填充）
-    code_analysis: dict[str, Any] = Field(default_factory=dict)
-    tested_system: dict[str, Any] = Field(default_factory=dict)
-    deployable_service: dict[str, Any] = Field(default_factory=dict)
+    code_analysis: Optional[CodeAnalysisArtifact] = None
+    tested_system: Optional[TestedSystemArtifact] = None
+    deployable_service: Optional[DeployableServiceArtifact] = None
 
 
 # ---------- schema_hint -> 模型映射 ----------

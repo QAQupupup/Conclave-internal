@@ -34,10 +34,10 @@ REFINE_PROMPT = """[阶段: CodeRefine]
 def _summarize_task(deliverable_type: str, result: dict[str, Any]) -> str:
     """生成任务锚点摘要（三句话：任务是什么 + 已完成什么 + 当前问题）"""
     if deliverable_type == "code_analysis":
-        desc = result.get("code_analysis", {}).get("description", "")
+        desc = (result.get("code_analysis") or {}).get("description", "")
         return f"数据分析任务：{desc}。生成代码执行失败，需要修正。"
     elif deliverable_type == "tested_system":
-        desc = result.get("tested_system", {}).get("description", "")
+        desc = (result.get("tested_system") or {}).get("description", "")
         return f"测试系统任务：{desc}。测试执行失败，需要修正代码。"
     return "代码执行任务。执行失败，需要修正。"
 
