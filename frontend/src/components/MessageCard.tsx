@@ -7,6 +7,7 @@ import { ROLE_LABELS, STAGE_LABELS } from '../types/events.ts'
 import { FocusMode } from './FocusMode.tsx'
 import { formatTime, tryFormatJson, truncate } from '../lib/format.ts'
 import { useCopy } from '../hooks/useCopy.ts'
+import { renderMessageContent, formatRefLabel } from './MessageContent.tsx'
 
 interface MessageCardProps {
   message: MeetingMessage
@@ -60,7 +61,7 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
           <span className="message-time">{formatTime(message.created_at)}</span>
         )}
       </div>
-      <pre className="message-content">{truncatedText}</pre>
+      <div className="message-content">{renderMessageContent(truncatedText)}</div>
       <div className="message-actions">
         <div className="message-actions-left">
           {isLong && (
@@ -102,9 +103,9 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
               className="ref-chip"
               type="button"
               onClick={() => onSelectRef?.(ref)}
-              title="点击在右侧证据面板定位"
+              title={`引用: ${ref}（点击在右侧证据面板定位）`}
             >
-              {ref}
+              {formatRefLabel(ref)}
             </button>
           ))}
           {hasManyRefs && (
@@ -119,7 +120,7 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
         </div>
       )}
       <FocusMode open={focused} onClose={() => setFocused(false)} title={ROLE_LABELS[role] ?? role}>
-        <pre className="message-content-full">{displayText}</pre>
+        <div className="message-content-full">{renderMessageContent(displayText)}</div>
       </FocusMode>
     </div>
   )

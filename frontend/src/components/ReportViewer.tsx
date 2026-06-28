@@ -7,6 +7,7 @@ import { LogicGraph } from './LogicGraph.tsx'
 import { formatDateTime } from '../lib/format.ts'
 import { downloadFile } from '../lib/download.ts'
 import { STAGE_NAMES } from '../constants.ts'
+import { renderMessageContent } from './MessageContent.tsx'
 
 /** 可折叠面板 */
 function CollapsibleSection({ title, children, defaultOpen = false }: {
@@ -199,7 +200,7 @@ export function ReportViewer() {
                   <span className="message-role">{msg.agent_role || msg.role}</span>
                   <span className="message-time">{fmtTime(msg.created_at || msg.ts || '')}</span>
                 </div>
-                <div className="message-content">{msg.content}</div>
+                <div className="message-content">{renderMessageContent(msg.content)}</div>
               </div>
             ))}
           </div>
