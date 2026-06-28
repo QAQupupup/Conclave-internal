@@ -1,13 +1,21 @@
 # Markdown 按标题切块：以 # / ## 切分，保留 char_start/char_end
+# Chunk 支持结构化扩展：metadata / claims / relations，为图 RAG 铺路
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
 class Chunk:
-    """单个文档块"""
+    """单个文档块
+
+    结构化字段（为图 RAG 铺路）：
+    - metadata: 标题层级、文档来源、创建时间等
+    - claims: 从该 chunk 提取的声明（预留，迭代三填充）
+    - relations: 与其他 chunk 的关系（预留，迭代三填充）
+    """
     chunk_id: str
     doc_id: str
     section: str  # 标题文本（不含 # 号）
@@ -15,6 +23,9 @@ class Chunk:
     char_start: int
     char_end: int
     source: str = ""  # doc:section 引用串
+    metadata: dict[str, Any] = field(default_factory=dict)
+    claims: list[str] = field(default_factory=list)
+    relations: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -25,7 +36,19 @@ class Chunk:
             "char_start": self.char_start,
             "char_end": self.char_end,
             "source": self.source,
+            "metadata": self.metadata,
+            "claims": self.claims,
+            "relations": self.relations,
         }
+
+    def summary(self, max_len: int = 200) -> str:
+        """生成摘要：取前 max_len 字符 + 省略号，用于 prompt 注入。
+
+        配合惰性读取：prompt 只注入摘要，需要全文时按 char_range 展开。
+        """
+        if len(self.text) <= max_len:
+            return self.text
+        return self.text[:max_len].rstrip() + "…"
 
 
 # 匹配 markdown 标题行（# 或 ## 开头）
@@ -92,6 +115,11 @@ def chunk_markdown(text: str, doc_id: str) -> list[Chunk]:
                     char_start=start,
                     char_end=end,
                     source=f"{doc_id}:{section}",
+                    metadata={
+                        "heading_level": level,
+                        "section_index": idx,
+                        "doc_id": doc_id,
+                    },
                 )
             )
     return chunks

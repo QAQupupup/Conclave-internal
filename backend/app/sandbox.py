@@ -48,6 +48,13 @@ SANDBOX_IMAGE = os.environ.get(
     "docker.m.daocloud.io/library/python:3.12-slim",
 )
 
+# 数据科学镜像：预装 pandas/numpy/matplotlib/sklearn/seaborn/scipy
+# 供 code_analysis / tested_system 等需要数据分析库的模板按需使用
+SANDBOX_IMAGE_DATASCIENCE = os.environ.get(
+    "CONCLAVE_SANDBOX_IMAGE_DATASCIENCE",
+    "conclave-python-datascience:latest",
+)
+
 # 备用镜像列表（主镜像拉取失败时依次尝试）
 FALLBACK_IMAGES = [
     "docker.m.daocloud.io/library/python:3.12-slim",
@@ -70,6 +77,8 @@ DOCKER_SOCKET = os.environ.get("DOCKER_HOST", "")
 # 缓存
 _docker_available: bool | None = None
 _resolved_image: str | None = None
+# 已解析的按需镜像缓存（image_name -> resolved_name），数据科学等镜像走此缓存
+_resolved_named_images: dict[str, str] = {}
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -181,6 +190,53 @@ async def _resolve_image() -> str | None:
     return None
 
 
+async def _ensure_image_available(image: str) -> bool:
+    """检查指定镜像本地是否就绪，不存在则尝试拉取"""
+    cmd = _shell_cmd(["docker", "image", "inspect", image])
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate()
+    if proc.returncode == 0:
+        return True
+
+    log_bus.info(f"本地无镜像 {image}，尝试拉取", logger="sandbox")
+    cmd = _shell_cmd(["docker", "pull", image])
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        await asyncio.wait_for(proc.communicate(), timeout=300)
+    except asyncio.TimeoutError:
+        log_bus.error(f"镜像拉取超时: {image}", logger="sandbox")
+        return False
+    return proc.returncode == 0
+
+
+async def _resolve_named_image(image: str) -> str | None:
+    """解析指定的沙箱镜像（如数据科学镜像），本地无则拉取，带缓存
+
+    与标准镜像不同：按需镜像无 FALLBACK（缺失数据科学库时标准镜像无法替代），
+    解析失败返回 None，由调用方降级为宿主机执行。
+    """
+    cached = _resolved_named_images.get(image)
+    if cached is not None:
+        return cached
+    if await _ensure_image_available(image):
+        _resolved_named_images[image] = image
+        log_bus.info(f"沙箱镜像就绪: {image}", logger="sandbox")
+        return image
+    log_bus.error(
+        f"沙箱镜像不可用: {image}，将降级为宿主机执行",
+        logger="sandbox",
+    )
+    return None
+
+
 # ---- 安全选项构建 ----
 
 
@@ -212,20 +268,28 @@ async def _run_in_container(
     command: str | None,
     workspace_root: Path,
     timeout: int,
+    image: str | None = None,
 ) -> ExecResult:
-    """在 Docker 容器中执行 Python 代码或 Shell 命令"""
-    image = await _resolve_image()
+    """在 Docker 容器中执行 Python 代码或 Shell 命令
+
+    image: 指定沙箱镜像（如 SANDBOX_IMAGE_DATASCIENCE）；
+           None 时使用标准镜像 SANDBOX_IMAGE（向后兼容）。
+    """
     if image is None:
+        resolved = await _resolve_image()
+    else:
+        resolved = await _resolve_named_image(image)
+    if resolved is None:
         raise RuntimeError("无可用沙箱镜像")
 
     security_args = _build_security_args(workspace_root)
 
     if code is not None:
-        all_args = ["docker", "run", *security_args, image, "python", "-"]
+        all_args = ["docker", "run", *security_args, resolved, "python", "-"]
         stdin_data = code.encode("utf-8")
     else:
         assert command is not None
-        all_args = ["docker", "run", *security_args, image, "sh", "-c", command]
+        all_args = ["docker", "run", *security_args, resolved, "sh", "-c", command]
         stdin_data = None
 
     # 用 shell 模式执行，兼容 Windows(docker.cmd) 和 Linux(docker)
@@ -252,7 +316,7 @@ async def _run_in_container(
         stdout=stdout.decode("utf-8", errors="replace"),
         stderr=stderr.decode("utf-8", errors="replace"),
         sandboxed=True,
-        image=image,
+        image=resolved,
     )
 
 
@@ -303,14 +367,20 @@ async def _run_on_host(
 # ---- 公共 API ----
 
 
-async def run_python(code: str, workspace_root: Path, timeout: int = 15) -> ExecResult:
-    """执行 Python 代码（沙箱优先，降级宿主机）"""
+async def run_python(
+    code: str, workspace_root: Path, timeout: int = 15, image: str | None = None
+) -> ExecResult:
+    """执行 Python 代码（沙箱优先，降级宿主机）
+
+    image: 可选，指定沙箱镜像（如 SANDBOX_IMAGE_DATASCIENCE）；
+           默认 None 使用标准镜像 SANDBOX_IMAGE。
+    """
     if SANDBOX_MODE == "host":
         return await _run_on_host(code, None, workspace_root, timeout)
 
     if SANDBOX_MODE == "docker" or await _check_docker():
         try:
-            return await _run_in_container(code, None, workspace_root, timeout)
+            return await _run_in_container(code, None, workspace_root, timeout, image=image)
         except RuntimeError:
             if SANDBOX_MODE == "docker":
                 raise
@@ -324,14 +394,20 @@ async def run_python(code: str, workspace_root: Path, timeout: int = 15) -> Exec
     return result
 
 
-async def run_command(command: str, workspace_root: Path, timeout: int = 30) -> ExecResult:
-    """执行 Shell 命令（沙箱优先，降级宿主机）"""
+async def run_command(
+    command: str, workspace_root: Path, timeout: int = 30, image: str | None = None
+) -> ExecResult:
+    """执行 Shell 命令（沙箱优先，降级宿主机）
+
+    image: 可选，指定沙箱镜像（如 SANDBOX_IMAGE_DATASCIENCE）；
+           默认 None 使用标准镜像 SANDBOX_IMAGE。
+    """
     if SANDBOX_MODE == "host":
         return await _run_on_host(None, command, workspace_root, timeout)
 
     if SANDBOX_MODE == "docker" or await _check_docker():
         try:
-            return await _run_in_container(None, command, workspace_root, timeout)
+            return await _run_in_container(None, command, workspace_root, timeout, image=image)
         except RuntimeError:
             if SANDBOX_MODE == "docker":
                 raise

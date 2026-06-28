@@ -14,8 +14,13 @@ def retrieve(
     meeting_id: str,
     query: str,
     top_k: int = 5,
+    summary_max: int = 200,
 ) -> list[dict[str, Any]]:
-    """检索：返回 top_k 个 chunk 的字典视图"""
+    """检索：返回 top_k 个 chunk 的字典视图（含摘要，可按需展开）
+
+    惰性读取策略：默认只返回 summary（前 summary_max 字符 + 省略号），
+    完整文本通过 expand_context 按需获取，减少 prompt token 消耗。
+    """
     store = get_store(meeting_id)
     if not store.all_chunks():
         return []
@@ -25,6 +30,10 @@ def retrieve(
     for chunk, score in candidates:
         d = chunk.to_dict()
         d["score"] = round(score, 4)
+        # 惰性读取：返回摘要 + 完整长度，调用方按需 expand
+        d["summary"] = chunk.summary(max_len=summary_max)
+        d["full_length"] = len(chunk.text)
+        d["expandable"] = len(chunk.text) > summary_max
         out.append(d)
     return out
 

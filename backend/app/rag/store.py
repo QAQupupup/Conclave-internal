@@ -84,11 +84,16 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 class InMemoryVectorStore:
-    """内存向量库：存 chunk + 向量，余弦相似度检索"""
+    """内存向量库：存 chunk + 向量，余弦相似度检索
+
+    支持原文缓存和惰性展开：存文档原文，按 char_range 按需展开上下文。
+    """
 
     def __init__(self, embedding: Embedding | None = None) -> None:
         self._embedding = embedding or _build_embedding()
         self._store: dict[str, tuple[Chunk, list[float]]] = {}
+        # 原文缓存：doc_id → 原始文本，用于惰性展开
+        self._raw_texts: dict[str, str] = {}
 
     def add_chunks(self, chunks: list[Chunk]) -> None:
         """切块入库并计算向量（批量嵌入提升效率）"""
@@ -98,6 +103,31 @@ class InMemoryVectorStore:
         vecs = self._embedding.embed_batch(texts)
         for chunk, vec in zip(chunks, vecs):
             self._store[chunk.chunk_id] = (chunk, vec)
+            # 缓存原文用于惰性展开
+            if chunk.doc_id not in self._raw_texts:
+                self._raw_texts[chunk.doc_id] = chunk.text
+
+    def store_raw_text(self, doc_id: str, full_text: str) -> None:
+        """缓存文档完整原文，用于跨 chunk 惰性展开"""
+        self._raw_texts[doc_id] = full_text
+
+    def expand_context(
+        self,
+        chunk: Chunk,
+        before: int = 0,
+        after: int = 0,
+    ) -> str:
+        """惰性展开：从原文缓存按 char_range 扩展上下文
+
+        - before/after: 向前/向后扩展的字符数
+        - 返回扩展后的文本；无原文缓存时回退到 chunk.text
+        """
+        raw = self._raw_texts.get(chunk.doc_id)
+        if raw is None:
+            return chunk.text
+        start = max(0, chunk.char_start - before)
+        end = min(len(raw), chunk.char_end + after)
+        return raw[start:end]
 
     def search(self, query: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
         if not self._store:

@@ -777,14 +777,17 @@ async def produce_node(state: MeetingState) -> MeetingState:
         code_data = result.get("code_analysis", {})
         code = code_data.get("code", "")
         if code:
-            from app.sandbox import run_python
+            from app.sandbox import run_python, SANDBOX_IMAGE_DATASCIENCE
             from pathlib import Path
             import tempfile
             ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
             ws_root = Path(ws_env) if ws_env and Path(ws_env).exists() else Path(tempfile.mkdtemp())
             ws_root.mkdir(parents=True, exist_ok=True)
             try:
-                exec_result = await run_python(code, ws_root, timeout=30)
+                # code_analysis 模板更可能需要数据分析库，使用数据科学镜像
+                exec_result = await run_python(
+                    code, ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE
+                )
                 state.artifact["code_analysis"] = code_data
                 state.artifact["execution"] = exec_result.to_dict()
             except Exception as e:
@@ -798,7 +801,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
         main_code = ts_data.get("main_code", "")
         test_code = ts_data.get("test_code", "")
         if test_code:
-            from app.sandbox import run_command
+            from app.sandbox import run_command, SANDBOX_IMAGE_DATASCIENCE
             from pathlib import Path
             import tempfile
             ws_root = Path(os.environ.get("CONCLAVE_WORKSPACE_DIR", ""))
@@ -812,9 +815,10 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 main_file = ws_root / "main_generated.py"
                 if main_code:
                     main_file.write_text(main_code, encoding="utf-8")
+                # tested_system 模板更可能需要数据分析库，使用数据科学镜像
                 exec_result = await run_command(
                     "python -m pytest test_generated.py -v",
-                    ws_root, timeout=30
+                    ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE
                 )
                 state.artifact["tested_system"] = ts_data
                 state.artifact["execution"] = exec_result.to_dict()

@@ -36,6 +36,8 @@ async def upload_document(meeting_id: str, file: UploadFile = File(...)) -> dict
     chunks = chunk_markdown(content, doc_id)
     store = get_store(meeting_id)
     store.add_chunks(chunks)
+    # 缓存完整原文，支持跨 chunk 惰性展开
+    store.store_raw_text(doc_id, content)
 
     # 记录文档摘要供 clarify 阶段使用
     summary = f"{doc_id}（{len(chunks)} 块）"
