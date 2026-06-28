@@ -631,58 +631,19 @@ code {
   color: var(--text);
   font-family: var(--font-sans);
 }
-/* JSON 语法高亮：键名、字符串值、数字、布尔、null、标点 各异色 */
-.message-content.is-json,
-.message-content-full.is-json {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--text);
-}
-.message-content .json-key,
-.message-content-full .json-key {
-  color: #6aa3ff;
-  font-weight: 600;
-}
-.message-content .json-string,
-.message-content-full .json-string {
-  color: #b4e3a3;
-}
-.message-content .json-number,
-.message-content-full .json-number {
-  color: #f0a36b;
-}
-.message-content .json-boolean,
-.message-content-full .json-boolean {
-  color: #d6a4ff;
-  font-weight: 600;
-}
-.message-content .json-null,
-.message-content-full .json-null {
-  color: #f56c6c;
-  font-style: italic;
-}
-.message-content .json-punct,
-.message-content-full .json-punct {
-  color: var(--text-muted);
-}
-/* FocusMode 中全屏展示的完整消息内容 */
+/* FocusMode 中全屏展示的完整消息内容（保持与普通消息一致的简洁样式） */
 .message-content-full {
   display: block;
   width: 100%;
   max-height: calc(100vh - 220px);
   overflow: auto;
   margin: 0;
-  padding: 20px 24px;
-  white-space: pre;
-  word-break: normal;
-  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--text);
-  font-family: var(--font-mono);
-  background: rgba(15, 20, 25, 0.45);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-soft);
+  font-family: var(--font-sans);
 }
 /* 消息操作工具条 */
 .message-actions {
