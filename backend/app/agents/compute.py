@@ -16,6 +16,7 @@ from app.agents.prompts import (
     MODERATOR_CLARIFY, ARCHITECT_INTRA, ENGINEER_INTRA,
     CROSS_TEAM, EVIDENCE_CHECK, ARBITRATE, PRODUCE, render,
 )
+from app.agents.role_templates import ROLE_LIBRARY
 from app.models import Role
 
 # IntraTeam 阶段的角色 → 模板注册表（Registry 模式）
@@ -25,6 +26,29 @@ _INTRA_TEAM_TEMPLATES: dict[Role, str] = {
     Role.ENGINEER: ENGINEER_INTRA,
     Role.PRODUCT_ARCHITECT: ARCHITECT_INTRA,
 }
+
+# Role 枚举值 → ROLE_LIBRARY key 映射
+_ROLE_KEY_MAP: dict[str, str] = {
+    "moderator": "moderator",
+    "product_architect": "product_architect",
+    "engineer": "engineer",
+    "security_expert": "security_expert",
+    "data_engineer": "data_engineer",
+    "ux_designer": "ux_designer",
+}
+
+
+def _get_role_persona(role_value: str) -> str:
+    """从 ROLE_LIBRARY 取角色画像文本（单一数据源）
+
+    角色画像（视角+决策偏置）只在 role_templates.py 维护一份，
+    prompts.py 模板通过 {role_persona} 占位符动态注入。
+    """
+    key = _ROLE_KEY_MAP.get(role_value, role_value)
+    template = ROLE_LIBRARY.get(key)
+    if template is not None:
+        return template.prompt_template
+    return f"你是{role_value}专家。"
 
 
 def _get_intra_template(role: Role) -> str:
@@ -192,7 +216,8 @@ def build_clarify_prompt(topic: str, doc_summaries: list[str], anchor: str = "")
 def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: str = "") -> ThinkRequest:
     """构造 intra_team 阶段的思考请求"""
     template = _get_intra_template(role)
-    prompt = render(template, clarified_topic=clarified_topic, stance=stance)
+    persona = _get_role_persona(role.value)
+    prompt = render(template, role_persona=persona, clarified_topic=clarified_topic, stance=stance)
     prompt = _inject_profile(prompt, role.value)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
@@ -233,7 +258,8 @@ def build_intra_react_prompt(
             + "\n".join(parts)
             + "\n\n请基于上述参考，结合你的专业视角发表论点。"
         )
-    prompt = render(template, clarified_topic=clarified_topic, stance=stance)
+    prompt = render(template, role_persona=_get_role_persona(role.value),
+                    clarified_topic=clarified_topic, stance=stance)
     # 在模板渲染后注入前序结论
     if prior_summary:
         prompt = prompt + prior_summary
