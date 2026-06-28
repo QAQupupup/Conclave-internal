@@ -1870,11 +1870,13 @@ code {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  position: relative;
 }
 
 .app-main {
   flex: 1;
   overflow: auto;
+  min-width: 0;
 }
 
 .meeting-sidebar {
@@ -1887,6 +1889,91 @@ code {
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
+  position: relative;
+  transition: width 0.22s ease, min-width 0.22s ease;
+}
+
+/* 折叠按钮：浮在会议列表右边缘的小竖向箭头 */
+.sidebar-collapse-btn {
+  position: absolute;
+  top: 50%;
+  left: 260px;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 48px;
+  padding: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.sidebar-collapse-btn:hover {
+  background: var(--bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 收起后的迷你侧边栏：宽度极窄，仅有展开按钮 + 当前选中点 */
+.meeting-sidebar-collapsed {
+  width: 28px;
+  min-width: 28px;
+  height: 100vh;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 18px;
+  flex-shrink: 0;
+}
+.collapsed-expand-btn {
+  width: 24px;
+  height: 80px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.collapsed-expand-btn:hover {
+  background: var(--bg-elev);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.collapsed-icon {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 600;
+}
+.collapsed-label {
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 1px;
+  text-align: center;
+  color: inherit;
+}
+.collapsed-dot {
+  margin-top: 10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft, transparent);
 }
 
 .sidebar-header {

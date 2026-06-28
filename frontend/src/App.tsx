@@ -1,6 +1,6 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧 ChatPanel + 右侧三块
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { StageIndicator } from './components/StageIndicator.tsx'
 import { MeetingControls } from './components/MeetingControls.tsx'
@@ -130,14 +130,64 @@ function WorkspaceView() {
   )
 }
 
+/** 收起后的迷你侧边栏：只展示一个竖向标签 + 展开按钮，节省横向空间让用户专注内容 */
+function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
+  const { meetingId } = useMeeting()
+  return (
+    <div className="meeting-sidebar-collapsed">
+      <button
+        type="button"
+        className="collapsed-expand-btn"
+        onClick={onExpand}
+        title="展开会议列表"
+        aria-label="展开会议列表"
+      >
+        <span className="collapsed-icon">›</span>
+        <span className="collapsed-label">会<br />议</span>
+      </button>
+      {meetingId && <div className="collapsed-dot" title="当前会议已选中" />}
+    </div>
+  )
+}
+
 /** 根据是否已选会议切换视图 */
 function AppShell() {
   const { meetingId } = useMeeting()
   const [tab, setTab] = useState<ViewTab>('meeting')
+  // 左侧会议列表侧边栏的折叠/展开状态（持久化到 localStorage）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('conclave-sidebar-collapsed') === '1'
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('conclave-sidebar-collapsed', sidebarCollapsed ? '1' : '0')
+    } catch {
+      /* noop */
+    }
+  }, [sidebarCollapsed])
 
   return (
-    <div className="app-shell">
-      <MeetingSidebar />
+    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+      {sidebarCollapsed ? (
+        <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
+      ) : (
+        <>
+          <MeetingSidebar />
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={() => setSidebarCollapsed(true)}
+            title="收起会议列表（专注内容）"
+            aria-label="收起会议列表"
+          >
+            ‹
+          </button>
+        </>
+      )}
       <div className="app-main">
         {!meetingId ? (
           <CreateMeeting />
