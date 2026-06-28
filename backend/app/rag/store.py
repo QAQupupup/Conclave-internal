@@ -147,6 +147,103 @@ class InMemoryVectorStore:
         self._store.clear()
 
 
+class QdrantVectorStore(InMemoryVectorStore):
+    """Qdrant 向量库适配器（适配器模式）
+
+    继承 InMemoryVectorStore 保持接口一致，add_chunks/search/all_chunks/clear 委托 Qdrant。
+    原文缓存和惰性展开仍用内存（Qdrant 存向量+payload，不存原文）。
+    Qdrant 不可用时自动降级到内存（_build_store 已处理）。
+    """
+
+    def __init__(self, url: str, embedding: Embedding | None = None) -> None:
+        super().__init__(embedding)
+        self._url = url.rstrip("/")
+        self._collection = "conclave_chunks"
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from qdrant_client import QdrantClient
+            self._client = QdrantClient(url=self._url)
+        return self._client
+
+    def ensure_collection(self) -> None:
+        """确保 collection 存在，不存在则创建"""
+        from qdrant_client.models import Distance, VectorParams
+        client = self._get_client()
+        collections = client.get_collections().collections
+        names = [c.name for c in collections]
+        if self._collection not in names:
+            # 维度从 embedding 获取
+            dim = len(self._embedding.embed("test"))
+            client.create_collection(
+                collection_name=self._collection,
+                vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+            )
+
+    def add_chunks(self, chunks: list[Chunk]) -> None:
+        """入库：计算向量 + 写 Qdrant"""
+        if not chunks:
+            return
+        from qdrant_client.models import PointStruct
+        texts = [c.text for c in chunks]
+        vecs = self._embedding.embed_batch(texts)
+        client = self._get_client()
+        points = []
+        for chunk, vec in zip(chunks, vecs):
+            # 内存也存一份（惰性展开用）
+            self._store[chunk.chunk_id] = (chunk, vec)
+            if chunk.doc_id not in self._raw_texts:
+                self._raw_texts[chunk.doc_id] = chunk.text
+            # Qdrant 存 payload
+            points.append(PointStruct(
+                id=hash(chunk.chunk_id) % (2**63),
+                vector=vec,
+                payload=chunk.to_dict(),
+            ))
+        client.upsert(collection_name=self._collection, points=points)
+
+    def search(self, query: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
+        """检索：Qdrant 向量搜索，回退内存"""
+        if not self._store:
+            return []
+        try:
+            client = self._get_client()
+            qvec = self._embedding.embed(query)
+            results = client.search(
+                collection_name=self._collection,
+                query_vector=qvec,
+                limit=top_k,
+            )
+            out: list[tuple[Chunk, float]] = []
+            for r in results:
+                payload = r.payload or {}
+                chunk = Chunk(
+                    chunk_id=payload.get("chunk_id", ""),
+                    doc_id=payload.get("doc_id", ""),
+                    section=payload.get("section", ""),
+                    text=payload.get("text", ""),
+                    char_start=payload.get("char_start", 0),
+                    char_end=payload.get("char_end", 0),
+                    source=payload.get("source", ""),
+                )
+                out.append((chunk, r.score or 0.0))
+            return out
+        except Exception:
+            # Qdrant 查询失败回退内存搜索
+            return super().search(query, top_k)
+
+    def clear(self) -> None:
+        """清空：删 Qdrant collection + 内存"""
+        try:
+            client = self._get_client()
+            client.delete_collection(collection_name=self._collection)
+        except Exception:
+            pass
+        self._store.clear()
+        self._raw_texts.clear()
+
+
 def _build_embedding() -> Embedding:
     """按配置构建嵌入器：有 key 用真实 bge-m3，否则用 stub"""
     if settings.use_real_embed:
@@ -160,5 +257,18 @@ _stores: dict[str, InMemoryVectorStore] = {}
 
 def get_store(meeting_id: str) -> InMemoryVectorStore:
     if meeting_id not in _stores:
-        _stores[meeting_id] = InMemoryVectorStore()
+        _stores[meeting_id] = _build_store()
     return _stores[meeting_id]
+
+
+def _build_store() -> InMemoryVectorStore:
+    """按配置构建向量库：优先 Qdrant，回退内存"""
+    qdrant_url = getattr(settings, "qdrant_url", "") or ""
+    if qdrant_url:
+        try:
+            store = QdrantVectorStore(url=qdrant_url, embedding=_build_embedding())
+            store.ensure_collection()
+            return store
+        except Exception:
+            pass  # Qdrant 不可用时回退内存
+    return InMemoryVectorStore(embedding=_build_embedding())

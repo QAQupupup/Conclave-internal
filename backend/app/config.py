@@ -56,6 +56,10 @@ class Settings:
     # StubEmbedding 伪向量维度（仅 stub 模式用）
     embed_dim: int = int(_env("CONCLAVE_EMBED_DIM", "64"))
 
+    # Qdrant 向量库 URL（为空时用内存伪向量）
+    # Docker 内用容器名访问，本机开发用 localhost
+    qdrant_url: str = _env("CONCLAVE_QDRANT_URL", "http://qdrant:6333")
+
     # 三层记忆开关：CONCLAVE_MEMORY_DISABLED 环境变量存在（非空）时禁用
     memory_enabled: bool = _env("CONCLAVE_MEMORY_DISABLED", "") == ""
 
