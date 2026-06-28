@@ -182,14 +182,24 @@ PRODUCE_BUSINESS_REPORT = """[阶段: Produce]
 # ---------- 产出阶段：代码分析 ----------
 PRODUCE_CODE_ANALYSIS = """[阶段: Produce]
 裁决结果：{decision_record}
-任务：基于讨论结论，生成 Python 数据分析代码。代码将在沙箱中执行，结果会回填到报告中。
+任务：基于讨论结论，生成 PRD 文档 + OpenAPI 摘要 + Python 数据分析代码。代码将在沙箱中执行，结果会回填到报告中。
 
 输出 JSON:
 {{
+  "prd": {{
+    "title": "...",
+    "goal": "目标说明",
+    "scope": "范围说明",
+    "assumptions": ["假设1"],
+    "constraints": ["约束1"],
+    "api_endpoints": ["GET /api/..."],
+    "open_questions": ["待解决问题"]
+  }},
+  "openapi": "openapi: 3.0.0\\ninfo: ...",
   "code_analysis": {{
     "title": "...",
     "description": "分析目的说明",
-    "code": "完整的 Python 代码（可直接执行）",
+    "code": "完整的 Python 代码（可直接执行，可用 pandas/numpy/matplotlib）",
     "expected_output": "预期输出说明"
   }}
 }}"""
@@ -197,10 +207,20 @@ PRODUCE_CODE_ANALYSIS = """[阶段: Produce]
 # ---------- 产出阶段：测试系统 ----------
 PRODUCE_TESTED_SYSTEM = """[阶段: Produce]
 裁决结果：{decision_record}
-任务：基于讨论结论，生成完整的 Python 代码和对应的 pytest 测试。代码将在沙箱中执行测试。
+任务：基于讨论结论，生成 PRD 文档 + OpenAPI 摘要 + 完整的 Python 代码和对应的 pytest 测试。代码将在沙箱中执行测试。
 
 输出 JSON:
 {{
+  "prd": {{
+    "title": "...",
+    "goal": "目标说明",
+    "scope": "范围说明",
+    "assumptions": ["假设1"],
+    "constraints": ["约束1"],
+    "api_endpoints": ["GET /api/..."],
+    "open_questions": ["待解决问题"]
+  }},
+  "openapi": "openapi: 3.0.0\\ninfo: ...",
   "tested_system": {{
     "title": "...",
     "description": "系统说明",
@@ -213,7 +233,7 @@ PRODUCE_TESTED_SYSTEM = """[阶段: Produce]
 # ---------- 产出阶段：可部署服务 ----------
 PRODUCE_DEPLOYABLE_SERVICE = """[阶段: Produce]
 裁决结果：{decision_record}
-任务：基于讨论结论，生成可直接部署的完整服务。包含应用代码、Dockerfile 和 docker-compose.yml。
+任务：基于讨论结论，生成 PRD 文档 + OpenAPI 摘要 + 可直接部署的完整服务。包含应用代码、Dockerfile 和 docker-compose.yml。
 要求：
 1. 应用代码应是一个完整的可运行 Web 服务（如 FastAPI/Flask 应用）
 2. Dockerfile 基于 python:3.12-slim，安装依赖，暴露端口
@@ -222,6 +242,16 @@ PRODUCE_DEPLOYABLE_SERVICE = """[阶段: Produce]
 
 输出 JSON:
 {{
+  "prd": {{
+    "title": "...",
+    "goal": "目标说明",
+    "scope": "范围说明",
+    "assumptions": ["假设1"],
+    "constraints": ["约束1"],
+    "api_endpoints": ["GET /api/..."],
+    "open_questions": ["待解决问题"]
+  }},
+  "openapi": "openapi: 3.0.0\\ninfo: ...",
   "deployable_service": {{
     "title": "...",
     "description": "服务说明",

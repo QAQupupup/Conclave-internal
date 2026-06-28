@@ -3,7 +3,7 @@
 # 用于 RealLLM.complete() 的解析层校验（三明治模式）。
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -126,10 +126,22 @@ class PRDResult(BaseModel):
 
 
 class ProduceResult(BaseModel):
-    """Produce 阶段输出：PRD + OpenAPI"""
+    """Produce 阶段输出：PRD + OpenAPI（可选 code_analysis/tested_system/deployable_service）
+
+    根据 deliverable_type 不同，LLM 返回的字段不同：
+    - prd_openapi: prd + openapi
+    - code_analysis: prd + openapi + code_analysis
+    - tested_system: prd + openapi + tested_system
+    - deployable_service: prd + openapi + deployable_service
+    所有扩展字段可选，避免校验丢弃 LLM 输出。
+    """
     model_config = _SCHEMA_CONFIG
     prd: PRDResult
-    openapi: str
+    openapi: str = ""
+    # 可选产出字段（根据 deliverable_type 动态填充）
+    code_analysis: dict[str, Any] = Field(default_factory=dict)
+    tested_system: dict[str, Any] = Field(default_factory=dict)
+    deployable_service: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------- schema_hint -> 模型映射 ----------
@@ -141,4 +153,7 @@ SCHEMA_MAP: dict[str, type[BaseModel]] = {
     "evidence_check": EvidenceCheckResult,
     "arbitrate": ArbitrateResult,
     "produce": ProduceResult,
+    "produce_code_analysis": ProduceResult,
+    "produce_tested_system": ProduceResult,
+    "produce_deployable_service": ProduceResult,
 }
