@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { listMeetings } from '../lib/api.ts'
 import { useMeeting } from '../store/MeetingContext.tsx'
+import { STAGE_LABELS, getMeetingStatusInfo } from '../constants.ts'
 
 interface MeetingListItem {
   meeting_id: string
@@ -41,11 +42,8 @@ export function MeetingSidebar() {
   }, [])
 
   const statusLabel = (status: string, stage: string) => {
-    if (status === 'done') return { text: '已完成', cls: 'done' }
-    if (status === 'running') return { text: `${stage} 运行中`, cls: 'running' }
-    if (status === 'paused') return { text: '已暂停', cls: 'paused' }
-    if (status === 'aborted') return { text: '已终止', cls: 'aborted' }
-    return { text: stage, cls: '' }
+    const stageLabel = STAGE_LABELS[stage as keyof typeof STAGE_LABELS] ?? stage
+    return getMeetingStatusInfo(status, stageLabel)
   }
 
   return (

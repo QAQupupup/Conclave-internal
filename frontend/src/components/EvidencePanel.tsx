@@ -2,6 +2,10 @@
 // conflict → evidence → verdict 三段式
 import { useMeeting } from '../store/MeetingContext.tsx'
 import type { Decision, EvidenceSet } from '../types/events.ts'
+import {
+  EVIDENCE_SOURCE_LABEL as SOURCE_LABEL,
+  classifyEvidenceSource as sourceType,
+} from '../constants.ts'
 
 interface EvidencePanelProps {
   selectedConflictId: string | null
@@ -21,21 +25,7 @@ const SUPPORTS_LABEL: Record<string, string> = {
   irrelevant: '无关',
 }
 
-// 证据来源分类着色
-function sourceType(source: string | undefined): 'doc' | 'web' | 'common' | 'unknown' {
-  if (!source) return 'unknown'
-  if (source.startsWith('doc:')) return 'doc'
-  if (source.startsWith('web:')) return 'web'
-  if (source.startsWith('common_knowledge')) return 'common'
-  return 'unknown'
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  doc: '文档证据',
-  web: '网络检索',
-  common: '通用知识',
-  unknown: '未知来源',
-}
+// 证据来源分类着色（统一在 constants.ts 实现，保持单一数据源）
 
 export function EvidencePanel({ selectedConflictId, onSelectConflict }: EvidencePanelProps) {
   const { store } = useMeeting()

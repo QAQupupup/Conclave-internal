@@ -6,6 +6,7 @@ import { useMeeting } from '../store/MeetingContext.tsx'
 import { LogicGraph } from './LogicGraph.tsx'
 import { formatDateTime } from '../lib/format.ts'
 import { downloadFile } from '../lib/download.ts'
+import { STAGE_NAMES } from '../constants.ts'
 
 /** 可折叠面板 */
 function CollapsibleSection({ title, children, defaultOpen = false }: {
@@ -97,15 +98,7 @@ function reportToMarkdown(state: any): string {
   return md
 }
 
-/** 阶段中文标签 */
-const STAGE_NAMES: Record<string, string> = {
-  clarify: '议题澄清',
-  intra_team: '团队内部讨论',
-  cross_team: '跨队辩论',
-  evidence_check: '证据对照',
-  arbitrate: '仲裁裁决',
-  produce: '产出阶段',
-}
+/** 阶段中文标签：直接复用 constants.ts 的 STAGE_NAMES（= STAGE_LABELS），保持单一数据源 */
 
 export function ReportViewer() {
   const { store } = useMeeting()
@@ -152,7 +145,7 @@ export function ReportViewer() {
           {state.confidence_flags &&
             Object.entries(state.confidence_flags).map(([stage, conf]) => (
               <div key={stage} className="summary-row">
-                <span className="summary-stage">{STAGE_NAMES[stage] || stage}</span>
+                <span className="summary-stage">{STAGE_NAMES[stage as keyof typeof STAGE_NAMES] || stage}</span>
                 <span className={`summary-conf ${conf}`}>{conf}</span>
               </div>
             ))}
@@ -198,7 +191,7 @@ export function ReportViewer() {
 
       {/* 各阶段发言 */}
       {Object.entries(stageMessages).map(([stage, msgs]) => (
-        <CollapsibleSection key={stage} title={STAGE_NAMES[stage] || stage}>
+        <CollapsibleSection key={stage} title={STAGE_NAMES[stage as keyof typeof STAGE_NAMES] || stage}>
           <div className="report-messages">
             {msgs.map((msg: any, i: number) => (
               <div key={i} className="report-message">

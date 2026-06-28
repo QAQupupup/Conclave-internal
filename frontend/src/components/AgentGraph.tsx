@@ -8,6 +8,7 @@ import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { ROLE_LABELS } from '../types/events.ts'
 import type { MeetingState, Role } from '../types/events.ts'
+import { evidenceSourceLabel as sourceLabel } from '../constants.ts'
 import type { ForceGraphData, GraphLink, GraphNode } from '../types/graph.ts'
 import { FocusMode } from './FocusMode.tsx'
 
@@ -92,13 +93,6 @@ function tooltipText(n: SimNode): string {
   return n.evidenceSource
     ? `证据\n来源：${n.evidenceSource}\n类型：${sourceLabel(n.evidenceSource)}`
     : `证据`
-}
-
-function sourceLabel(src: string): string {
-  if (src.startsWith('doc:')) return '文档证据'
-  if (src.startsWith('web:')) return '网络检索'
-  if (src.startsWith('common_knowledge')) return '通用知识'
-  return '证据'
 }
 
 function buildGraphData(meeting: MeetingState): { data: ForceGraphData; borrowedSet: Set<string> } {
