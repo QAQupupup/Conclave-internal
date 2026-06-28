@@ -624,6 +624,37 @@ def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
     return attachments
 
 
+async def _collect_evidence(meeting_id: str, conflict: dict) -> list[dict]:
+    """为单个冲突检索证据（RAG + Web Search + 通用知识降级）
+
+    统一检索流程：cross_team 预检索和 evidence_check 实时检索共用此函数（DRY）。
+    """
+    summary = conflict.get("summary", str(conflict))
+    chunks = retrieve_for_conflict(meeting_id, summary, top_k=5)
+    evidence_chunks = [
+        {
+            "evidence_id": f"ev-{i}",
+            "quote": ck.get("text", "")[:200],
+            "source": ck.get("source", "doc:unknown"),
+            "char_range": [ck.get("char_start", 0), ck.get("char_end", 0)],
+        }
+        for i, ck in enumerate(chunks)
+    ]
+    if len(evidence_chunks) < 3:
+        web_search = get_web_search()
+        web_results = await web_search.search(summary, top_k=3)
+        for i, wr in enumerate(web_results):
+            evidence_chunks.append({
+                "evidence_id": f"web-{i}",
+                "quote": wr.get("quote", "")[:200],
+                "source": wr.get("source", "web:unknown"),
+                "char_range": [0, 0],
+            })
+    if not evidence_chunks:
+        evidence_chunks = _make_common_knowledge_evidence(conflict)
+    return evidence_chunks
+
+
 async def _prefetch_evidence(state: MeetingState, conflicts: list[dict]) -> dict[str, list[dict]]:
     """预检索所有冲突的证据（流水线优化：与借调发言并行）
 
@@ -631,30 +662,8 @@ async def _prefetch_evidence(state: MeetingState, conflicts: list[dict]) -> dict
     """
     async def _retrieve_one(conflict: dict) -> tuple[str, list[dict]]:
         cid = conflict.get("id", "c0")
-        summary = conflict.get("summary", str(conflict))
-        chunks = retrieve_for_conflict(state.meeting_id, summary, top_k=5)
-        evidence_chunks = [
-            {
-                "evidence_id": f"ev-{i}",
-                "quote": ck.get("text", "")[:200],
-                "source": ck.get("source", "doc:unknown"),
-                "char_range": [ck.get("char_start", 0), ck.get("char_end", 0)],
-            }
-            for i, ck in enumerate(chunks)
-        ]
-        if len(evidence_chunks) < 3:
-            web_search = get_web_search()
-            web_results = await web_search.search(summary, top_k=3)
-            for i, wr in enumerate(web_results):
-                evidence_chunks.append({
-                    "evidence_id": f"web-{i}",
-                    "quote": wr.get("quote", "")[:200],
-                    "source": wr.get("source", "web:unknown"),
-                    "char_range": [0, 0],
-                })
-        if not evidence_chunks:
-            evidence_chunks = _make_common_knowledge_evidence(conflict)
-        return cid, evidence_chunks
+        chunks = await _collect_evidence(state.meeting_id, conflict)
+        return cid, chunks
 
     # 并行检索所有冲突
     results = await asyncio.gather(*[_retrieve_one(c) for c in conflicts])
@@ -687,32 +696,9 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     else:
         # 无预检索时，并行检索（兼容旧路径）
         async def _retrieve_evidence(conflict: dict) -> tuple[dict, list[dict]]:
-            """为单个冲突检索证据（RAG + Web Search）"""
-            cid = conflict.get("id", "c0")
-            summary = conflict.get("summary", str(conflict))
-            chunks = retrieve_for_conflict(state.meeting_id, summary, top_k=5)
-            evidence_chunks = [
-                {
-                    "evidence_id": f"ev-{i}",
-                    "quote": ck.get("text", "")[:200],
-                    "source": ck.get("source", "doc:unknown"),
-                    "char_range": [ck.get("char_start", 0), ck.get("char_end", 0)],
-                }
-                for i, ck in enumerate(chunks)
-            ]
-            if len(evidence_chunks) < 3:
-                web_search = get_web_search()
-                web_results = await web_search.search(summary, top_k=3)
-                for i, wr in enumerate(web_results):
-                    evidence_chunks.append({
-                        "evidence_id": f"web-{i}",
-                        "quote": wr.get("quote", "")[:200],
-                        "source": wr.get("source", "web:unknown"),
-                        "char_range": [0, 0],
-                    })
-            if not evidence_chunks:
-                evidence_chunks = _make_common_knowledge_evidence(conflict)
-            return conflict, evidence_chunks
+            """为单个冲突检索证据（委托 _collect_evidence 统一流程）"""
+            chunks = await _collect_evidence(state.meeting_id, conflict)
+            return conflict, chunks
 
         retrieval_results = await asyncio.gather(
             *[_retrieve_evidence(c) for c in state.conflicts]
