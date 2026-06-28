@@ -1,7 +1,8 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧 ChatPanel + 右侧三块
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
+import { usePersistentState } from './hooks/usePersistentState.ts'
 import { StageIndicator } from './components/StageIndicator.tsx'
 import { MeetingControls } from './components/MeetingControls.tsx'
 import { AgentGraph } from './components/AgentGraph.tsx'
@@ -52,20 +53,10 @@ function MeetingView() {
   // 右侧面板当前激活 Tab
   const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
   // 拓扑图折叠/展开状态（持久化到 localStorage）
-  const [graphCollapsed, setGraphCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('conclave-graph-collapsed') === '1'
-    } catch {
-      return false
-    }
-  })
-  useEffect(() => {
-    try {
-      localStorage.setItem('conclave-graph-collapsed', graphCollapsed ? '1' : '0')
-    } catch {
-      /* noop */
-    }
-  }, [graphCollapsed])
+  const [graphCollapsed, setGraphCollapsed] = usePersistentState<boolean>(
+    'conclave-graph-collapsed',
+    false,
+  )
 
   return (
     <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}`}>
@@ -181,20 +172,10 @@ function AppShell() {
   const { meetingId } = useMeeting()
   const [tab, setTab] = useState<ViewTab>('meeting')
   // 左侧会议列表侧边栏的折叠/展开状态（持久化到 localStorage）
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('conclave-sidebar-collapsed') === '1'
-    } catch {
-      return false
-    }
-  })
-  useEffect(() => {
-    try {
-      localStorage.setItem('conclave-sidebar-collapsed', sidebarCollapsed ? '1' : '0')
-    } catch {
-      /* noop */
-    }
-  }, [sidebarCollapsed])
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState<boolean>(
+    'conclave-sidebar-collapsed',
+    false,
+  )
 
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>

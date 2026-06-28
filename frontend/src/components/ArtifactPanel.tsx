@@ -1,8 +1,8 @@
 // 右下：PRD 结构化预览 + OpenAPI 语法高亮 + 一键复制 + 借调入口
-import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import type { PRD } from '../types/events.ts'
+import { useCopy } from '../hooks/useCopy.ts'
 
 interface ArtifactPanelProps {
   onOpenBorrow: () => void
@@ -43,18 +43,8 @@ const LIST_ICONS: { icon: string; cls: string }[] = [
 ]
 
 function PRDSection({ prd }: { prd: PRD | undefined }) {
-  const [copied, setCopied] = useState(false)
-  const handleCopy = () => {
-    navigator.clipboard
-      .writeText(prdToMarkdown(prd))
-      .then(() => {
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 2000)
-      })
-      .catch(() => {
-        /* 忽略复制失败 */
-      })
-  }
+  const { copied, copy } = useCopy()
+  const handleCopy = () => copy(prdToMarkdown(prd))
   return (
     <div className="prd-block">
       <div className="prd-head">
@@ -139,19 +129,9 @@ function prdToMarkdown(prd: PRD | undefined): string {
 /* ============================ OpenAPI 区域 ============================ */
 
 function OpenAPISection({ yaml }: { yaml: string | undefined }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopy()
   const text = yaml || '# 暂无 OpenAPI'
-  const handleCopy = () => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 2000)
-      })
-      .catch(() => {
-        /* 忽略复制失败 */
-      })
-  }
+  const handleCopy = () => copy(text)
   return (
     <div className="openapi-block">
       <div className="openapi-head">

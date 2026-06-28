@@ -4,6 +4,8 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { LogicGraph } from './LogicGraph.tsx'
+import { formatDateTime } from '../lib/format.ts'
+import { downloadFile } from '../lib/download.ts'
 
 /** 可折叠面板 */
 function CollapsibleSection({ title, children, defaultOpen = false }: {
@@ -23,26 +25,8 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
   )
 }
 
-/** 格式化时间 */
-function fmtTime(ts: string) {
-  if (!ts) return ''
-  try {
-    return new Date(ts).toLocaleString('zh-CN')
-  } catch {
-    return ts
-  }
-}
-
-/** 下载文本文件 */
-function downloadFile(filename: string, content: string, mime = 'text/markdown') {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
+/** 格式化时间（使用统一的 lib/format，保持单一数据源） */
+const fmtTime = formatDateTime
 
 /** 报告转 Markdown */
 function reportToMarkdown(state: any): string {

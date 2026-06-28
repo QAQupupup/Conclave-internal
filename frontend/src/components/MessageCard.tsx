@@ -5,6 +5,8 @@ import { useState } from 'react'
 import type { MeetingMessage } from '../types/events.ts'
 import { ROLE_LABELS, STAGE_LABELS } from '../types/events.ts'
 import { FocusMode } from './FocusMode.tsx'
+import { formatTime, tryFormatJson, truncate } from '../lib/format.ts'
+import { useCopy } from '../hooks/useCopy.ts'
 
 interface MessageCardProps {
   message: MeetingMessage
@@ -14,6 +16,9 @@ interface MessageCardProps {
 
 /** 超过该字符数视为长消息，默认折叠 */
 const COLLAPSE_THRESHOLD = 300
+
+/** ref chip 默认可见数量，超出折叠为 "+N" */
+const REFS_VISIBLE = 3
 
 /** 角色 → CSS 颜色类 */
 function roleClass(role: MeetingMessage['agent_role']): string {
@@ -29,67 +34,22 @@ function roleClass(role: MeetingMessage['agent_role']): string {
   }
 }
 
-/** 尝试把内容解析并重新格式化（仅做缩进美化，不做颜色高亮） */
-function tryFormatJson(content: string): { ok: true; formatted: string } | { ok: false } {
-  const trimmed = content.trim()
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return { ok: false }
-  try {
-    return { ok: true, formatted: JSON.stringify(JSON.parse(trimmed), null, 2) }
-  } catch {
-    return { ok: false }
-  }
-}
-
-/** 把 ISO 时间字符串格式化为 HH:MM:SS */
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
 export function MessageCard({ message, onSelectRef }: MessageCardProps) {
   const role = message.agent_role
   const refs = [...(message.claim_refs ?? []), ...(message.evidence_refs ?? [])]
-  const formatted = tryFormatJson(message.content)
-  const displayText = formatted.ok ? formatted.formatted : message.content
+  const displayText = tryFormatJson(message.content)
   const isLong = displayText.length > COLLAPSE_THRESHOLD
   const [isExpanded, setIsExpanded] = useState(false)
   const [focused, setFocused] = useState(false)
-  const [copyTip, setCopyTip] = useState(false)
+  const { copied, copy } = useCopy()
   // 折叠时截断并加省略号，避免长消息挤压视图
-  const truncatedText = isLong && !isExpanded ? displayText.slice(0, COLLAPSE_THRESHOLD) + '…' : displayText
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(displayText)
-      setCopyTip(true)
-      setTimeout(() => setCopyTip(false), 2000)
-    } catch {
-      // 兜底：旧 API
-      const ta = document.createElement('textarea')
-      ta.value = displayText
-      document.body.appendChild(ta)
-      ta.select()
-      try {
-        document.execCommand('copy')
-        setCopyTip(true)
-        setTimeout(() => setCopyTip(false), 2000)
-      } catch {
-        /* noop */
-      } finally {
-        document.body.removeChild(ta)
-      }
-    }
-  }
+  const truncatedText = isLong && !isExpanded ? truncate(displayText, COLLAPSE_THRESHOLD) : displayText
 
   // ref chip 折叠：默认只显示前 3 个 + "+N 展开"
-  const REFS_VISIBLE = 3
-  const allRefs = refs
-  const hasManyRefs = allRefs.length > REFS_VISIBLE
+  const hasManyRefs = refs.length > REFS_VISIBLE
   const [refsExpanded, setRefsExpanded] = useState(false)
-  const visibleRefs = hasManyRefs && !refsExpanded ? allRefs.slice(0, REFS_VISIBLE) : allRefs
-  const hiddenCount = allRefs.length - REFS_VISIBLE
+  const visibleRefs = hasManyRefs && !refsExpanded ? refs.slice(0, REFS_VISIBLE) : refs
+  const hiddenCount = refs.length - REFS_VISIBLE
 
   return (
     <div className={`message-card ${roleClass(role)} message-in${isExpanded ? ' is-expanded' : ''}`}>
@@ -116,11 +76,11 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
         <div className="message-actions-right">
           <button
             type="button"
-            className={`btn btn-ghost copy-btn${copyTip ? ' is-copied' : ''}`}
-            onClick={handleCopy}
+            className={`btn btn-ghost copy-btn${copied ? ' is-copied' : ''}`}
+            onClick={() => copy(displayText)}
             title="复制完整内容到剪贴板"
           >
-            {copyTip ? '已复制' : '复制'}
+            {copied ? '已复制' : '复制'}
           </button>
           {isLong && (
             <button
@@ -134,7 +94,7 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
           )}
         </div>
       </div>
-      {allRefs.length > 0 && (
+      {refs.length > 0 && (
         <div className="message-refs">
           {visibleRefs.map((ref, i) => (
             <button
