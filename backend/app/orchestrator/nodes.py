@@ -846,13 +846,32 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 # code_analysis 模板更可能需要数据分析库，使用数据科学镜像
                 # 根据代码内容判断网络级别
                 net_level = _detect_network_level(code)
-                async def _run(code):
+                async def _run(code, level=net_level):
                     r = await run_python(code, ws_root, timeout=30,
                                          image=SANDBOX_IMAGE_DATASCIENCE,
-                                         network_level=net_level)
+                                         network_level=level)
                     return r.to_dict()
                 task_summary = _summarize_task("code_analysis", result)
-                refined = await refine_python_code(code, task_summary, _run, max_rounds=5)
+                refined = await refine_python_code(
+                    code, task_summary, _run, max_rounds=5,
+                    meeting_id=state.meeting_id, stage="produce",
+                    detected_level=net_level,
+                )
+                # 网络授权获批后用新级别重试
+                if refined.get("need_retry_with_level"):
+                    new_level = refined["need_retry_with_level"]
+                    _lb.info(f"produce: 网络授权获批 level={new_level}，重新执行代码",
+                             logger="orchestrator.nodes.produce")
+                    async def _run_approved(code):
+                        r = await run_python(code, ws_root, timeout=30,
+                                             image=SANDBOX_IMAGE_DATASCIENCE,
+                                             network_level=new_level)
+                        return r.to_dict()
+                    refined = await refine_python_code(
+                        refined["code"], task_summary, _run_approved, max_rounds=3,
+                        meeting_id=state.meeting_id, stage="produce",
+                        detected_level=new_level,
+                    )
                 code_data["code"] = refined["code"]
                 state.artifact["code_analysis"] = code_data
                 state.artifact["execution"] = refined["execution"]
@@ -860,6 +879,8 @@ async def produce_node(state: MeetingState) -> MeetingState:
                     "rounds_used": refined["rounds_used"],
                     "success": refined["success"],
                 }
+                if refined.get("net_auth"):
+                    state.artifact["net_auth"] = refined["net_auth"]
             except Exception as e:
                 state.artifact["code_analysis"] = code_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}
@@ -888,16 +909,38 @@ async def produce_node(state: MeetingState) -> MeetingState:
                     main_file.write_text(main_code, encoding="utf-8")
                 # tested_system 模板更可能需要数据分析库，使用数据科学镜像
                 net_level = _detect_network_level(test_code)
-                async def _run_tests(code):
+                async def _run_tests(code, level=net_level):
                     test_file.write_text(code, encoding="utf-8")
                     r = await run_command(
                         "python -m pytest test_generated.py -v",
                         ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE,
-                        network_level=net_level,
+                        network_level=level,
                     )
                     return r.to_dict()
                 task_summary = _summarize_task("tested_system", result)
-                refined = await refine_python_code(test_code, task_summary, _run_tests, max_rounds=5)
+                refined = await refine_python_code(
+                    test_code, task_summary, _run_tests, max_rounds=5,
+                    meeting_id=state.meeting_id, stage="produce",
+                    detected_level=net_level,
+                )
+                # 网络授权获批后用新级别重试
+                if refined.get("need_retry_with_level"):
+                    new_level = refined["need_retry_with_level"]
+                    _lb.info(f"produce: 网络授权获批 level={new_level}，重新执行测试",
+                             logger="orchestrator.nodes.produce")
+                    async def _run_tests_approved(code):
+                        test_file.write_text(code, encoding="utf-8")
+                        r = await run_command(
+                            "python -m pytest test_generated.py -v",
+                            ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE,
+                            network_level=new_level,
+                        )
+                        return r.to_dict()
+                    refined = await refine_python_code(
+                        refined["code"], task_summary, _run_tests_approved, max_rounds=3,
+                        meeting_id=state.meeting_id, stage="produce",
+                        detected_level=new_level,
+                    )
                 ts_data["test_code"] = refined["code"]
                 state.artifact["tested_system"] = ts_data
                 state.artifact["execution"] = refined["execution"]
@@ -905,6 +948,8 @@ async def produce_node(state: MeetingState) -> MeetingState:
                     "rounds_used": refined["rounds_used"],
                     "success": refined["success"],
                 }
+                if refined.get("net_auth"):
+                    state.artifact["net_auth"] = refined["net_auth"]
             except Exception as e:
                 state.artifact["tested_system"] = ts_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}

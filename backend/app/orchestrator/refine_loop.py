@@ -47,21 +47,29 @@ async def refine_python_code(
     task_summary: str,
     run_fn,
     max_rounds: int = 5,
+    meeting_id: str = "",
+    stage: str = "produce",
+    detected_level: str = "L1",
 ) -> dict[str, Any]:
     """代码自修复循环
 
-    Args:
-        initial_code: 初始生成的代码
-        task_summary: 任务锚点（三句话摘要）
-        run_fn: 异步执行函数 (code) -> {exit_code, stdout, stderr, ...}
-        max_rounds: 最大循环次数
+    参数:
+        initial_code: 初始代码
+        task_summary: 任务锚点摘要
+        run_fn: async def(code) -> {exit_code, stdout, stderr}
+        max_rounds: 最大修复轮次
+        meeting_id: 会议 ID（用于网络授权申请）
+        stage: 当前阶段
+        detected_level: 当前检测到的网络级别
 
-    Returns:
-        {code, execution, rounds_used, success}
+    返回:
+        {code, execution, rounds_used, success, net_auth?: dict}
     """
     current_code = initial_code
     last_result = None
     llm = get_llm()
+    current_net_level = detected_level
+    net_auth_info = None
 
     log_bus.info(
         "RefineLoop 开始",
@@ -90,7 +98,56 @@ async def refine_python_code(
                 "execution": last_result,
                 "rounds_used": round_idx,
                 "success": True,
+                **({"net_auth": net_auth_info} if net_auth_info else {}),
             }
+
+        # ---- 网络授权检测 ----
+        # 失败时先检测是否是网络限制导致
+        if meeting_id and current_net_level == "L1":
+            try:
+                from app.net_auth_manager import detect_network_failure, request_network_access
+                net_reason = detect_network_failure(stderr, exit_code, current_code)
+                if net_reason:
+                    log_bus.info(
+                        f"RefineLoop 检测到网络限制，发起授权申请: {net_reason}",
+                        logger="orchestrator.refine_loop",
+                    )
+                    auth_result = await request_network_access(
+                        meeting_id=meeting_id,
+                        stage=stage,
+                        code=current_code,
+                        detected_level=current_net_level,
+                        failure_reason=net_reason,
+                        stderr=stderr,
+                    )
+                    net_auth_info = auth_result
+
+                    if auth_result.get("approved"):
+                        # 获批：用新网络级别重新执行（不消耗 round）
+                        approved_level = auth_result["level"]
+                        log_bus.info(
+                            f"网络授权获批 level={approved_level}，重新执行",
+                            logger="orchestrator.refine_loop",
+                        )
+                        # 通过闭包更新 run_fn 的网络级别
+                        # run_fn 是 produce_node 传入的闭包，无法直接改网络级别
+                        # 所以这里直接返回，让 produce_node 用新级别重试
+                        return {
+                            "code": current_code,
+                            "execution": last_result,
+                            "rounds_used": round_idx,
+                            "success": False,
+                            "net_auth": auth_result,
+                            "need_retry_with_level": approved_level,
+                        }
+                    else:
+                        # 未获批：继续走 LLM 修正（可能改代码去掉网络依赖）
+                        log_bus.warning(
+                            "网络授权未获批，继续修正代码",
+                            logger="orchestrator.refine_loop",
+                        )
+            except Exception as e:
+                logger.warning("网络授权检测异常: %s", e)
 
         # 最后一轮不调 LLM（没机会改了）
         if round_idx >= max_rounds:
@@ -145,4 +202,5 @@ async def refine_python_code(
         "execution": last_result or {"exit_code": -1, "error": "未执行"},
         "rounds_used": final_rounds,
         "success": False,
+        **({"net_auth": net_auth_info} if net_auth_info else {}),
     }

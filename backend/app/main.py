@@ -9,8 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db import init_db
 from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware
+from app.net_auth import init_auth_table
 from app.routers import documents as documents_router
 from app.routers import meetings as meetings_router
+from app.routers import net_auth as net_auth_router
 from app.routers import regression as regression_router
 from app.routers import workspace as workspace_router
 from app.routers import ws as ws_router
@@ -23,6 +25,7 @@ setup_logging()
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库"""
     init_db()
+    init_auth_table()
     yield
 
 
@@ -50,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(workspace_router.router)
     app.include_router(ws_router.router)
     app.include_router(regression_router.router)
+    app.include_router(net_auth_router.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:
