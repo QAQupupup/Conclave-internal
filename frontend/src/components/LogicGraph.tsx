@@ -190,7 +190,8 @@ function LogicGraphInner({
   const claims = (state?.claims || []) as any[]
   const conflicts = (state?.conflicts || []) as any[]
   const decisions = ((state?.decision_record as any)?.decisions || []) as any[]
-  const adoptedIds = new Set<string>(
+  // adopted_claims 是纯文本字符串列表（非 id），需按 claim 文本内容匹配
+  const adoptedTexts = new Set<string>(
     ((state?.decision_record as any)?.adopted_claims || []) as string[],
   )
 
@@ -203,16 +204,18 @@ function LogicGraphInner({
           c.claim || c.text || c.summary || ''
         ).toString()
         const role: string | undefined = c.proposed_by || c.role
+        // 采纳高亮：优先按 rawId 匹配，回退按 claim 文本内容匹配（adopted_claims 存的是文本）
+        const adopted = adoptedTexts.has(rawId) || adoptedTexts.has(text)
         return {
           kind: 'claim',
           id: `c-${i}`,
           rawId,
           text,
           role,
-          adopted: adoptedIds.has(rawId),
+          adopted,
         }
       }),
-    [claims, adoptedIds],
+    [claims, adoptedTexts],
   )
 
   const conflictNodes: ConflictNode[] = useMemo(

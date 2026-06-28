@@ -56,12 +56,21 @@ EVIDENCE_CHECK = """[阶段: EvidenceCheck]
 检索证据：{evidence_chunks}
 任务：逐条证据判断支持哪一方，或中立，或与冲突无关。
 
-输出 JSON: {{"conflict_id": "...", "evidence_assessments": [{{"evidence_id": "...", "quote": "...", "source": "...", "supports": "a|b|neutral|irrelevant"}}]}}"""
+重要：证据的 strength 字段标注了证据强度：
+- strength=strong：来自上传文档或网络检索的具体证据，应重点采信
+- strength=weak：通用工程实践占位证据（source 以 common_knowledge 开头），仅作参考，不可单独作为裁决依据
+- strength=none：无实质内容的占位，应判为 irrelevant
+
+对于 strength=weak 的证据，请基于 side_a / side_b 论点本身的质量做倾向性判断，而非对占位文本判中立。
+
+输出 JSON: {{"conflict_id": "...", "evidence_assessments": [{{"evidence_id": "...", "quote": "...", "source": "...", "supports": "a|b|neutral|irrelevant", "strength": "strong|weak|none"}}]}}"""
 
 # ---------- 2.6 仲裁阶段 ----------
 ARBITRATE = """[阶段: Arbitrate]
 冲突与证据：{evidence_set}
 任务：基于证据裁决每个冲突，给出采纳结论与驳回理由。
+
+注意：若证据中 strength 全为 weak 或 none（无外部文档/网络证据），请基于双方论点本身的质量裁决，并在 rationale 中标注"无外部证据支持，置信度低"。
 
 输出 JSON: {{"decisions": [{{"conflict_id": "...", "verdict": "a|b|compromise", "rationale": "..."}}], "adopted_claims": ["..."]}}"""
 

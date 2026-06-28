@@ -44,9 +44,13 @@ class ClaimItem(BaseModel):
 
 
 class ClaimListResult(BaseModel):
-    """IntraTeam 阶段输出：队内论点列表"""
+    """IntraTeam 阶段输出：队内论点列表
+
+    claims 为必填字段（非空校验）：LLM 漏输出 claims 时会触发 ValidationError，
+    进入重试→降级 StubLLM 路径，保证 claims 不再静默丢失。
+    """
     model_config = _SCHEMA_CONFIG
-    claims: list[ClaimItem] = Field(default_factory=list)
+    claims: list[ClaimItem]
 
 
 # ---------- 3. cross_team ----------
@@ -72,12 +76,17 @@ class ConflictListResult(BaseModel):
 
 # ---------- 4. evidence_check ----------
 class EvidenceAssessmentItem(BaseModel):
-    """单条证据对照判断"""
+    """单条证据对照判断
+
+    supports: a | b | neutral | irrelevant
+    strength: strong（文档/网络证据）| weak（通用知识）| none（无证据占位）
+    """
     model_config = _SCHEMA_CONFIG
     evidence_id: str
     quote: str = ""
     source: str = ""
     supports: str = "neutral"  # a | b | neutral | irrelevant
+    strength: str = "strong"    # strong | weak | none
 
 
 class EvidenceCheckResult(BaseModel):

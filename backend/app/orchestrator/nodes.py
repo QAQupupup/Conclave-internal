@@ -127,6 +127,33 @@ async def _emit_agent_spoke(state: MeetingState, role: Role, stage: Stage, conte
     )
 
 
+def _format_claims_as_text(claims: list[dict[str, Any]], role_label: str = "") -> str:
+    """把 claims 列表格式化为可读文本（替代裸 JSON），保留推理叙述价值。
+
+    格式：
+        【产品架构师 · 队内发言】
+        1. [fact] 论点内容（证据：doc:xxx）
+        2. [assumption] 论点内容（风险：low）
+    """
+    if not claims:
+        return f"【{role_label} · 队内发言】\n（未输出有效论点）"
+    lines: list[str] = []
+    if role_label:
+        lines.append(f"【{role_label} · 队内发言】")
+    for i, c in enumerate(claims, 1):
+        claim_text = c.get("claim", c.get("text", ""))
+        ctype = c.get("type", "assumption")
+        evidence_ref = c.get("evidence_ref", "")
+        risk_level = c.get("risk_level")
+        parts = [f"{i}. [{ctype}] {claim_text}"]
+        if evidence_ref:
+            parts.append(f"（证据：{evidence_ref}）")
+        if risk_level:
+            parts.append(f"（风险：{risk_level}）")
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
+
+
 # ---------- 改造三：借调 agent 发言 ----------
 
 # 迭代二：借调角色 prompt 改为从动态角色库获取（替换原硬编码 BORROW_ROLE_PROMPTS）
@@ -136,17 +163,53 @@ from app.agents.role_templates import get_borrow_prompt
 async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
     """让待发言（spoken=False）的借调 agent 发言一次，然后标记 spoken=True
 
-    借调的 agent 不立即加入 frozen scope，而是在下一个 intra_team / evidence_check
-    节点执行时检查 borrowed_agents，对待发言的用对应角色模板发一次言。
-    借调角色不在 Role 枚举中，直接构造消息并发布事件。
+    借调角色现在走真实 LLM 调用（用 build_intra_prompt + 匹配的 Role 枚举），
+    不再输出静态模板字符串，保证有真实观点和 claims。
+    未匹配到 Role 枚举的角色回退到静态模板（向后兼容）。
     """
     if not state.borrowed_agents:
         return
     topic = state.clarified_topic or state.topic
+    compute = get_compute()
     for agent_info in state.borrowed_agents:
         if agent_info.get("spoken"):
             continue
         role_str = agent_info.get("role", "")
+        # 尝试匹配 Role 枚举，走真实 LLM
+        matched_role = _match_role(role_str)
+        if matched_role is not None:
+            try:
+                anchor = _full_anchor(state, stage.value)
+                req = build_intra_prompt(matched_role, topic, agent_info.get("request", {}).get("stance", ""), anchor=anchor)
+                resp = await compute.think(req)
+                claims = resp.result.get("claims", [])
+                claim_ids: list[str] = []
+                for c in claims:
+                    cid = f"claim-{uuid.uuid4().hex[:8]}"
+                    c["id"] = cid
+                    c["agent_role"] = role_str
+                    state.claims.append(c)
+                    claim_ids.append(cid)
+                content = _format_claims_as_text(claims, role_str)
+                msg = _record_message(state, matched_role, stage, content, claim_ids)
+                await bus.publish(
+                    make_event("agent.spoke", state.meeting_id, {
+                        "meeting_id": state.meeting_id,
+                        "role": role_str,
+                        "stage": stage.value,
+                        "content": content,
+                        "claim_refs": claim_ids,
+                        "message_id": msg["id"],
+                        "borrowed": True,
+                    })
+                )
+                _record_drift(state, matched_role, stage, content)
+                agent_info["spoken"] = True
+                continue
+            except Exception:
+                # LLM 失败时回退到静态模板，保证流程不中断
+                pass
+        # 回退：未匹配 Role 或 LLM 失败，用静态模板
         prompt = get_borrow_prompt(role_str)
         content = (
             f"【借调发言 - {role_str}】\n"
@@ -154,7 +217,6 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
             f"针对议题「{topic}」，我基于上述专业偏置补充意见："
             f"建议在决策中重点考虑本领域的关键风险与约束，避免遗漏。"
         )
-        # 直接构造消息（借调角色不在 Role 枚举中，不走 _record_message）
         msg = {
             "id": f"msg-{uuid.uuid4().hex[:8]}",
             "meeting_id": state.meeting_id,
@@ -391,7 +453,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         conclusion = {"role": role.value, "stance": stance, "claims": claims}
         conclusions.append(conclusion)
         prior_conclusions_for_react.append(conclusion)
-        content = json.dumps(claims, ensure_ascii=False)
+        content = _format_claims_as_text(claims, role.value)
         await _emit_agent_spoke(state, role, Stage.INTRA_TEAM, content, claim_refs=claim_ids)
         _record_drift(state, role, Stage.INTRA_TEAM, content)
 
@@ -420,7 +482,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             react_claim_ids.append(cid)
         conclusion = {"role": last_role.value, "stance": last_stance, "claims": react_claims}
         conclusions.append(conclusion)
-        content = json.dumps(react_claims, ensure_ascii=False)
+        content = _format_claims_as_text(react_claims, last_role.value)
         await _emit_agent_spoke(state, last_role, Stage.INTRA_TEAM, content, claim_refs=react_claim_ids)
         _record_drift(state, last_role, Stage.INTRA_TEAM, content)
 
@@ -475,6 +537,35 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
     return state
 
 
+def _make_common_knowledge_evidence(conflict: dict) -> list[dict]:
+    """无文档/网络证据时的降级：为每个冲突生成双方向通用工程原则证据。
+
+    替代旧的单条中性占位符，让 evidence_check 仍有方向可判断：
+    - ev-a：呼应 side_a 立场的通用原则
+    - ev-b：呼应 side_b 立场的通用原则
+    标记 strength=weak 和 source=common_knowledge，让 LLM 知道这是弱证据。
+    """
+    side_a = conflict.get("side_a", "")
+    side_b = conflict.get("side_b", "")
+    summary = conflict.get("summary", str(conflict))
+    return [
+        {
+            "evidence_id": "ev-a",
+            "quote": f"（通用工程实践 · 倾向 A 方）{side_a or summary}。此原则基于行业常识，非具体文档证据，需用户验证。",
+            "source": "common_knowledge:side_a",
+            "char_range": [0, 0],
+            "strength": "weak",
+        },
+        {
+            "evidence_id": "ev-b",
+            "quote": f"（通用工程实践 · 倾向 B 方）{side_b or summary}。此原则基于行业常识，非具体文档证据，需用户验证。",
+            "source": "common_knowledge:side_b",
+            "char_range": [0, 0],
+            "strength": "weak",
+        },
+    ]
+
+
 async def _prefetch_evidence(state: MeetingState, conflicts: list[dict]) -> dict[str, list[dict]]:
     """预检索所有冲突的证据（流水线优化：与借调发言并行）
 
@@ -504,14 +595,7 @@ async def _prefetch_evidence(state: MeetingState, conflicts: list[dict]) -> dict
                     "char_range": [0, 0],
                 })
         if not evidence_chunks:
-            evidence_chunks = [
-                {
-                    "evidence_id": "ev-0",
-                    "quote": "（无上传文档证据，以下结论基于通用工程实践，需用户验证）",
-                    "source": "common_knowledge:none",
-                    "char_range": [0, 0],
-                }
-            ]
+            evidence_chunks = _make_common_knowledge_evidence(conflict)
         return cid, evidence_chunks
 
     # 并行检索所有冲突
@@ -569,14 +653,7 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
                         "char_range": [0, 0],
                     })
             if not evidence_chunks:
-                evidence_chunks = [
-                    {
-                        "evidence_id": "ev-0",
-                        "quote": "（无上传文档证据，以下结论基于通用工程实践，需用户验证）",
-                        "source": "common_knowledge:none",
-                        "char_range": [0, 0],
-                    }
-                ]
+                evidence_chunks = _make_common_knowledge_evidence(conflict)
             return conflict, evidence_chunks
 
         retrieval_results = await asyncio.gather(

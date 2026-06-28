@@ -8,7 +8,7 @@ from typing import Any, Protocol
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.agents.schemas import SCHEMA_MAP
+from app.agents.schemas import SCHEMA_MAP, ClaimListResult
 from app.agents.trace import record_call, update_last_record
 from app.config import settings
 from app.logging_config import get_logger
@@ -375,6 +375,15 @@ class RealLLM:
                     logger="agents.llm",
                     extra={"stage": stage, "attempt": attempt, "model": self.model, "temp": temp},
                 )
+                # 关键字段非空校验：intra_team 的 claims 空则视为解析失败，强制重试/降级
+                # （修复 claims 静默丢失问题）
+                if schema_hint == "intra_team" and isinstance(result, dict):
+                    claims_val = result.get("claims")
+                    if not claims_val:  # None 或空列表
+                        raise ValidationError(
+                            f"intra_team 阶段 claims 为空，LLM 未输出有效论点",
+                            ClaimListResult,
+                        )
                 return result
             except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
                 # 提取 HTTP 错误的响应体（便于排查 403 余额不足等问题）
