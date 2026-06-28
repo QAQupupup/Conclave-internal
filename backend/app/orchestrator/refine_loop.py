@@ -135,13 +135,14 @@ async def refine_python_code(
             break
 
     # 所有轮次用完或提前终止
+    final_rounds = round_idx  # 记录实际使用的轮次
     log_bus.info(
-        f"RefineLoop 结束（未成功）rounds_used={max_rounds}",
+        f"RefineLoop 结束（未成功）rounds_used={final_rounds}",
         logger="orchestrator.refine_loop",
     )
     return {
         "code": current_code,
         "execution": last_result or {"exit_code": -1, "error": "未执行"},
-        "rounds_used": max_rounds,
+        "rounds_used": final_rounds,
         "success": False,
     }
