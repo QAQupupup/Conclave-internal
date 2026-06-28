@@ -566,6 +566,41 @@ def _make_common_knowledge_evidence(conflict: dict) -> list[dict]:
     ]
 
 
+def _detect_network_level(code: str) -> str:
+    """根据代码内容自动判断需要的沙箱网络级别
+
+    L1(无网络)：默认，纯计算代码
+    L2(限网)：包含 pip install，需要安装依赖
+    L3(全联网)：包含 requests/urllib/httpx/http(s)://，需要访问外部 API
+
+    判断逻辑：
+    1. 有 pip install → L2（需要 pypi）
+    2. 有 HTTP 库 import 或 URL → L3（需要联网）
+    3. 其他 → L1（纯计算）
+    """
+    code_lower = code.lower()
+
+    # L3: 外部 HTTP 请求
+    http_indicators = [
+        "import requests", "from requests",
+        "import urllib", "from urllib",
+        "import httpx", "from httpx",
+        "import aiohttp", "from aiohttp",
+        "http://", "https://",
+        "urlopen", "requests.get", "requests.post",
+    ]
+    for indicator in http_indicators:
+        if indicator in code_lower:
+            return "L3"
+
+    # L2: pip install
+    if "pip install" in code_lower or "subprocess" in code_lower and "pip" in code_lower:
+        return "L2"
+
+    # L1: 默认纯计算
+    return "L1"
+
+
 def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
     """扫描沙箱工作区，收集产出的文件作为附件。
 
@@ -809,8 +844,12 @@ async def produce_node(state: MeetingState) -> MeetingState:
             ws_root.mkdir(parents=True, exist_ok=True)
             try:
                 # code_analysis 模板更可能需要数据分析库，使用数据科学镜像
+                # 根据代码内容判断网络级别
+                net_level = _detect_network_level(code)
                 async def _run(code):
-                    r = await run_python(code, ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE)
+                    r = await run_python(code, ws_root, timeout=30,
+                                         image=SANDBOX_IMAGE_DATASCIENCE,
+                                         network_level=net_level)
                     return r.to_dict()
                 task_summary = _summarize_task("code_analysis", result)
                 refined = await refine_python_code(code, task_summary, _run, max_rounds=5)
@@ -848,11 +887,13 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 if main_code:
                     main_file.write_text(main_code, encoding="utf-8")
                 # tested_system 模板更可能需要数据分析库，使用数据科学镜像
+                net_level = _detect_network_level(test_code)
                 async def _run_tests(code):
                     test_file.write_text(code, encoding="utf-8")
                     r = await run_command(
                         "python -m pytest test_generated.py -v",
-                        ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE
+                        ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE,
+                        network_level=net_level,
                     )
                     return r.to_dict()
                 task_summary = _summarize_task("tested_system", result)

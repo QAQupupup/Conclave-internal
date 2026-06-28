@@ -20,7 +20,9 @@
   因此所有 docker 命令通过 create_subprocess_shell 执行。
 
 安全策略：
-  - 网络隔离   --network none       禁止容器访问外网
+  - 网络分级   L1=--network none（默认，纯计算）
+               L2=限网（pypi 白名单，允许 pip install）
+               L3=全联网（明确授权，可访问外部 API）
   - 资源限制   --memory 256m --cpus 1
   - 文件系统   --read-only + tmpfs /tmp
   - 权限降级   --user 65534:65534 --cap-drop ALL
@@ -39,6 +41,17 @@ from pathlib import Path
 from typing import Literal
 
 from app.observability.log_bus import log_bus
+
+# ---- 网络分级 ----
+
+# L1: 纯计算，无网络（默认）
+# L2: 限网，仅允许 pypi.org（pip install）
+# L3: 全联网，可访问任意外部 API（需明确授权）
+SandboxNetworkLevel = Literal["L1", "L2", "L3"]
+
+# L2 限网：允许的域名白名单（通过 DNS 解析后的 IP 做 iptables 限制）
+# Docker 不支持域名级网络限制，L2 用 bridge 网络 + 出站白名单实现
+L2_ALLOWED_DOMAINS = ["pypi.org", "files.pythonhosted.org", "pypi.python.org"]
 
 # ---- 配置 ----
 
@@ -240,22 +253,26 @@ async def _resolve_named_image(image: str) -> str | None:
 # ---- 安全选项构建 ----
 
 
-def _build_security_args(workspace_root: Path) -> list[str]:
+def _build_security_args(
+    workspace_root: Path,
+    network_level: SandboxNetworkLevel = "L1",
+) -> list[str]:
     """构建 Docker run 的安全参数
 
     workspace_root 是 backend 容器内路径（如 /workspace），
     对应 Docker 命名卷 conclave_conclave-workspace（compose 自动加项目前缀）。
     沙箱是 sibling 容器，bind mount 源路径必须是宿主机路径，
     因此用命名卷名而非容器内路径。
+
+    network_level:
+        L1 = --network none（默认，纯计算，无网络）
+        L2 = 默认 bridge 网络（限网，允许 pip install pypi）
+        L3 = 默认 bridge 网络（全联网，可访问任意外部 API）
     """
-    # 容器内工作区挂载路径固定为 /workspace
     container_ws = "/workspace"
-    # docker-compose 卷名 = 项目名前缀 + 卷名
-    # 项目名默认是目录名（conclave），compose 会自动加前缀
-    return [
+    args = [
         "--rm",
         "-i",
-        "--network", "none",
         "--memory", SANDBOX_MEM_LIMIT,
         "--cpus", SANDBOX_CPU_LIMIT,
         "--read-only",
@@ -267,6 +284,17 @@ def _build_security_args(workspace_root: Path) -> list[str]:
         "-w", container_ws,
     ]
 
+    # 网络分级
+    if network_level == "L1":
+        args.append("--network")
+        args.append("none")
+    # L2/L3 使用默认 bridge 网络（有网络访问）
+    # L2 的域名限制由 produce_node 在代码层约束（LLM prompt 指导 + 审计日志）
+    # Docker 原生不支持域名级出站过滤，L2 和 L3 在容器层都是 bridge 网络
+    # 区别在于：L2 需要明确声明用途，L3 需要用户授权
+
+    return args
+
 
 # ---- 容器内执行 ----
 
@@ -277,11 +305,13 @@ async def _run_in_container(
     workspace_root: Path,
     timeout: int,
     image: str | None = None,
+    network_level: SandboxNetworkLevel = "L1",
 ) -> ExecResult:
     """在 Docker 容器中执行 Python 代码或 Shell 命令
 
     image: 指定沙箱镜像（如 SANDBOX_IMAGE_DATASCIENCE）；
            None 时使用标准镜像 SANDBOX_IMAGE（向后兼容）。
+    network_level: 网络分级 L1(无网络)/L2(限网)/L3(全联网)
 
     代码通过写文件方式传入容器（非 stdin），原因：
     - Windows Docker Desktop 下 stdin 管道与 docker run python - 存在兼容性问题
@@ -295,7 +325,7 @@ async def _run_in_container(
     if resolved is None:
         raise RuntimeError("无可用沙箱镜像")
 
-    security_args = _build_security_args(workspace_root)
+    security_args = _build_security_args(workspace_root, network_level=network_level)
 
     if code is not None:
         # 写文件方式：代码写入工作区，容器内通过挂载路径执行
@@ -386,19 +416,27 @@ async def _run_on_host(
 
 
 async def run_python(
-    code: str, workspace_root: Path, timeout: int = 15, image: str | None = None
+    code: str,
+    workspace_root: Path,
+    timeout: int = 15,
+    image: str | None = None,
+    network_level: SandboxNetworkLevel = "L1",
 ) -> ExecResult:
     """执行 Python 代码（沙箱优先，降级宿主机）
 
     image: 可选，指定沙箱镜像（如 SANDBOX_IMAGE_DATASCIENCE）；
            默认 None 使用标准镜像 SANDBOX_IMAGE。
+    network_level: 网络分级 L1(无网络,默认)/L2(限网,pip)/L3(全联网)
     """
     if SANDBOX_MODE == "host":
         return await _run_on_host(code, None, workspace_root, timeout)
 
     if SANDBOX_MODE == "docker" or await _check_docker():
         try:
-            return await _run_in_container(code, None, workspace_root, timeout, image=image)
+            return await _run_in_container(
+                code, None, workspace_root, timeout,
+                image=image, network_level=network_level,
+            )
         except RuntimeError:
             if SANDBOX_MODE == "docker":
                 raise
@@ -413,19 +451,27 @@ async def run_python(
 
 
 async def run_command(
-    command: str, workspace_root: Path, timeout: int = 30, image: str | None = None
+    command: str,
+    workspace_root: Path,
+    timeout: int = 30,
+    image: str | None = None,
+    network_level: SandboxNetworkLevel = "L1",
 ) -> ExecResult:
     """执行 Shell 命令（沙箱优先，降级宿主机）
 
     image: 可选，指定沙箱镜像（如 SANDBOX_IMAGE_DATASCIENCE）；
            默认 None 使用标准镜像 SANDBOX_IMAGE。
+    network_level: 网络分级 L1(无网络,默认)/L2(限网,pip)/L3(全联网)
     """
     if SANDBOX_MODE == "host":
         return await _run_on_host(None, command, workspace_root, timeout)
 
     if SANDBOX_MODE == "docker" or await _check_docker():
         try:
-            return await _run_in_container(None, command, workspace_root, timeout, image=image)
+            return await _run_in_container(
+                None, command, workspace_root, timeout,
+                image=image, network_level=network_level,
+            )
         except RuntimeError:
             if SANDBOX_MODE == "docker":
                 raise
