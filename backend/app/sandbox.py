@@ -241,9 +241,17 @@ async def _resolve_named_image(image: str) -> str | None:
 
 
 def _build_security_args(workspace_root: Path) -> list[str]:
-    """构建 Docker run 的安全参数"""
+    """构建 Docker run 的安全参数
+
+    workspace_root 是 backend 容器内路径（如 /workspace），
+    对应 Docker 命名卷 conclave_conclave-workspace（compose 自动加项目前缀）。
+    沙箱是 sibling 容器，bind mount 源路径必须是宿主机路径，
+    因此用命名卷名而非容器内路径。
+    """
     # 容器内工作区挂载路径固定为 /workspace
     container_ws = "/workspace"
+    # docker-compose 卷名 = 项目名前缀 + 卷名
+    # 项目名默认是目录名（conclave），compose 会自动加前缀
     return [
         "--rm",
         "-i",
@@ -255,7 +263,7 @@ def _build_security_args(workspace_root: Path) -> list[str]:
         "--user", "65534:65534",
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
-        "-v", f"{workspace_root}:{container_ws}",
+        "-v", "conclave_conclave-workspace:/workspace",
         "-w", container_ws,
     ]
 
@@ -274,6 +282,11 @@ async def _run_in_container(
 
     image: 指定沙箱镜像（如 SANDBOX_IMAGE_DATASCIENCE）；
            None 时使用标准镜像 SANDBOX_IMAGE（向后兼容）。
+
+    代码通过写文件方式传入容器（非 stdin），原因：
+    - Windows Docker Desktop 下 stdin 管道与 docker run python - 存在兼容性问题
+    - 写文件后可通过 volume 挂载直接执行，无管道阻塞风险
+    - 执行后文件保留在工作区，便于调试
     """
     if image is None:
         resolved = await _resolve_image()
@@ -285,8 +298,13 @@ async def _run_in_container(
     security_args = _build_security_args(workspace_root)
 
     if code is not None:
-        all_args = ["docker", "run", *security_args, resolved, "python", "-"]
-        stdin_data = code.encode("utf-8")
+        # 写文件方式：代码写入工作区，容器内通过挂载路径执行
+        code_file = workspace_root / "_conclave_exec.py"
+        code_file.write_text(code, encoding="utf-8")
+        # 容器内路径 = 工作区挂载的 /workspace
+        container_path = "/workspace/_conclave_exec.py"
+        all_args = ["docker", "run", *security_args, resolved, "python", container_path]
+        stdin_data = None
     else:
         assert command is not None
         all_args = ["docker", "run", *security_args, resolved, "sh", "-c", command]
