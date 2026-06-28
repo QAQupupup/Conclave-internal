@@ -64,7 +64,7 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
     try {
       await navigator.clipboard.writeText(displayText)
       setCopyTip(true)
-      setTimeout(() => setCopyTip(false), 1200)
+      setTimeout(() => setCopyTip(false), 2000)
     } catch {
       // 兜底：旧 API
       const ta = document.createElement('textarea')
@@ -74,7 +74,7 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
       try {
         document.execCommand('copy')
         setCopyTip(true)
-        setTimeout(() => setCopyTip(false), 1200)
+        setTimeout(() => setCopyTip(false), 2000)
       } catch {
         /* noop */
       } finally {
@@ -83,8 +83,16 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
     }
   }
 
+  // ref chip 折叠：默认只显示前 3 个 + "+N 展开"
+  const REFS_VISIBLE = 3
+  const allRefs = refs
+  const hasManyRefs = allRefs.length > REFS_VISIBLE
+  const [refsExpanded, setRefsExpanded] = useState(false)
+  const visibleRefs = hasManyRefs && !refsExpanded ? allRefs.slice(0, REFS_VISIBLE) : allRefs
+  const hiddenCount = allRefs.length - REFS_VISIBLE
+
   return (
-    <div className={`message-card ${roleClass(role)} message-in`}>
+    <div className={`message-card ${roleClass(role)} message-in${isExpanded ? ' is-expanded' : ''}`}>
       <div className="message-head">
         <span className="message-role">{ROLE_LABELS[role] ?? role}</span>
         <span className="message-stage">{STAGE_LABELS[message.stage] ?? message.stage}</span>
@@ -94,37 +102,41 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
       </div>
       <pre className="message-content">{truncatedText}</pre>
       <div className="message-actions">
-        {isLong && (
+        <div className="message-actions-left">
+          {isLong && (
+            <button
+              type="button"
+              className="btn btn-ghost expand-btn"
+              onClick={() => setIsExpanded(v => !v)}
+            >
+              {isExpanded ? '收起' : '展开全部'}
+            </button>
+          )}
+        </div>
+        <div className="message-actions-right">
           <button
             type="button"
-            className="btn btn-ghost expand-btn"
-            onClick={() => setIsExpanded(v => !v)}
+            className={`btn btn-ghost copy-btn${copyTip ? ' is-copied' : ''}`}
+            onClick={handleCopy}
+            title="复制完整内容到剪贴板"
           >
-            {isExpanded ? '收起' : '展开全部'}
+            {copyTip ? '已复制' : '复制'}
           </button>
-        )}
-        <button
-          type="button"
-          className={`btn btn-ghost copy-btn${copyTip ? ' is-copied' : ''}`}
-          onClick={handleCopy}
-          title="复制完整内容到剪贴板"
-        >
-          {copyTip ? '已复制' : '复制'}
-        </button>
-        {isLong && (
-          <button
-            type="button"
-            className="btn btn-ghost focus-btn"
-            onClick={() => setFocused(true)}
-            title="放大查看完整内容"
-          >
-            放大查看
-          </button>
-        )}
+          {isLong && (
+            <button
+              type="button"
+              className="btn btn-ghost focus-btn"
+              onClick={() => setFocused(true)}
+              title="放大查看完整内容"
+            >
+              放大查看
+            </button>
+          )}
+        </div>
       </div>
-      {refs.length > 0 && (
+      {allRefs.length > 0 && (
         <div className="message-refs">
-          {refs.map((ref, i) => (
+          {visibleRefs.map((ref, i) => (
             <button
               key={`${ref}-${i}`}
               className="ref-chip"
@@ -135,6 +147,15 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
               {ref}
             </button>
           ))}
+          {hasManyRefs && (
+            <button
+              type="button"
+              className="ref-chip-toggle"
+              onClick={() => setRefsExpanded(v => !v)}
+            >
+              {refsExpanded ? '收起' : `+${hiddenCount}`}
+            </button>
+          )}
         </div>
       )}
       <FocusMode open={focused} onClose={() => setFocused(false)} title={ROLE_LABELS[role] ?? role}>

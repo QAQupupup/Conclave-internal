@@ -649,9 +649,21 @@ code {
 .message-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   margin-top: 8px;
   flex-wrap: wrap;
+}
+.message-actions-left,
+.message-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 长消息展开后：卡片整体描边轻微强调，提醒用户"此条已展开" */
+.message-card.is-expanded {
+  border-color: var(--accent-soft, var(--accent));
+  box-shadow: 0 0 0 1px var(--accent-soft, transparent) inset;
 }
 .expand-btn,
 .copy-btn,
@@ -671,6 +683,23 @@ code {
 }
 .focus-btn:hover,
 .copy-btn:hover {
+  color: var(--accent);
+}
+/* ref chip "更多" 按钮：圆形数字徽章风格 */
+.ref-chip-toggle {
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.ref-chip-toggle:hover {
+  border-color: var(--accent);
+  border-style: solid;
   color: var(--accent);
 }
 .message-refs {
@@ -717,24 +746,40 @@ code {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 6px 0 2px;
+  margin: 14px 0 6px;
+  position: relative;
 }
-.stage-sep-line {
+.stage-separator::before {
+  content: '';
   flex: 1;
   height: 1px;
-  background: var(--border);
+  background: linear-gradient(to right, transparent, var(--border) 30%, var(--border) 70%, transparent);
+}
+.stage-sep-line {
+  display: none;
 }
 .stage-sep-label {
   font-size: 11px;
   color: var(--text-muted);
-  background: var(--bg-elev);
-  padding: 2px 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  background: var(--bg);
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
   white-space: nowrap;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stage-sep-label::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
 }
 .new-msg-btn {
   position: absolute;

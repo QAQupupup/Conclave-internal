@@ -547,7 +547,7 @@ function AgentGraphInner({
             type="button"
             className="btn btn-sm btn-primary"
             onClick={() => setFocused(true)}
-            title="聚焦模式（临时撑起画布放大展示）"
+            title="聚焦模式（撑起画布专注查看，不改变缩放）"
           >
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ marginRight: 4 }}>
               <path
@@ -557,7 +557,7 @@ function AgentGraphInner({
                 strokeLinecap="round"
               />
             </svg>
-            放大展示
+            聚焦查看
           </button>
         </div>
       </div>
