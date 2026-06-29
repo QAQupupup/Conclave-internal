@@ -308,6 +308,61 @@ STAGE_TEMPERATURES: dict[str, float] = {
 }
 
 
+class CircuitBreaker:
+    """LLM 熔断器：连续失败超阈值时熔断，拒绝后续请求一段时间
+
+    状态机：closed → open（连续失败 >= threshold）→ half_open（冷却后）→ closed/half_open
+    """
+
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 60.0):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self._failure_count = 0
+        self._state = "closed"  # closed | open | half_open
+        self._opened_at: float = 0.0
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def can_call(self) -> bool:
+        """是否允许调用 LLM"""
+        if self._state == "open":
+            import time
+            if time.monotonic() - self._opened_at >= self.recovery_timeout:
+                self._state = "half_open"
+                logger.info("熔断器进入 half_open 状态，尝试恢复")
+                return True
+            return False
+        return True
+
+    def record_success(self) -> None:
+        self._failure_count = 0
+        if self._state != "closed":
+            logger.info("熔断器恢复到 closed 状态")
+        self._state = "closed"
+
+    def record_failure(self) -> None:
+        self._failure_count += 1
+        if self._failure_count >= self.failure_threshold and self._state != "open":
+            self._state = "open"
+            import time
+            self._opened_at = time.monotonic()
+            logger.error(
+                "熔断器打开：连续失败 %d 次，%gs 内拒绝所有 LLM 调用",
+                self._failure_count, self.recovery_timeout,
+            )
+
+
+# 进程级单例熔断器
+_circuit_breaker = CircuitBreaker()
+
+
+def get_circuit_breaker() -> CircuitBreaker:
+    """获取全局熔断器"""
+    return _circuit_breaker
+
+
 class RealLLM:
     """真实 LLM 客户端：调 openai 兼容接口（httpx）
 
@@ -344,6 +399,16 @@ class RealLLM:
 
     async def complete(self, prompt: str, schema_hint: str = "") -> dict[str, Any]:
         """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级"""
+        # 熔断器检查
+        if not _circuit_breaker.can_call():
+            logger.warning("熔断器打开，跳过 LLM 调用，直接降级到 Stub")
+            from app.observability.log_bus import log_bus
+            log_bus.warning(
+                f"LLM 熔断器打开，直接降级: stage={schema_hint}",
+                logger="agents.llm",
+            )
+            return StubLLM().complete(prompt, schema_hint)
+
         model_cls = SCHEMA_MAP.get(schema_hint)
         schema_desc = self._schema_description(model_cls)
         # schema_hint 即阶段名，用于 trace 记录
@@ -384,6 +449,7 @@ class RealLLM:
                             f"intra_team 阶段 claims 为空，LLM 未输出有效论点",
                             ClaimListResult,
                         )
+                _circuit_breaker.record_success()
                 return result
             except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
                 # 提取 HTTP 错误的响应体（便于排查 403 余额不足等问题）
@@ -402,6 +468,7 @@ class RealLLM:
                 )
 
         # 3 次都失败：降级到 StubLLM 同阶段数据，保证流程不中断（不报错）
+        _circuit_breaker.record_failure()
         logger.error("阶段=%s 三次重试全部失败，降级到 StubLLM。最后错误: %s", stage, last_error[:300])
         # 旁路日志：LLM 降级
         from app.observability.log_bus import log_bus

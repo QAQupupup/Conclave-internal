@@ -23,7 +23,11 @@ Subscriber = Callable[[DomainEvent], Awaitable[None]]
 
 
 class InMemoryEventBus:
-    """内存事件总线，后期换 RedisEventBus / MQ 不改上层调用"""
+    """内存事件总线 + SQLite 持久化（重启不丢事件）
+
+    事件同时写入内存缓存和 SQLite，重启后从 SQLite 恢复。
+    后期换 RedisEventBus / MQ 不改上层调用。
+    """
 
     def __init__(self) -> None:
         # topic -> 订阅者列表
@@ -32,10 +36,21 @@ class InMemoryEventBus:
         self._history: dict[str, list[DomainEvent]] = {}
 
     async def publish(self, event: DomainEvent) -> None:
-        """发布事件：广播给所有订阅者，并写入历史缓存"""
-        # 设置序列号（基于当前历史长度，从 0 自增）
-        event.seq = len(self._history.get(event.meeting_id, []))
-        # 写入历史
+        """发布事件：写入 SQLite + 内存缓存，广播给订阅者"""
+        # 持久化到 SQLite 并获取自增 seq
+        from app.db import save_event
+        ts_str = event.ts.isoformat() if hasattr(event.ts, "isoformat") else str(event.ts)
+        db_seq = save_event(
+            meeting_id=event.meeting_id,
+            event_type=event.type,
+            payload=event.payload,
+            ts=ts_str,
+            trace_id=event.trace_id,
+        )
+        # 用 SQLite 的自增 seq 作为全局唯一序列号
+        event.seq = db_seq
+
+        # 写入内存历史
         self._history.setdefault(event.meeting_id, []).append(event)
         # 广播给 topic 级订阅者
         for sub in list(self._subs.get(event.meeting_id, [])):
@@ -63,24 +78,59 @@ class InMemoryEventBus:
         return _unsubscribe
 
     def history(self, meeting_id: str) -> list[DomainEvent]:
-        """取某会议已发布事件，供 WS 新连接回放"""
-        return list(self._history.get(meeting_id, []))
+        """取某会议已发布事件，优先从内存取，内存空则从 SQLite 恢复"""
+        mem_events = self._history.get(meeting_id)
+        if mem_events:
+            return list(mem_events)
+        # 内存无缓存，从 SQLite 恢复
+        return self._restore_from_db(meeting_id)
 
     def replay(self, meeting_id: str, from_seq: int = 0) -> list[DomainEvent]:
         """增量回放：from_seq=0 返回全部事件，from_seq>0 返回 seq > from_seq 的事件"""
-        events = self._history.get(meeting_id, [])
+        events = self._history.get(meeting_id)
+        if not events:
+            # 内存无缓存，从 SQLite 恢复
+            events = self._restore_from_db(meeting_id)
         if from_seq <= 0:
             return list(events)
         return [e for e in events if e.seq > from_seq]
 
     def last_seq(self, meeting_id: str) -> int:
         """取某会议最后一条事件的 seq，无事件返回 0"""
-        events = self._history.get(meeting_id, [])
-        return events[-1].seq if events else 0
+        events = self._history.get(meeting_id)
+        if events:
+            return events[-1].seq
+        # 内存无缓存，从 SQLite 取
+        from app.db import last_event_seq
+        return last_event_seq(meeting_id)
 
     def clear(self, meeting_id: str) -> None:
-        """清理某会议的历史缓存"""
+        """清理某会议的内存缓存（SQLite 保留）"""
         self._history.pop(meeting_id, None)
+
+    def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
+        """从 SQLite 恢复事件到内存缓存"""
+        from app.db import load_events
+        rows = load_events(meeting_id)
+        events = []
+        for row in rows:
+            from datetime import datetime as _dt
+            try:
+                ts = _dt.fromisoformat(row["ts"])
+            except (ValueError, TypeError):
+                ts = _dt.now(timezone.utc)
+            events.append(DomainEvent(
+                type=row["type"],
+                meeting_id=row["meeting_id"],
+                payload=row["payload"],
+                ts=ts,
+                trace_id=row.get("trace_id"),
+                seq=row["seq"],
+            ))
+        # 缓存到内存
+        if events:
+            self._history[meeting_id] = events
+        return events
 
 
 # 进程级单例事件总线

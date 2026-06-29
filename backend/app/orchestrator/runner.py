@@ -1,6 +1,8 @@
 # 编排运行器：按序跑节点，每步 publish 阶段切换事件
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from typing import Any
 
@@ -156,18 +158,24 @@ class Runner:
             save_message(msg)
 
 
-# 进程级运行态注册表：meeting_id -> MeetingState
+# 进程级运行态注册表（线程安全）
 _states: dict[str, MeetingState] = {}
+_states_lock = threading.RLock()
+# 运行中的会议后台任务：meeting_id -> asyncio.Task
+_running_tasks: dict[str, asyncio.Task] = {}
+_tasks_lock = threading.RLock()
 
 
 def get_state(meeting_id: str) -> MeetingState | None:
-    """取某会议的运行态"""
-    return _states.get(meeting_id)
+    """取某会议的运行态（线程安全）"""
+    with _states_lock:
+        return _states.get(meeting_id)
 
 
 def set_state(state: MeetingState) -> None:
-    """更新运行态"""
-    _states[state.meeting_id] = state
+    """更新运行态（线程安全）"""
+    with _states_lock:
+        _states[state.meeting_id] = state
 
 
 def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
@@ -199,3 +207,47 @@ def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None 
         except Exception as e:
             logger.warning("会议 %s 从 SQLite 恢复失败: %s，创建新状态", meeting_id, e)
     return new_state(meeting_id, topic, doc_summaries)
+
+
+def recover_crashed_meetings() -> list[str]:
+    """崩溃恢复：启动时把 status=running 的会议标记为 paused
+
+    进程崩溃时正在运行的会议没有后台 task 继续执行，
+    重启后把它们标记为 paused，用户可以手动 resume 继续。
+    返回被恢复的会议 ID 列表。
+    """
+    from app.db import recover_running_meetings, save_meeting
+    from app.models import MeetingStatus
+    from app.observability.log_bus import log_bus
+
+    crashed = recover_running_meetings()
+    recovered_ids = []
+    for record in crashed:
+        meeting_id = record["id"]
+        payload = record.get("payload", {})
+        if isinstance(payload, str):
+            import json
+            payload = json.loads(payload)
+        try:
+            state = MeetingState(**payload)
+            state.status = MeetingStatus.PAUSED
+            state.paused_snapshot = state.snapshot()
+            set_state(state)
+            save_meeting(
+                state.meeting_id,
+                state.topic,
+                state.stage.value,
+                state.status.value,
+                state.snapshot(),
+            )
+            recovered_ids.append(meeting_id)
+            log_bus.warning(
+                f"崩溃恢复：会议 {meeting_id} 从 running 标记为 paused",
+                logger="orchestrator.runner",
+            )
+        except Exception as e:
+            log_bus.error(
+                f"崩溃恢复失败：会议 {meeting_id} 恢复异常: {e}",
+                logger="orchestrator.runner",
+            )
+    return recovered_ids

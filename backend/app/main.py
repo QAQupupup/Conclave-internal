@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,9 +25,15 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时初始化数据库"""
+    """应用生命周期：启动时初始化数据库 + 崩溃恢复"""
     init_db()
     init_auth_table()
+    # 崩溃恢复：把上次未完成的 RUNNING 会议标记为 PAUSED
+    from app.orchestrator.runner import recover_crashed_meetings
+    recovered = recover_crashed_meetings()
+    if recovered:
+        import logging
+        logging.getLogger("lifespan").info("崩溃恢复：%d 个会议标记为 PAUSED", len(recovered))
     yield
 
 
@@ -60,9 +67,50 @@ def create_app() -> FastAPI:
     app.include_router(net_auth_router.router)
 
     @app.get("/health", tags=["meta"])
-    async def health() -> dict[str, str]:
-        """健康检查"""
-        return {"status": "ok"}
+    async def health() -> dict[str, Any]:
+        """健康检查：检查关键依赖可用性"""
+        checks: dict[str, str] = {}
+
+        # SQLite 检查
+        try:
+            from app.db import _connect
+            conn = _connect()
+            conn.execute("SELECT 1")
+            conn.close()
+            checks["sqlite"] = "ok"
+        except Exception as e:
+            checks["sqlite"] = f"error: {e}"
+
+        # Qdrant 检查
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=3) as client:
+                qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+                resp = await client.get(f"{qdrant_url}/healthz")
+                checks["qdrant"] = "ok" if resp.status_code == 200 else f"error: {resp.status_code}"
+        except Exception as e:
+            checks["qdrant"] = f"error: {type(e).__name__}"
+
+        # Docker 检查
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["docker", "info"], capture_output=True, timeout=3,
+            )
+            checks["docker"] = "ok" if result.returncode == 0 else "error: docker unavailable"
+        except Exception as e:
+            checks["docker"] = f"error: {type(e).__name__}"
+
+        # LLM 熔断器状态
+        try:
+            from app.agents.llm import get_circuit_breaker
+            cb = get_circuit_breaker()
+            checks["llm_circuit"] = cb.state
+        except Exception:
+            checks["llm_circuit"] = "unknown"
+
+        all_ok = all(v == "ok" or v == "closed" for v in checks.values())
+        return {"status": "ok" if all_ok else "degraded", "checks": checks}
 
     return app
 

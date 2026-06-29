@@ -1042,6 +1042,23 @@ pip install -r requirements.txt
     state.stage = Stage.PRODUCE
     state.status = MeetingStatus.DONE
     _lb.info("produce: 状态已设为 DONE", logger="orchestrator.nodes.produce")
+
+    # LLM 降级检测：如果有阶段使用了 StubLLM 兜底，发 warning 事件
+    fallback_stages = [s for s, flag in state.confidence_flags.items() if flag == "fallback"]
+    if fallback_stages:
+        await bus.publish(make_event(
+            "meeting.fallback_warning",
+            state.meeting_id,
+            {
+                "fallback_stages": fallback_stages,
+                "message": f"以下阶段使用了降级数据（非真实 LLM 输出）：{', '.join(fallback_stages)}。产出物可能不可靠，请谨慎参考。",
+                "severity": "warning",
+            },
+        ))
+        _lb.warning(
+            f"会议完成但有 {len(fallback_stages)} 个阶段降级：{fallback_stages}",
+            logger="orchestrator.nodes.produce",
+        )
     # 迭代二：会议结束后触发记忆提取（失败不影响主流程）
     from app.memory.profile import trigger_extraction
     trigger_extraction(state)

@@ -53,6 +53,18 @@ def init_db() -> None:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_messages_meeting ON messages(meeting_id);
+
+                CREATE TABLE IF NOT EXISTS events (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    trace_id TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_events_meeting ON events(meeting_id);
+                CREATE INDEX IF NOT EXISTS idx_events_meeting_seq ON events(meeting_id, seq);
                 """
             )
             conn.commit()
@@ -127,6 +139,89 @@ def list_meetings() -> list[dict[str, Any]]:
                 d["payload"] = json.loads(d["payload"])
                 out.append(d)
             return out
+        finally:
+            conn.close()
+
+
+# ---------- 事件持久化 ----------
+
+def save_event(
+    meeting_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    ts: str,
+    trace_id: str | None = None,
+) -> int:
+    """持久化事件到 SQLite，返回自增 seq"""
+    with _lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """INSERT INTO events (meeting_id, type, payload, ts, trace_id)
+                VALUES (?, ?, ?, ?, ?)""",
+                (
+                    meeting_id,
+                    event_type,
+                    json.dumps(payload, ensure_ascii=False),
+                    ts,
+                    trace_id,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid or 0
+        finally:
+            conn.close()
+
+
+def load_events(meeting_id: str, from_seq: int = 0) -> list[dict[str, Any]]:
+    """从 SQLite 加载事件，支持增量回放"""
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                """SELECT seq, meeting_id, type, payload, ts, trace_id
+                FROM events WHERE meeting_id = ? AND seq > ?
+                ORDER BY seq ASC""",
+                (meeting_id, from_seq),
+            ).fetchall()
+            out = []
+            for row in rows:
+                out.append({
+                    "seq": row["seq"],
+                    "meeting_id": row["meeting_id"],
+                    "type": row["type"],
+                    "payload": json.loads(row["payload"]),
+                    "ts": row["ts"],
+                    "trace_id": row["trace_id"],
+                })
+            return out
+        finally:
+            conn.close()
+
+
+def last_event_seq(meeting_id: str) -> int:
+    """取某会议最后一条事件的 seq，无事件返回 0"""
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT MAX(seq) as max_seq FROM events WHERE meeting_id = ?",
+                (meeting_id,),
+            ).fetchone()
+            return row["max_seq"] if row and row["max_seq"] else 0
+        finally:
+            conn.close()
+
+
+def recover_running_meetings() -> list[dict[str, Any]]:
+    """查找状态为 running 的会议（用于崩溃恢复）"""
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM meetings WHERE status = 'running'"
+            ).fetchall()
+            return [dict(row) for row in rows]
         finally:
             conn.close()
 
