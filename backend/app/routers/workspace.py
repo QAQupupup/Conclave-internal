@@ -33,8 +33,8 @@ CODE_TIMEOUT = int(os.environ.get("CONCLAVE_CODE_TIMEOUT", "15"))
 # 输出最大字节数（防止超大输出撑爆前端）
 MAX_OUTPUT = int(os.environ.get("CONCLAVE_MAX_OUTPUT", str(512 * 1024)))
 
-# 禁止执行的命令前缀（安全黑名单）
-_BLOCKED_COMMANDS = {"rm -rf /", "format", "del /f /s /q C:", "shutdown", "reboot"}
+# 禁止执行的命令模式（安全检查）
+from app.middleware import is_dangerous_command
 
 
 def _resolve_path(rel_path: str) -> Path:
@@ -198,14 +198,12 @@ async def delete_file(file_path: str) -> dict[str, Any]:
 @router.post("/exec")
 async def exec_command(req: CommandRequest) -> dict[str, Any]:
     """在工作区内执行命令（沙箱优先，降级宿主机）"""
-    # 安全检查
-    cmd_lower = req.command.lower().strip()
-    for blocked in _BLOCKED_COMMANDS:
-        if blocked in cmd_lower:
-            raise HTTPException(
-                status_code=403,
-                detail=f"命令被安全策略阻止: 包含 '{blocked}'",
-            )
+    # 安全检查：危险命令模式检测
+    if is_dangerous_command(req.command):
+        raise HTTPException(
+            status_code=403,
+            detail="命令被安全策略阻止：检测到危险命令模式",
+        )
 
     log_bus.info(
         f"执行命令: {req.command}",

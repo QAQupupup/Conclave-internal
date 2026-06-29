@@ -79,10 +79,13 @@ SANDBOX_MEM_LIMIT = os.environ.get("CONCLAVE_SANDBOX_MEM", "256m")
 SANDBOX_CPU_LIMIT = os.environ.get("CONCLAVE_SANDBOX_CPUS", "1")
 SANDBOX_TMPFS_SIZE = os.environ.get("CONCLAVE_SANDBOX_TMPFS", "64m")
 
-# 沙箱模式: auto(默认,尝试Docker,失败降级) / docker(强制容器) / host(直接宿主机)
+# 沙箱模式: auto(默认,尝试Docker,失败拒绝) / docker(强制容器) / host(直接宿主机,仅开发)
 SANDBOX_MODE: Literal["auto", "docker", "host"] = os.environ.get(
     "CONCLAVE_SANDBOX_MODE", "auto"
 )  # type: ignore[assignment]
+
+# 是否允许宿主机降级（默认 False，安全优先）
+SANDBOX_ALLOW_HOST_FALLBACK = os.environ.get("CONCLAVE_SANDBOX_ALLOW_HOST", "") == "1"
 
 # Docker socket 路径（容器内挂载位置）
 DOCKER_SOCKET = os.environ.get("DOCKER_HOST", "")
@@ -443,7 +446,18 @@ async def run_python(
         except TimeoutError:
             raise
         except Exception as e:
-            log_bus.warning(f"容器执行异常，降级到宿主机: {e}", logger="sandbox")
+            log_bus.warning(f"容器执行异常: {e}", logger="sandbox")
+
+    # Docker 不可用：拒绝执行（安全优先）
+    if not SANDBOX_ALLOW_HOST_FALLBACK:
+        log_bus.error("沙箱不可用且未启用宿主机降级，拒绝执行代码", logger="sandbox")
+        return ExecResult(
+            exit_code=127,
+            stdout="",
+            stderr="[安全拒绝] Docker 沙箱不可用。设置 CONCLAVE_SANDBOX_ALLOW_HOST=1 可允许宿主机降级（仅开发环境）。",
+            sandboxed=False,
+            fallback_reason="Docker 不可用，安全策略拒绝执行",
+        )
 
     result = await _run_on_host(code, None, workspace_root, timeout)
     log_bus.warning("代码执行未隔离（宿主机直连），请检查 Docker 服务状态", logger="sandbox")
@@ -478,7 +492,18 @@ async def run_command(
         except TimeoutError:
             raise
         except Exception as e:
-            log_bus.warning(f"容器执行异常，降级到宿主机: {e}", logger="sandbox")
+            log_bus.warning(f"容器执行异常: {e}", logger="sandbox")
+
+    # Docker 不可用：拒绝执行（安全优先）
+    if not SANDBOX_ALLOW_HOST_FALLBACK:
+        log_bus.error("沙箱不可用且未启用宿主机降级，拒绝执行命令", logger="sandbox")
+        return ExecResult(
+            exit_code=127,
+            stdout="",
+            stderr="[安全拒绝] Docker 沙箱不可用。设置 CONCLAVE_SANDBOX_ALLOW_HOST=1 可允许宿主机降级（仅开发环境）。",
+            sandboxed=False,
+            fallback_reason="Docker 不可用，安全策略拒绝执行",
+        )
 
     result = await _run_on_host(None, command, workspace_root, timeout)
     log_bus.warning("命令执行未隔离（宿主机直连），请检查 Docker 服务状态", logger="sandbox")

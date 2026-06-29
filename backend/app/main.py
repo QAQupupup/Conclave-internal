@@ -1,6 +1,7 @@
 # FastAPI 入口：挂载 routers，CORS，lifespan
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -37,14 +38,17 @@ def create_app() -> FastAPI:
         version="0.2.0",
         lifespan=lifespan,
     )
-    # CORS：开发期全放开
+    # CORS：开发期全放开，生产环境应限制 origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=os.environ.get("CONCLAVE_CORS_ORIGINS", "*").split(","),
+        allow_credentials=os.environ.get("CONCLAVE_CORS_ORIGINS", "") != "" or False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # API 认证中间件：基于 token 的认证
+    from app.middleware import setup_auth_middleware
+    setup_auth_middleware(app)
     # 请求追踪中间件：分配 request_id，注入日志
     setup_trace_middleware(app)
     # 挂载路由

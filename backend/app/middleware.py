@@ -1,15 +1,99 @@
 # 请求追踪中间件：每个 HTTP 请求分配 request_id，设置到 contextvars
+# API 认证中间件：基于 token 的简单认证
 from __future__ import annotations
 
+import os
+import re
 import time
 
 from fastapi import FastAPI, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 
 from app.context import new_request_id, set_request_id, reset_request_id
 from app.logging_config import get_logger
 
 logger = get_logger("middleware.trace")
+
+# API 认证 token（留空则不启用认证，仅开发模式）
+_API_TOKEN = os.environ.get("CONCLAVE_API_TOKEN", "")
+# 免认证路径前缀
+_PUBLIC_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+# WebSocket 升级路径免认证（WebSocket 在 query 参数中传 token）
+_WS_PATHS = {"/ws"}
+
+
+def _is_public(path: str) -> bool:
+    """判断路径是否免认证"""
+    for p in _PUBLIC_PATHS:
+        if path == p or path.startswith(p + "/") or path.startswith(p + "?"):
+            return True
+    return False
+
+
+def setup_auth_middleware(app: FastAPI) -> None:
+    """注册 API 认证中间件
+
+    认证策略：
+    - CONCLAVE_API_TOKEN 未设置 → 不启用认证（开发模式）
+    - 设置了 token → 所有非公开路径需带 Authorization: Bearer <token> 或 ?token=<token>
+    - WebSocket 连接通过 query 参数 ?token=<token> 认证
+    """
+
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next) -> Response:
+        # 未配置 token 时不认证
+        if not _API_TOKEN:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # 公开路径免认证
+        if _is_public(path):
+            return await call_next(request)
+
+        # 检查 Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        token = ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        # 也支持 query 参数（用于 WebSocket 和浏览器直连）
+        if not token:
+            token = request.query_params.get("token", "")
+
+        if token != _API_TOKEN:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "未授权：请提供有效的 API token"},
+            )
+
+        return await call_next(request)
+
+
+# ---- 命令注入防护 ----
+
+# 危险命令模式（正则匹配，比精确匹配更难绕过）
+_DANGEROUS_PATTERNS = [
+    r"\brm\s+(-\w*\s+)*-?r\w*\s+(-\w+\s+)*[/~]",  # rm -rf / 或 rm -rf ~
+    r"\bmkfs\b",              # 格式化文件系统
+    r"\b(?:shutdown|reboot|halt|poweroff)\b",  # 系统关机/重启
+    r"\bdd\s+if=.+of=/dev/",  # dd 写设备
+    r">\s*/dev/sd[a-z]",      # 重定向到块设备
+    r"\bchmod\s+-R\s+777\s+/",  # 全盘改权限
+    r"\bcurl\s+.+\|\s*(?:bash|sh)",  # curl | shell 远程执行
+    r"\bwget\s+.+\|\s*(?:bash|sh)",  # wget | shell
+    r"\beval\s+\$\(?",       # eval 命令注入
+    r"\bnc\s+.*-e\s+/bin/sh",  # netcat 反弹 shell
+    r"\bpython\s+-c\s+.*import\s+subprocess",  # python subprocess 注入
+]
+
+
+def is_dangerous_command(command: str) -> bool:
+    """检测命令是否包含危险模式"""
+    cmd = command.strip()
+    for pattern in _DANGEROUS_PATTERNS:
+        if re.search(pattern, cmd, re.IGNORECASE):
+            return True
+    return False
 
 
 def setup_trace_middleware(app: FastAPI) -> None:
