@@ -73,17 +73,20 @@ def setup_auth_middleware(app: FastAPI) -> None:
 
 # 危险命令模式（正则匹配，比精确匹配更难绕过）
 _DANGEROUS_PATTERNS = [
-    r"\brm\s+(-\w*\s+)*-?r\w*\s+(-\w+\s+)*[/~]",  # rm -rf / 或 rm -rf ~
+    r"\brm\s+(-{1,2}\w+\s+)*-?r\w*\s+(-{1,2}\w+\s+)*[/~.*]",  # rm -rf / 或 rm -rf ~ 或 rm -rf . 或 rm -rf *
+    r"\brm\s+(-{1,2}\w+\s+)*-?r\w*\s+\*",  # rm -rf *（删所有文件）
     r"\bmkfs\b",              # 格式化文件系统
     r"\b(?:shutdown|reboot|halt|poweroff)\b",  # 系统关机/重启
     r"\bdd\s+if=.+of=/dev/",  # dd 写设备
     r">\s*/dev/sd[a-z]",      # 重定向到块设备
     r"\bchmod\s+-R\s+777\s+/",  # 全盘改权限
-    r"\bcurl\s+.+\|\s*(?:bash|sh)",  # curl | shell 远程执行
-    r"\bwget\s+.+\|\s*(?:bash|sh)",  # wget | shell
+    r"\b(?:curl|wget)\s+.+\|\s*/?(?:bash|sh|/bin/bash|/bin/sh)",  # curl|bash 含路径前缀
+    r"\b(?:curl|wget)\s+.+\|\s*(?:bash|sh)",  # curl | shell 远程执行
     r"\beval\s+\$\(?",       # eval 命令注入
+    r"\beval\s+\$\w+",       # eval $CMD 变量展开
     r"\bnc\s+.*-e\s+/bin/sh",  # netcat 反弹 shell
     r"\bpython\s+-c\s+.*import\s+subprocess",  # python subprocess 注入
+    r"\bpython\s+-c\s+.*import\s+os",  # python os 模块注入
 ]
 
 

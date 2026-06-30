@@ -155,11 +155,11 @@ STAGE_ORDER: list[Stage] = [
 
 # 议题路由：各复杂度对应的阶段裁剪规则
 # simple：跳过 cross_team + evidence_check + arbitrate，intra_team 后直接 produce
-# standard：跳过 evidence_check（无冲突时自动跳过）
+# standard：无条件跳过的阶段为空；evidence_check 由 cross_team_node 动态跳过（无冲突时）
 # full：完整六阶段
 _FLOW_SKIP_MAP: dict[str, set[Stage]] = {
     "simple": {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE},
-    "standard": {Stage.EVIDENCE_CHECK},
+    "standard": set(),
     "full": set(),
 }
 

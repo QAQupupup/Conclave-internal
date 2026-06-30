@@ -30,11 +30,20 @@ interface UseWebSocketResult {
  * 根据 meetingId 和 lastSeq 推导 WS 地址
  * - lastSeq > 0 时携带 from_seq，后端只推增量事件（断线重连）
  * - lastSeq == 0 时全量回放（首次连接）
+ * - 认证 token（如果 localStorage 有）附加到 query 参数
  */
 function buildWsUrl(meetingId: string, fromSeq: number): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const base = `${proto}://${window.location.host}/ws/meetings/${meetingId}`
-  return fromSeq > 0 ? `${base}?from_seq=${fromSeq}` : base
+  const params = new URLSearchParams()
+  if (fromSeq > 0) params.set('from_seq', String(fromSeq))
+  // 附加认证 token（如果用户设置了）
+  try {
+    const token = localStorage.getItem('conclave_api_token')
+    if (token) params.set('token', token)
+  } catch { /* localStorage 不可用时忽略 */ }
+  const qs = params.toString()
+  return qs ? `${base}?${qs}` : base
 }
 
 /** 自动重连的退避参数 */

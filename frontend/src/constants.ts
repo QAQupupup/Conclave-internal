@@ -19,6 +19,7 @@ export const STORAGE_KEYS = {
   sidebarCollapsed: 'conclave-sidebar-collapsed',
   graphCollapsed: 'conclave-graph-collapsed',
   chatDraft: 'conclave-chat-draft',
+  apiToken: 'conclave_api_token',
 } as const
 
 /** 会议状态中文标签 + 样式类 */

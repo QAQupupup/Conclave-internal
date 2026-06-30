@@ -114,11 +114,10 @@ class InMemoryEventBus:
         rows = load_events(meeting_id)
         events = []
         for row in rows:
-            from datetime import datetime as _dt
             try:
-                ts = _dt.fromisoformat(row["ts"])
+                ts = datetime.fromisoformat(row["ts"])
             except (ValueError, TypeError):
-                ts = _dt.now(timezone.utc)
+                ts = datetime.now(timezone.utc)
             events.append(DomainEvent(
                 type=row["type"],
                 meeting_id=row["meeting_id"],

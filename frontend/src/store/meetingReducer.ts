@@ -170,6 +170,23 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
             meeting: { ...meeting, status: p.status ?? meeting.status },
           }
         }
+        case 'flow_plan.set': {
+          const p = ev.payload as { flow_plan: string; skipped_stages: string[] }
+          return {
+            ...store,
+            meeting: { ...meeting, flow_plan: p.flow_plan },
+          }
+        }
+        case 'meeting.fallback_warning': {
+          const p = ev.payload as { fallback_stages: string[]; message: string; severity: string }
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              fallback_warning: { stages: p.fallback_stages, message: p.message },
+            },
+          }
+        }
         // control.ack / loan.requested / loan.resolved / error 等暂不改变核心状态
         default:
           return store

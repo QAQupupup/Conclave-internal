@@ -159,11 +159,12 @@ class Runner:
 
 
 # 进程级运行态注册表（线程安全）
+# 注意：RLock 只保护字典的读写操作（_states[key] = ... / _states.pop(key)），
+# 不保护 MeetingState 对象内部的属性修改。当前架构下 asyncio 单线程事件循环
+# 只在 await 点切换，apply_signal 是同步函数不会被打断，实际竞态风险低。
+# 如未来引入多线程或多 worker，需要改用 deepcopy 或细粒度锁。
 _states: dict[str, MeetingState] = {}
 _states_lock = threading.RLock()
-# 运行中的会议后台任务：meeting_id -> asyncio.Task
-_running_tasks: dict[str, asyncio.Task] = {}
-_tasks_lock = threading.RLock()
 
 
 def get_state(meeting_id: str) -> MeetingState | None:
@@ -236,8 +237,9 @@ def recover_crashed_meetings() -> list[str]:
             save_meeting(
                 state.meeting_id,
                 state.topic,
-                state.stage.value,
                 state.status.value,
+                state.stage.value,
+                state.created_at,
                 state.snapshot(),
             )
             recovered_ids.append(meeting_id)

@@ -103,9 +103,11 @@ class InMemoryVectorStore:
         vecs = self._embedding.embed_batch(texts)
         for chunk, vec in zip(chunks, vecs):
             self._store[chunk.chunk_id] = (chunk, vec)
-            # 缓存原文用于惰性展开
+        # 原文缓存：仅在 store_raw_text 未调用时作为兜底
+        # 优先用 store_raw_text 存入完整文档原文，此处只标记文档存在
+        for chunk in chunks:
             if chunk.doc_id not in self._raw_texts:
-                self._raw_texts[chunk.doc_id] = chunk.text
+                self._raw_texts[chunk.doc_id] = ""  # 占位，expand_context 会回退到 chunk.text
 
     def store_raw_text(self, doc_id: str, full_text: str) -> None:
         """缓存文档完整原文，用于跨 chunk 惰性展开"""
@@ -123,7 +125,7 @@ class InMemoryVectorStore:
         - 返回扩展后的文本；无原文缓存时回退到 chunk.text
         """
         raw = self._raw_texts.get(chunk.doc_id)
-        if raw is None:
+        if not raw:  # None 或空字符串都回退到 chunk.text
             return chunk.text
         start = max(0, chunk.char_start - before)
         end = min(len(raw), chunk.char_end + after)
@@ -240,7 +242,7 @@ class QdrantVectorStore(InMemoryVectorStore):
             # 内存也存一份（惰性展开用）
             self._store[chunk.chunk_id] = (chunk, vec)
             if chunk.doc_id not in self._raw_texts:
-                self._raw_texts[chunk.doc_id] = chunk.text
+                self._raw_texts[chunk.doc_id] = ""  # 占位，优先用 store_raw_text
             # Qdrant 存 payload
             points.append(PointStruct(
                 id=hash(chunk.chunk_id) % (2**63),
@@ -272,6 +274,8 @@ class QdrantVectorStore(InMemoryVectorStore):
                     char_start=payload.get("char_start", 0),
                     char_end=payload.get("char_end", 0),
                     source=payload.get("source", ""),
+                    prev_id=payload.get("prev_id", ""),
+                    next_id=payload.get("next_id", ""),
                 )
                 out.append((chunk, r.score or 0.0))
             return out

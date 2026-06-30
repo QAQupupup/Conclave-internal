@@ -46,10 +46,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     # CORS：开发期全放开，生产环境应限制 origins
+    _cors_origins_raw = os.environ.get("CONCLAVE_CORS_ORIGINS", "")
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()] or ["*"]
+    # CORS 规范禁止 allow_origins=["*"] + allow_credentials=True
+    # 当 origins 为通配 * 时不允许 credentials；指定了具体源时才允许
+    _allow_credentials = _cors_origins != ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=os.environ.get("CONCLAVE_CORS_ORIGINS", "*").split(","),
-        allow_credentials=os.environ.get("CONCLAVE_CORS_ORIGINS", "") != "" or False,
+        allow_origins=_cors_origins,
+        allow_credentials=_allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -91,13 +96,16 @@ def create_app() -> FastAPI:
         except Exception as e:
             checks["qdrant"] = f"error: {type(e).__name__}"
 
-        # Docker 检查
+        # Docker 检查（async 避免阻塞事件循环）
         try:
-            import subprocess
-            result = subprocess.run(
-                ["docker", "info"], capture_output=True, timeout=3,
+            import asyncio as _aio
+            proc = await _aio.create_subprocess_exec(
+                "docker", "info",
+                stdout=_aio.subprocess.DEVNULL,
+                stderr=_aio.subprocess.DEVNULL,
             )
-            checks["docker"] = "ok" if result.returncode == 0 else "error: docker unavailable"
+            await _aio.wait_for(proc.wait(), timeout=3)
+            checks["docker"] = "ok" if proc.returncode == 0 else "error: docker unavailable"
         except Exception as e:
             checks["docker"] = f"error: {type(e).__name__}"
 
@@ -109,7 +117,9 @@ def create_app() -> FastAPI:
         except Exception:
             checks["llm_circuit"] = "unknown"
 
-        all_ok = all(v == "ok" or v == "closed" for v in checks.values())
+        # half_open 表示正在尝试恢复，视为可用
+        _healthy_vals = {"ok", "closed", "half_open"}
+        all_ok = all(v in _healthy_vals for v in checks.values())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
 
     return app

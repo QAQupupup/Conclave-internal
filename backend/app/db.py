@@ -162,7 +162,7 @@ def save_event(
                 (
                     meeting_id,
                     event_type,
-                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(payload, ensure_ascii=False, default=str),
                     ts,
                     trace_id,
                 ),

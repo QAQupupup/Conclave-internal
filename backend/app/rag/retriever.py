@@ -38,12 +38,16 @@ def retrieve(
         d["summary"] = chunk.summary(max_len=summary_max)
         d["full_length"] = len(chunk.text)
         d["expandable"] = len(chunk.text) > summary_max
-        # 邻居链上下文：附带前 N 个 chunk 的摘要
-        if expand_neighbors > 0 and chunk.prev_id:
+        # 邻居链上下文：附带前 N 个 chunk 的文本
+        # 不依赖 chunk.prev_id 判断——文档首个 chunk prev_id 为空时
+        # get_neighbor_context 会返回仅含自身的文本，不会出错
+        if expand_neighbors > 0:
             neighbor_ctx = store.get_neighbor_context(
                 chunk, prev_count=expand_neighbors, next_count=0,
             )
-            d["neighbor_context"] = neighbor_ctx[:summary_max * 3]
+            # 只有实际扩展到了邻居时才附加上下文（避免冗余）
+            if len(neighbor_ctx) > len(chunk.text):
+                d["neighbor_context"] = neighbor_ctx[:summary_max * 3]
         out.append(d)
     return out
 

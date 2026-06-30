@@ -261,6 +261,10 @@ export interface MeetingState {
   confidence_flags?: Record<string, 'high' | 'low' | 'fallback'>
   /** 借调的 agent 列表（loan 信号裁决通过后追加） */
   borrowed_agents?: BorrowedAgent[]
+  /** 议题路由计划：simple/standard/full */
+  flow_plan?: string
+  /** 降级警告：有阶段使用了 StubLLM 兜底 */
+  fallback_warning?: { stages: string[]; message: string } | null
 }
 
 /** 借调 agent 信息 */

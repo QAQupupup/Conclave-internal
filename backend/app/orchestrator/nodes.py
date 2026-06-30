@@ -551,7 +551,9 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
     if conflicts:
         state._prefetched_evidence = await _prefetch_evidence(state, conflicts)
 
-    # 议题路由：standard 模式下无冲突时跳过 evidence_check
+    # 议题路由：standard 模式下无冲突时动态跳过 evidence_check
+    # standard 模式的 _FLOW_SKIP_MAP 为空（不像 simple 那样无条件跳过），
+    # 此处根据实际冲突情况决定是否跳过 evidence_check
     nxt = _next_stage(Stage.CROSS_TEAM, state.flow_plan)
     if nxt == Stage.EVIDENCE_CHECK and not conflicts and state.flow_plan == "standard":
         nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan) or Stage.PRODUCE
@@ -659,6 +661,8 @@ async def _collect_evidence(meeting_id: str, conflict: dict) -> list[dict]:
             "quote": ck.get("text", "")[:200],
             "source": ck.get("source", "doc:unknown"),
             "char_range": [ck.get("char_start", 0), ck.get("char_end", 0)],
+            # 附带邻居上下文（让 LLM 看到证据所在段落的上下文）
+            "context": ck.get("neighbor_context", ""),
         }
         for i, ck in enumerate(chunks)
     ]
