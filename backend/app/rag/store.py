@@ -252,9 +252,7 @@ class QdrantVectorStore(InMemoryVectorStore):
         client.upsert(collection_name=self._collection, points=points)
 
     def search(self, query: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
-        """检索：Qdrant 向量搜索，回退内存"""
-        if not self._store:
-            return []
+        """检索：Qdrant 向量搜索，失败时回退内存"""
         try:
             client = self._get_client()
             qvec = self._embedding.embed(query)
@@ -280,7 +278,12 @@ class QdrantVectorStore(InMemoryVectorStore):
                 out.append((chunk, r.score or 0.0))
             return out
         except Exception:
-            # Qdrant 查询失败回退内存搜索
+            # Qdrant 查询失败，回退内存搜索（仅在当前进程有缓存时有效）
+            import logging
+            logging.getLogger("app.rag.store").warning(
+                "Qdrant 查询失败，回退内存搜索（内存缓存: %d 条）",
+                len(self._store),
+            )
             return super().search(query, top_k)
 
     def clear(self) -> None:

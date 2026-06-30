@@ -629,7 +629,14 @@ class RealLLM:
         """容错提取 JSON：去掉 ```json 围栏与多余文本"""
         content = (content or "").strip()
         if content.startswith("```"):
-            content = content.split("\n", 1)[1].rsplit("```", 1)[0]
+            # 去掉首行围栏（```json 或 ```）
+            parts = content.split("\n", 1)
+            if len(parts) >= 2:
+                content = parts[1]
+                # 去掉闭合围栏（如果存在）
+                closing = content.rsplit("```", 1)
+                if len(closing) >= 2:
+                    content = closing[0]
         return json.loads(content)
 
 

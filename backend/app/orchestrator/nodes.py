@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from app.agents.compute import (
@@ -850,7 +851,6 @@ async def produce_node(state: MeetingState) -> MeetingState:
         code = code_data.get("code", "")
         if code:
             from app.sandbox import run_python, SANDBOX_IMAGE_DATASCIENCE
-            from pathlib import Path
             import tempfile
             from app.orchestrator.refine_loop import refine_python_code, _summarize_task
             ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
@@ -907,7 +907,6 @@ async def produce_node(state: MeetingState) -> MeetingState:
         test_code = ts_data.get("test_code", "")
         if test_code:
             from app.sandbox import run_command, SANDBOX_IMAGE_DATASCIENCE
-            from pathlib import Path
             import tempfile
             from app.orchestrator.refine_loop import refine_python_code, _summarize_task
             ws_root = Path(os.environ.get("CONCLAVE_WORKSPACE_DIR", ""))
@@ -977,7 +976,6 @@ async def produce_node(state: MeetingState) -> MeetingState:
         dockerfile_content = ds_data.get("dockerfile", "")
         docker_compose_content = ds_data.get("docker_compose", "")
         if app_code:
-            from pathlib import Path
             import tempfile
             ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
             ws_root = Path(ws_env) if ws_env and Path(ws_env).exists() else Path(tempfile.mkdtemp())
@@ -1030,7 +1028,6 @@ pip install -r requirements.txt
 
     # 附件扫描：代码执行类产出（code_analysis/tested_system）扫描工作区收集产出文件
     if state.deliverable_type in ("code_analysis", "tested_system"):
-        from pathlib import Path
         import tempfile
         ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
         ws_root = Path(ws_env) if ws_env and Path(ws_env).exists() else Path(tempfile.mkdtemp())
