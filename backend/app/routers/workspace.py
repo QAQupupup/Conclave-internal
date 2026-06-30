@@ -73,11 +73,13 @@ class FileWriteRequest(BaseModel):
 class CodeRunRequest(BaseModel):
     code: str = Field(..., description="要执行的 Python 代码")
     language: str = Field(default="python", description="语言（目前支持 python）")
+    network_level: str = Field(default="L1", description="网络分级：L1=无网络(默认) / L2=限网(pip) / L3=全联网")
 
 
 class CommandRequest(BaseModel):
     command: str = Field(..., description="要执行的命令")
     cwd: str = Field(default="", description="工作目录（工作区内相对路径）")
+    network_level: str = Field(default="L2", description="网络分级：L1=无网络 / L2=限网(默认,pip) / L3=全联网")
 
 
 # ---- 文件操作 ----
@@ -212,7 +214,10 @@ async def exec_command(req: CommandRequest) -> dict[str, Any]:
     )
 
     try:
-        result = await run_command(req.command, WORKSPACE_ROOT, CMD_TIMEOUT)
+        result = await run_command(
+            req.command, WORKSPACE_ROOT, CMD_TIMEOUT,
+            network_level=req.network_level,  # type: ignore[arg-type]
+        )
     except TimeoutError as e:
         raise HTTPException(status_code=408, detail=str(e))
     except Exception as e:
@@ -249,7 +254,10 @@ async def run_code(req: CodeRunRequest) -> dict[str, Any]:
     )
 
     try:
-        result = await run_python(req.code, WORKSPACE_ROOT, CODE_TIMEOUT)
+        result = await run_python(
+            req.code, WORKSPACE_ROOT, CODE_TIMEOUT,
+            network_level=req.network_level,  # type: ignore[arg-type]
+        )
     except TimeoutError as e:
         raise HTTPException(status_code=408, detail=str(e))
     except Exception as e:
