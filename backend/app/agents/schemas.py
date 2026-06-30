@@ -190,16 +190,96 @@ class ProduceResult(BaseModel):
     deployable_service: Optional[DeployableServiceArtifact] = None
 
 
+# ---------- 6b. produce 子类型：非 PRD 产出 ----------
+class DesignDocArtifact(BaseModel):
+    """design_doc 产出：架构设计文档"""
+    model_config = _SCHEMA_CONFIG
+    title: str = ""
+    overview: str = ""
+    architecture: str = ""
+    tech_stack: list[str] = Field(default_factory=list)
+    data_model: str = ""
+    api_design: str = ""
+    deployment: str = ""
+    risks: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+
+
+class DesignDocResult(BaseModel):
+    """Produce 阶段输出：架构设计文档"""
+    model_config = _SCHEMA_CONFIG
+    design_doc: DesignDocArtifact
+
+
+class ComprehensiveArtifact(BaseModel):
+    """comprehensive 产出：综合设计文档"""
+    model_config = _SCHEMA_CONFIG
+    title: str = ""
+    requirements: dict[str, Any] = Field(default_factory=dict)
+    system_design: dict[str, Any] = Field(default_factory=dict)
+    api_design: dict[str, Any] = Field(default_factory=dict)
+    data_model: dict[str, Any] = Field(default_factory=dict)
+
+
+class ComprehensiveResult(BaseModel):
+    """Produce 阶段输出：综合设计文档"""
+    model_config = _SCHEMA_CONFIG
+    comprehensive: ComprehensiveArtifact
+
+
+class ResearchReportArtifact(BaseModel):
+    """research_report 产出：调研报告"""
+    model_config = _SCHEMA_CONFIG
+    title: str = ""
+    summary: str = ""
+    findings: list[dict[str, Any]] = Field(default_factory=list)
+    analysis: str = ""
+    recommendations: list[str] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
+
+
+class ResearchReportResult(BaseModel):
+    """Produce 阶段输出：调研报告"""
+    model_config = _SCHEMA_CONFIG
+    research_report: ResearchReportArtifact
+
+
+class BusinessReportArtifact(BaseModel):
+    """business_report 产出：商业报告"""
+    model_config = _SCHEMA_CONFIG
+    title: str = ""
+    executive_summary: str = ""
+    market_analysis: str = ""
+    financial_projection: str = ""
+    risk_assessment: str = ""
+    strategic_recommendation: str = ""
+    next_steps: list[str] = Field(default_factory=list)
+
+
+class BusinessReportResult(BaseModel):
+    """Produce 阶段输出：商业报告"""
+    model_config = _SCHEMA_CONFIG
+    business_report: BusinessReportArtifact
+
+
 # ---------- schema_hint -> 模型映射 ----------
 # RealLLM.complete() 依据 schema_hint 选择对应模型做 model_validate。
+# produce 阶段使用 (stage, subtype) 二级键：produce_{deliverable_type}
 SCHEMA_MAP: dict[str, type[BaseModel]] = {
     "clarify": ClarifyResult,
     "intra_team": ClaimListResult,
     "cross_team": ConflictListResult,
     "evidence_check": EvidenceCheckResult,
     "arbitrate": ArbitrateResult,
-    "produce": ProduceResult,
+    # produce 子类型：每种 deliverable_type 对应独立模型
+    "produce_prd_openapi": ProduceResult,
     "produce_code_analysis": ProduceResult,
     "produce_tested_system": ProduceResult,
     "produce_deployable_service": ProduceResult,
+    "produce_design_doc": DesignDocResult,
+    "produce_comprehensive": ComprehensiveResult,
+    "produce_research_report": ResearchReportResult,
+    "produce_business_report": BusinessReportResult,
+    # 向后兼容：纯 "produce" 映射到默认 PRD 模型
+    "produce": ProduceResult,
 }

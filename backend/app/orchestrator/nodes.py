@@ -826,7 +826,12 @@ async def produce_node(state: MeetingState) -> MeetingState:
 
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
-        req = build_produce_prompt(state.decision_record or {}, anchor=anchor, template=template)
+        req = build_produce_prompt(
+            state.decision_record or {},
+            anchor=anchor,
+            template=template,
+            deliverable_type=state.deliverable_type,
+        )
         resp = await compute.think(req)
         return resp.result
 

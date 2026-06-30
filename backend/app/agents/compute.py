@@ -313,7 +313,12 @@ def build_arbitrate_prompt(evidence_set: list[dict], anchor: str = "") -> ThinkR
     )
 
 
-def build_produce_prompt(decision_record: dict, anchor: str = "", template: str | None = None) -> ThinkRequest:
+def build_produce_prompt(
+    decision_record: dict,
+    anchor: str = "",
+    template: str | None = None,
+    deliverable_type: str = "prd_openapi",
+) -> ThinkRequest:
     if template is None:
         template = PRODUCE
     prompt = render(template, decision_record=str(decision_record))
@@ -324,7 +329,7 @@ def build_produce_prompt(decision_record: dict, anchor: str = "", template: str 
         agent_role=Role.MODERATOR.value,
         stage="produce",
         prompt=prompt,
-        schema_hint="produce",
+        schema_hint=f"produce_{deliverable_type}",
     )
 
 

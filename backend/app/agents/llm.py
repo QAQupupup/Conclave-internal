@@ -145,7 +145,7 @@ class StubLLM:
                     "接口需保持幂等",
                 ],
             }
-        if "Produce" in prompt or schema_hint == "produce":
+        if "Produce" in prompt or schema_hint.startswith("produce"):
             # 根据产出模板中的任务描述关键字区分交付物类型
             if "产出架构设计文档" in prompt:
                 return {
@@ -306,6 +306,15 @@ STAGE_TEMPERATURES: dict[str, float] = {
     "evidence_check": 0.0,  # 证据对照必须客观
     "arbitrate": 0.0,      # 裁决必须确定且可复现
     "produce": 0.1,        # PRD 要稳定，允许微小表达差异
+    # produce 子类型继承 produce 的温度（produce_design_doc 等）
+    "produce_prd_openapi": 0.1,
+    "produce_design_doc": 0.1,
+    "produce_comprehensive": 0.1,
+    "produce_research_report": 0.1,
+    "produce_business_report": 0.1,
+    "produce_code_analysis": 0.1,
+    "produce_tested_system": 0.1,
+    "produce_deployable_service": 0.1,
 }
 
 
@@ -553,7 +562,8 @@ class RealLLM:
         latency_ms = 0
         # produce 阶段生成大量文本（OpenAPI），需要更长超时
         # DeepSeek-V3.2 生成 PRD+OpenAPI 可能需要 200-400s
-        stage_timeout = 600.0 if stage == "produce" else 120.0
+        # produce_* 子类型同样需要长超时
+        stage_timeout = 600.0 if stage.startswith("produce") else 120.0
         try:
             t0 = time.monotonic()
             resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
