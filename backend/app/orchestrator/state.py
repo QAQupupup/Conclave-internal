@@ -153,12 +153,29 @@ STAGE_ORDER: list[Stage] = [
     Stage.PRODUCE,
 ]
 
+# 议题路由：各复杂度对应的阶段裁剪规则
+# simple：跳过 cross_team + evidence_check + arbitrate，intra_team 后直接 produce
+# standard：跳过 evidence_check（无冲突时自动跳过）
+# full：完整六阶段
+_FLOW_SKIP_MAP: dict[str, set[Stage]] = {
+    "simple": {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE},
+    "standard": {Stage.EVIDENCE_CHECK},
+    "full": set(),
+}
 
-def next_stage(current: Stage) -> Stage | None:
-    """返回下一阶段，末尾返回 None"""
+
+def get_skipped_stages(flow_plan: str) -> set[Stage]:
+    """根据议题路由计划返回应跳过的阶段集合"""
+    return _FLOW_SKIP_MAP.get(flow_plan, set())
+
+
+def next_stage(current: Stage, flow_plan: str = "full") -> Stage | None:
+    """返回下一阶段（跳过 flow_plan 标记的阶段），末尾返回 None"""
+    skip = get_skipped_stages(flow_plan)
     idx = STAGE_ORDER.index(current)
-    if idx + 1 < len(STAGE_ORDER):
-        return STAGE_ORDER[idx + 1]
+    for i in range(idx + 1, len(STAGE_ORDER)):
+        if STAGE_ORDER[i] not in skip:
+            return STAGE_ORDER[i]
     return None
 
 

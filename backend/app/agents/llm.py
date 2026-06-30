@@ -42,6 +42,7 @@ class StubLLM:
                     {"role": "product_architect", "stance": "重价值与边界"},
                     {"role": "engineer", "stance": "重可行性与风险"},
                 ],
+                "complexity": "full",
             }
         if "IntraTeam" in prompt or schema_hint == "intra_team":
             # 根据角色区分偏置

@@ -189,6 +189,9 @@ class MeetingState(BaseModel):
     artifact: Optional[dict[str, Any]] = None
     # 产出类型（创建会议时指定，produce 阶段据此切换模板）
     deliverable_type: str = "prd_openapi"
+    # 议题路由计划：clarify 阶段 LLM 输出，Runner 据此裁剪后续阶段
+    # "full" = 完整六阶段 / "standard" = 无冲突时跳过 evidence_check / "simple" = 跳过中间三阶段
+    flow_plan: str = "full"
     paused_snapshot: Optional[dict[str, Any]] = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
     # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）

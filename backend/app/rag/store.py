@@ -129,6 +129,52 @@ class InMemoryVectorStore:
         end = min(len(raw), chunk.char_end + after)
         return raw[start:end]
 
+    def get_neighbor_context(
+        self,
+        chunk: Chunk,
+        prev_count: int = 1,
+        next_count: int = 1,
+    ) -> str:
+        """按邻居链展开上下文：拼接 prev/next chunk 的文本
+
+        相比 expand_context 的字符级展开，邻居链按 chunk 粒度展开，
+        能完整保留相邻标题段落，提供更好的上下文窗口。
+
+        - prev_count: 向前取几个 chunk
+        - next_count: 向后取几个 chunk
+        - 返回拼接后的上下文文本
+        """
+        parts: list[str] = []
+        # 向前遍历
+        prev_chunks: list[str] = []
+        current = chunk
+        for _ in range(prev_count):
+            if not current.prev_id:
+                break
+            prev = self._store.get(current.prev_id)
+            if prev is None:
+                break
+            current = prev[0]
+            prev_chunks.insert(0, current.text)
+        # 向后遍历
+        next_chunks: list[str] = []
+        current = chunk
+        for _ in range(next_count):
+            if not current.next_id:
+                break
+            nxt = self._store.get(current.next_id)
+            if nxt is None:
+                break
+            current = nxt[0]
+            next_chunks.append(current.text)
+        parts = prev_chunks + [chunk.text] + next_chunks
+        return "\n\n".join(parts)
+
+    def get_chunk(self, chunk_id: str) -> Chunk | None:
+        """按 ID 取单个 chunk"""
+        entry = self._store.get(chunk_id)
+        return entry[0] if entry else None
+
     def search(self, query: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
         if not self._store:
             return []

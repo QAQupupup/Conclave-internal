@@ -11,6 +11,9 @@ from typing import Any
 class Chunk:
     """单个文档块
 
+    邻居链：prev_id / next_id 指向同一文档中相邻的 chunk，
+    用于检索时扩展上下文窗口（看证据的上下文）。
+
     结构化字段（为图 RAG 铺路）：
     - metadata: 标题层级、文档来源、创建时间等
     - claims: 从该 chunk 提取的声明（预留，迭代三填充）
@@ -23,6 +26,8 @@ class Chunk:
     char_start: int
     char_end: int
     source: str = ""  # doc:section 引用串
+    prev_id: str = ""  # 前一个 chunk 的 ID（邻居链）
+    next_id: str = ""  # 后一个 chunk 的 ID（邻居链）
     metadata: dict[str, Any] = field(default_factory=dict)
     claims: list[str] = field(default_factory=list)
     relations: list[dict[str, str]] = field(default_factory=list)
@@ -36,6 +41,8 @@ class Chunk:
             "char_start": self.char_start,
             "char_end": self.char_end,
             "source": self.source,
+            "prev_id": self.prev_id,
+            "next_id": self.next_id,
             "metadata": self.metadata,
             "claims": self.claims,
             "relations": self.relations,
@@ -122,4 +129,10 @@ def chunk_markdown(text: str, doc_id: str) -> list[Chunk]:
                     },
                 )
             )
+    # 建立邻居链：prev_id / next_id 串联同一文档的所有 chunk
+    for i, chunk in enumerate(chunks):
+        if i > 0:
+            chunk.prev_id = chunks[i - 1].chunk_id
+        if i < len(chunks) - 1:
+            chunk.next_id = chunks[i + 1].chunk_id
     return chunks

@@ -2,6 +2,7 @@
 // 协议：
 //   连接 → 收到 {type:'snapshot', payload} → 历史事件 DomainEvent → {type:'replay.done', events}
 //   之后实时推送 DomainEvent（agent.spoke / stage.changed / evidence.attached / artifact.generated / control.signal / control.ack / error）
+// 断线重连：携带 ?from_seq=<lastSeq>，后端只推增量事件，避免全量 snapshot
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { Dispatch } from 'react'
 import type { MeetingAction } from '../store/meetingReducer.ts'
@@ -26,13 +27,19 @@ interface UseWebSocketResult {
 }
 
 /**
- * 根据当前页面地址推导 WS 地址，利用 vite proxy 转发到后端，避免 CORS
- * 形如 ws://<host>/ws/meetings/<meeting_id>
+ * 根据 meetingId 和 lastSeq 推导 WS 地址
+ * - lastSeq > 0 时携带 from_seq，后端只推增量事件（断线重连）
+ * - lastSeq == 0 时全量回放（首次连接）
  */
-function buildWsUrl(meetingId: string): string {
+function buildWsUrl(meetingId: string, fromSeq: number): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}/ws/meetings/${meetingId}`
+  const base = `${proto}://${window.location.host}/ws/meetings/${meetingId}`
+  return fromSeq > 0 ? `${base}?from_seq=${fromSeq}` : base
 }
+
+/** 自动重连的退避参数 */
+const RECONNECT_BASE_DELAY = 1000
+const RECONNECT_MAX_DELAY = 30000
 
 /**
  * 会议 WebSocket 钩子
@@ -47,90 +54,122 @@ export function useWebSocket(
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [lastSeq, setLastSeq] = useState(0)
   const wsRef = useRef<WebSocket | null>(null)
+  // lastSeq ref：重连时读取最新值，避免闭包陈旧
+  const lastSeqRef = useRef(0)
   // dispatch 引用稳定（来自 useReducer），但用 ref 规避闭包陈旧问题
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
+  // 重连控制
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectAttemptRef = useRef(0)
+  const closedByUnmountRef = useRef(false)
 
   useEffect(() => {
     if (!meetingId) {
       setConnected(false)
       return
     }
-    let closed = false
-    const url = buildWsUrl(meetingId)
-    const ws = new WebSocket(url)
-    wsRef.current = ws
+    closedByUnmountRef.current = false
 
-    ws.onopen = () => {
-      if (closed) return
-      setConnected(true)
-      setConnectionError(null)
-    }
+    const connect = () => {
+      if (closedByUnmountRef.current) return
+      const fromSeq = lastSeqRef.current
+      const url = buildWsUrl(meetingId!, fromSeq)
+      const ws = new WebSocket(url)
+      wsRef.current = ws
 
-    ws.onmessage = (ev: MessageEvent) => {
-      if (closed) return
-      let data: unknown
-      try {
-        data = JSON.parse(typeof ev.data === 'string' ? ev.data : '')
-      } catch {
-        setConnectionError('收到无法解析的 WS 消息')
-        return
+      ws.onopen = () => {
+        if (closedByUnmountRef.current) return
+        setConnected(true)
+        setConnectionError(null)
+        reconnectAttemptRef.current = 0
       }
-      // 区分控制帧与领域事件（统一以 Record 读取字段）
-      const frame = data as Record<string, unknown>
-      const type = typeof frame.type === 'string' ? frame.type : ''
-      switch (type) {
-        case 'snapshot':
-          dispatchRef.current({
-            type: 'snapshot',
-            payload: frame.payload as MeetingState,
-          })
-          break
-        case 'replay.done':
-          // 追踪最后事件序列号（用于增量回放重连）
-          if (typeof frame.last_seq === 'number') {
-            setLastSeq(frame.last_seq)
-          }
-          dispatchRef.current({
-            type: 'replay.done',
-            events: typeof frame.events === 'number' ? frame.events : 0,
-          })
-          break
-        case 'error':
-          dispatchRef.current({
-            type: 'error',
-            message: typeof frame.message === 'string' ? frame.message : '未知错误',
-          })
-          break
-        case 'control.ack':
-          // 后端 WS 单独回执：可据此更新状态（reducer 对 control.signal 已处理，此处忽略）
-          break
-        default:
-          // 其余视为 DomainEvent（type 即事件类型，如 agent.spoke / stage.changed 等）
-          dispatchRef.current({ type: 'event', event: frame as unknown as DomainEvent })
+
+      ws.onmessage = (ev: MessageEvent) => {
+        if (closedByUnmountRef.current) return
+        let data: unknown
+        try {
+          data = JSON.parse(typeof ev.data === 'string' ? ev.data : '')
+        } catch {
+          setConnectionError('收到无法解析的 WS 消息')
+          return
+        }
+        // 区分控制帧与领域事件（统一以 Record 读取字段）
+        const frame = data as Record<string, unknown>
+        const type = typeof frame.type === 'string' ? frame.type : ''
+        switch (type) {
+          case 'snapshot':
+            dispatchRef.current({
+              type: 'snapshot',
+              payload: frame.payload as MeetingState,
+            })
+            break
+          case 'replay.done':
+            // 追踪最后事件序列号（用于增量回放重连）
+            if (typeof frame.last_seq === 'number') {
+              lastSeqRef.current = frame.last_seq
+              setLastSeq(frame.last_seq)
+            }
+            dispatchRef.current({
+              type: 'replay.done',
+              events: typeof frame.events === 'number' ? frame.events : 0,
+            })
+            break
+          case 'error':
+            dispatchRef.current({
+              type: 'error',
+              message: typeof frame.message === 'string' ? frame.message : '未知错误',
+            })
+            break
+          case 'control.ack':
+            // 后端 WS 单独回执：可据此更新状态（reducer 对 control.signal 已处理，此处忽略）
+            break
+          default:
+            // 其余视为 DomainEvent（type 即事件类型，如 agent.spoke / stage.changed 等）
+            dispatchRef.current({ type: 'event', event: frame as unknown as DomainEvent })
+        }
+      }
+
+      ws.onerror = () => {
+        if (closedByUnmountRef.current) return
+        setConnectionError('WebSocket 连接异常，请确认后端 127.0.0.1:8000 已启动')
+      }
+
+      ws.onclose = () => {
+        if (closedByUnmountRef.current) return
+        setConnected(false)
+        wsRef.current = null
+        // 自动重连（指数退避）
+        const attempt = reconnectAttemptRef.current
+        reconnectAttemptRef.current += 1
+        const delay = Math.min(
+          RECONNECT_BASE_DELAY * Math.pow(2, attempt),
+          RECONNECT_MAX_DELAY,
+        )
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = setTimeout(connect, delay)
       }
     }
 
-    ws.onerror = () => {
-      if (closed) return
-      setConnectionError('WebSocket 连接异常，请确认后端 127.0.0.1:8000 已启动')
-    }
-
-    ws.onclose = () => {
-      if (closed) return
-      setConnected(false)
-    }
+    connect()
 
     return () => {
-      closed = true
-      ws.onopen = null
-      ws.onmessage = null
-      ws.onerror = null
-      ws.onclose = null
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close()
+      closedByUnmountRef.current = true
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
       }
-      wsRef.current = null
+      const ws = wsRef.current
+      if (ws) {
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close()
+        }
+        wsRef.current = null
+      }
     }
   }, [meetingId])
 

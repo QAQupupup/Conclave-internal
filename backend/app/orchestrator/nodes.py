@@ -22,6 +22,7 @@ from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, MeetingStatus, Role, Stage
 from app.orchestrator.charter import build_charter_from_clarify
+from app.orchestrator.state import next_stage as _next_stage, get_skipped_stages
 from app.rag.retriever import retrieve_for_conflict
 from app.tools.web_search import get_web_search
 
@@ -378,7 +379,22 @@ async def clarify_node(state: MeetingState) -> MeetingState:
     )
     await _emit_agent_spoke(state, Role.MODERATOR, Stage.CLARIFY, summary)
     _record_drift(state, Role.MODERATOR, Stage.CLARIFY, summary)
-    state.stage = Stage.INTRA_TEAM
+    # 议题路由：根据 complexity 设置 flow_plan
+    complexity = result.get("complexity", "full")
+    if complexity in ("simple", "standard", "full"):
+        state.flow_plan = complexity
+    # 发布路由计划事件（前端可据此显示裁剪后的流程）
+    await bus.publish(make_event(
+        "flow_plan.set",
+        state.meeting_id,
+        {
+            "flow_plan": state.flow_plan,
+            "skipped_stages": [s.value for s in get_skipped_stages(state.flow_plan)],
+        },
+    ))
+    # 按路由计划跳转下一阶段
+    nxt = _next_stage(Stage.CLARIFY, state.flow_plan)
+    state.stage = nxt or Stage.INTRA_TEAM
     return state
 
 
@@ -493,7 +509,9 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
     state.confidence_flags["intra_team"] = worst_confidence
     # 改造三：让待发言的借调 agent 在队内讨论末尾发言一次
     await _let_borrowed_agents_speak(state, Stage.INTRA_TEAM)
-    state.stage = Stage.CROSS_TEAM
+    # 按路由计划跳转下一阶段
+    nxt = _next_stage(Stage.INTRA_TEAM, state.flow_plan)
+    state.stage = nxt or Stage.PRODUCE
     return state
 
 
@@ -533,7 +551,11 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
     if conflicts:
         state._prefetched_evidence = await _prefetch_evidence(state, conflicts)
 
-    state.stage = Stage.EVIDENCE_CHECK
+    # 议题路由：standard 模式下无冲突时跳过 evidence_check
+    nxt = _next_stage(Stage.CROSS_TEAM, state.flow_plan)
+    if nxt == Stage.EVIDENCE_CHECK and not conflicts and state.flow_plan == "standard":
+        nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan) or Stage.PRODUCE
+    state.stage = nxt or Stage.PRODUCE
     return state
 
 
@@ -755,7 +777,8 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     state.confidence_flags["evidence_check"] = worst_confidence
     # 改造三：让待发言的借调 agent 在证据对照阶段也发言一次（兜底）
     await _let_borrowed_agents_speak(state, Stage.EVIDENCE_CHECK)
-    state.stage = Stage.ARBITRATE
+    nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan)
+    state.stage = nxt or Stage.PRODUCE
     return state
 
 
@@ -782,7 +805,8 @@ async def arbitrate_node(state: MeetingState) -> MeetingState:
     content = json.dumps(state.decision_record, ensure_ascii=False)
     await _emit_agent_spoke(state, Role.MODERATOR, Stage.ARBITRATE, content)
     _record_drift(state, Role.MODERATOR, Stage.ARBITRATE, content)
-    state.stage = Stage.PRODUCE
+    nxt = _next_stage(Stage.ARBITRATE, state.flow_plan)
+    state.stage = nxt or Stage.PRODUCE
     return state
 
 

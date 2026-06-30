@@ -15,11 +15,15 @@ def retrieve(
     query: str,
     top_k: int = 5,
     summary_max: int = 200,
+    expand_neighbors: int = 0,
 ) -> list[dict[str, Any]]:
     """检索：返回 top_k 个 chunk 的字典视图（含摘要，可按需展开）
 
     惰性读取策略：默认只返回 summary（前 summary_max 字符 + 省略号），
     完整文本通过 expand_context 按需获取，减少 prompt token 消耗。
+
+    邻居链扩展：expand_neighbors > 0 时，附带前 N 个 chunk 的摘要，
+    提供更完整的上下文窗口（适用于证据检索场景）。
     """
     store = get_store(meeting_id)
     if not store.all_chunks():
@@ -34,6 +38,12 @@ def retrieve(
         d["summary"] = chunk.summary(max_len=summary_max)
         d["full_length"] = len(chunk.text)
         d["expandable"] = len(chunk.text) > summary_max
+        # 邻居链上下文：附带前 N 个 chunk 的摘要
+        if expand_neighbors > 0 and chunk.prev_id:
+            neighbor_ctx = store.get_neighbor_context(
+                chunk, prev_count=expand_neighbors, next_count=0,
+            )
+            d["neighbor_context"] = neighbor_ctx[:summary_max * 3]
         out.append(d)
     return out
 
@@ -43,8 +53,11 @@ def retrieve_for_conflict(
     conflict_summary: str,
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
-    """针对单个冲突检索证据：召回 → 重排"""
-    base = retrieve(meeting_id, conflict_summary, top_k=top_k)
+    """针对单个冲突检索证据：召回 → 重排 → 邻居链扩展
+
+    证据检索默认启用 1 级邻居展开，让 LLM 看到证据的上下文段落。
+    """
+    base = retrieve(meeting_id, conflict_summary, top_k=top_k, expand_neighbors=1)
     if not base:
         return base
     # 有 reranker 配置则用真实重排，否则关键词加成

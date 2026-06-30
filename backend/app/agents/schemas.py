@@ -22,11 +22,19 @@ class TeamMember(BaseModel):
 
 
 class ClarifyResult(BaseModel):
-    """Clarify 阶段输出：主持人澄清议题"""
+    """Clarify 阶段输出：主持人澄清议题 + 议题路由
+
+    flow_plan 字段实现议题路由：LLM 根据议题复杂度裁剪后续阶段。
+    """
     model_config = _SCHEMA_CONFIG
     clarified_topic: str
     key_questions: list[str] = Field(default_factory=list)
     team_config: list[TeamMember] = Field(default_factory=list)
+    # 议题路由：简单任务跳过中间阶段，直接产出
+    # "simple" = 跳过 cross_team + evidence_check + arbitrate
+    # "standard" = 跳过 evidence_check（无冲突时）
+    # "full" = 完整六阶段（默认）
+    complexity: str = "full"
 
 
 # ---------- 2. intra_team ----------
