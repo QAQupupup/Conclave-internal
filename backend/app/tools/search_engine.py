@@ -42,7 +42,7 @@ class SearchResult:
         if not self.signals:
             self.signals = tag_url(self.url) if self.url else {}
         if self.source_tier == "C" and self.signals:
-            self.source_tier = self.signals.get("tier_static", "C")
+            self.source_tier = self.signals.get("source_tier", "C")
 
 
 @runtime_checkable

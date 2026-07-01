@@ -57,8 +57,35 @@ def _get_intra_template(role: Role) -> str:
 
 
 @dataclass
+class ToolCall:
+    """Agent 请求执行的工具调用"""
+    tool_name: str = ""            # "web_search" | "browser.goto" | "browser.click" | ...
+    arguments: dict[str, Any] = field(default_factory=dict)  # 工具参数
+    reason: str = ""               # Agent 为什么调用此工具（可读性 + 调试）
+
+
+@dataclass
+class ToolResult:
+    """工具调用的执行结果"""
+    tool_name: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
+    success: bool = True
+    result: Any = None             # 工具返回值
+    error: str = ""
+    latency_ms: int = 0
+    iteration: int = 0             # 第几轮 ReAct 迭代
+
+
+@dataclass
 class ThinkRequest:
-    """Agent 思考请求（传输无关的纯数据模型）"""
+    """Agent 思考请求（传输无关的纯数据模型）
+
+    ReAct 扩展（Phase B）：
+    - available_tools: Agent 可调用的工具列表
+    - tool_history: 前序迭代的工具调用结果（经裁剪）
+    - iteration: 当前 ReAct 迭代序号（0 = 首轮）
+    非 ReAct 模式下这三个字段为空/0，行为与原来一致。
+    """
     request_id: str = ""
     meeting_id: str = ""
     runner_session_id: str = ""
@@ -68,17 +95,33 @@ class ThinkRequest:
     schema_hint: str = ""
     temperature: float = 0.0
     seed: int = 42
+    # ReAct 扩展
+    available_tools: list[dict[str, Any]] = field(default_factory=list)  # [{name, description, parameters}]
+    tool_history: list[ToolResult] = field(default_factory=list)
+    iteration: int = 0
 
 
 @dataclass
 class ThinkResponse:
-    """Agent 思考响应"""
+    """Agent 思考响应
+
+    ReAct 扩展（Phase B）：
+    - tool_calls: Agent 请求执行的工具调用列表
+    - need_continue: Agent 是否需要继续 ReAct 循环
+    - input_tokens / output_tokens: token 用量（成本追踪）
+    非 ReAct 模式下 tool_calls 为空，need_continue 为 False。
+    """
     success: bool = False
     result: dict[str, Any] = field(default_factory=dict)
     error: str = ""
     latency_ms: int = 0
     validation_status: str = "valid"
     raw_response: str = ""
+    # ReAct 扩展
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    need_continue: bool = False
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @runtime_checkable
@@ -111,11 +154,29 @@ class LocalAgentCompute:
         t0 = time.monotonic()
         try:
             result = await self._llm.complete(req.prompt, schema_hint=req.schema_hint)
+
+            # ReAct 模式：从 result 中提取 tool_calls 和 need_continue
+            tool_calls: list[ToolCall] = []
+            need_continue = False
+            if req.available_tools and isinstance(result, dict):
+                need_continue = bool(result.pop("need_continue", False))
+                raw_calls = result.pop("tool_calls", [])
+                if isinstance(raw_calls, list):
+                    for call in raw_calls:
+                        if isinstance(call, dict):
+                            tool_calls.append(ToolCall(
+                                tool_name=call.get("tool_name", ""),
+                                arguments=call.get("arguments", {}),
+                                reason=call.get("reason", ""),
+                            ))
+
             return ThinkResponse(
                 success=True,
                 result=result,
                 latency_ms=int((time.monotonic() - t0) * 1000),
                 validation_status="valid",
+                tool_calls=tool_calls,
+                need_continue=need_continue,
             )
         except Exception as e:
             return ThinkResponse(
