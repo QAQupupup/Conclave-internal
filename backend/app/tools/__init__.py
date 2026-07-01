@@ -1,4 +1,5 @@
 # Web Search 工具：感知层实现（stub / tavily / playwright 三模式）
+# BrowserTool：Agent 浏览器操作工具集（6 大类操作）
 from __future__ import annotations
 
 import logging

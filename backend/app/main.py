@@ -130,6 +130,11 @@ def create_app() -> FastAPI:
             await close_playwright_search()
         except Exception:
             pass
+        try:
+            from app.tools.browser_tool import close_browser_tool
+            await close_browser_tool()
+        except Exception:
+            pass
 
     return app
 
