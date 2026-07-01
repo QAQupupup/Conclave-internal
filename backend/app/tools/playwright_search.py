@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 import re
@@ -566,10 +567,16 @@ class PlaywrightWebSearch:
                     chunk_ugc = chunk.get("is_ugc", False)
                     eff_tier = _effective_tier(chunk_ugc)
 
-                    # P0-4: prompt injection 防护 — quote 用定界符包裹
+                    # P0-4: prompt injection 防御 — quote 用定界符包裹
                     # 让 LLM 能结构性区分"数据"与"指令"
                     raw_text = chunk.get("text", "")[:500]
                     quote_delimited = f"[EVIDENCE_DATA_BEGIN]{raw_text}[EVIDENCE_DATA_END]"
+
+                    # A-4: content hash — 基于结构化 chunk 输出（heading_path + text），非 raw HTML
+                    heading_path = chunk.get("heading_path", "")
+                    content_hash = hashlib.sha256(
+                        f"{heading_path}|{raw_text}".encode("utf-8")
+                    ).hexdigest()[:16]
 
                     evidence.append({
                         "evidence_id": f"web-{ev_idx}",
@@ -577,6 +584,7 @@ class PlaywrightWebSearch:
                         "source": f"web:{hostname}",
                         "url": url,
                         "domain": hostname,
+                        "content_hash": content_hash,
                         # 顶层 tier 向后兼容（用 effective_tier）
                         "source_tier": eff_tier,
                         # signals 袋 — 原始正交信号，agent 自行加权
@@ -597,11 +605,12 @@ class PlaywrightWebSearch:
                             "page_ugc_count": page_ugc_count,
                             "iframe_fallback": result.get("iframe_fallback", False),
                             # chunk 级信号（Phase 1.5 新增）
-                            "heading_path": chunk.get("heading_path", ""),
+                            "heading_path": heading_path,
                             "heading_level": chunk.get("heading_level", 0),
                             "chunk_index": chunk_idx,
                             "total_chunks": min(len(chunks), max_chunks_per_page),
                             "is_ugc": chunk_ugc,
+                            "content_hash": content_hash,
                         },
                     })
                     ev_idx += 1
@@ -627,15 +636,19 @@ class PlaywrightWebSearch:
         - 查询字符串自动拼接 -site: 排除 spam 域名
         - 请求量 3x 于 top_k，供上层 rank_by_tier 重排后截取
         - 最多重试 2 次（Bing 表单搜索偶发无结果）
+
+        Returns:
+            list[str]: URL 列表（从 _do_bing_search 的 dict 结果中提取）
         """
         entity = match_entity(query)
 
         # 重试机制：Bing 表单搜索偶发返回空结果
         for attempt in range(2):
             try:
-                urls = await self._do_bing_search(query, top_k)
-                if urls:
-                    return urls
+                raw_results = await self._do_bing_search(query, top_k)
+                if raw_results:
+                    # _do_bing_search 返回 list[dict{url, title}]，提取 URL
+                    return [r["url"] for r in raw_results if "url" in r]
                 if attempt == 0:
                     logger.debug("Bing 搜索无结果，重试: query=%s", query[:50])
                     await asyncio.sleep(2)  # 重试前等待
@@ -649,10 +662,13 @@ class PlaywrightWebSearch:
         logger.warning("Bing 搜索 2 次均无结果: query=%s", query[:50])
         return []
 
-    async def _do_bing_search(self, query: str, top_k: int) -> list[str]:
+    async def _do_bing_search(self, query: str, top_k: int) -> list[dict[str, str]]:
         """执行单次 Bing 表单搜索
 
         流程：访问首页获取 cookie → 搜索框输入 → 从 cite 标签提取真实 URL
+
+        Returns:
+            list[dict]: 每项为 {"url": str, "title": str}
         """
         await self._ensure_browser()
 
@@ -694,15 +710,16 @@ class PlaywrightWebSearch:
                 }
             """)
 
-            # 从 cite 文本重建完整 URL
+            # 从 cite 文本重建完整 URL + 保留标题
             # cite 格式: "https://docs.python.org › library › asyncio"
             from .domain_registry import SPAM_DOMAINS
-            urls: list[str] = []
+            results: list[dict[str, str]] = []  # {url, title}
             seen: set[str] = set()
             for item in raw_results[:top_k]:
                 cite = item.get("cite", "")
                 if not cite:
                     continue
+                title = item.get("title", "")
                 if cite.startswith("http"):
                     parts = cite.split(" › ")
                     if parts:
@@ -715,18 +732,18 @@ class PlaywrightWebSearch:
                             continue
                         if url not in seen:
                             seen.add(url)
-                            urls.append(url)
+                            results.append({"url": url, "title": title})
                 else:
                     first_part = cite.split(" › ")[0] if " › " in cite else cite.split(" ")[0]
                     if first_part and "." in first_part:
                         url = f"https://{first_part}"
                         if url not in seen:
                             seen.add(url)
-                            urls.append(url)
+                            results.append({"url": url, "title": title})
 
             logger.debug("Bing 搜索: query=%s, 获取 %d URLs",
-                         query[:50], len(urls))
-            return urls[:top_k]
+                         query[:50], len(results))
+            return results[:top_k]
 
         finally:
             await page.close()
@@ -764,6 +781,17 @@ class PlaywrightWebSearch:
             logger.warning("SSRF 拦截: url=%s reason=%s", url[:80], reason)
             return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
                     "last_modified": None, "fallback": True, "ugc_count": 0}
+
+        # A-3: per-domain 限速（token-bucket）
+        try:
+            from app.tools.rate_limiter import get_rate_limiter
+            acquired = await get_rate_limiter().acquire(url, max_wait=5.0)
+            if not acquired:
+                logger.warning("域名限速超时，跳过: url=%s", url[:80])
+                return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
+                        "last_modified": None, "fallback": True, "ugc_count": 0}
+        except Exception:
+            pass  # 限速器故障不阻断主流程
 
         async with self._semaphore:
             try:

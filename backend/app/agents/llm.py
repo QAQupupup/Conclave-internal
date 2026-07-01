@@ -623,6 +623,18 @@ class RealLLM:
             output_tokens=output_tokens,
             total_tokens=total_tokens,
         )
+        # 成本可观测性：记录 LLM 调用成本到 CostTracker
+        try:
+            from app.observability.cost_tracker import get_cost_tracker
+            get_cost_tracker().record_llm(
+                node=stage,
+                model=self.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+            )
+        except Exception:
+            pass
         return content
 
     @staticmethod
