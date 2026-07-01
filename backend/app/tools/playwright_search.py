@@ -488,53 +488,104 @@ class PlaywrightWebSearch:
             return []
 
     async def _search_ddg(self, query: str, top_k: int) -> list[str]:
-        """Bing 搜索：零 API key，解析 HTML 提取结果 URL
+        """Bing 搜索：Playwright 表单搜索（绕过 httpx 反爬）
 
-        优先使用 Bing（中国可访问），DuckDuckGo 在中国被墙。
-        使用 cn.bing.com 的 HTML 结果页。
+        关键发现（2026-07 验证）：
+        - httpx 直接请求 Bing 搜索 URL 会返回首页而非结果页（无 cookie/会话）
+        - 直接导航搜索 URL 即使带 cookie 也返回空结果
+        - 必须先访问首页获取 cookie → 在搜索框输入 → 表单提交
+        - Bing 的 h2>a 链接是 ck/a 重定向，真实 URL 在 <cite> 标签中
 
         信源增强（Phase 1）：
         - 查询字符串自动拼接 -site: 排除 spam 域名
         - 请求量 3x 于 top_k，供上层 rank_by_tier 重排后截取
         """
         try:
-            # 构造含 spam 排除的 Bing 查询
-            enhanced_query = build_bing_query(query)
+            # Playwright 表单搜索不用 -site: 排除（过长的查询字符串导致 Bing 异常）
+            # spam 域名过滤改为在获取结果后用 domain_registry 过滤
             entity = match_entity(query)
 
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    "https://cn.bing.com/search",
-                    params={"q": enhanced_query, "count": str(top_k), "setlang": "en"},
-                    headers={
-                        "User-Agent": _USER_AGENT,
-                        "Accept": "text/html,application/xhtml+xml",
-                        "Accept-Language": "en-US,en;q=0.9",
-                    },
-                    timeout=10.0,
-                    follow_redirects=True,
-                )
-                resp.raise_for_status()
+            await self._ensure_browser()
 
-            soup = BeautifulSoup(resp.text, "html.parser")
-            urls: list[str] = []
-            seen: set[str] = set()
+            context = await self._browser.new_context(
+                user_agent=_USER_AGENT,
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+            )
+            await context.add_init_script(_STEALTH_JS)
+            page = await context.new_page()
 
-            # Bing 结果页结构：li.b_algo > h2 > a
-            for li in soup.select("li.b_algo"):
-                a_tag = li.select_one("h2 a")
-                if not a_tag:
-                    continue
-                href = a_tag.get("href", "")
-                if href.startswith("http") and href not in seen:
-                    seen.add(href)
-                    urls.append(href)
-                if len(urls) >= top_k:
-                    break
+            try:
+                # Step 1: 访问 Bing 首页获取 cookie
+                await page.goto("https://www.bing.com/", wait_until="domcontentloaded", timeout=15000)
+                await page.wait_for_timeout(2000)
 
-            logger.debug("Bing 搜索: query=%s, 获取 %d URLs (entity=%s)",
-                         query[:50], len(urls), entity or "unknown")
-            return urls[:top_k]
+                # Step 2: 在搜索框输入并提交（用原始 query，不含 -site: 排除）
+                search_input = page.locator("textarea[name='q'], input[name='q']").first
+                await search_input.wait_for(state="visible", timeout=5000)
+                await search_input.fill(query)
+                await page.keyboard.press("Enter")
+
+                # Step 3: 等待结果页加载
+                await page.wait_for_timeout(4000)
+
+                # Step 4: 从 <cite> 标签提取真实 URL
+                # Bing 的 h2>a 是 ck/a 重定向链接，cite 标签包含真实域名路径
+                raw_results = await page.evaluate("""
+                    () => {
+                        const items = [];
+                        document.querySelectorAll('li.b_algo').forEach(li => {
+                            const cite = li.querySelector('cite');
+                            const h2a = li.querySelector('h2 a');
+                            const title = h2a ? (h2a.textContent || '').trim() : '';
+                            const citeText = cite ? (cite.textContent || '').trim() : '';
+                            items.push({title: title, cite: citeText});
+                        });
+                        return items;
+                    }
+                """)
+
+                # 从 cite 文本重建完整 URL
+                # cite 格式: "https://docs.python.org › library › asyncio"
+                from .domain_registry import SPAM_DOMAINS
+                urls: list[str] = []
+                seen: set[str] = set()
+                for item in raw_results[:top_k]:
+                    cite = item.get("cite", "")
+                    if not cite:
+                        continue
+                    # 提取域名部分（第一个空格或 › 之前）
+                    # 格式: "https://docs.python.org › library › asyncio"
+                    if cite.startswith("http"):
+                        # 去掉 " ›" 分隔符，重建 URL
+                        parts = cite.split(" › ")
+                        if parts:
+                            base = parts[0].rstrip("/")
+                            path = "/".join(parts[1:]) if len(parts) > 1 else ""
+                            url = f"{base}/{path}" if path else base
+                            # 过滤 spam 域名（post-filter 替代 -site: 排除）
+                            hostname = url.split("/")[2] if len(url.split("/")) > 2 else ""
+                            if hostname in SPAM_DOMAINS:
+                                continue
+                            if url not in seen:
+                                seen.add(url)
+                                urls.append(url)
+                    else:
+                        # 有些 cite 不带 https:// 前缀
+                        first_part = cite.split(" › ")[0] if " › " in cite else cite.split(" ")[0]
+                        if first_part and "." in first_part:
+                            url = f"https://{first_part}"
+                            if url not in seen:
+                                seen.add(url)
+                                urls.append(url)
+
+                logger.debug("Bing 搜索: query=%s, 获取 %d URLs (entity=%s)",
+                             query[:50], len(urls), entity or "unknown")
+                return urls[:top_k]
+
+            finally:
+                await page.close()
+                await context.close()
 
         except Exception as e:
             logger.warning("Bing 搜索失败: %s", str(e)[:200])
