@@ -181,6 +181,128 @@ _JSONLD_EXTRACT_JS = """
 }
 """
 
+# Claim 粒度分块提取（Phase 1.5 — Claude Sonnet 5 建议 #4）
+# 按 heading 结构分块，每块携带 heading_path 作为结构元数据。
+# 处理两个失败模式（Claude 指出）：
+#   - 无 heading 页面 → paragraph fallback（按段落聚类，保持 heading_path 元数据）
+#   - heading 过多 → min-size merge（合并 < MIN_CHARS 的小段到前一段）
+# UGC guard（Claude 建议 #5）：检测嵌入式评论/社区笔记，标记 is_ugc
+_CHUNK_EXTRACT_JS = """
+() => {
+    // 1. 移除噪声元素
+    const noiseSelectors = [
+        'script', 'style', 'noscript', 'iframe', 'svg', 'canvas',
+        'nav', 'footer', 'header', 'aside',
+        '.ad', '.ads', '.advertisement', '.sidebar',
+        '.cookie-notice', '.popup', '.modal',
+        '.share', '.social',
+    ];
+    noiseSelectors.forEach(sel => {
+        document.querySelectorAll(sel).forEach(el => el.remove());
+    });
+
+    // 2. 定位主内容容器
+    const main = document.querySelector(
+        'article, main, [role="main"], .article-body, .post-content, .entry-content, .content'
+    );
+    const root = main || document.body;
+    if (!root) return { chunks: [], fallback: true, ugc_count: 0 };
+
+    // 3. 标记 UGC 元素（Claude #5：chunk-level tier 继承冲突）
+    //    官方文档页可能嵌入 Disqus 评论/社区笔记，这些不应继承 S tier
+    const ugcSelectors = [
+        '[class*="disqus"]', '[id*="disqus"]',
+        '[class*="comment"]', '[id*="comment"]',
+        '[class*="user-content"]', '[class*="community-note"]',
+        '[class*="user_notes"]', '[class*="reader-feedback"]',
+        '.feedback', '.discussion', '[class*="forum-post"]',
+    ];
+    let ugcCount = 0;
+    ugcSelectors.forEach(sel => {
+        root.querySelectorAll(sel).forEach(el => {
+            el.setAttribute('data-ugc', 'true');
+            ugcCount++;
+        });
+    });
+
+    // 4. 配置
+    const MIN_CHARS = 200;   // 最小分块大小（低于此合并到前一段）
+    const MAX_CHARS = 2000;  // 最大分块大小（超出强制截断）
+
+    // 5. 递归遍历 DOM，按 heading 分块
+    const chunks = [];
+    let path = [];        // [{level, text}]
+    let currentText = '';
+    let hasHeadings = false;
+
+    function flush() {
+        const t = currentText.trim();
+        if (t.length >= MIN_CHARS) {
+            chunks.push({
+                heading_path: path.map(p => p.text).join(' > '),
+                heading_level: path.length > 0 ? path[path.length - 1].level : 0,
+                text: t.substring(0, MAX_CHARS),
+                is_ugc: false,
+            });
+        }
+        currentText = '';
+    }
+
+    function walk(node) {
+        for (const child of node.childNodes) {
+            if (child.nodeType === 3) {
+                // 文本节点
+                const t = child.textContent.trim();
+                if (t) currentText += (currentText ? ' ' : '') + t;
+            } else if (child.nodeType === 1) {
+                // 元素节点
+                if (child.getAttribute && child.getAttribute('data-ugc') === 'true') continue;
+
+                const tag = child.tagName;
+                const match = tag.match(/^H([1-6])$/);
+
+                if (match) {
+                    // 遇到 heading：刷出当前块，更新 heading path
+                    hasHeadings = true;
+                    flush();
+                    const level = parseInt(match[1]);
+                    const hText = (child.textContent || '').trim();
+                    // 弹出同级或更深层级的 path
+                    while (path.length > 0 && path[path.length - 1].level >= level) {
+                        path.pop();
+                    }
+                    path.push({ level, text: hText });
+                } else {
+                    // 递归处理非 heading 元素
+                    walk(child);
+                    // 溢出保护
+                    if (currentText.length > MAX_CHARS) flush();
+                }
+            }
+        }
+    }
+
+    walk(root);
+    flush();
+
+    // 6. 合并小段（Claude 指出：避免 h4/h5 嵌套产生 40 个碎片）
+    const merged = [];
+    for (const chunk of chunks) {
+        if (merged.length > 0 && chunk.text.length < MIN_CHARS) {
+            merged[merged.length - 1].text += '\\n\\n' + chunk.text;
+        } else {
+            merged.push(chunk);
+        }
+    }
+
+    return {
+        chunks: merged,
+        fallback: !hasHeadings,  // true = 无 heading，使用段落 fallback
+        ugc_count: ugcCount,
+    };
+}
+"""
+
 
 class PlaywrightWebSearch:
     """自建 Web Search：Playwright 无头浏览器 + DuckDuckGo 搜索
@@ -231,34 +353,36 @@ class PlaywrightWebSearch:
             )
 
     async def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """搜索流程：Bing 搜索 → Tier 重排 → Playwright 渲染 → 提取正文 + 结构化元数据
+        """搜索流程：Bing 搜索 → Tier 重排 → Playwright 渲染 → Claim 粒度分块提取
 
-        信源可信度增强（Phase 1 + Claude Sonnet 5 评审改进）：
-        1. Bing 查询自动排除 spam 域名（-site:tieba.baidu.com ...）
-        2. 请求 3x 结果，按 domain tier 重排（S > A > B > C > D），取 top_k
-        3. 提取 schema.org JSON-LD 结构化数据（publisher/dateModified/author）
-        4. 不提前折叠为单一 credibility_score — 输出原始 signals 袋让 consumer 自行加权
-        5. 跟踪 staleness（fetched_at + page_last_modified）
+        Phase 1.5 改进（Claude Sonnet 5 #4 + #5）：
+        1. 每页从单 blob 改为 N 个 atomic claim（按 heading 分块）
+        2. 每块携带 heading_path（h1 > h2 > h3）结构元数据
+        3. UGC guard：嵌入评论/社区笔记降级为 C tier（不继承 S/A/B）
+        4. 保留 Phase 1 的全部增强：Bing 排除、tier 重排、JSON-LD、signals 袋、staleness
 
-        返回格式（signals 袋模式）：
+        返回格式（chunk-level evidence）：
         [{
             "evidence_id": "web-0",
-            "quote": "...",
-            "source": "web:hostname",
-            "url": "...",
+            "quote": "atomic claim text...",
+            "source": "web:docs.python.org",
+            "url": "https://...",
             "domain": "docs.python.org",
-            "source_tier": "S",  # 顶层 tier，向后兼容现有 prompt
+            "source_tier": "S",
             "signals": {
                 "tier_static": "S",
+                "effective_tier": "S",       # UGC chunk 降为 "C"
                 "is_official": true,
-                "fetched_at": "2026-07-01T10:30:00Z",
-                "page_last_modified": "2024-03-15" | null,
-                "jsonld_publisher": "Python Software Foundation" | null,
-                "jsonld_author": "..." | null,
-                "jsonld_date_published": "2024-01-01" | null,
-                "jsonld_type": "TechArticle" | null,
-                "structured_data_present": true,
-                "page_title": "..."
+                "fetched_at": "...",
+                "page_last_modified": "...",
+                "jsonld_publisher": "...",
+                "heading_path": "Installation > Prerequisites",
+                "heading_level": 2,
+                "chunk_index": 0,
+                "total_chunks": 3,
+                "is_ugc": false,
+                "page_title": "...",
+                ...
             }
         }]
         """
@@ -286,53 +410,77 @@ class PlaywrightWebSearch:
             tasks = [self._fetch_and_extract(url) for url in ranked_urls]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 5. 过滤失败结果，组装证据（含 signals 袋）
+            # 5. 从 chunks 组装 evidence（每 chunk 一条 evidence）
             evidence: list[dict[str, Any]] = []
-            for i, (url, result) in enumerate(zip(ranked_urls, results)):
+            ev_idx = 0
+            for url, result in zip(ranked_urls, results):
                 if isinstance(result, Exception):
                     logger.warning("页面提取失败: url=%s err=%s", url, str(result)[:100])
                     continue
-                # _fetch_and_extract 现在返回 dict
-                text = result.get("text", "") if isinstance(result, dict) else ""
-                if not text or len(text.strip()) < 50:
-                    logger.debug("页面内容过短，跳过: url=%s", url)
+                if not isinstance(result, dict):
+                    continue
+
+                chunks = result.get("chunks", [])
+                if not chunks:
+                    logger.debug("页面无有效分块，跳过: url=%s", url)
                     continue
 
                 hostname = urlparse(url).hostname or "unknown"
                 tier_info = tag_url(url)
-                jsonld = result.get("jsonld", {}) if isinstance(result, dict) else {}
-                last_modified = result.get("last_modified") if isinstance(result, dict) else None
-                page_title = result.get("title", "") if isinstance(result, dict) else ""
-
-                # page_last_modified 优先用 HTTP 头，其次 JSON-LD dateModified
+                jsonld = result.get("jsonld", {})
+                last_modified = result.get("last_modified")
+                page_title = result.get("title", "")
                 page_last_modified = last_modified or jsonld.get("dateModified")
+                page_fallback = result.get("fallback", False)
+                page_ugc_count = result.get("ugc_count", 0)
 
-                evidence.append({
-                    "evidence_id": f"web-{i}",
-                    "quote": text[:300],
-                    "source": f"web:{hostname}",
-                    "url": url,
-                    "domain": hostname,
-                    # 顶层 tier 向后兼容现有 evidence_check prompt
-                    "source_tier": tier_info["source_tier"],
-                    # 原始 signals 袋 — 不提前折叠为单一 score
-                    # 不同 agent 角色可自行加权（Claude Sonnet 5 建议 #2）
-                    "signals": {
-                        "tier_static": tier_info["source_tier"],
-                        "is_official": tier_info["is_official"],
-                        "fetched_at": fetched_at,
-                        "page_last_modified": page_last_modified,
-                        "jsonld_publisher": jsonld.get("publisher"),
-                        "jsonld_author": jsonld.get("author"),
-                        "jsonld_date_published": jsonld.get("datePublished"),
-                        "jsonld_type": jsonld.get("type"),
-                        "structured_data_present": bool(jsonld.get("entry_count", 0) > 0),
-                        "page_title": page_title,
-                    },
-                })
+                # UGC tier downgrade（Claude #5）：
+                # 嵌入评论/社区笔记的 chunk 不继承 S/A/B tier，降级为 C
+                def _effective_tier(is_ugc: bool) -> str:
+                    if is_ugc:
+                        return "C"
+                    return tier_info["source_tier"]
 
-            logger.info("Web Search 完成: query=%s, 获取 %d 条证据 (entity=%s)",
-                        query[:50], len(evidence), entity or "unknown")
+                for chunk_idx, chunk in enumerate(chunks):
+                    chunk_ugc = chunk.get("is_ugc", False)
+                    eff_tier = _effective_tier(chunk_ugc)
+
+                    evidence.append({
+                        "evidence_id": f"web-{ev_idx}",
+                        "quote": chunk.get("text", "")[:500],
+                        "source": f"web:{hostname}",
+                        "url": url,
+                        "domain": hostname,
+                        # 顶层 tier 向后兼容（用 effective_tier）
+                        "source_tier": eff_tier,
+                        # signals 袋 — 原始正交信号，agent 自行加权
+                        "signals": {
+                            # 页面级信号
+                            "tier_static": tier_info["source_tier"],
+                            "effective_tier": eff_tier,
+                            "is_official": tier_info["is_official"],
+                            "fetched_at": fetched_at,
+                            "page_last_modified": page_last_modified,
+                            "jsonld_publisher": jsonld.get("publisher"),
+                            "jsonld_author": jsonld.get("author"),
+                            "jsonld_date_published": jsonld.get("datePublished"),
+                            "jsonld_type": jsonld.get("type"),
+                            "structured_data_present": bool(jsonld.get("entry_count", 0) > 0),
+                            "page_title": page_title,
+                            "page_fallback": page_fallback,
+                            "page_ugc_count": page_ugc_count,
+                            # chunk 级信号（Phase 1.5 新增）
+                            "heading_path": chunk.get("heading_path", ""),
+                            "heading_level": chunk.get("heading_level", 0),
+                            "chunk_index": chunk_idx,
+                            "total_chunks": len(chunks),
+                            "is_ugc": chunk_ugc,
+                        },
+                    })
+                    ev_idx += 1
+
+            logger.info("Web Search 完成: query=%s, 获取 %d 条证据 / %d 页 (entity=%s)",
+                        query[:50], len(evidence), len(ranked_urls), entity or "unknown")
             return evidence
 
         except Exception as e:
@@ -393,17 +541,25 @@ class PlaywrightWebSearch:
             return []
 
     async def _fetch_and_extract(self, url: str) -> dict[str, Any]:
-        """Playwright 渲染页面并提取正文 + 结构化元数据
+        """Playwright 渲染页面并提取 claim 粒度分块 + 结构化元数据
+
+        Phase 1.5 改进（Claude Sonnet 5 #4）：
+        - 从整页 blob 改为 heading-based chunking
+        - 每块携带 heading_path（h1 > h2 > h3）作为结构元数据
+        - 无 heading 页面使用段落 fallback
+        - 小段合并避免碎片化
 
         返回：
         {
-            "text": str,           # 页面正文（噪声移除后）
-            "title": str,          # 页面标题
-            "jsonld": dict,        # schema.org JSON-LD 提取结果
+            "chunks": list[dict],    # [{heading_path, heading_level, text, is_ugc}]
+            "title": str,            # 页面标题
+            "jsonld": dict,          # schema.org JSON-LD 提取结果
             "last_modified": str|None,  # HTTP Last-Modified 头
+            "fallback": bool,        # 是否使用了段落 fallback
+            "ugc_count": int,        # 检测到的 UGC 元素数
         }
 
-        异常处理：所有 Playwright 异常被捕获，返回空 dict。
+        异常处理：所有 Playwright 异常被捕获，返回空 chunks。
         """
         async with self._semaphore:
             context = None
@@ -424,8 +580,12 @@ class PlaywrightWebSearch:
                 response = await page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 await page.wait_for_timeout(2000)
 
-                # 提取正文
-                content = await page.evaluate(_EXTRACT_JS)
+                # Claim 粒度分块提取（Phase 1.5）
+                chunk_result = await page.evaluate(_CHUNK_EXTRACT_JS)
+                chunks = chunk_result.get("chunks", []) if chunk_result else []
+                fallback = chunk_result.get("fallback", False) if chunk_result else True
+                ugc_count = chunk_result.get("ugc_count", 0) if chunk_result else 0
+
                 # 提取标题
                 try:
                     title = await page.title()
@@ -442,15 +602,18 @@ class PlaywrightWebSearch:
                     last_modified = response.headers.get("last-modified")
 
                 return {
-                    "text": content or "",
+                    "chunks": chunks or [],
                     "title": title or "",
                     "jsonld": jsonld or {"entry_count": 0},
                     "last_modified": last_modified,
+                    "fallback": fallback,
+                    "ugc_count": ugc_count,
                 }
 
             except Exception as e:
                 logger.debug("页面渲染失败: url=%s err=%s", url, str(e)[:100])
-                return {"text": "", "title": "", "jsonld": {"entry_count": 0}, "last_modified": None}
+                return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
+                        "last_modified": None, "fallback": True, "ugc_count": 0}
             finally:
                 if page:
                     try:
