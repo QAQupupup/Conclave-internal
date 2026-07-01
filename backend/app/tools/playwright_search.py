@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import re
 from datetime import datetime, timezone
@@ -23,13 +24,62 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from .domain_registry import (
-    build_bing_query,
     match_entity,
     rank_by_tier,
     tag_url,
 )
 
 logger = logging.getLogger("app.tools.playwright_search")
+
+# ---------- SSRF 防护 ----------
+# P0-1: 完整 SSRF 校验（Claude 交叉评审指出 redirect-hop + DNS rebinding 风险）
+_BLOCKED_SCHEMES = {"file", "data", "javascript", "vbscript", "about", "blob"}
+
+
+def _is_safe_url(url: str) -> tuple[bool, str]:
+    """校验 URL 安全性（初始 URL 检查）
+
+    检查项：
+    1. scheme 必须是 http/https（拒绝 file://、data: 等）
+    2. 拒绝私网 IP / localhost / 元数据端点
+    3. 检测 userinfo 绕过（http://allowed@evil.com）
+
+    注意：此函数仅检查初始 URL，redirect-hop 验证在 goto 后用 response.url 再次调用。
+    DNS rebinding 的完整防护需要 page.on("request") 钩子，此处先做基础防护。
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, "URL 解析失败"
+
+    if parsed.scheme not in ("http", "https"):
+        return False, f"scheme '{parsed.scheme}' 不允许（仅 http/https）"
+
+    if parsed.scheme in _BLOCKED_SCHEMES:
+        return False, f"scheme '{parsed.scheme}' 被禁止"
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return False, "URL 缺少 hostname"
+
+    # 私网 IP 拒绝
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False, f"私网/保留地址 '{hostname}' 被拒绝"
+    except ValueError:
+        if hostname in ("localhost", "metadata.google.internal", "metadata"):
+            return False, f"内网/元数据端点 '{hostname}' 被拒绝"
+
+    # userinfo 绕过检测（http://safe.com@evil.com → hostname=evil.com 但 netloc 含 @）
+    # 只要 URL 中存在 userinfo 部分，就拒绝（合法网页极少使用 userinfo）
+    if "@" in (parsed.netloc or ""):
+        userinfo_part = parsed.netloc.rsplit("@", 1)[0]
+        if userinfo_part:  # @ 前有内容 = 存在 userinfo
+            return False, "URL 包含 userinfo 部分，疑似绕过攻击"
+
+    return True, "ok"
+
 
 # ---------- 反检测脚本 ----------
 # 在页面任何 JS 执行前注入（addInitScript），覆盖自动化指纹
@@ -446,6 +496,17 @@ class PlaywrightWebSearch:
         """
         fetched_at = datetime.now(timezone.utc).isoformat()
         try:
+            return await asyncio.wait_for(
+                self._do_search(query, top_k, fetched_at),
+                timeout=60.0,  # P0-3: 整体超时 60s（Bing 重试 32s + 渲染 28s）
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Web Search 整体超时 60s: query=%s", query[:50])
+            return []
+
+    async def _do_search(self, query: str, top_k: int, fetched_at: str) -> list[dict[str, Any]]:
+        """搜索核心逻辑（被 search() 的 wait_for 包裹）"""
+        try:
             # 0. 实体匹配（零开销子串匹配，用于日志记录）
             entity = match_entity(query)
             if entity:
@@ -505,9 +566,14 @@ class PlaywrightWebSearch:
                     chunk_ugc = chunk.get("is_ugc", False)
                     eff_tier = _effective_tier(chunk_ugc)
 
+                    # P0-4: prompt injection 防护 — quote 用定界符包裹
+                    # 让 LLM 能结构性区分"数据"与"指令"
+                    raw_text = chunk.get("text", "")[:500]
+                    quote_delimited = f"[EVIDENCE_DATA_BEGIN]{raw_text}[EVIDENCE_DATA_END]"
+
                     evidence.append({
                         "evidence_id": f"web-{ev_idx}",
-                        "quote": chunk.get("text", "")[:500],
+                        "quote": quote_delimited,
                         "source": f"web:{hostname}",
                         "url": url,
                         "domain": hostname,
@@ -675,6 +741,11 @@ class PlaywrightWebSearch:
         - 无 heading 页面使用段落 fallback
         - 小段合并避免碎片化
 
+        P0 安全修复（Claude 交叉评审）：
+        - SSRF: 初始 URL 校验 + redirect-hop 后 response.url 校验
+        - Response size: 超过 MAX_RESPONSE_BYTES 的页面跳过提取
+        - Context cleanup: 使用 async with 保证资源释放
+
         返回：
         {
             "chunks": list[dict],    # [{heading_path, heading_level, text, is_ugc}]
@@ -687,70 +758,89 @@ class PlaywrightWebSearch:
 
         异常处理：所有 Playwright 异常被捕获，返回空 chunks。
         """
+        # P0-1: SSRF 初始 URL 校验
+        safe, reason = _is_safe_url(url)
+        if not safe:
+            logger.warning("SSRF 拦截: url=%s reason=%s", url[:80], reason)
+            return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
+                    "last_modified": None, "fallback": True, "ugc_count": 0}
+
         async with self._semaphore:
-            context = None
-            page = None
             try:
-                context = await self._browser.new_context(
+                async with await self._browser.new_context(
                     user_agent=_USER_AGENT,
                     viewport={"width": 1920, "height": 1080},
                     locale="en-US",
                     timezone_id="Asia/Shanghai",
                     java_script_enabled=True,
-                )
+                ) as context:
+                    await context.add_init_script(_STEALTH_JS)
+                    async with await context.new_page() as page:
+                        # goto 返回 Response 对象，含 HTTP 头
+                        response = await page.goto(url, wait_until="domcontentloaded", timeout=15000)
 
-                await context.add_init_script(_STEALTH_JS)
-                page = await context.new_page()
+                        # P0-1: redirect-hop SSRF 验证
+                        # page.goto 跟随重定向，检查最终 URL 是否安全
+                        if response:
+                            final_url = response.url
+                            safe_redirect, redirect_reason = _is_safe_url(final_url)
+                            if not safe_redirect:
+                                logger.warning("SSRF redirect 拦截: initial=%s final=%s reason=%s",
+                                               url[:60], final_url[:60], redirect_reason)
+                                return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
+                                        "last_modified": None, "fallback": True, "ugc_count": 0}
 
-                # goto 返回 Response 对象，含 HTTP 头
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                await page.wait_for_timeout(2000)
+                        # P0-5: response body 大小限制
+                        MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5MB
+                        content_length = None
+                        if response:
+                            cl = response.headers.get("content-length")
+                            if cl:
+                                try:
+                                    content_length = int(cl)
+                                except ValueError:
+                                    pass
+                        if content_length and content_length > MAX_RESPONSE_BYTES:
+                            logger.warning("响应体过大，跳过: url=%s size=%d", url[:60], content_length)
+                            return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
+                                    "last_modified": None, "fallback": True, "ugc_count": 0}
 
-                # Claim 粒度分块提取（Phase 1.5）
-                chunk_result = await page.evaluate(_CHUNK_EXTRACT_JS)
-                chunks = chunk_result.get("chunks", []) if chunk_result else []
-                fallback = chunk_result.get("fallback", False) if chunk_result else True
-                ugc_count = chunk_result.get("ugc_count", 0) if chunk_result else 0
+                        await page.wait_for_timeout(2000)
 
-                # 提取标题
-                try:
-                    title = await page.title()
-                except Exception:
-                    title = ""
-                # 提取 JSON-LD 结构化数据
-                try:
-                    jsonld = await page.evaluate(_JSONLD_EXTRACT_JS)
-                except Exception:
-                    jsonld = {"entry_count": 0}
-                # HTTP Last-Modified 头
-                last_modified = None
-                if response:
-                    last_modified = response.headers.get("last-modified")
+                        # Claim 粒度分块提取（Phase 1.5）
+                        chunk_result = await page.evaluate(_CHUNK_EXTRACT_JS)
+                        chunks = chunk_result.get("chunks", []) if chunk_result else []
+                        fallback = chunk_result.get("fallback", False) if chunk_result else True
+                        ugc_count = chunk_result.get("ugc_count", 0) if chunk_result else 0
 
-                return {
-                    "chunks": chunks or [],
-                    "title": title or "",
-                    "jsonld": jsonld or {"entry_count": 0},
-                    "last_modified": last_modified,
-                    "fallback": fallback,
-                    "ugc_count": ugc_count,
-                }
+                        # 提取标题
+                        try:
+                            title = await page.title()
+                        except Exception:
+                            title = ""
+                        # 提取 JSON-LD 结构化数据
+                        try:
+                            jsonld = await page.evaluate(_JSONLD_EXTRACT_JS)
+                        except Exception:
+                            jsonld = {"entry_count": 0}
+                        # HTTP Last-Modified 头
+                        last_modified = None
+                        if response:
+                            last_modified = response.headers.get("last-modified")
+
+                        return {
+                            "chunks": chunks or [],
+                            "title": title or "",
+                            "jsonld": jsonld or {"entry_count": 0},
+                            "last_modified": last_modified,
+                            "fallback": fallback,
+                            "ugc_count": ugc_count,
+                        }
 
             except Exception as e:
                 logger.debug("页面渲染失败: url=%s err=%s", url, str(e)[:100])
                 return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
                         "last_modified": None, "fallback": True, "ugc_count": 0}
-            finally:
-                if page:
-                    try:
-                        await page.close()
-                    except Exception:
-                        pass
-                if context:
-                    try:
-                        await context.close()
-                    except Exception:
-                        pass
 
     async def close(self) -> None:
         """关闭浏览器实例（应用关闭时调用）"""
