@@ -122,6 +122,15 @@ def create_app() -> FastAPI:
         all_ok = all(v in _healthy_vals for v in checks.values())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
 
+    @app.on_event("shutdown")
+    async def _shutdown_event() -> None:
+        """应用关闭时清理资源"""
+        try:
+            from app.tools.playwright_search import close_playwright_search
+            await close_playwright_search()
+        except Exception:
+            pass
+
     return app
 
 

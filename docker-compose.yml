@@ -31,6 +31,10 @@ services:
       - CONCLAVE_DB_PATH=/app/data/conclave.db
       - CONCLAVE_SANDBOX_MODE=auto
       - CONCLAVE_QDRANT_URL=http://qdrant:6333
+    # DNS 配置：确保容器能解析外部域名（Web Search 需要）
+    dns:
+      - 8.8.8.8
+      - 223.5.5.5
     depends_on:
       - qdrant
     restart: unless-stopped

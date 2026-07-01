@@ -28,6 +28,9 @@ COPY pyproject.toml ./
 # 安装依赖
 RUN pip install --no-cache-dir -e ".[dev]"
 
+# 安装 Playwright Chromium 浏览器 + 系统依赖（用于 Web Search 无头浏览器）
+RUN playwright install --with-deps chromium
+
 # 复制源码
 COPY . .
 

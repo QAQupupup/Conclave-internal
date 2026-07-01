@@ -68,6 +68,12 @@ class Settings:
     # gRPC Worker 端点地址
     grpc_compute_endpoint: str = _env("CONCLAVE_GRPC_ENDPOINT", "localhost:50051")
 
+    # Web Search 配置
+    # 模式：stub(默认空结果) | tavily(API) | playwright(自建无头浏览器)
+    web_search_mode: str = _env("CONCLAVE_WEB_SEARCH_MODE", "playwright")
+    # Tavily API key（仅 tavily 模式需要）
+    web_search_api_key: str = _env("CONCLAVE_WEB_SEARCH_API_KEY", "")
+
     @property
     def use_real_llm(self) -> bool:
         return bool(self.llm_api_key)

@@ -1,5 +1,5 @@
-# Web Search 工具：感知层首期实现（预留接口 + stub）
-# 重新导出，保持导入路径一致性
+# Web Search 工具：感知层实现（重导出）
+# 三种模式：stub / tavily / playwright（由 CONCLAVE_WEB_SEARCH_MODE 配置）
 from app.tools.__init__ import (  # noqa: F401
     ToolPort,
     StubWebSearch,
