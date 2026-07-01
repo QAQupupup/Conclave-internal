@@ -22,6 +22,13 @@ from urllib.parse import quote_plus, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from .domain_registry import (
+    build_bing_query,
+    match_entity,
+    rank_by_tier,
+    tag_url,
+)
+
 logger = logging.getLogger("app.tools.playwright_search")
 
 # ---------- 反检测脚本 ----------
@@ -177,28 +184,43 @@ class PlaywrightWebSearch:
             )
 
     async def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """搜索流程：DuckDuckGo 搜索 → Playwright 渲染 → 提取正文
+        """搜索流程：Bing 搜索 → Tier 重排 → Playwright 渲染 → 提取正文
 
-        返回格式与 TavilyWebSearch 对齐：
-        [{ "evidence_id": "web-0", "quote": "...", "source": "web:example.com", "url": "..." }]
+        信源可信度增强（Phase 1）：
+        1. Bing 查询自动排除 spam 域名（-site:tieba.baidu.com ...）
+        2. 请求 3x 结果，按 domain tier 重排（S > A > B > C > D），取 top_k
+        3. 每条证据标注 source_tier / credibility_score / is_official
+
+        返回格式（增强后）：
+        [{ "evidence_id": "web-0", "quote": "...", "source": "web:example.com",
+           "url": "...", "source_tier": "S", "credibility_score": 0.9, "is_official": true }]
         """
         try:
-            # 1. DuckDuckGo HTML 搜索获取 URL 列表
-            urls = await self._search_ddg(query, top_k)
+            # 0. 实体匹配（零开销子串匹配，用于日志记录）
+            entity = match_entity(query)
+            if entity:
+                logger.info("Web Search 实体匹配: query=%s → entity=%s", query[:50], entity)
+
+            # 1. Bing 搜索获取 URL 列表（请求 3x 结果用于 tier 重排）
+            fetch_count = min(top_k * 3, 15)
+            urls = await self._search_ddg(query, fetch_count)
             if not urls:
-                logger.warning("DuckDuckGo 搜索无结果: query=%s", query[:50])
+                logger.warning("Bing 搜索无结果: query=%s", query[:50])
                 return []
 
-            # 2. 确保浏览器已启动
+            # 2. 按 domain tier 重排（官方源优先）
+            ranked_urls = rank_by_tier(urls)[:top_k]
+
+            # 3. 确保浏览器已启动
             await self._ensure_browser()
 
-            # 3. 并行渲染页面（并发限制）
-            tasks = [self._fetch_and_extract(url) for url in urls]
+            # 4. 并行渲染页面（并发限制）
+            tasks = [self._fetch_and_extract(url) for url in ranked_urls]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 4. 过滤失败结果，组装证据
+            # 5. 过滤失败结果，组装证据（含信源元数据）
             evidence: list[dict[str, Any]] = []
-            for i, (url, result) in enumerate(zip(urls, results)):
+            for i, (url, result) in enumerate(zip(ranked_urls, results)):
                 if isinstance(result, Exception):
                     logger.warning("页面提取失败: url=%s err=%s", url, str(result)[:100])
                     continue
@@ -206,14 +228,20 @@ class PlaywrightWebSearch:
                     logger.debug("页面内容过短，跳过: url=%s", url)
                     continue
                 hostname = urlparse(url).hostname or "unknown"
+                # 信源可信度标注（Phase 1）
+                tier_info = tag_url(url)
                 evidence.append({
                     "evidence_id": f"web-{i}",
                     "quote": result[:300],
                     "source": f"web:{hostname}",
                     "url": url,
+                    "source_tier": tier_info["source_tier"],
+                    "credibility_score": tier_info["credibility_score"],
+                    "is_official": tier_info["is_official"],
                 })
 
-            logger.info("Web Search 完成: query=%s, 获取 %d 条证据", query[:50], len(evidence))
+            logger.info("Web Search 完成: query=%s, 获取 %d 条证据 (entity=%s)",
+                        query[:50], len(evidence), entity or "unknown")
             return evidence
 
         except Exception as e:
@@ -225,12 +253,20 @@ class PlaywrightWebSearch:
 
         优先使用 Bing（中国可访问），DuckDuckGo 在中国被墙。
         使用 cn.bing.com 的 HTML 结果页。
+
+        信源增强（Phase 1）：
+        - 查询字符串自动拼接 -site: 排除 spam 域名
+        - 请求量 3x 于 top_k，供上层 rank_by_tier 重排后截取
         """
         try:
+            # 构造含 spam 排除的 Bing 查询
+            enhanced_query = build_bing_query(query)
+            entity = match_entity(query)
+
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     "https://cn.bing.com/search",
-                    params={"q": query, "count": str(top_k), "setlang": "en"},
+                    params={"q": enhanced_query, "count": str(top_k), "setlang": "en"},
                     headers={
                         "User-Agent": _USER_AGENT,
                         "Accept": "text/html,application/xhtml+xml",
@@ -257,6 +293,8 @@ class PlaywrightWebSearch:
                 if len(urls) >= top_k:
                     break
 
+            logger.debug("Bing 搜索: query=%s, 获取 %d URLs (entity=%s)",
+                         query[:50], len(urls), entity or "unknown")
             return urls[:top_k]
 
         except Exception as e:
