@@ -18,9 +18,8 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from .domain_registry import (
@@ -187,11 +186,12 @@ _JSONLD_EXTRACT_JS = """
 #   - 无 heading 页面 → paragraph fallback（按段落聚类，保持 heading_path 元数据）
 #   - heading 过多 → min-size merge（合并 < MIN_CHARS 的小段到前一段）
 # UGC guard（Claude 建议 #5）：检测嵌入式评论/社区笔记，标记 is_ugc
+# iframe 处理：不直接移除，而是递归提取 contentDocument 中的内容（同源 iframe）
 _CHUNK_EXTRACT_JS = """
 () => {
-    // 1. 移除噪声元素
+    // 1. 移除噪声元素（注意：iframe 不移除，单独处理）
     const noiseSelectors = [
-        'script', 'style', 'noscript', 'iframe', 'svg', 'canvas',
+        'script', 'style', 'noscript', 'svg', 'canvas',
         'nav', 'footer', 'header', 'aside',
         '.ad', '.ads', '.advertisement', '.sidebar',
         '.cookie-notice', '.popup', '.modal',
@@ -201,15 +201,34 @@ _CHUNK_EXTRACT_JS = """
         document.querySelectorAll(sel).forEach(el => el.remove());
     });
 
-    // 2. 定位主内容容器
-    const main = document.querySelector(
-        'article, main, [role="main"], .article-body, .post-content, .entry-content, .content'
-    );
-    const root = main || document.body;
+    // 2. 定位主内容容器（优先级从高到低）
+    //    修复 docs.python.org 侧边栏被当主内容的问题：
+    //    article > main > [role=main] > ID/class 内容区 > body
+    //    Python 文档用的是 div.body + div.section，不是 article/main
+    const contentSelectors = [
+        'article',
+        'main',
+        '[role="main"]',
+        '.article-body', '.post-content', '.entry-content',
+        '.content', '.document-body',
+        'div[role="main"]',
+        '#content', '#main-content', '#main',
+        '.body', 'div.body',  // Python 文档 / Sphinx
+        'div.section',
+    ];
+    let root = null;
+    for (const sel of contentSelectors) {
+        const el = document.querySelector(sel);
+        // 候选元素必须包含足够文本（避免命中空容器或导航条）
+        if (el && el.innerText && el.innerText.trim().length > 200) {
+            root = el;
+            break;
+        }
+    }
+    root = root || document.body;
     if (!root) return { chunks: [], fallback: true, ugc_count: 0 };
 
     // 3. 标记 UGC 元素（Claude #5：chunk-level tier 继承冲突）
-    //    官方文档页可能嵌入 Disqus 评论/社区笔记，这些不应继承 S tier
     const ugcSelectors = [
         '[class*="disqus"]', '[id*="disqus"]',
         '[class*="comment"]', '[id*="comment"]',
@@ -226,12 +245,12 @@ _CHUNK_EXTRACT_JS = """
     });
 
     // 4. 配置
-    const MIN_CHARS = 200;   // 最小分块大小（低于此合并到前一段）
-    const MAX_CHARS = 2000;  // 最大分块大小（超出强制截断）
+    const MIN_CHARS = 200;
+    const MAX_CHARS = 2000;
 
     // 5. 递归遍历 DOM，按 heading 分块
     const chunks = [];
-    let path = [];        // [{level, text}]
+    let path = [];
     let currentText = '';
     let hasHeadings = false;
 
@@ -251,31 +270,40 @@ _CHUNK_EXTRACT_JS = """
     function walk(node) {
         for (const child of node.childNodes) {
             if (child.nodeType === 3) {
-                // 文本节点
                 const t = child.textContent.trim();
                 if (t) currentText += (currentText ? ' ' : '') + t;
             } else if (child.nodeType === 1) {
-                // 元素节点
                 if (child.getAttribute && child.getAttribute('data-ugc') === 'true') continue;
 
                 const tag = child.tagName;
+
+                // iframe 处理：尝试提取同源 iframe 内容
+                if (tag === 'IFRAME') {
+                    try {
+                        const doc = child.contentDocument || child.contentWindow.document;
+                        if (doc && doc.body) {
+                            // 递归遍历 iframe 内部 DOM
+                            walk(doc.body);
+                        }
+                    } catch(e) {
+                        // 跨域 iframe 无法访问 contentDocument，跳过
+                    }
+                    continue;
+                }
+
                 const match = tag.match(/^H([1-6])$/);
 
                 if (match) {
-                    // 遇到 heading：刷出当前块，更新 heading path
                     hasHeadings = true;
                     flush();
                     const level = parseInt(match[1]);
                     const hText = (child.textContent || '').trim();
-                    // 弹出同级或更深层级的 path
                     while (path.length > 0 && path[path.length - 1].level >= level) {
                         path.pop();
                     }
                     path.push({ level, text: hText });
                 } else {
-                    // 递归处理非 heading 元素
                     walk(child);
-                    // 溢出保护
                     if (currentText.length > MAX_CHARS) flush();
                 }
             }
@@ -285,7 +313,7 @@ _CHUNK_EXTRACT_JS = """
     walk(root);
     flush();
 
-    // 6. 合并小段（Claude 指出：避免 h4/h5 嵌套产生 40 个碎片）
+    // 6. 合并小段
     const merged = [];
     for (const chunk of chunks) {
         if (merged.length > 0 && chunk.text.length < MIN_CHARS) {
@@ -295,10 +323,40 @@ _CHUNK_EXTRACT_JS = """
         }
     }
 
+    // 7. 如果主内容区无有效分块，尝试遍历所有同源 iframe
+    if (merged.length === 0) {
+        const iframes = document.querySelectorAll('iframe');
+        iframes.forEach(iframe => {
+            try {
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                if (doc && doc.body && doc.body.innerText && doc.body.innerText.trim().length > 200) {
+                    walk(doc.body);
+                    flush();
+                }
+            } catch(e) {}
+        });
+        // 再次合并
+        const merged2 = [];
+        for (const chunk of chunks) {
+            if (merged2.length > 0 && chunk.text.length < MIN_CHARS) {
+                merged2[merged2.length - 1].text += '\\n\\n' + chunk.text;
+            } else {
+                merged2.push(chunk);
+            }
+        }
+        return {
+            chunks: merged2,
+            fallback: !hasHeadings,
+            ugc_count: ugcCount,
+            iframe_fallback: true,
+        };
+    }
+
     return {
         chunks: merged,
-        fallback: !hasHeadings,  // true = 无 heading，使用段落 fallback
+        fallback: !hasHeadings,
         ugc_count: ugcCount,
+        iframe_fallback: false,
     };
 }
 """
@@ -441,7 +499,9 @@ class PlaywrightWebSearch:
                         return "C"
                     return tier_info["source_tier"]
 
-                for chunk_idx, chunk in enumerate(chunks):
+                # 限制每页最大 chunk 数，避免 evidence 爆炸（如 docs.python.org 85 chunks）
+                max_chunks_per_page = 5
+                for chunk_idx, chunk in enumerate(chunks[:max_chunks_per_page]):
                     chunk_ugc = chunk.get("is_ugc", False)
                     eff_tier = _effective_tier(chunk_ugc)
 
@@ -469,11 +529,12 @@ class PlaywrightWebSearch:
                             "page_title": page_title,
                             "page_fallback": page_fallback,
                             "page_ugc_count": page_ugc_count,
+                            "iframe_fallback": result.get("iframe_fallback", False),
                             # chunk 级信号（Phase 1.5 新增）
                             "heading_path": chunk.get("heading_path", ""),
                             "heading_level": chunk.get("heading_level", 0),
                             "chunk_index": chunk_idx,
-                            "total_chunks": len(chunks),
+                            "total_chunks": min(len(chunks), max_chunks_per_page),
                             "is_ugc": chunk_ugc,
                         },
                     })
@@ -499,97 +560,111 @@ class PlaywrightWebSearch:
         信源增强（Phase 1）：
         - 查询字符串自动拼接 -site: 排除 spam 域名
         - 请求量 3x 于 top_k，供上层 rank_by_tier 重排后截取
+        - 最多重试 2 次（Bing 表单搜索偶发无结果）
         """
-        try:
-            # Playwright 表单搜索不用 -site: 排除（过长的查询字符串导致 Bing 异常）
-            # spam 域名过滤改为在获取结果后用 domain_registry 过滤
-            entity = match_entity(query)
+        entity = match_entity(query)
 
-            await self._ensure_browser()
-
-            context = await self._browser.new_context(
-                user_agent=_USER_AGENT,
-                viewport={"width": 1920, "height": 1080},
-                locale="en-US",
-            )
-            await context.add_init_script(_STEALTH_JS)
-            page = await context.new_page()
-
+        # 重试机制：Bing 表单搜索偶发返回空结果
+        for attempt in range(2):
             try:
-                # Step 1: 访问 Bing 首页获取 cookie
-                await page.goto("https://www.bing.com/", wait_until="domcontentloaded", timeout=15000)
-                await page.wait_for_timeout(2000)
+                urls = await self._do_bing_search(query, top_k)
+                if urls:
+                    return urls
+                if attempt == 0:
+                    logger.debug("Bing 搜索无结果，重试: query=%s", query[:50])
+                    await asyncio.sleep(2)  # 重试前等待
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning("Bing 搜索异常，重试: %s", str(e)[:100])
+                    await asyncio.sleep(2)
+                else:
+                    raise
 
-                # Step 2: 在搜索框输入并提交（用原始 query，不含 -site: 排除）
-                search_input = page.locator("textarea[name='q'], input[name='q']").first
-                await search_input.wait_for(state="visible", timeout=5000)
-                await search_input.fill(query)
-                await page.keyboard.press("Enter")
+        logger.warning("Bing 搜索 2 次均无结果: query=%s", query[:50])
+        return []
 
-                # Step 3: 等待结果页加载
-                await page.wait_for_timeout(4000)
+    async def _do_bing_search(self, query: str, top_k: int) -> list[str]:
+        """执行单次 Bing 表单搜索
 
-                # Step 4: 从 <cite> 标签提取真实 URL
-                # Bing 的 h2>a 是 ck/a 重定向链接，cite 标签包含真实域名路径
-                raw_results = await page.evaluate("""
-                    () => {
-                        const items = [];
-                        document.querySelectorAll('li.b_algo').forEach(li => {
-                            const cite = li.querySelector('cite');
-                            const h2a = li.querySelector('h2 a');
-                            const title = h2a ? (h2a.textContent || '').trim() : '';
-                            const citeText = cite ? (cite.textContent || '').trim() : '';
-                            items.push({title: title, cite: citeText});
-                        });
-                        return items;
-                    }
-                """)
+        流程：访问首页获取 cookie → 搜索框输入 → 从 cite 标签提取真实 URL
+        """
+        await self._ensure_browser()
 
-                # 从 cite 文本重建完整 URL
-                # cite 格式: "https://docs.python.org › library › asyncio"
-                from .domain_registry import SPAM_DOMAINS
-                urls: list[str] = []
-                seen: set[str] = set()
-                for item in raw_results[:top_k]:
-                    cite = item.get("cite", "")
-                    if not cite:
-                        continue
-                    # 提取域名部分（第一个空格或 › 之前）
-                    # 格式: "https://docs.python.org › library › asyncio"
-                    if cite.startswith("http"):
-                        # 去掉 " ›" 分隔符，重建 URL
-                        parts = cite.split(" › ")
-                        if parts:
-                            base = parts[0].rstrip("/")
-                            path = "/".join(parts[1:]) if len(parts) > 1 else ""
-                            url = f"{base}/{path}" if path else base
-                            # 过滤 spam 域名（post-filter 替代 -site: 排除）
-                            hostname = url.split("/")[2] if len(url.split("/")) > 2 else ""
-                            if hostname in SPAM_DOMAINS:
-                                continue
-                            if url not in seen:
-                                seen.add(url)
-                                urls.append(url)
-                    else:
-                        # 有些 cite 不带 https:// 前缀
-                        first_part = cite.split(" › ")[0] if " › " in cite else cite.split(" ")[0]
-                        if first_part and "." in first_part:
-                            url = f"https://{first_part}"
-                            if url not in seen:
-                                seen.add(url)
-                                urls.append(url)
+        context = await self._browser.new_context(
+            user_agent=_USER_AGENT,
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+        )
+        await context.add_init_script(_STEALTH_JS)
+        page = await context.new_page()
 
-                logger.debug("Bing 搜索: query=%s, 获取 %d URLs (entity=%s)",
-                             query[:50], len(urls), entity or "unknown")
-                return urls[:top_k]
+        try:
+            # Step 1: 访问 Bing 首页获取 cookie
+            await page.goto("https://www.bing.com/", wait_until="domcontentloaded", timeout=15000)
+            await page.wait_for_timeout(2000)
 
-            finally:
-                await page.close()
-                await context.close()
+            # Step 2: 在搜索框输入并提交（用原始 query，不含 -site: 排除）
+            search_input = page.locator("textarea[name='q'], input[name='q']").first
+            await search_input.wait_for(state="visible", timeout=5000)
+            await search_input.fill(query)
+            await page.keyboard.press("Enter")
 
-        except Exception as e:
-            logger.warning("Bing 搜索失败: %s", str(e)[:200])
-            return []
+            # Step 3: 等待结果页加载
+            await page.wait_for_timeout(4000)
+
+            # Step 4: 从 <cite> 标签提取真实 URL
+            # Bing 的 h2>a 是 ck/a 重定向链接，cite 标签包含真实域名路径
+            raw_results = await page.evaluate("""
+                () => {
+                    const items = [];
+                    document.querySelectorAll('li.b_algo').forEach(li => {
+                        const cite = li.querySelector('cite');
+                        const h2a = li.querySelector('h2 a');
+                        const title = h2a ? (h2a.textContent || '').trim() : '';
+                        const citeText = cite ? (cite.textContent || '').trim() : '';
+                        items.push({title: title, cite: citeText});
+                    });
+                    return items;
+                }
+            """)
+
+            # 从 cite 文本重建完整 URL
+            # cite 格式: "https://docs.python.org › library › asyncio"
+            from .domain_registry import SPAM_DOMAINS
+            urls: list[str] = []
+            seen: set[str] = set()
+            for item in raw_results[:top_k]:
+                cite = item.get("cite", "")
+                if not cite:
+                    continue
+                if cite.startswith("http"):
+                    parts = cite.split(" › ")
+                    if parts:
+                        base = parts[0].rstrip("/")
+                        path = "/".join(parts[1:]) if len(parts) > 1 else ""
+                        url = f"{base}/{path}" if path else base
+                        # 过滤 spam 域名
+                        hostname = url.split("/")[2] if len(url.split("/")) > 2 else ""
+                        if hostname in SPAM_DOMAINS:
+                            continue
+                        if url not in seen:
+                            seen.add(url)
+                            urls.append(url)
+                else:
+                    first_part = cite.split(" › ")[0] if " › " in cite else cite.split(" ")[0]
+                    if first_part and "." in first_part:
+                        url = f"https://{first_part}"
+                        if url not in seen:
+                            seen.add(url)
+                            urls.append(url)
+
+            logger.debug("Bing 搜索: query=%s, 获取 %d URLs",
+                         query[:50], len(urls))
+            return urls[:top_k]
+
+        finally:
+            await page.close()
+            await context.close()
 
     async def _fetch_and_extract(self, url: str) -> dict[str, Any]:
         """Playwright 渲染页面并提取 claim 粒度分块 + 结构化元数据
