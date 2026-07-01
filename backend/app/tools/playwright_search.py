@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
@@ -134,6 +135,52 @@ _EXTRACT_JS = """
 }
 """
 
+# schema.org JSON-LD 提取：从 <script type="application/ld+json"> 获取结构化元数据
+# 官方/权威站点通常嵌入 JSON-LD（publisher, dateModified, author 等），
+# 采集站/SEO 农场几乎不实现。比版权页脚启发式更可靠。
+_JSONLD_EXTRACT_JS = """
+() => {
+    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+    const entries = [];
+    scripts.forEach(s => {
+        try {
+            const data = JSON.parse(s.textContent);
+            if (Array.isArray(data)) {
+                entries.push(...data.filter(d => d && typeof d === 'object'));
+            } else if (data && typeof data === 'object') {
+                // @graph 展开（多实体页面）
+                if (Array.isArray(data['@graph'])) {
+                    entries.push(...data['@graph'].filter(d => d && typeof d === 'object'));
+                } else {
+                    entries.push(data);
+                }
+            }
+        } catch(e) {}
+    });
+    // 从所有条目中提取关键 provenance 字段
+    let publisher = null, author = null, datePublished = null, dateModified = null, type = null;
+    for (const e of entries) {
+        if (!publisher) {
+            publisher = (e.publisher && (e.publisher.name || e.publisher)) || null;
+        }
+        if (!author) {
+            author = (e.author && (e.author.name || e.author)) || null;
+        }
+        if (!datePublished) datePublished = e.datePublished || null;
+        if (!dateModified) dateModified = e.dateModified || null;
+        if (!type) type = e['@type'] || null;
+    }
+    return {
+        publisher: publisher,
+        author: author,
+        datePublished: datePublished,
+        dateModified: dateModified,
+        type: type,
+        entry_count: entries.length,
+    };
+}
+"""
+
 
 class PlaywrightWebSearch:
     """自建 Web Search：Playwright 无头浏览器 + DuckDuckGo 搜索
@@ -184,17 +231,38 @@ class PlaywrightWebSearch:
             )
 
     async def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """搜索流程：Bing 搜索 → Tier 重排 → Playwright 渲染 → 提取正文
+        """搜索流程：Bing 搜索 → Tier 重排 → Playwright 渲染 → 提取正文 + 结构化元数据
 
-        信源可信度增强（Phase 1）：
+        信源可信度增强（Phase 1 + Claude Sonnet 5 评审改进）：
         1. Bing 查询自动排除 spam 域名（-site:tieba.baidu.com ...）
         2. 请求 3x 结果，按 domain tier 重排（S > A > B > C > D），取 top_k
-        3. 每条证据标注 source_tier / credibility_score / is_official
+        3. 提取 schema.org JSON-LD 结构化数据（publisher/dateModified/author）
+        4. 不提前折叠为单一 credibility_score — 输出原始 signals 袋让 consumer 自行加权
+        5. 跟踪 staleness（fetched_at + page_last_modified）
 
-        返回格式（增强后）：
-        [{ "evidence_id": "web-0", "quote": "...", "source": "web:example.com",
-           "url": "...", "source_tier": "S", "credibility_score": 0.9, "is_official": true }]
+        返回格式（signals 袋模式）：
+        [{
+            "evidence_id": "web-0",
+            "quote": "...",
+            "source": "web:hostname",
+            "url": "...",
+            "domain": "docs.python.org",
+            "source_tier": "S",  # 顶层 tier，向后兼容现有 prompt
+            "signals": {
+                "tier_static": "S",
+                "is_official": true,
+                "fetched_at": "2026-07-01T10:30:00Z",
+                "page_last_modified": "2024-03-15" | null,
+                "jsonld_publisher": "Python Software Foundation" | null,
+                "jsonld_author": "..." | null,
+                "jsonld_date_published": "2024-01-01" | null,
+                "jsonld_type": "TechArticle" | null,
+                "structured_data_present": true,
+                "page_title": "..."
+            }
+        }]
         """
+        fetched_at = datetime.now(timezone.utc).isoformat()
         try:
             # 0. 实体匹配（零开销子串匹配，用于日志记录）
             entity = match_entity(query)
@@ -218,26 +286,49 @@ class PlaywrightWebSearch:
             tasks = [self._fetch_and_extract(url) for url in ranked_urls]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 5. 过滤失败结果，组装证据（含信源元数据）
+            # 5. 过滤失败结果，组装证据（含 signals 袋）
             evidence: list[dict[str, Any]] = []
             for i, (url, result) in enumerate(zip(ranked_urls, results)):
                 if isinstance(result, Exception):
                     logger.warning("页面提取失败: url=%s err=%s", url, str(result)[:100])
                     continue
-                if not result or len(result.strip()) < 50:
+                # _fetch_and_extract 现在返回 dict
+                text = result.get("text", "") if isinstance(result, dict) else ""
+                if not text or len(text.strip()) < 50:
                     logger.debug("页面内容过短，跳过: url=%s", url)
                     continue
+
                 hostname = urlparse(url).hostname or "unknown"
-                # 信源可信度标注（Phase 1）
                 tier_info = tag_url(url)
+                jsonld = result.get("jsonld", {}) if isinstance(result, dict) else {}
+                last_modified = result.get("last_modified") if isinstance(result, dict) else None
+                page_title = result.get("title", "") if isinstance(result, dict) else ""
+
+                # page_last_modified 优先用 HTTP 头，其次 JSON-LD dateModified
+                page_last_modified = last_modified or jsonld.get("dateModified")
+
                 evidence.append({
                     "evidence_id": f"web-{i}",
-                    "quote": result[:300],
+                    "quote": text[:300],
                     "source": f"web:{hostname}",
                     "url": url,
+                    "domain": hostname,
+                    # 顶层 tier 向后兼容现有 evidence_check prompt
                     "source_tier": tier_info["source_tier"],
-                    "credibility_score": tier_info["credibility_score"],
-                    "is_official": tier_info["is_official"],
+                    # 原始 signals 袋 — 不提前折叠为单一 score
+                    # 不同 agent 角色可自行加权（Claude Sonnet 5 建议 #2）
+                    "signals": {
+                        "tier_static": tier_info["source_tier"],
+                        "is_official": tier_info["is_official"],
+                        "fetched_at": fetched_at,
+                        "page_last_modified": page_last_modified,
+                        "jsonld_publisher": jsonld.get("publisher"),
+                        "jsonld_author": jsonld.get("author"),
+                        "jsonld_date_published": jsonld.get("datePublished"),
+                        "jsonld_type": jsonld.get("type"),
+                        "structured_data_present": bool(jsonld.get("entry_count", 0) > 0),
+                        "page_title": page_title,
+                    },
                 })
 
             logger.info("Web Search 完成: query=%s, 获取 %d 条证据 (entity=%s)",
@@ -301,24 +392,23 @@ class PlaywrightWebSearch:
             logger.warning("Bing 搜索失败: %s", str(e)[:200])
             return []
 
-    async def _fetch_and_extract(self, url: str) -> str:
-        """Playwright 渲染页面并提取正文
+    async def _fetch_and_extract(self, url: str) -> dict[str, Any]:
+        """Playwright 渲染页面并提取正文 + 结构化元数据
 
-        流程：
-        1. 创建独立 context（隔离 cookie/cache）
-        2. 注入反检测脚本（addInitScript，在页面 JS 前执行）
-        3. 导航到 URL，等待 DOM 加载
-        4. 等待动态内容渲染（2s）
-        5. 执行提取 JS，获取正文
-        6. 关闭 context（释放资源）
+        返回：
+        {
+            "text": str,           # 页面正文（噪声移除后）
+            "title": str,          # 页面标题
+            "jsonld": dict,        # schema.org JSON-LD 提取结果
+            "last_modified": str|None,  # HTTP Last-Modified 头
+        }
 
-        异常处理：所有 Playwright 异常被捕获，返回空字符串。
+        异常处理：所有 Playwright 异常被捕获，返回空 dict。
         """
         async with self._semaphore:
             context = None
             page = None
             try:
-                # 每个页面独立 context（隔离 cookie/fingerprint）
                 context = await self._browser.new_context(
                     user_agent=_USER_AGENT,
                     viewport={"width": 1920, "height": 1080},
@@ -327,26 +417,40 @@ class PlaywrightWebSearch:
                     java_script_enabled=True,
                 )
 
-                # 关键：在页面任何 JS 执行前注入反检测脚本
-                # addInitScript 会在每个新页面加载时、页面 JS 之前执行
                 await context.add_init_script(_STEALTH_JS)
-
                 page = await context.new_page()
 
-                # 导航：domcontentloaded 比 load 快，适合内容提取
-                # networkidle 太慢（等待所有请求完成），不适用于有长连接的页面
-                await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-
-                # 等待动态内容渲染（SPA / AJAX 加载）
+                # goto 返回 Response 对象，含 HTTP 头
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 await page.wait_for_timeout(2000)
 
-                # 执行提取 JS（通过 CDP 在 V8 引擎直接执行，不经过 DevTools）
+                # 提取正文
                 content = await page.evaluate(_EXTRACT_JS)
-                return content or ""
+                # 提取标题
+                try:
+                    title = await page.title()
+                except Exception:
+                    title = ""
+                # 提取 JSON-LD 结构化数据
+                try:
+                    jsonld = await page.evaluate(_JSONLD_EXTRACT_JS)
+                except Exception:
+                    jsonld = {"entry_count": 0}
+                # HTTP Last-Modified 头
+                last_modified = None
+                if response:
+                    last_modified = response.headers.get("last-modified")
+
+                return {
+                    "text": content or "",
+                    "title": title or "",
+                    "jsonld": jsonld or {"entry_count": 0},
+                    "last_modified": last_modified,
+                }
 
             except Exception as e:
                 logger.debug("页面渲染失败: url=%s err=%s", url, str(e)[:100])
-                return ""
+                return {"text": "", "title": "", "jsonld": {"entry_count": 0}, "last_modified": None}
             finally:
                 if page:
                     try:
