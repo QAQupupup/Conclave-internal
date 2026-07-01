@@ -624,22 +624,38 @@ class PlaywrightWebSearch:
             return []
 
     async def _search_ddg(self, query: str, top_k: int) -> list[str]:
-        """Bing 搜索：Playwright 表单搜索（绕过 httpx 反爬）
+        """Bing 搜索（含 MultiEngineSearch failover 到 DDG）
+
+        搜索引擎优先级（Phase D）：
+        1. MultiEngineSearch（Bing → DDG 自动 failover）
+        2. 直接 Bing 表单搜索（降级路径）
 
         关键发现（2026-07 验证）：
         - httpx 直接请求 Bing 搜索 URL 会返回首页而非结果页（无 cookie/会话）
-        - 直接导航搜索 URL 即使带 cookie 也返回空结果
         - 必须先访问首页获取 cookie → 在搜索框输入 → 表单提交
         - Bing 的 h2>a 链接是 ck/a 重定向，真实 URL 在 <cite> 标签中
 
-        信源增强（Phase 1）：
-        - 查询字符串自动拼接 -site: 排除 spam 域名
-        - 请求量 3x 于 top_k，供上层 rank_by_tier 重排后截取
-        - 最多重试 2 次（Bing 表单搜索偶发无结果）
-
         Returns:
-            list[str]: URL 列表（从 _do_bing_search 的 dict 结果中提取）
+            list[str]: URL 列表
         """
+        # Phase D: 优先使用 MultiEngineSearch（含自动 failover）
+        try:
+            from app.tools.search_engine import get_multi_engine_search
+            multi = get_multi_engine_search()
+            if multi._engines:  # 有可用引擎时
+                result = await multi.search(query, max_results=top_k)
+                if result["results"]:
+                    urls = [r.url for r in result["results"]]
+                    logger.info("MultiEngineSearch 成功: engine=%s, urls=%d",
+                               result["engine_used"], len(urls))
+                    return urls
+                # MultiEngineSearch 所有引擎都失败，降级到直接 Bing 搜索
+                logger.warning("MultiEngineSearch 全部失败 (%s)，降级到直接 Bing 搜索",
+                              result["failed_engines"])
+        except Exception as e:
+            logger.warning("MultiEngineSearch 异常，降级到直接 Bing 搜索: %s", str(e)[:100])
+
+        # 降级路径：直接 Bing 表单搜索（原有逻辑）
         entity = match_entity(query)
 
         # 重试机制：Bing 表单搜索偶发返回空结果
