@@ -417,7 +417,7 @@ class RealLLM:
                 f"LLM 熔断器打开，直接降级: stage={schema_hint}",
                 logger="agents.llm",
             )
-            return StubLLM().complete(prompt, schema_hint)
+            return await StubLLM().complete(prompt, schema_hint)
 
         model_cls = SCHEMA_MAP.get(schema_hint)
         schema_desc = self._schema_description(model_cls)
