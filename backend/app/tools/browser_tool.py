@@ -360,6 +360,10 @@ class BrowserPool:
         self._contexts: dict[str, _ContextSession] = {}
         self._lock = asyncio.Lock()
         self._idle_check_task: asyncio.Task | None = None
+        # C-1: NavigationSkill 排他锁（按 meeting_id 隔离）
+        # 当 NavigationSkill 执行时，锁住整个 meeting 的浏览器操作，
+        # 防止 web_search 等并发操作干扰页面状态
+        self._exclusive_locks: dict[str, asyncio.Lock] = {}
 
     async def _ensure_browser(self) -> None:
         """延迟初始化 Chromium"""
@@ -449,10 +453,28 @@ class BrowserPool:
         ctx = self._contexts.pop(meeting_id, None)
         if ctx:
             await ctx.close()
-            from app.observability.log_bus import log_bus
-            log_bus.emit("INFO", f"browser_context_released: meeting={meeting_id}",
-                         logger="app.tools.browser_tool",
-                         extra={"meeting_id": meeting_id, "remaining_contexts": len(self._contexts)})
+        # 清理排他锁
+        self._exclusive_locks.pop(meeting_id, None)
+        from app.observability.log_bus import log_bus
+        log_bus.emit("INFO", f"browser_context_released: meeting={meeting_id}",
+                     logger="app.tools.browser_tool",
+                     extra={"meeting_id": meeting_id, "remaining_contexts": len(self._contexts)})
+
+    def get_exclusive_lock(self, meeting_id: str) -> asyncio.Lock:
+        """获取指定 meeting 的排他锁（NavigationSkill 使用）
+
+        NavigationSkill 执行期间持有此锁，阻塞同 meeting 的其他浏览器操作。
+        这是 blocking 模式：NavigationSkill 首次实现不共享浏览器上下文。
+
+        用法：
+            lock = pool.get_exclusive_lock(meeting_id)
+            async with lock:
+                # 执行 NavigationSkill 步骤
+                ...
+        """
+        if meeting_id not in self._exclusive_locks:
+            self._exclusive_locks[meeting_id] = asyncio.Lock()
+        return self._exclusive_locks[meeting_id]
 
     async def _reclaim_oldest_idle(self) -> None:
         """回收最空闲的 Context"""
