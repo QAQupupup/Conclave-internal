@@ -8,7 +8,7 @@
 //  4) 鼠标悬停显示完整内容（tooltip）作为兜底
 //  5) adopted 判定严格按 claim.id，避免文本包含造成误判
 //  6) 边的起点/终点精确到节点中线，贝塞尔弧线
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { FocusMode } from './FocusMode.tsx'
@@ -183,6 +183,7 @@ function LogicGraphInner({
   const [dragging, setDragging] = useState(false)
   const dragStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 })
+  const [viewportReady, setViewportReady] = useState(false)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null)
   const [userZoomed, setUserZoomed] = useState(false)  // 标记用户是否主动调过缩放
 
@@ -350,16 +351,20 @@ function LogicGraphInner({
   }, [layout.claimOverflow, layout.claimPos])
 
   /* ---------- 自适应 fit-to-viewport ---------- */
-  useEffect(() => {
+  // 使用 useLayoutEffect 在浏览器绘制前同步测量容器尺寸，避免 {0,0} → 实际尺寸的 fit 跳变
+  useLayoutEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       const rect = el.getBoundingClientRect()
-      setViewportSize({ w: rect.width, h: rect.height })
-    })
+      if (rect.width > 0 && rect.height > 0) {
+        setViewportSize({ w: rect.width, h: rect.height })
+        setViewportReady(true)
+      }
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-    const rect = el.getBoundingClientRect()
-    setViewportSize({ w: rect.width, h: rect.height })
     return () => ro.disconnect()
   }, [])
 
@@ -497,7 +502,8 @@ function LogicGraphInner({
           width="100%"
           height="100%"
           // 视口 = 实际像素；内部 g 用 transform 控制 pan/zoom
-          style={{ display: 'block' }}
+          // viewportReady 前隐藏 SVG，避免 {0,0} → fit 的跳变
+          style={{ display: 'block', opacity: viewportReady ? 1 : 0, transition: 'opacity 0.3s ease' }}
         >
           {/* 视口背景（淡网格） */}
           <defs>
