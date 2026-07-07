@@ -83,6 +83,10 @@ export function useWebSocket(
     }
     closedByUnmountRef.current = false
 
+    // 切换会议时重置 lastSeq，确保新会议从 seq=0 开始获取全部历史事件
+    setLastSeq(0)
+    lastSeqRef.current = 0
+
     const connect = () => {
       if (closedByUnmountRef.current) return
       const fromSeq = lastSeqRef.current

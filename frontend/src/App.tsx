@@ -46,14 +46,20 @@ function TabBar({ tab, onChange }: { tab: ViewTab; onChange: (t: ViewTab) => voi
 type RightPanelTab = 'topic' | 'evidence' | 'artifact' | 'report' | 'token'
 
 /** 会议主视图：顶部流程指示器+控制按钮 / 拓扑图 / 聊天流 + 右侧面板，借调模态 + 冲突联动选中态 + 右侧 Tab 切换 */
-function MeetingView({ onOpenInWorkspace }: { onOpenInWorkspace?: (filePath: string) => void }) {
+function MeetingView({
+  onOpenInWorkspace,
+  rightTab,
+  setRightTab,
+}: {
+  onOpenInWorkspace?: (filePath: string) => void
+  rightTab: RightPanelTab
+  setRightTab: (t: RightPanelTab) => void
+}) {
   const { reset } = useMeeting()
   // 右侧证据面板选中冲突（聊天流点击证据 ref 时联动高亮）
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null)
   // 借调表单模态开关
   const [borrowOpen, setBorrowOpen] = useState(false)
-  // 右侧面板当前激活 Tab
-  const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
   // 拓扑图折叠/展开状态（持久化到 localStorage）
   const [graphCollapsed, setGraphCollapsed] = usePersistentState<boolean>(
     'conclave-graph-collapsed',
@@ -210,6 +216,8 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 function AppShell() {
   const { meetingId } = useMeeting()
   const [tab, setTab] = useState<ViewTab>('meeting')
+  // 右侧面板 Tab 状态提升到 AppShell，避免切换会议/工作区视图时丢失
+  const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
   // 左侧会议列表侧边栏的折叠/展开状态（持久化到 localStorage）
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState<boolean>(
     'conclave-sidebar-collapsed',
@@ -273,7 +281,11 @@ function AppShell() {
           <>
             <TabBar tab={tab} onChange={setTab} />
             {tab === 'meeting' ? (
-              <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
+              <MeetingView
+                onOpenInWorkspace={handleOpenInWorkspace}
+                rightTab={rightTab}
+                setRightTab={setRightTab}
+              />
             ) : (
               <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
             )}

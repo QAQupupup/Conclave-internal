@@ -1573,6 +1573,37 @@ code {
   margin-top: 6px;
 }
 
+/* ---------- 借调反馈 + 终止确认 ---------- */
+.borrow-feedback {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.borrow-error {
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+.borrow-success {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+.abort-confirm-modal {
+  max-width: 380px;
+  padding: 20px;
+}
+.abort-confirm-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 12px 0 16px;
+}
+.abort-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ---------- 创建页 ---------- */
 .create-page {
   display: flex;

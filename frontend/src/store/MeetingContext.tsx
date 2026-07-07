@@ -69,6 +69,8 @@ export function MeetingProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'reset' })
     } else {
       localStorage.setItem('conclave_meeting_id', id)
+      // 切换会议时先 reset store，避免旧会议数据闪烁，等 WS snapshot 填充新数据
+      dispatch({ type: 'reset' })
     }
   }, [])
 
