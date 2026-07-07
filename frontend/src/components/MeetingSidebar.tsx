@@ -1,7 +1,8 @@
-// 会议列表侧边栏：展示所有历史会议，支持切换 / 新建
-import { useState, useEffect } from 'react'
-import { listMeetings } from '../lib/api.ts'
+// 会议列表侧边栏：展示所有历史会议，支持切换 / 新建 / 删除 / 折叠
+import { useState, useEffect, useCallback } from 'react'
+import { listMeetings, deleteMeeting } from '../lib/api.ts'
 import { useMeeting } from '../store/MeetingContext.tsx'
+import { usePersistentState } from '../hooks/usePersistentState.ts'
 import { STAGE_LABELS, getMeetingStatusInfo } from '../constants.ts'
 
 interface MeetingListItem {
@@ -19,8 +20,19 @@ export function MeetingSidebar() {
   const [concurrentLimit, setConcurrentLimit] = useState(0)
   const [runningCount, setRunningCount] = useState(0)
   const [loading, setLoading] = useState(false)
+  // 会议列表折叠状态（持久化）
+  const [listCollapsed, setListCollapsed] = usePersistentState<boolean>(
+    'conclave-meeting-list-collapsed',
+    false,
+  )
+  // 删除确认状态：记录当前待确认删除的会议 ID
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  // 删除中的会议 ID（loading）
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  // 删除模式选择
+  const [deleteMode, setDeleteMode] = useState<'soft' | 'hard'>('soft')
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true)
     try {
       const data = await listMeetings()
@@ -32,19 +44,41 @@ export function MeetingSidebar() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     refresh()
     // 每 5 秒刷新一次列表（捕获运行中会议的状态变化）
     const timer = setInterval(refresh, 5000)
     return () => clearInterval(timer)
-  }, [])
+  }, [refresh])
 
   const statusLabel = (status: string, stage: string) => {
     const stageLabel = STAGE_LABELS[stage as keyof typeof STAGE_LABELS] ?? stage
     return getMeetingStatusInfo(status, stageLabel)
   }
+
+  /** 执行删除 */
+  const handleDelete = useCallback(
+    async (id: string) => {
+      setDeletingId(id)
+      try {
+        await deleteMeeting(id, deleteMode)
+        // 如果删除的是当前选中的会议，重置到创建页
+        if (id === meetingId) {
+          reset()
+        }
+        // 刷新列表
+        await refresh()
+      } catch {
+        // 静默失败，可扩展为 toast
+      } finally {
+        setDeletingId(null)
+        setPendingDelete(null)
+      }
+    },
+    [deleteMode, meetingId, reset, refresh],
+  )
 
   return (
     <div className="meeting-sidebar">
@@ -57,31 +91,112 @@ export function MeetingSidebar() {
       <button className="btn btn-primary sidebar-new-btn" onClick={reset}>
         + 新建会议
       </button>
-      <div className="meeting-list">
-        {meetings.length === 0 && <div className="meeting-empty">暂无会议</div>}
-        {meetings.map((m) => {
-          const sl = statusLabel(m.status, m.stage)
-          const isActive = m.meeting_id === meetingId
-          return (
-            <div
-              key={m.meeting_id}
-              className={`meeting-item ${isActive ? 'active' : ''}`}
-              onClick={() => selectMeeting(m.meeting_id)}
-            >
-              <div className="meeting-topic">
-                {m.is_running && (
-                  <span className="running-pulse" title="运行中" aria-hidden="true" />
+
+      {/* 会议列表折叠/展开 */}
+      <div
+        className={`meeting-list-zone ${listCollapsed ? 'is-collapsed' : ''}`}
+      >
+        <button
+          type="button"
+          className="meeting-list-toggle"
+          onClick={() => setListCollapsed(v => !v)}
+          title={listCollapsed ? '展开列表' : '收起列表'}
+        >
+          <span className={`toggle-arrow ${listCollapsed ? 'is-collapsed' : ''}`}>›</span>
+          <span className="toggle-label">
+            历史会议 ({meetings.length})
+          </span>
+          <span className="toggle-running">
+            {runningCount > 0 && <span className="running-pulse" title={`${runningCount} 个运行中`} />}
+          </span>
+        </button>
+        <div className="meeting-list">
+          {meetings.length === 0 && <div className="meeting-empty">暂无会议</div>}
+          {meetings.map((m) => {
+            const sl = statusLabel(m.status, m.stage)
+            const isActive = m.meeting_id === meetingId
+            const isPendingDelete = pendingDelete === m.meeting_id
+            const isDeleting = deletingId === m.meeting_id
+            return (
+              <div
+                key={m.meeting_id}
+                className={`meeting-item ${isActive ? 'active' : ''} ${isPendingDelete ? 'pending-delete' : ''}`}
+                onClick={() => !isPendingDelete && !isDeleting && selectMeeting(m.meeting_id)}
+              >
+                <div className="meeting-topic">
+                  {m.is_running && (
+                    <span className="running-pulse" title="运行中" aria-hidden="true" />
+                  )}
+                  <span className="meeting-topic-text">{m.topic || '(无议题)'}</span>
+                  {/* 删除按钮：hover 时显示，运行中的会议禁用 */}
+                  <button
+                    type="button"
+                    className="meeting-delete-btn"
+                    title={m.is_running ? '运行中，无法删除' : '删除会议'}
+                    disabled={m.is_running || isDeleting}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPendingDelete(m.meeting_id)
+                    }}
+                  >
+                    {isDeleting ? '⟳' : '×'}
+                  </button>
+                </div>
+                <div className="meeting-meta">
+                  <span className={`meeting-status ${sl.cls}`}>{sl.text}</span>
+                  <span className="meeting-id">{m.meeting_id.slice(-8)}</span>
+                </div>
+                {/* 删除确认面板 */}
+                {isPendingDelete && (
+                  <div className="delete-confirm" onClick={(e) => e.stopPropagation()}>
+                    <div className="delete-confirm-title">确认删除？</div>
+                    <div className="delete-confirm-modes">
+                      <label className={`delete-mode-option ${deleteMode === 'soft' ? 'active' : ''}`}>
+                        <input
+                          type="radio"
+                          name={`del-mode-${m.meeting_id}`}
+                          value="soft"
+                          checked={deleteMode === 'soft'}
+                          onChange={() => setDeleteMode('soft')}
+                        />
+                        <span>软删除（保留数据）</span>
+                      </label>
+                      <label className={`delete-mode-option ${deleteMode === 'hard' ? 'active' : ''}`}>
+                        <input
+                          type="radio"
+                          name={`del-mode-${m.meeting_id}`}
+                          value="hard"
+                          checked={deleteMode === 'hard'}
+                          onChange={() => setDeleteMode('hard')}
+                        />
+                        <span>永久删除（不可恢复）</span>
+                      </label>
+                    </div>
+                    <div className="delete-confirm-actions">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        onClick={() => handleDelete(m.meeting_id)}
+                        disabled={isDeleting}
+                      >
+                        {isDeleting ? '删除中…' : '确认删除'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => setPendingDelete(null)}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
                 )}
-                {m.topic || '(无议题)'}
               </div>
-              <div className="meeting-meta">
-                <span className={`meeting-status ${sl.cls}`}>{sl.text}</span>
-                <span className="meeting-id">{m.meeting_id.slice(-8)}</span>
-              </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
+
       <div className="sidebar-footer">
         运行中 {runningCount} / 上限 {concurrentLimit}
       </div>

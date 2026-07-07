@@ -10,7 +10,15 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.db import get_meeting, list_messages, list_meetings, save_meeting
+from app.db import (
+    get_meeting,
+    hard_delete_meeting,
+    list_messages,
+    list_meetings,
+    restore_meeting,
+    save_meeting,
+    soft_delete_meeting,
+)
 from app.events import bus, make_event
 from app.models import MeetingStatus, Stage
 from app.orchestrator.runner import (
@@ -165,6 +173,68 @@ async def list_meetings_with_status() -> dict[str, Any]:
         "concurrent_limit": MAX_CONCURRENT_MEETINGS,
         "running_count": sum(1 for t in _running_tasks.values() if not t.done()),
     }
+
+
+@router.delete("/{meeting_id}")
+async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
+    """删除会议
+
+    - mode=soft（默认）：软删除，标记 status='deleted'，保留全部数据用于回归测试
+    - mode=hard：硬删除，永久删除 meetings/messages/events 表记录，不可恢复
+    - mode=restore：恢复软删除的会议
+
+    运行中的会议不允许删除（返回 409）。
+    """
+    from app.observability.log_bus import log_bus
+    from app.context import get_request_id
+
+    # 检查会议是否存在
+    meeting = get_meeting(meeting_id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+
+    # 运行中的会议不允许删除
+    if meeting_id in _running_tasks and not _running_tasks[meeting_id].done():
+        raise HTTPException(status_code=409, detail="会议正在运行，无法删除")
+
+    if mode == "soft":
+        ok = soft_delete_meeting(meeting_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="会议不存在")
+        log_bus.info(
+            f"会议软删除: {meeting_id}",
+            logger="routers.meetings",
+            extra={"meeting_id": meeting_id, "action": "soft_delete", "request_id": get_request_id()},
+        )
+        # 清理内存态
+        set_state(meeting_id, None)
+        return {"meeting_id": meeting_id, "deleted": True, "mode": "soft"}
+
+    elif mode == "hard":
+        ok = hard_delete_meeting(meeting_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="会议不存在")
+        log_bus.info(
+            f"会议硬删除: {meeting_id}",
+            logger="routers.meetings",
+            extra={"meeting_id": meeting_id, "action": "hard_delete", "request_id": get_request_id()},
+        )
+        set_state(meeting_id, None)
+        return {"meeting_id": meeting_id, "deleted": True, "mode": "hard"}
+
+    elif mode == "restore":
+        ok = restore_meeting(meeting_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="会议不存在或未被软删除")
+        log_bus.info(
+            f"会议恢复: {meeting_id}",
+            logger="routers.meetings",
+            extra={"meeting_id": meeting_id, "action": "restore", "request_id": get_request_id()},
+        )
+        return {"meeting_id": meeting_id, "deleted": False, "mode": "restore"}
+
+    else:
+        raise HTTPException(status_code=400, detail="mode 必须是 soft/hard/restore")
 
 
 @router.post("/{meeting_id}/run")

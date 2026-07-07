@@ -107,6 +107,20 @@ export async function healthCheck(): Promise<{ status: string }> {
   return request<{ status: string }>('/health', { method: 'GET' })
 }
 
+/** 删除会议：DELETE /meetings/:id?mode=soft|hard|restore
+ * - soft（默认）：软删除，保留数据用于回归
+ * - hard：永久删除，不可恢复
+ * - restore：恢复软删除的会议
+ */
+export async function deleteMeeting(
+  meetingId: string,
+  mode: 'soft' | 'hard' | 'restore' = 'soft',
+): Promise<{ meeting_id: string; deleted: boolean; mode: string }> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}?mode=${mode}`, {
+    method: 'DELETE',
+  })
+}
+
 // ---- Workspace API ----
 
 /** 工作区文件项 */

@@ -2390,6 +2390,66 @@ code {
   padding: 8px;
 }
 
+/* 会议列表折叠区域 */
+.meeting-list-zone {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.meeting-list-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+  transition: var(--transition);
+}
+.meeting-list-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.toggle-arrow {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(90deg);
+  transition: transform 0.2s ease;
+  font-size: 14px;
+  line-height: 1;
+}
+.toggle-arrow.is-collapsed {
+  transform: rotate(0deg);
+}
+.toggle-label {
+  flex: 1;
+  font-weight: 500;
+}
+.toggle-running {
+  display: flex;
+  align-items: center;
+}
+/* 折叠态：隐藏列表，仅保留 toggle 条 */
+.meeting-list-zone.is-collapsed .meeting-list {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+}
+.meeting-list-zone .meeting-list {
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+}
+
 .meeting-empty {
   padding: 20px;
   text-align: center;
@@ -2408,6 +2468,7 @@ code {
   background: transparent;
   border: 1px solid transparent;
   transition: var(--transition);
+  position: relative;
 }
 
 .meeting-item:hover {
@@ -2422,15 +2483,104 @@ code {
   color: var(--accent);
 }
 
+.meeting-item.pending-delete {
+  background: var(--err-bg);
+  border-color: var(--err-fg);
+}
+
 .meeting-topic {
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.meeting-topic-text {
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.4;
-  letter-spacing: -0.005em;
+}
+
+/* 删除按钮：默认隐藏，hover 时显示 */
+.meeting-delete-btn {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.meeting-item:hover .meeting-delete-btn {
+  opacity: 1;
+}
+.meeting-delete-btn:hover {
+  color: var(--err-fg);
+  background: var(--err-bg);
+}
+.meeting-delete-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 删除确认面板 */
+.delete-confirm {
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.delete-confirm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--err-fg);
+}
+.delete-confirm-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.delete-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+.delete-mode-option.active {
+  color: var(--text);
+  background: var(--accent-light);
+}
+.delete-mode-option input {
+  margin: 0;
+}
+.delete-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+.delete-confirm-actions .btn {
+  flex: 1;
 }
 
 .meeting-meta {

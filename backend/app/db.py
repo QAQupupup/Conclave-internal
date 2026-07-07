@@ -65,6 +65,14 @@ def init_db() -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_events_meeting ON events(meeting_id);
                 CREATE INDEX IF NOT EXISTS idx_events_meeting_seq ON events(meeting_id, seq);
+
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, key)
+                );
                 """
             )
             conn.commit()
@@ -125,14 +133,19 @@ def get_meeting(meeting_id: str) -> dict[str, Any] | None:
             conn.close()
 
 
-def list_meetings() -> list[dict[str, Any]]:
-    """列出全部会议"""
+def list_meetings(include_deleted: bool = False) -> list[dict[str, Any]]:
+    """列出全部会议。默认排除软删除（status='deleted'）的记录。"""
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
-                "SELECT * FROM meetings ORDER BY created_at DESC"
-            ).fetchall()
+            if include_deleted:
+                rows = conn.execute(
+                    "SELECT * FROM meetings ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM meetings WHERE status != 'deleted' ORDER BY created_at DESC"
+                ).fetchall()
             out = []
             for row in rows:
                 d = dict(row)
@@ -269,5 +282,146 @@ def list_messages(meeting_id: str) -> list[dict[str, Any]]:
                 d["evidence_refs"] = json.loads(d["evidence_refs"])
                 out.append(d)
             return out
+        finally:
+            conn.close()
+
+
+# ---------- 会议删除 ----------
+
+
+def soft_delete_meeting(meeting_id: str) -> bool:
+    """软删除会议：将 status 标记为 'deleted'，保留全部数据用于回归。
+    返回是否找到了记录并更新。"""
+    with _lock:
+        conn = _connect()
+        try:
+            # 先读取当前 payload
+            row = conn.execute(
+                "SELECT payload FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            payload = json.loads(row["payload"])
+            payload["_deleted_at"] = datetime.now().isoformat()
+            conn.execute(
+                "UPDATE meetings SET status = 'deleted', payload = ? WHERE id = ?",
+                (json.dumps(payload, ensure_ascii=False, default=str), meeting_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+def hard_delete_meeting(meeting_id: str) -> bool:
+    """硬删除会议：永久删除 meetings、messages、events 表中该会议的全部记录。
+    不可恢复，用于彻底清理。返回是否删除了主记录。"""
+    with _lock:
+        conn = _connect()
+        try:
+            # 先检查主记录是否存在
+            row = conn.execute(
+                "SELECT id FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            # 按依赖顺序删除：先 messages（有外键），再 events，最后 meetings
+            conn.execute("DELETE FROM messages WHERE meeting_id = ?", (meeting_id,))
+            conn.execute("DELETE FROM events WHERE meeting_id = ?", (meeting_id,))
+            conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+def restore_meeting(meeting_id: str) -> bool:
+    """恢复软删除的会议：将 status 从 'deleted' 恢复为 'aborted'。
+    返回是否找到了记录并恢复。"""
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT payload FROM meetings WHERE id = ? AND status = 'deleted'",
+                (meeting_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            payload = json.loads(row["payload"])
+            payload.pop("_deleted_at", None)
+            conn.execute(
+                "UPDATE meetings SET status = 'aborted', payload = ? WHERE id = ?",
+                (json.dumps(payload, ensure_ascii=False, default=str), meeting_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+# ---------- 用户偏好持久化 ----------
+
+
+def get_preference(user_id: str, key: str) -> str | None:
+    """取单条用户偏好，不存在返回 None"""
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT value FROM user_preferences WHERE user_id = ? AND key = ?",
+                (user_id, key),
+            ).fetchone()
+            return row["value"] if row else None
+        finally:
+            conn.close()
+
+
+def set_preference(user_id: str, key: str, value: str) -> str:
+    """upsert 用户偏好，返回写入的 updated_at"""
+    updated_at = datetime.now().isoformat()
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO user_preferences (user_id, key, value, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, key) DO UPDATE SET
+                    value=excluded.value,
+                    updated_at=excluded.updated_at
+                """,
+                (user_id, key, value, updated_at),
+            )
+            conn.commit()
+            return updated_at
+        finally:
+            conn.close()
+
+
+def get_all_preferences(user_id: str) -> dict[str, str]:
+    """取该用户全部偏好，返回 {key: value}"""
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                "SELECT key, value FROM user_preferences WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+            return {row["key"]: row["value"] for row in rows}
+        finally:
+            conn.close()
+
+
+def delete_preference(user_id: str, key: str) -> bool:
+    """删除单条用户偏好，返回是否删除了记录"""
+    with _lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM user_preferences WHERE user_id = ? AND key = ?",
+                (user_id, key),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
         finally:
             conn.close()
