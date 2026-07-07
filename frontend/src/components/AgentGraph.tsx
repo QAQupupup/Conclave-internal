@@ -274,6 +274,15 @@ function AgentGraphInner({
     while (group.firstChild) group.removeChild(group.firstChild)
 
     const simNodes: SimNode[] = graphData.nodes.map((n) => ({ ...n, borrowed: borrowedSet.has(n.id) }))
+    // 设置初始位置：圆形分布围绕中心，避免 d3-force 从 (0,0) 爆炸漂移
+    const centerX = width / 2
+    const centerY = height / 2
+    const initRadius = Math.min(width, height) * 0.3
+    simNodes.forEach((n, i) => {
+      const angle = (i / simNodes.length) * Math.PI * 2
+      n.x = centerX + Math.cos(angle) * initRadius
+      n.y = centerY + Math.sin(angle) * initRadius
+    })
     const simLinks: SimLink[] = graphData.links.map((l) => ({ ...l }))
 
     const defs = create('defs')
@@ -445,7 +454,12 @@ function AgentGraphInner({
       )
       .force('center', forceCenter<SimNode>(width / 2, height / 2))
       .force('collide', forceCollide<SimNode>().radius((d) => Math.max(NODE_W[d.type], NODE_H) / 2 + 12))
-      .alphaDecay(0.045)
+      .alphaDecay(0.08)
+
+    // 预热：同步执行若干 tick 让节点快速接近稳定位置，减少首帧漂移
+    for (let i = 0; i < 80; i++) simulation.tick()
+    // 预热后降低 alpha，让动画从接近稳定状态开始微调
+    simulation.alpha(0.15)
 
     simulation.on('tick', () => {
       simLinks.forEach((l, i) => {
@@ -561,7 +575,7 @@ function AgentGraphInner({
           ref={svgRef}
           width="100%"
           height={focused ? '100%' : compactHeight}
-          className="agent-graph-svg"
+          className="agent-graph-svg ag-fade-in"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

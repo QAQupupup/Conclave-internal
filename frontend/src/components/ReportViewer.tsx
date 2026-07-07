@@ -1,31 +1,12 @@
 // 报告查看器：可折叠的会议完整报告，支持下载 Markdown
 // 展示会议信息、执行摘要、议题澄清、团队讨论、冲突与裁决、证据对照、最终产出
-import { useState } from 'react'
-import type { ReactNode } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { LogicGraph } from './LogicGraph.tsx'
+import { CollapsibleSection } from './CollapsibleSection.tsx'
 import { formatDateTime } from '../lib/format.ts'
 import { downloadFile } from '../lib/download.ts'
 import { STAGE_NAMES } from '../constants.ts'
 import { renderMessageContent } from './MessageContent.tsx'
-
-/** 可折叠面板 */
-function CollapsibleSection({ title, children, defaultOpen = false }: {
-  title: string
-  children: ReactNode
-  defaultOpen?: boolean
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <div className="report-section">
-      <div className="report-section-header" onClick={() => setOpen(!open)}>
-        <span className={`report-toggle ${open ? 'open' : ''}`}>▶</span>
-        <span className="report-section-title">{title}</span>
-      </div>
-      {open && <div className="report-section-body">{children}</div>}
-    </div>
-  )
-}
 
 /** 格式化时间（使用统一的 lib/format，保持单一数据源） */
 const fmtTime = formatDateTime

@@ -1,7 +1,8 @@
 // 应用根组件：组装四块布局
-// meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧 ChatPanel + 右侧三块
+// meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
 import { useState } from 'react'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
+import { ThemeProvider, useTheme } from './store/ThemeContext.tsx'
 import { usePersistentState } from './hooks/usePersistentState.ts'
 import { StageIndicator } from './components/StageIndicator.tsx'
 import { MeetingControls } from './components/MeetingControls.tsx'
@@ -16,6 +17,7 @@ import { BorrowDialog } from './components/BorrowDialog.tsx'
 import { CreateMeeting } from './components/CreateMeeting.tsx'
 import { MeetingSidebar } from './components/MeetingSidebar.tsx'
 import { WorkspacePanel } from './components/WorkspacePanel.tsx'
+import { ThemeSettings } from './components/ThemeSettings.tsx'
 
 /** 全局视图切换：会议 / 工作区 */
 type ViewTab = 'meeting' | 'workspace'
@@ -176,13 +178,14 @@ function AppShell() {
     'conclave-sidebar-collapsed',
     false,
   )
+  // 主题设置面板开关
+  const [themeOpen, setThemeOpen] = useState(false)
+  const { mode, toggleMode } = useTheme()
 
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
-      {sidebarCollapsed ? (
-        <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
-      ) : (
-        <>
+      <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
+        <div className="sidebar-expanded-pane">
           <MeetingSidebar />
           <button
             type="button"
@@ -193,9 +196,32 @@ function AppShell() {
           >
             ‹
           </button>
-        </>
-      )}
+        </div>
+        <div className="sidebar-collapsed-pane">
+          <CollapsedSidebar onExpand={() => setSidebarCollapsed(false)} />
+        </div>
+      </aside>
       <div className="app-main">
+        {/* 顶部工具栏：主题切换 + 设置入口 */}
+        <div className="app-toolbar">
+          <button
+            type="button"
+            className="btn btn-ghost theme-toggle-btn"
+            onClick={toggleMode}
+            title={mode === 'light' ? '切换到暗色' : '切换到亮色'}
+            aria-label="切换主题"
+          >
+            {mode === 'light' ? '☾' : '☀'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost theme-settings-btn"
+            onClick={() => setThemeOpen(true)}
+            title="主题设置"
+          >
+            主题
+          </button>
+        </div>
         {!meetingId ? (
           <CreateMeeting />
         ) : (
@@ -205,14 +231,17 @@ function AppShell() {
           </>
         )}
       </div>
+      {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
     </div>
   )
 }
 
 export default function App() {
   return (
-    <MeetingProvider>
-      <AppShell />
-    </MeetingProvider>
+    <ThemeProvider>
+      <MeetingProvider>
+        <AppShell />
+      </MeetingProvider>
+    </ThemeProvider>
   )
 }

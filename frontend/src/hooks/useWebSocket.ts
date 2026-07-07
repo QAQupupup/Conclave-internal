@@ -72,6 +72,9 @@ export function useWebSocket(
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptRef = useRef(0)
   const closedByUnmountRef = useRef(false)
+  // rAF 事件批处理：同一帧内到达的多个 DomainEvent 合并为单次 dispatch，减少 re-render
+  const pendingEventsRef = useRef<DomainEvent[]>([])
+  const rafIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!meetingId) {
@@ -133,9 +136,23 @@ export function useWebSocket(
           case 'control.ack':
             // 后端 WS 单独回执：可据此更新状态（reducer 对 control.signal 已处理，此处忽略）
             break
-          default:
+          default: {
             // 其余视为 DomainEvent（type 即事件类型，如 agent.spoke / stage.changed 等）
-            dispatchRef.current({ type: 'event', event: frame as unknown as DomainEvent })
+            // rAF 批处理：累积到 pendingEvents，下一帧统一 dispatch，避免高频事件逐帧触发 re-render
+            pendingEventsRef.current.push(frame as unknown as DomainEvent)
+            if (rafIdRef.current === null) {
+              rafIdRef.current = requestAnimationFrame(() => {
+                rafIdRef.current = null
+                const batch = pendingEventsRef.current
+                pendingEventsRef.current = []
+                // 批量 dispatch：每条事件仍然是独立 action，但集中在同一帧内，
+                // React 18+ 会自动批处理同一事件回调内的多次 dispatch
+                for (const evt of batch) {
+                  dispatchRef.current({ type: 'event', event: evt })
+                }
+              })
+            }
+          }
         }
       }
 
@@ -164,6 +181,12 @@ export function useWebSocket(
 
     return () => {
       closedByUnmountRef.current = true
+      // 取消待处理的 rAF 批处理
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+      pendingEventsRef.current = []
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
