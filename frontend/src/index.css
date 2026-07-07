@@ -1604,6 +1604,37 @@ code {
   gap: 8px;
 }
 
+/* 批量删除确认弹窗 */
+.batch-confirm-modal {
+  width: 420px;
+  max-width: 92vw;
+}
+.batch-confirm-body {
+  padding: 16px 20px;
+}
+.batch-confirm-count {
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.batch-confirm-count strong {
+  color: var(--danger);
+  font-size: 18px;
+}
+.batch-confirm-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+.batch-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
 /* ---------- 创建页 ---------- */
 .create-page {
   display: flex;
@@ -3925,74 +3956,148 @@ code {
   white-space: nowrap;
 }
 
-/* Board Body (tag sidebar + list) */
+/* Board Body — 不再有标签侧栏，列表全宽 */
 .board-body {
   flex: 1;
   display: flex;
-  gap: 16px;
   overflow: hidden;
   min-height: 0;
 }
 
-/* Tag Sidebar */
-.board-tag-sidebar {
-  width: 160px;
+/* 标签多选下拉 */
+.board-tag-dropdown {
+  position: relative;
   flex-shrink: 0;
-  overflow-y: auto;
-  border-right: 1px solid var(--border-soft);
-  padding-right: 12px;
 }
-.board-tag-header {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  padding: 4px 0 8px;
-}
-.board-tag-item {
+.board-tag-dropdown-btn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  white-space: nowrap;
+}
+.board-tag-dropdown-btn:hover {
+  border-color: var(--accent);
+}
+.board-tag-dropdown-btn.open {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.board-tag-dropdown-icon {
+  font-size: 12px;
+}
+.board-tag-dropdown-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+.board-tag-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(15, 20, 25, 0.1);
+  z-index: 50;
+  padding: 4px;
+}
+.board-tag-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 8px;
   font-size: 13px;
   color: var(--text);
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.12s ease;
-  text-align: left;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s ease;
 }
-.board-tag-item:hover {
+.board-tag-dropdown-item:hover {
   background: var(--bg-hover);
 }
-.board-tag-item.active {
-  background: var(--accent);
-  color: var(--bg);
+.board-tag-dropdown-item.checked {
+  background: rgba(79, 70, 229, 0.06);
 }
-.board-tag-item.active .board-tag-count {
-  color: var(--bg);
-  opacity: 0.8;
+.board-tag-dropdown-item input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
 }
-.board-tag-name {
+.board-tag-dropdown-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.board-tag-count {
+.board-tag-dropdown-count {
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-muted);
-  flex-shrink: 0;
-  margin-left: 4px;
 }
-.board-tag-empty {
+.board-tag-dropdown-empty {
+  padding: 12px 8px;
   font-size: 12px;
   color: var(--text-muted);
-  padding: 8px;
+  text-align: center;
+}
+.board-tag-dropdown-clear {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--danger);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  cursor: pointer;
+  text-align: center;
+}
+.board-tag-dropdown-clear:hover {
+  background: rgba(220, 38, 38, 0.05);
+}
+
+/* 已选标签行内 chips */
+.board-active-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.board-active-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 500;
+}
+.board-active-tag-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: inherit;
   opacity: 0.6;
+  padding: 0;
+  line-height: 1;
+  transition: opacity 0.1s ease;
+}
+.board-active-tag-remove:hover {
+  opacity: 1;
 }
 
 /* List Area */
@@ -4136,35 +4241,34 @@ code {
   font-family: var(--font-mono);
 }
 
-/* Card Tags */
-.board-card-tags {
+/* Card Inline Tags — 行内展示在状态/阶段标签右侧 */
+.board-card-inline-tags {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-  padding: 8px 12px 8px 0;
-  flex-shrink: 0;
-  max-width: 300px;
+  margin-left: auto;
 }
 .board-chip {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 11px;
-  padding: 2px 6px;
+  font-size: 10px;
+  padding: 1px 6px;
   border-radius: var(--radius-full);
   background: var(--bg-hover);
   color: var(--text-muted);
+  white-space: nowrap;
 }
 .board-chip-remove {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
   padding: 0;
   line-height: 1;
-  opacity: 0.5;
+  opacity: 0.4;
   transition: opacity 0.1s ease;
 }
 .board-chip-remove:hover {
@@ -4172,23 +4276,29 @@ code {
   color: var(--danger);
 }
 .board-chip-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   background: none;
   border: 1px dashed var(--border);
   border-radius: var(--radius-full);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
-  padding: 2px 8px;
+  padding: 0;
   cursor: pointer;
   transition: border-color 0.12s ease, color 0.12s ease;
+  line-height: 1;
 }
 .board-chip-add:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 .board-tag-input {
-  font-size: 11px;
-  padding: 2px 6px;
-  width: 80px;
+  font-size: 10px;
+  padding: 1px 6px;
+  width: 70px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-full);
   background: var(--bg);
