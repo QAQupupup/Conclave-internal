@@ -59,9 +59,19 @@ function MeetingView() {
     'conclave-graph-collapsed',
     false,
   )
+  // 聊天面板折叠/展开状态
+  const [chatCollapsed, setChatCollapsed] = usePersistentState<boolean>(
+    'conclave-chat-collapsed',
+    false,
+  )
+  // 右侧面板折叠/展开状态
+  const [rightCollapsed, setRightCollapsed] = usePersistentState<boolean>(
+    'conclave-right-collapsed',
+    false,
+  )
 
   return (
-    <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}`}>
+    <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}${chatCollapsed ? ' chat-collapsed' : ''}${rightCollapsed ? ' right-collapsed' : ''}`}>
       {/* 顶部：六步流程指示器 + 会议控制按钮（替代原 Header） */}
       <div className="meeting-top-bar">
         <StageIndicator />
@@ -83,50 +93,72 @@ function MeetingView() {
           </button>
         </div>
         <div className="app-body">
-          <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
-          <div className="right-column">
-            <div className="right-tabs">
-              <button
-                className={`right-tab ${rightTab === 'topic' ? 'active' : ''}`}
-                onClick={() => setRightTab('topic')}
-              >
-                议题
-              </button>
-              <button
-                className={`right-tab ${rightTab === 'evidence' ? 'active' : ''}`}
-                onClick={() => setRightTab('evidence')}
-              >
-                证据
-              </button>
-              <button
-                className={`right-tab ${rightTab === 'artifact' ? 'active' : ''}`}
-                onClick={() => setRightTab('artifact')}
-              >
-                产出
-              </button>
-              <button
-                className={`right-tab ${rightTab === 'report' ? 'active' : ''}`}
-                onClick={() => setRightTab('report')}
-              >
-                报告
-              </button>
-              <button
-                className={`right-tab ${rightTab === 'token' ? 'active' : ''}`}
-                onClick={() => setRightTab('token')}
-              >
-                Token
-              </button>
+          <div className="chat-slot">
+            <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
+            <button
+              type="button"
+              className="panel-collapse-btn chat-collapse-btn"
+              onClick={() => setChatCollapsed(v => !v)}
+              title={chatCollapsed ? '展开聊天流' : '收起聊天流'}
+              aria-label={chatCollapsed ? '展开聊天流' : '收起聊天流'}
+            >
+              {chatCollapsed ? '›' : '‹'}
+            </button>
+          </div>
+          <div className="right-column-slot">
+            <div className="right-column">
+              <div className="right-tabs">
+                <button
+                  className={`right-tab ${rightTab === 'topic' ? 'active' : ''}`}
+                  onClick={() => setRightTab('topic')}
+                >
+                  议题
+                </button>
+                <button
+                  className={`right-tab ${rightTab === 'evidence' ? 'active' : ''}`}
+                  onClick={() => setRightTab('evidence')}
+                >
+                  证据
+                </button>
+                <button
+                  className={`right-tab ${rightTab === 'artifact' ? 'active' : ''}`}
+                  onClick={() => setRightTab('artifact')}
+                >
+                  产出
+                </button>
+                <button
+                  className={`right-tab ${rightTab === 'report' ? 'active' : ''}`}
+                  onClick={() => setRightTab('report')}
+                >
+                  报告
+                </button>
+                <button
+                  className={`right-tab ${rightTab === 'token' ? 'active' : ''}`}
+                  onClick={() => setRightTab('token')}
+                >
+                  Token
+                </button>
+              </div>
+              {rightTab === 'topic' && <TopicPanel />}
+              {rightTab === 'evidence' && (
+                <EvidencePanel
+                  selectedConflictId={selectedConflictId}
+                  onSelectConflict={setSelectedConflictId}
+                />
+              )}
+              {rightTab === 'artifact' && <ArtifactPanel onOpenBorrow={() => setBorrowOpen(true)} />}
+              {rightTab === 'report' && <ReportViewer />}
+              {rightTab === 'token' && <TokenPanel />}
             </div>
-            {rightTab === 'topic' && <TopicPanel />}
-            {rightTab === 'evidence' && (
-              <EvidencePanel
-                selectedConflictId={selectedConflictId}
-                onSelectConflict={setSelectedConflictId}
-              />
-            )}
-            {rightTab === 'artifact' && <ArtifactPanel onOpenBorrow={() => setBorrowOpen(true)} />}
-            {rightTab === 'report' && <ReportViewer />}
-            {rightTab === 'token' && <TokenPanel />}
+            <button
+              type="button"
+              className="panel-collapse-btn right-collapse-btn"
+              onClick={() => setRightCollapsed(v => !v)}
+              title={rightCollapsed ? '展开右侧面板' : '收起右侧面板'}
+              aria-label={rightCollapsed ? '展开右侧面板' : '收起右侧面板'}
+            >
+              {rightCollapsed ? '‹' : '›'}
+            </button>
           </div>
         </div>
         <button type="button" className="btn btn-ghost new-meeting-btn" onClick={reset}>

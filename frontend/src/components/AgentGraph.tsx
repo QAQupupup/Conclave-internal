@@ -523,7 +523,8 @@ function AgentGraphInner({
     )
   }
 
-  const compactHeight = Math.max(360, Math.min(540, 80 + nodeCount * 18))
+  // 固定高度避免节点增减时布局跳动；focus 模式下撑满
+  const compactHeight = 400
   const body = (
     <div className={`graph-container ${focused ? 'is-focused' : ''}`}>
       <div className="graph-header">

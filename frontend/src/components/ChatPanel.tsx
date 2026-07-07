@@ -12,6 +12,8 @@ interface ChatPanelProps {
 
 /** 距底部小于该阈值视为"在底部"，新消息可自动跟随 */
 const BOTTOM_THRESHOLD = 50
+/** 快速消息间隔阈值(ms)：间隔小于此值时用 instant 滚动，避免 smooth 动画堆叠抖动 */
+const RAPID_INTERVAL = 300
 
 export function ChatPanel({ onSelectRef }: ChatPanelProps) {
   const { store } = useMeeting()
@@ -21,6 +23,8 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
   const [showNewMsg, setShowNewMsg] = useState(false)
   // 记录用户已"看过"的消息数，用于判断新消息是否到来
   const lastSeenCountRef = useRef(0)
+  // 记录上次滚动时间戳：快速连续消息时用 instant 而非 smooth
+  const lastScrollAtRef = useRef(0)
 
   /** 滚动到底部并重置提示状态 */
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
@@ -30,6 +34,7 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
     setIsAtBottom(true)
     setShowNewMsg(false)
     lastSeenCountRef.current = messages.length
+    lastScrollAtRef.current = Date.now()
   }, [messages.length])
 
   /** 监听滚动位置，更新 isAtBottom，到底时同步已看消息数 */
@@ -45,11 +50,14 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
     }
   }, [messages.length])
 
-  // 新消息到达：在底部则平滑跟随，否则显示"新消息"提示
+  // 新消息到达：在底部则跟随，否则显示"新消息"提示
+  // 快速连续消息(间隔<300ms)用 instant 滚动，避免 smooth 动画堆叠抖动
   useEffect(() => {
     if (messages.length === 0) return
     if (isAtBottom) {
-      scrollToBottom('smooth')
+      const sinceLast = Date.now() - lastScrollAtRef.current
+      const behavior: ScrollBehavior = sinceLast < RAPID_INTERVAL ? 'auto' : 'smooth'
+      scrollToBottom(behavior)
     } else if (messages.length > lastSeenCountRef.current) {
       setShowNewMsg(true)
     }

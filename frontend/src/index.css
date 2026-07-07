@@ -88,8 +88,13 @@
   --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code",
     Consolas, "Courier New", monospace;
 
-  /* 过渡：精确快速 */
-  --transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  /* 过渡：精确快速 — 仅视觉属性，不动画布局属性(width/height/padding/margin)避免抖动 */
+  --transition: color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               box-shadow 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-transform: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 
   font-family: var(--font-sans);
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -618,12 +623,90 @@ code {
   background: var(--border);
   min-height: 0;
 }
+/* 聊天面板和右侧面板的可折叠容器 */
+.chat-slot {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  transition: max-width 0.22s ease;
+}
+.right-column-slot {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  transition: max-width 0.22s ease;
+}
+/* 折叠态：聊天面板收窄为细条 */
+.meeting-view.chat-collapsed .chat-slot {
+  max-width: 24px;
+  flex: 0 0 24px;
+}
+.meeting-view.chat-collapsed .chat-slot .chat-panel {
+  opacity: 0;
+  pointer-events: none;
+}
+/* 折叠态：右侧面板收窄为细条 */
+.meeting-view.right-collapsed .right-column-slot {
+  max-width: 24px;
+  flex: 0 0 24px;
+}
+.meeting-view.right-collapsed .right-column-slot .right-column {
+  opacity: 0;
+  pointer-events: none;
+}
+/* 面板折叠按钮：竖向小箭头 */
+.panel-collapse-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 44px;
+  padding: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.panel-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.chat-collapse-btn {
+  right: -1px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.right-collapse-btn {
+  left: -1px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+/* 折叠态时按钮居中显示 */
+.meeting-view.chat-collapsed .chat-collapse-btn,
+.meeting-view.right-collapsed .right-collapse-btn {
+  left: 50%;
+  right: auto;
+  transform: translate(-50%, -50%);
+}
+
 .right-column {
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 1px;
   background: var(--border);
   min-height: 0;
+  flex: 1;
+  transition: opacity 0.15s ease;
 }
 
 /* ---------- 面板通用：边框分明 ---------- */
@@ -658,6 +741,8 @@ code {
 .chat-panel {
   min-height: 0;
   position: relative;
+  flex: 1;
+  transition: opacity 0.15s ease;
 }
 .chat-list {
   overflow-y: auto;
@@ -1559,10 +1644,19 @@ code {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 400px;
 }
 .graph-container.is-focused {
   height: 100%;
   border-bottom: none;
+}
+.graph-empty {
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 .graph-header {
   display: flex;
