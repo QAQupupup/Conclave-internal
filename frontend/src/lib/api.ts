@@ -52,21 +52,38 @@ export async function getMeetingDetail(meetingId: string) {
   })
 }
 
-/** 列出所有会议：GET /meetings
- *  返回 { meetings, concurrent_limit, running_count }，每个会议含 is_running 运行态标记 */
-export async function listMeetings(): Promise<{
-  meetings: Array<{
-    meeting_id: string
-    topic: string
-    stage: string
-    status: string
-    created_at?: string
-    is_running?: boolean
-  }>
+/** 会议列表项 */
+export interface MeetingListItem {
+  meeting_id: string
+  topic: string
+  stage: string
+  status: string
+  created_at?: string
+  is_running?: boolean
+  tags?: string[]
+}
+
+/** 列出会议（支持搜索、分页、标签过滤）
+ *  GET /meetings?q=&limit=&offset=&tags=
+ *  返回 { meetings, total, concurrent_limit, running_count } */
+export async function listMeetings(params?: {
+  q?: string
+  limit?: number
+  offset?: number
+  tags?: string[]
+}): Promise<{
+  meetings: MeetingListItem[]
+  total: number
   concurrent_limit: number
   running_count: number
 }> {
-  return request('/meetings', { method: 'GET' })
+  const qs = new URLSearchParams()
+  if (params?.q) qs.set('q', params.q)
+  if (params?.limit != null) qs.set('limit', String(params.limit))
+  if (params?.offset != null) qs.set('offset', String(params.offset))
+  if (params?.tags?.length) qs.set('tags', params.tags.join(','))
+  const query = qs.toString()
+  return request(`/meetings${query ? `?${query}` : ''}`, { method: 'GET' })
 }
 
 /** 触发会议运行（同步阻塞到六阶段完成）：POST /meetings/:id/run */
@@ -118,6 +135,59 @@ export async function deleteMeeting(
 ): Promise<{ meeting_id: string; deleted: boolean; mode: string }> {
   return request(`/meetings/${encodeURIComponent(meetingId)}?mode=${mode}`, {
     method: 'DELETE',
+  })
+}
+
+// ---- 标签 API ----
+
+/** 标签信息 */
+export interface TagInfo {
+  tag: string
+  count: number
+  last_used?: string
+}
+
+/** 列出所有标签：GET /meetings/tags */
+export async function listTags(): Promise<{ tags: TagInfo[]; count: number }> {
+  return request('/meetings/tags', { method: 'GET' })
+}
+
+/** 取会议标签：GET /meetings/:id/tags */
+export async function getMeetingTags(meetingId: string): Promise<{ meeting_id: string; tags: string[] }> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}/tags`, { method: 'GET' })
+}
+
+/** 添加标签：POST /meetings/:id/tags body {tag} */
+export async function addMeetingTag(
+  meetingId: string,
+  tag: string,
+): Promise<{ meeting_id: string; tag: string; added: boolean }> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}/tags`, {
+    method: 'POST',
+    body: JSON.stringify({ tag }),
+  })
+}
+
+/** 移除标签：DELETE /meetings/:id/tags/:tag */
+export async function removeMeetingTag(
+  meetingId: string,
+  tag: string,
+): Promise<{ meeting_id: string; tag: string; removed: boolean }> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}/tags/${encodeURIComponent(tag)}`, {
+    method: 'DELETE',
+  })
+}
+
+// ---- 批量操作 API ----
+
+/** 批量删除会议：POST /meetings/batch-delete body {meeting_ids, mode} */
+export async function batchDeleteMeetings(
+  meetingIds: string[],
+  mode: 'soft' | 'hard' = 'soft',
+): Promise<{ deleted: string[]; failed: string[]; mode: string }> {
+  return request('/meetings/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify({ meeting_ids: meetingIds, mode }),
   })
 }
 

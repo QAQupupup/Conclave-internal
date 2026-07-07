@@ -11,10 +11,16 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import (
+    add_meeting_tag,
+    batch_delete_meetings,
     get_meeting,
+    get_meeting_tags,
     hard_delete_meeting,
+    list_all_tags,
     list_messages,
     list_meetings,
+    query_meetings,
+    remove_meeting_tag,
     restore_meeting,
     save_meeting,
     soft_delete_meeting,
@@ -72,6 +78,17 @@ class RunResponse(BaseModel):
     messages_count: int = 0
 
 
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求"""
+    meeting_ids: list[str] = Field(..., description="待删除的会议 ID 列表")
+    mode: str = Field("soft", description="删除模式: soft|hard")
+
+
+class AddTagRequest(BaseModel):
+    """添加标签请求"""
+    tag: str = Field(..., min_length=1, max_length=32, description="标签名称")
+
+
 # ---------- 端点 ----------
 
 @router.post("", response_model=CreateMeetingResponse)
@@ -116,6 +133,61 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     )
 
 
+@router.get("/tags")
+async def list_tags() -> dict[str, Any]:
+    """列出所有标签及其使用次数"""
+    tags = list_all_tags()
+    return {"tags": tags, "count": len(tags)}
+
+
+@router.post("/batch-delete")
+async def batch_delete(req: BatchDeleteRequest) -> dict[str, Any]:
+    """批量删除会议
+
+    - mode=soft：软删除，保留数据用于回归
+    - mode=hard：永久删除，不可恢复
+    - 运行中的会议会跳过并记入 failed
+
+    返回 {deleted: [...], failed: [...], mode}
+    """
+    from app.observability.log_bus import log_bus
+    from app.context import get_request_id
+
+    # 过滤掉运行中的会议
+    safe_ids: list[str] = []
+    skipped: list[str] = []
+    for mid in req.meeting_ids:
+        if mid in _running_tasks and not _running_tasks[mid].done():
+            skipped.append(mid)
+        else:
+            safe_ids.append(mid)
+
+    result = batch_delete_meetings(safe_ids, mode=req.mode)
+    # 运行中的会议也记入 failed
+    result["failed"].extend(skipped)
+
+    log_bus.info(
+        f"批量删除会议: deleted={len(result['deleted'])}, failed={len(result['failed'])}",
+        logger="routers.meetings",
+        extra={
+            "action": "batch_delete",
+            "mode": req.mode,
+            "deleted_ids": result["deleted"],
+            "failed_ids": result["failed"],
+            "request_id": get_request_id(),
+        },
+    )
+    # 清理已删除会议的内存态
+    for mid in result["deleted"]:
+        set_state(mid, None)
+
+    return {
+        "deleted": result["deleted"],
+        "failed": result["failed"],
+        "mode": req.mode,
+    }
+
+
 @router.get("/{meeting_id}")
 async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
     """取会议详情（含状态、产物、发言）"""
@@ -147,29 +219,44 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
 
 
 @router.get("")
-async def list_meetings_with_status() -> dict[str, Any]:
-    """列出所有会议及其运行状态
+async def list_meetings_with_status(
+    q: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    tags: str | None = None,
+) -> dict[str, Any]:
+    """列出会议（支持搜索、分页、标签过滤）
 
-    返回 {meetings[], concurrent_limit, running_count}：
-    - meetings：每个会议含 meeting_id/topic/stage/status/created_at/is_running
+    查询参数：
+    - q：按议题关键词搜索（模糊匹配）
+    - limit：每页数量（默认 20）
+    - offset：偏移量（默认 0）
+    - tags：逗号分隔的标签列表，会议需同时拥有所有标签才匹配
+
+    返回 {meetings[], total, concurrent_limit, running_count}：
+    - meetings：当前页的会议列表，每个含 meeting_id/topic/stage/status/created_at/is_running/tags
+    - total：满足条件的总记录数
     - concurrent_limit：最大并发会议数
     - running_count：当前正在运行的会议数
     """
-    meetings = list_meetings()
-    result = []
-    for m in meetings:
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    result = query_meetings(q=q, limit=limit, offset=offset, tags=tag_list)
+    items = []
+    for m in result["items"]:
         mid = m["id"]
         is_running = mid in _running_tasks and not _running_tasks[mid].done()
-        result.append({
+        items.append({
             "meeting_id": mid,
             "topic": m["topic"],
             "stage": m["stage"],
             "status": m["status"],
             "created_at": m.get("created_at"),
             "is_running": is_running,
+            "tags": m.get("tags", []),
         })
     return {
-        "meetings": result,
+        "meetings": items,
+        "total": result["total"],
         "concurrent_limit": MAX_CONCURRENT_MEETINGS,
         "running_count": sum(1 for t in _running_tasks.values() if not t.done()),
     }
@@ -235,6 +322,41 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
 
     else:
         raise HTTPException(status_code=400, detail="mode 必须是 soft/hard/restore")
+
+
+@router.get("/{meeting_id}/tags")
+async def get_tags(meeting_id: str) -> dict[str, Any]:
+    """取会议的全部标签"""
+    meeting = get_meeting(meeting_id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+    tags = get_meeting_tags(meeting_id)
+    return {"meeting_id": meeting_id, "tags": tags}
+
+
+@router.post("/{meeting_id}/tags")
+async def add_tag(meeting_id: str, req: AddTagRequest) -> dict[str, Any]:
+    """为会议添加标签"""
+    meeting = get_meeting(meeting_id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+    tag = req.tag.strip()
+    if not tag:
+        raise HTTPException(status_code=400, detail="标签不能为空")
+    added = add_meeting_tag(meeting_id, tag)
+    return {"meeting_id": meeting_id, "tag": tag, "added": added}
+
+
+@router.delete("/{meeting_id}/tags/{tag}")
+async def remove_tag(meeting_id: str, tag: str) -> dict[str, Any]:
+    """移除会议的某个标签"""
+    meeting = get_meeting(meeting_id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+    removed = remove_meeting_tag(meeting_id, tag)
+    if not removed:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    return {"meeting_id": meeting_id, "tag": tag, "removed": True}
 
 
 @router.post("/{meeting_id}/run")

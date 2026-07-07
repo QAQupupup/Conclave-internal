@@ -14,10 +14,11 @@ import { ArtifactPanel } from './components/ArtifactPanel.tsx'
 import { ReportViewer } from './components/ReportViewer.tsx'
 import { TokenPanel } from './components/TokenPanel.tsx'
 import { BorrowDialog } from './components/BorrowDialog.tsx'
-import { CreateMeeting } from './components/CreateMeeting.tsx'
 import { MeetingSidebar } from './components/MeetingSidebar.tsx'
 import { WorkspacePanel } from './components/WorkspacePanel.tsx'
 import { ThemeSettings } from './components/ThemeSettings.tsx'
+import { LandingPage } from './components/LandingPage.tsx'
+import { TaskBoard } from './components/TaskBoard.tsx'
 
 /** 全局视图切换：会议 / 工作区 */
 type ViewTab = 'meeting' | 'workspace'
@@ -173,7 +174,7 @@ function MeetingView({
           </div>
         </div>
         <button type="button" className="btn btn-ghost new-meeting-btn" onClick={reset}>
-          新建会议
+          返回看板
         </button>
         <BorrowDialog open={borrowOpen} onClose={() => setBorrowOpen(false)} />
       </div>
@@ -212,9 +213,10 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   )
 }
 
-/** 根据是否已选会议切换视图 */
+/** 根据是否已进入系统 + 是否已选会议切换三层视图：landing → board → meeting */
 function AppShell() {
   const { meetingId } = useMeeting()
+  const [entered, setEntered] = usePersistentState<boolean>('conclave-entered', false)
   const [tab, setTab] = useState<ViewTab>('meeting')
   // 右侧面板 Tab 状态提升到 AppShell，避免切换会议/工作区视图时丢失
   const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
@@ -235,6 +237,41 @@ function AppShell() {
     setTab('workspace')
   }
 
+  // 第一层：封面页
+  if (!entered) {
+    return <LandingPage onEnter={() => setEntered(true)} />
+  }
+
+  // 第二层：任务看板（无侧栏，全宽）
+  if (!meetingId) {
+    return (
+      <div className="app-shell board-shell">
+        <div className="app-toolbar board-toolbar">
+          <button
+            type="button"
+            className="btn btn-ghost theme-toggle-btn"
+            onClick={toggleMode}
+            title={mode === 'light' ? '切换到暗色' : '切换到亮色'}
+            aria-label="切换主题"
+          >
+            {mode === 'light' ? '☾' : '☀'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost theme-settings-btn"
+            onClick={() => setThemeOpen(true)}
+            title="主题设置"
+          >
+            主题
+          </button>
+        </div>
+        <TaskBoard onBackToLanding={() => setEntered(false)} />
+        {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
+      </div>
+    )
+  }
+
+  // 第三层：会议视图（侧栏 + 主体）
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
@@ -275,21 +312,15 @@ function AppShell() {
             主题
           </button>
         </div>
-        {!meetingId ? (
-          <CreateMeeting />
+        <TabBar tab={tab} onChange={setTab} />
+        {tab === 'meeting' ? (
+          <MeetingView
+            onOpenInWorkspace={handleOpenInWorkspace}
+            rightTab={rightTab}
+            setRightTab={setRightTab}
+          />
         ) : (
-          <>
-            <TabBar tab={tab} onChange={setTab} />
-            {tab === 'meeting' ? (
-              <MeetingView
-                onOpenInWorkspace={handleOpenInWorkspace}
-                rightTab={rightTab}
-                setRightTab={setRightTab}
-              />
-            ) : (
-              <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
-            )}
-          </>
+          <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
         )}
       </div>
       {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}

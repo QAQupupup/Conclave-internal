@@ -73,6 +73,18 @@ def init_db() -> None:
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (user_id, key)
                 );
+
+                CREATE TABLE IF NOT EXISTS meeting_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT NOT NULL,
+                    tag TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(meeting_id, tag),
+                    FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_meeting_tags_meeting ON meeting_tags(meeting_id);
+                CREATE INDEX IF NOT EXISTS idx_meeting_tags_tag ON meeting_tags(tag);
                 """
             )
             conn.commit()
@@ -154,6 +166,169 @@ def list_meetings(include_deleted: bool = False) -> list[dict[str, Any]]:
             return out
         finally:
             conn.close()
+
+
+def query_meetings(
+    q: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    tags: list[str] | None = None,
+    include_deleted: bool = False,
+) -> dict[str, Any]:
+    """搜索+分页+标签过滤查询会议。
+
+    返回 {items, total}：
+    - items：当前页的会议列表（含 tags 字段）
+    - total：满足条件的总记录数（用于分页计算）
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            conditions: list[str] = []
+            params: list[Any] = []
+
+            if not include_deleted:
+                conditions.append("m.status != 'deleted'")
+
+            if q:
+                conditions.append("m.topic LIKE ?")
+                params.append(f"%{q}%")
+
+            if tags:
+                # 交集过滤：会议需同时拥有所有指定标签
+                placeholders = ",".join("?" for _ in tags)
+                conditions.append(
+                    f"m.id IN (SELECT meeting_id FROM meeting_tags "
+                    f"WHERE tag IN ({placeholders}) "
+                    f"GROUP BY meeting_id HAVING COUNT(DISTINCT tag) = ?)"
+                )
+                params.extend(tags)
+                params.append(len(tags))
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            # 总数
+            total_row = conn.execute(
+                f"SELECT COUNT(*) as cnt FROM meetings m {where_clause}", params
+            ).fetchone()
+            total = total_row["cnt"] if total_row else 0
+
+            # 分页查询
+            rows = conn.execute(
+                f"SELECT m.* FROM meetings m {where_clause} "
+                f"ORDER BY m.created_at DESC LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            ).fetchall()
+
+            items = []
+            for row in rows:
+                d = dict(row)
+                d["payload"] = json.loads(d["payload"])
+                # 查询该会议的标签
+                tag_rows = conn.execute(
+                    "SELECT tag FROM meeting_tags WHERE meeting_id = ? ORDER BY tag",
+                    (d["id"],),
+                ).fetchall()
+                d["tags"] = [r["tag"] for r in tag_rows]
+                items.append(d)
+
+            return {"items": items, "total": total}
+        finally:
+            conn.close()
+
+
+# ---------- 标签 CRUD ----------
+
+
+def list_all_tags() -> list[dict[str, Any]]:
+    """列出所有标签及其使用次数，按使用次数降序排列"""
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                """SELECT tag, COUNT(*) as cnt, MAX(created_at) as last_used
+                FROM meeting_tags
+                GROUP BY tag
+                ORDER BY cnt DESC, tag ASC"""
+            ).fetchall()
+            return [{"tag": r["tag"], "count": r["cnt"], "last_used": r["last_used"]} for r in rows]
+        finally:
+            conn.close()
+
+
+def get_meeting_tags(meeting_id: str) -> list[str]:
+    """取某会议的全部标签"""
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                "SELECT tag FROM meeting_tags WHERE meeting_id = ? ORDER BY tag",
+                (meeting_id,),
+            ).fetchall()
+            return [r["tag"] for r in rows]
+        finally:
+            conn.close()
+
+
+def add_meeting_tag(meeting_id: str, tag: str) -> bool:
+    """为会议添加标签。已存在则忽略（UNIQUE 约束）。返回是否新增。"""
+    with _lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO meeting_tags (meeting_id, tag, created_at) VALUES (?, ?, ?)",
+                (meeting_id, tag, datetime.now().isoformat()),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+
+def remove_meeting_tag(meeting_id: str, tag: str) -> bool:
+    """移除会议的某个标签。返回是否删除了记录。"""
+    with _lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM meeting_tags WHERE meeting_id = ? AND tag = ?",
+                (meeting_id, tag),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+
+# ---------- 批量删除 ----------
+
+
+def batch_delete_meetings(
+    meeting_ids: list[str], mode: str = "soft"
+) -> dict[str, list[str]]:
+    """批量删除会议。
+
+    - mode=soft：软删除，保留数据
+    - mode=hard：硬删除，永久删除
+
+    返回 {deleted: [...], failed: [...]}。
+    running 状态的会议会被跳过并记入 failed。
+    """
+    deleted: list[str] = []
+    failed: list[str] = []
+    for mid in meeting_ids:
+        if mode == "soft":
+            ok = soft_delete_meeting(mid)
+        elif mode == "hard":
+            ok = hard_delete_meeting(mid)
+        else:
+            failed.append(mid)
+            continue
+        if ok:
+            deleted.append(mid)
+        else:
+            failed.append(mid)
+    return {"deleted": deleted, "failed": failed}
 
 
 # ---------- 事件持久化 ----------
@@ -325,7 +500,8 @@ def hard_delete_meeting(meeting_id: str) -> bool:
             ).fetchone()
             if row is None:
                 return False
-            # 按依赖顺序删除：先 messages（有外键），再 events，最后 meetings
+            # 按依赖顺序删除：先 meeting_tags、messages（有外键），再 events，最后 meetings
+            conn.execute("DELETE FROM meeting_tags WHERE meeting_id = ?", (meeting_id,))
             conn.execute("DELETE FROM messages WHERE meeting_id = ?", (meeting_id,))
             conn.execute("DELETE FROM events WHERE meeting_id = ?", (meeting_id,))
             conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
