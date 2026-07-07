@@ -336,7 +336,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
       )}
 
       {/* 搜索栏 + 批量操作 */}
-      <div className="board-toolbar">
+      <div className="board-filter-bar">
         <div className="board-search-wrap">
           <input
             className="board-search-input"

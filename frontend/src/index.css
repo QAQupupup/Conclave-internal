@@ -3776,7 +3776,7 @@ code {
   height: 100vh;
   overflow: hidden;
 }
-.board-toolbar {
+.board-app-toolbar {
   flex-shrink: 0;
   border-bottom: 1px solid var(--border-soft);
 }
@@ -3858,7 +3858,7 @@ code {
 }
 
 /* Toolbar (search + batch) */
-.board-toolbar {
+.board-filter-bar {
   display: flex;
   align-items: center;
   gap: 12px;

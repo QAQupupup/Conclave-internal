@@ -215,8 +215,9 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 
 /** 根据是否已进入系统 + 是否已选会议切换三层视图：landing → board → meeting */
 function AppShell() {
-  const { meetingId } = useMeeting()
-  const [entered, setEntered] = usePersistentState<boolean>('conclave-entered', false)
+  const { meetingId, reset } = useMeeting()
+  // entered 不持久化：每次刷新都从封面页开始，符合正常系统入口逻辑
+  const [entered, setEntered] = useState(false)
   const [tab, setTab] = useState<ViewTab>('meeting')
   // 右侧面板 Tab 状态提升到 AppShell，避免切换会议/工作区视图时丢失
   const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
@@ -237,16 +238,16 @@ function AppShell() {
     setTab('workspace')
   }
 
-  // 第一层：封面页
+  // 第一层：封面页 — 进入时清除残留的 meetingId，确保落地到看板
   if (!entered) {
-    return <LandingPage onEnter={() => setEntered(true)} />
+    return <LandingPage onEnter={() => { reset(); setEntered(true) }} />
   }
 
   // 第二层：任务看板（无侧栏，全宽）
   if (!meetingId) {
     return (
       <div className="app-shell board-shell">
-        <div className="app-toolbar board-toolbar">
+        <div className="app-toolbar board-app-toolbar">
           <button
             type="button"
             className="btn btn-ghost theme-toggle-btn"
