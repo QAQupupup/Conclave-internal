@@ -46,7 +46,7 @@ function TabBar({ tab, onChange }: { tab: ViewTab; onChange: (t: ViewTab) => voi
 type RightPanelTab = 'topic' | 'evidence' | 'artifact' | 'report' | 'token'
 
 /** 会议主视图：顶部流程指示器+控制按钮 / 拓扑图 / 聊天流 + 右侧面板，借调模态 + 冲突联动选中态 + 右侧 Tab 切换 */
-function MeetingView() {
+function MeetingView({ onOpenInWorkspace }: { onOpenInWorkspace?: (filePath: string) => void }) {
   const { reset } = useMeeting()
   // 右侧证据面板选中冲突（聊天流点击证据 ref 时联动高亮）
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null)
@@ -146,7 +146,12 @@ function MeetingView() {
                   onSelectConflict={setSelectedConflictId}
                 />
               )}
-              {rightTab === 'artifact' && <ArtifactPanel onOpenBorrow={() => setBorrowOpen(true)} />}
+              {rightTab === 'artifact' && (
+                <ArtifactPanel
+                  onOpenBorrow={() => setBorrowOpen(true)}
+                  onOpenInWorkspace={onOpenInWorkspace}
+                />
+              )}
               {rightTab === 'report' && <ReportViewer />}
               {rightTab === 'token' && <TokenPanel />}
             </div>
@@ -171,11 +176,11 @@ function MeetingView() {
 }
 
 /** 工作区视图：文件树 + 编辑器 + 终端 */
-function WorkspaceView() {
+function WorkspaceView({ meetingId, initialFile }: { meetingId?: string; initialFile?: string }) {
   return (
     <div className="app-layout">
       <div className="workspace-view">
-        <WorkspacePanel />
+        <WorkspacePanel meetingId={meetingId} initialFile={initialFile} />
       </div>
     </div>
   )
@@ -213,6 +218,14 @@ function AppShell() {
   // 主题设置面板开关
   const [themeOpen, setThemeOpen] = useState(false)
   const { mode, toggleMode } = useTheme()
+  // 工作区跨视图跳转：从产出物"在工作区打开"时记录初始文件，切到 workspace Tab
+  const [workspaceInitialFile, setWorkspaceInitialFile] = useState<string | undefined>(undefined)
+
+  /** 从会议产出物跳转到工作区 */
+  const handleOpenInWorkspace = (filePath: string) => {
+    setWorkspaceInitialFile(filePath)
+    setTab('workspace')
+  }
 
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
@@ -259,7 +272,11 @@ function AppShell() {
         ) : (
           <>
             <TabBar tab={tab} onChange={setTab} />
-            {tab === 'meeting' ? <MeetingView /> : <WorkspaceView />}
+            {tab === 'meeting' ? (
+              <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
+            ) : (
+              <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
+            )}
           </>
         )}
       </div>

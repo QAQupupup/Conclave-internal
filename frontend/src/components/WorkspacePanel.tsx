@@ -31,7 +31,17 @@ function buildTree(items: FileItem[]): TreeNode[] {
   }))
 }
 
-export function WorkspacePanel() {
+interface WorkspacePanelProps {
+  /** 当前会议 ID，用于文件隔离（工作区按 meeting_id/ 分目录） */
+  meetingId?: string
+  /** 初始打开的文件路径（相对于 meeting_id/ 子目录） */
+  initialFile?: string
+}
+
+export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) {
+  // 当前路径前缀：会议隔离时为 meetingId/，否则为空
+  const pathPrefix = meetingId ? `${meetingId}/` : ''
+
   // 文件树
   const [tree, setTree] = useState<TreeNode[]>([])
   const [currentPath, setCurrentPath] = useState<string>('')
@@ -65,7 +75,8 @@ export function WorkspacePanel() {
   const refreshTree = useCallback(async (path = '') => {
     setLoading(true)
     try {
-      const res = await listFiles(path)
+      const fullPath = pathPrefix + path
+      const res = await listFiles(fullPath)
       setTree(buildTree(res.items))
       setCurrentPath(path)
     } catch (e) {
@@ -76,12 +87,13 @@ export function WorkspacePanel() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [pathPrefix])
 
   /** 打开文件 */
   const openFile = useCallback(async (path: string) => {
     try {
-      const res = await readFile(path)
+      const fullPath = pathPrefix + path
+      const res = await readFile(fullPath)
       setFilePath(res.path)
       setFileContent(res.content)
       setFileLang(res.language)
@@ -92,18 +104,19 @@ export function WorkspacePanel() {
         { type: 'err', text: `打开文件失败: ${(e as Error).message}` },
       ])
     }
-  }, [])
+  }, [pathPrefix])
 
   /** 保存文件 */
   const saveFile = useCallback(async () => {
     if (!filePath) return
     setSaving(true)
     try {
+      // filePath 已包含完整路径（由 openFile 设置），直接保存
       await writeFile(filePath, fileContent)
       setDirty(false)
       setTerminalHistory((h) => [
         ...h,
-        { type: 'out', text: `[已保存] ${filePath} (${fileContent.length} chars)` },
+        { type: 'out', text: `已保存: ${filePath}` },
       ])
     } catch (e) {
       setTerminalHistory((h) => [
@@ -200,7 +213,7 @@ export function WorkspacePanel() {
     }
   }, [terminalHistory])
 
-  // 初始加载文件树 + 沙箱状态
+  // 初始加载文件树 + 沙箱状态；meetingId 或 initialFile 变化时重新加载
   useEffect(() => {
     refreshTree('')
     sandboxStatus()
@@ -208,7 +221,11 @@ export function WorkspacePanel() {
         setSandbox({ active: s.active, image: s.image, mode: s.mode }),
       )
       .catch(() => null)
-  }, [refreshTree])
+    // 若指定了初始文件，自动打开
+    if (initialFile) {
+      openFile(initialFile)
+    }
+  }, [refreshTree, openFile, initialFile])
 
   return (
     <div className="workspace-panel">

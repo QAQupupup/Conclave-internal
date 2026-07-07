@@ -629,14 +629,20 @@ def _detect_network_level(code: str) -> str:
 def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
     """扫描沙箱工作区，收集产出的文件作为附件。
 
+    优先扫描会议专属子目录 ws_root/meeting_id/，若不存在则回退到 ws_root 顶层。
     支持的文件类型：png/jpg/svg/csv/md/html/json/txt/log
     返回附件元数据列表，文件本体保留在 workspace 中通过 API 下载。
     """
     attachments: list[dict[str, Any]] = []
     supported_exts = {".png", ".jpg", ".jpeg", ".svg", ".csv", ".md", ".html", ".json", ".txt", ".log"}
-    if not ws_root.exists():
+
+    # 优先扫描会议专属子目录，实现会议间文件隔离
+    meeting_dir = ws_root / meeting_id
+    scan_dir = meeting_dir if meeting_dir.exists() and meeting_dir.is_dir() else ws_root
+    if not scan_dir.exists():
         return attachments
-    for f in ws_root.iterdir():
+
+    for f in scan_dir.iterdir():
         if f.is_file() and f.suffix.lower() in supported_exts:
             stat = f.stat()
             attachments.append({

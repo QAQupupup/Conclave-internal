@@ -1,16 +1,27 @@
-// 右下：PRD 结构化预览 + OpenAPI 语法高亮 + 一键复制 + 借调入口
+// 右下：PRD 结构化预览 + OpenAPI 语法高亮 + 一键复制 + 借调入口 + 附件列表(跳转工作区)
 import type { ReactNode } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import type { PRD } from '../types/events.ts'
 import { useCopy } from '../hooks/useCopy.ts'
 
-interface ArtifactPanelProps {
-  onOpenBorrow: () => void
+interface Attachment {
+  filename: string
+  path: string
+  size?: number
+  ext?: string
+  meeting_id?: string
 }
 
-export function ArtifactPanel({ onOpenBorrow }: ArtifactPanelProps) {
+interface ArtifactPanelProps {
+  onOpenBorrow: () => void
+  /** 点击附件"在工作区打开"时的回调，参数为文件相对路径 */
+  onOpenInWorkspace?: (filePath: string) => void
+}
+
+export function ArtifactPanel({ onOpenBorrow, onOpenInWorkspace }: ArtifactPanelProps) {
   const { store } = useMeeting()
   const artifact = store.meeting?.artifact
+  const meetingId = store.meeting?.meeting_id
 
   return (
     <section className="panel artifact-panel">
@@ -26,9 +37,82 @@ export function ArtifactPanel({ onOpenBorrow }: ArtifactPanelProps) {
         <div className="artifact-body">
           <PRDSection prd={artifact.prd} />
           <OpenAPISection yaml={artifact.openapi} />
+          <AttachmentsSection
+            attachments={artifact.attachments}
+            meetingId={meetingId}
+            onOpenInWorkspace={onOpenInWorkspace}
+          />
         </div>
       )}
     </section>
+  )
+}
+
+/* ============================ 附件区域 ============================ */
+
+function AttachmentsSection({
+  attachments,
+  meetingId,
+  onOpenInWorkspace,
+}: {
+  attachments?: Attachment[]
+  meetingId?: string
+  onOpenInWorkspace?: (filePath: string) => void
+}) {
+  const list = attachments ?? []
+  if (list.length === 0) return null
+
+  return (
+    <div className="attachments-block">
+      <div className="attachments-head">
+        <span className="field-label">产出文件（{list.length}）</span>
+      </div>
+      <ul className="attachments-list">
+        {list.map((att, i) => {
+          // 从完整路径提取相对路径（用于工作区跳转）
+          const relPath = meetingId
+            ? att.filename
+            : att.path.split(/[/\\]/).slice(-1)[0]
+          return (
+            <li key={i} className="attachment-item">
+              <span className="attachment-icon">{att.ext || '📄'}</span>
+              <div className="attachment-info">
+                <span className="attachment-name">{att.filename}</span>
+                {att.size != null && (
+                  <span className="attachment-size">
+                    {att.size > 1024 ? `${(att.size / 1024).toFixed(1)}KB` : `${att.size}B`}
+                  </span>
+                )}
+              </div>
+              <div className="attachment-actions">
+                {/* 下载链接 */}
+                {meetingId && (
+                  <a
+                    className="btn btn-sm btn-ghost"
+                    href={`/api/meetings/${meetingId}/attachments/${encodeURIComponent(att.filename)}`}
+                    download={att.filename}
+                    title="下载"
+                  >
+                    下载
+                  </a>
+                )}
+                {/* 在工作区打开 */}
+                {onOpenInWorkspace && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    title="在工作区编辑器中打开"
+                    onClick={() => onOpenInWorkspace(relPath)}
+                  >
+                    在工作区打开
+                  </button>
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
 

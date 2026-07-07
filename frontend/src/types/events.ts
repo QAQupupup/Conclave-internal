@@ -140,6 +140,14 @@ export interface Artifact {
   meeting_id?: string
   prd?: PRD
   openapi?: string
+  /** 产出文件附件列表（由 produce 节点扫描工作区生成） */
+  attachments?: Array<{
+    filename: string
+    path: string
+    size?: number
+    ext?: string
+    meeting_id?: string
+  }>
 }
 
 // ---------- 领域事件信封 ----------

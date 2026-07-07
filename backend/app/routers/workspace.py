@@ -37,16 +37,28 @@ MAX_OUTPUT = int(os.environ.get("CONCLAVE_MAX_OUTPUT", str(512 * 1024)))
 from app.middleware import is_dangerous_command
 
 
-def _resolve_path(rel_path: str) -> Path:
-    """将相对路径解析为工作区内的绝对路径，防止目录穿越攻击"""
+def _resolve_path(rel_path: str, meeting_id: str | None = None) -> Path:
+    """将相对路径解析为工作区内的绝对路径，防止目录穿越攻击。
+
+    若提供 meeting_id，则路径解析到 WORKSPACE_ROOT/meeting_id/ 子目录下，
+    实现会议间文件隔离。回退兼容：若 meeting_id 子目录不存在，自动创建。
+    """
+    if meeting_id:
+        # 会议隔离模式：所有路径限定在 WORKSPACE_ROOT/meeting_id/ 下
+        meeting_dir = WORKSPACE_ROOT / meeting_id
+        meeting_dir.mkdir(parents=True, exist_ok=True)
+        base = meeting_dir
+    else:
+        base = WORKSPACE_ROOT
+
     if not rel_path:
-        return WORKSPACE_ROOT
+        return base
     # 去掉前导斜杠，强制相对
     clean = rel_path.lstrip("/\\")
-    target = (WORKSPACE_ROOT / clean).resolve()
-    # 安全检查：目标必须在 WORKSPACE_ROOT 内
+    target = (base / clean).resolve()
+    # 安全检查：目标必须在 base 内
     try:
-        target.relative_to(WORKSPACE_ROOT)
+        target.relative_to(base)
     except ValueError:
         raise HTTPException(
             status_code=403,
