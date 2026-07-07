@@ -10,6 +10,7 @@ import {
   runMeeting as apiRunMeeting,
   uploadDocument as apiUploadDocument,
 } from '../lib/api.ts'
+import { getMeetingIdFromPath, navigate, subscribe } from '../lib/router.ts'
 import { initialStore, meetingReducer } from './meetingReducer.ts'
 import type { MeetingStore } from './meetingReducer.ts'
 import type {
@@ -55,29 +56,56 @@ const MeetingContext = createContext<MeetingContextValue | null>(null)
 /** Context Provider 组件 */
 export function MeetingProvider({ children }: { children: ReactNode }) {
   const [store, dispatch] = useReducer(meetingReducer, initialStore)
-  const [meetingId, setMeetingId] = useState<string | null>(() => {
-    return localStorage.getItem('conclave_meeting_id')
-  })
+  // meetingId 从 URL 派生：/meeting/:id → id，其他路由 → null
+  const [meetingId, setMeetingId] = useState<string | null>(getMeetingIdFromPath)
+
+  // 监听路由变化（navigate / popstate），同步 meetingId
+  useEffect(() => {
+    const update = () => {
+      const newId = getMeetingIdFromPath()
+      setMeetingId((prev) => {
+        if (prev !== newId) {
+          // 会议切换时 reset store，避免旧数据闪烁
+          dispatch({ type: 'reset' })
+        }
+        return newId
+      })
+    }
+    const unsub = subscribe(update)
+    window.addEventListener('popstate', update)
+    return () => {
+      unsub()
+      window.removeEventListener('popstate', update)
+    }
+  }, [])
 
   // WS 连接管理（meetingId 变化时重连）
   const { connected, connectionError, sendControl, sendBorrow } = useWebSocket(meetingId, dispatch)
 
   const selectMeeting = useCallback((id: string | null) => {
-    setMeetingId(id)
     if (id === null) {
-      localStorage.removeItem('conclave_meeting_id')
-      dispatch({ type: 'reset' })
+      navigate('/board')
     } else {
-      localStorage.setItem('conclave_meeting_id', id)
-      // 切换会议时先 reset store，避免旧会议数据闪烁，等 WS snapshot 填充新数据
-      dispatch({ type: 'reset' })
+      navigate(`/meeting/${id}`)
     }
+    // 路由监听器会自动同步 meetingId + dispatch reset
+    // 但如果 URL 没变（同一路径），监听器不会触发，所以手动更新
+    setMeetingId((prev) => {
+      if (prev !== id) {
+        dispatch({ type: 'reset' })
+      }
+      return id
+    })
   }, [])
 
   const reset = useCallback(() => {
-    setMeetingId(null)
-    localStorage.removeItem('conclave_meeting_id')
-    dispatch({ type: 'reset' })
+    navigate('/board')
+    setMeetingId((prev) => {
+      if (prev !== null) {
+        dispatch({ type: 'reset' })
+      }
+      return null
+    })
   }, [])
 
   // 创建会议：REST，成功后 hydrate 初始字段
@@ -121,13 +149,12 @@ export function MeetingProvider({ children }: { children: ReactNode }) {
 
   const refreshMeeting = refreshMeetingImpl
 
-  // 首次挂载：若 localStorage 中恢复出 meetingId，自动拉取会议状态
+  // meetingId 变化时拉取会议详情（包括首次挂载和路由切换）
   useEffect(() => {
     if (meetingId) {
       refreshMeetingImpl(meetingId)
     }
-    // 仅首次挂载时执行一次
-  }, [])
+  }, [meetingId, refreshMeetingImpl])
 
   const value = useMemo<MeetingContextValue>(
     () => ({

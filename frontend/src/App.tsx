@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { ThemeProvider, useTheme } from './store/ThemeContext.tsx'
 import { usePersistentState } from './hooks/usePersistentState.ts'
+import { useRouter } from './hooks/useRouter.ts'
+import { navigate } from './lib/router.ts'
 import { StageIndicator } from './components/StageIndicator.tsx'
 import { MeetingControls } from './components/MeetingControls.tsx'
 import { AgentGraph } from './components/AgentGraph.tsx'
@@ -213,11 +215,10 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   )
 }
 
-/** 根据是否已进入系统 + 是否已选会议切换三层视图：landing → board → meeting */
+/** 根据 URL path 切换三层视图：/ → 封面，/board → 看板，/meeting/:id → 会议 */
 function AppShell() {
-  const { meetingId, reset } = useMeeting()
-  // entered 不持久化：每次刷新都从封面页开始，符合正常系统入口逻辑
-  const [entered, setEntered] = useState(false)
+  const { meetingId } = useMeeting()
+  const { path } = useRouter()
   const [tab, setTab] = useState<ViewTab>('meeting')
   // 右侧面板 Tab 状态提升到 AppShell，避免切换会议/工作区视图时丢失
   const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
@@ -238,41 +239,46 @@ function AppShell() {
     setTab('workspace')
   }
 
-  // 第一层：封面页 — 进入时清除残留的 meetingId，确保落地到看板
-  if (!entered) {
-    return <LandingPage onEnter={() => { reset(); setEntered(true) }} />
+  // 第一层：封面页（仅 / 路由）
+  if (path === '/') {
+    return <LandingPage onEnter={() => navigate('/board')} />
   }
 
-  // 第二层：任务看板（无侧栏，全宽）
+  // 主题工具栏（看板和会议视图共用）
+  const toolbar = (
+    <div className="app-toolbar">
+      <button
+        type="button"
+        className="btn btn-ghost theme-toggle-btn"
+        onClick={toggleMode}
+        title={mode === 'light' ? '切换到暗色' : '切换到亮色'}
+        aria-label="切换主题"
+      >
+        {mode === 'light' ? '☾' : '☀'}
+      </button>
+      <button
+        type="button"
+        className="btn btn-ghost theme-settings-btn"
+        onClick={() => setThemeOpen(true)}
+        title="主题设置"
+      >
+        主题
+      </button>
+    </div>
+  )
+
+  // 第二层：任务看板（/board 或其他非会议路由，无侧栏全宽）
   if (!meetingId) {
     return (
       <div className="app-shell board-shell">
-        <div className="app-toolbar board-app-toolbar">
-          <button
-            type="button"
-            className="btn btn-ghost theme-toggle-btn"
-            onClick={toggleMode}
-            title={mode === 'light' ? '切换到暗色' : '切换到亮色'}
-            aria-label="切换主题"
-          >
-            {mode === 'light' ? '☾' : '☀'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost theme-settings-btn"
-            onClick={() => setThemeOpen(true)}
-            title="主题设置"
-          >
-            主题
-          </button>
-        </div>
-        <TaskBoard onBackToLanding={() => setEntered(false)} />
+        {toolbar}
+        <TaskBoard onBackToLanding={() => navigate('/')} />
         {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
       </div>
     )
   }
 
-  // 第三层：会议视图（侧栏 + 主体）
+  // 第三层：会议视图（/meeting/:id，侧栏 + 主体）
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
@@ -293,26 +299,7 @@ function AppShell() {
         </div>
       </aside>
       <div className="app-main">
-        {/* 顶部工具栏：主题切换 + 设置入口 */}
-        <div className="app-toolbar">
-          <button
-            type="button"
-            className="btn btn-ghost theme-toggle-btn"
-            onClick={toggleMode}
-            title={mode === 'light' ? '切换到暗色' : '切换到亮色'}
-            aria-label="切换主题"
-          >
-            {mode === 'light' ? '☾' : '☀'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost theme-settings-btn"
-            onClick={() => setThemeOpen(true)}
-            title="主题设置"
-          >
-            主题
-          </button>
-        </div>
+        {toolbar}
         <TabBar tab={tab} onChange={setTab} />
         {tab === 'meeting' ? (
           <MeetingView

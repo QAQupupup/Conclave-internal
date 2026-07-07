@@ -171,13 +171,28 @@ function buildGraphData(meeting: MeetingState): { data: ForceGraphData; borrowed
   return { data: { nodes, links }, borrowedSet }
 }
 
+/** 过滤掉引用不存在节点的链接，防止 d3-force forceLink 抛出 "node not found" */
+function sanitizeLinks(nodes: GraphNode[], links: GraphLink[]): GraphLink[] {
+  const ids = new Set(nodes.map((n) => n.id))
+  return links.filter((l) => {
+    const s = typeof l.source === 'string' ? l.source : (l.source as any).id
+    const t = typeof l.target === 'string' ? l.target : (l.target as any).id
+    return ids.has(s) && ids.has(t)
+  })
+}
+
 // ---------- 组件 ----------
 
 export function AgentGraph() {
   const { store } = useMeeting()
   const meeting = store.meeting
   if (!meeting) return null
-  const { data: graphData, borrowedSet } = buildGraphData(meeting)
+  const { data: rawData, borrowedSet } = buildGraphData(meeting)
+  // 过滤无效链接，防止 d3-force 崩溃
+  const graphData: ForceGraphData = {
+    nodes: rawData.nodes,
+    links: sanitizeLinks(rawData.nodes, rawData.links),
+  }
   return (
     <AgentGraphInner
       graphData={graphData}
@@ -443,18 +458,24 @@ function AgentGraphInner({
       return { g, applyDim }
     })
 
-    const simulation = forceSimulation<SimNode, SimLink>(simNodes)
-      .force('charge', forceManyBody<SimNode>().strength(-280))
-      .force(
-        'link',
-        forceLink<SimNode, SimLink>(simLinks)
-          .id((d) => d.id)
-          .distance((l) => linkDistance(l.type))
-          .strength((l) => l.weight * 0.6),
-      )
-      .force('center', forceCenter<SimNode>(width / 2, height / 2))
-      .force('collide', forceCollide<SimNode>().radius((d) => Math.max(NODE_W[d.type], NODE_H) / 2 + 12))
-      .alphaDecay(0.08)
+    let simulation: ReturnType<typeof forceSimulation<SimNode, SimLink>>
+    try {
+      simulation = forceSimulation<SimNode, SimLink>(simNodes)
+        .force('charge', forceManyBody<SimNode>().strength(-280))
+        .force(
+          'link',
+          forceLink<SimNode, SimLink>(simLinks)
+            .id((d) => d.id)
+            .distance((l) => linkDistance(l.type))
+            .strength((l) => l.weight * 0.6),
+        )
+        .force('center', forceCenter<SimNode>(width / 2, height / 2))
+        .force('collide', forceCollide<SimNode>().radius((d) => Math.max(NODE_W[d.type], NODE_H) / 2 + 12))
+        .alphaDecay(0.08)
+    } catch (e) {
+      console.error('AgentGraph simulation init failed', e)
+      return
+    }
 
     // 预热：同步执行若干 tick 让节点快速接近稳定位置，减少首帧漂移
     for (let i = 0; i < 80; i++) simulation.tick()
