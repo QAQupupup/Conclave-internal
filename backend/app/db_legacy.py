@@ -85,6 +85,25 @@ def init_db() -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_meeting_tags_meeting ON meeting_tags(meeting_id);
                 CREATE INDEX IF NOT EXISTS idx_meeting_tags_tag ON meeting_tags(tag);
+
+                CREATE TABLE IF NOT EXISTS agent_roles (
+                    id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    perspective TEXT NOT NULL DEFAULT '',
+                    expertise_domains TEXT NOT NULL DEFAULT '[]',
+                    risk_appetite TEXT NOT NULL DEFAULT 'balanced',
+                    default_stance TEXT NOT NULL DEFAULT '',
+                    evidence_preference TEXT NOT NULL DEFAULT 'balanced',
+                    model_override TEXT NOT NULL DEFAULT '',
+                    background_brief TEXT NOT NULL DEFAULT '',
+                    prompt_template TEXT NOT NULL DEFAULT '',
+                    is_builtin INTEGER NOT NULL DEFAULT 0,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active);
                 """
             )
             conn.commit()
@@ -235,6 +254,76 @@ def query_meetings(
             return {"items": items, "total": total}
         finally:
             conn.close()
+
+
+def get_meetings_by_ids(meeting_ids: list[str]) -> list[dict[str, Any]]:
+    """批量获取会议记录（用于历史会议引用）。
+
+    返回已完成的会议摘要列表，包含 topic、stage、status、artifact 摘要。
+    不包含运行中的会议（status='running'），也不包含已删除的会议。
+    """
+    if not meeting_ids:
+        return []
+    with _lock:
+        conn = _connect()
+        try:
+            placeholders = ",".join("?" for _ in meeting_ids)
+            rows = conn.execute(
+                f"SELECT id, topic, status, stage, created_at, payload "
+                f"FROM meetings WHERE id IN ({placeholders}) "
+                f"AND status NOT IN ('deleted', 'running') "
+                f"ORDER BY created_at DESC",
+                meeting_ids,
+            ).fetchall()
+            out = []
+            for row in rows:
+                d = dict(row)
+                payload = json.loads(d["payload"])
+                d["payload"] = payload
+                d["clarified_topic"] = payload.get("clarified_topic", d["topic"])
+                d["key_questions"] = payload.get("key_questions", [])
+                d["artifact"] = payload.get("artifact")
+                d["decision_record"] = payload.get("decision_record")
+                d["flow_plan"] = payload.get("flow_plan", "full")
+                # 提取产出摘要
+                art = d["artifact"]
+                if art:
+                    d["artifact_summary"] = _extract_artifact_summary(art)
+                out.append(d)
+            return out
+        finally:
+            conn.close()
+
+
+def _extract_artifact_summary(artifact: dict[str, Any] | None) -> str:
+    """从 artifact 中提取简洁摘要文本"""
+    if not artifact:
+        return "（无产出）"
+    parts = []
+    if artifact.get("title"):
+        parts.append(artifact["title"])
+    if artifact.get("overview"):
+        parts.append(artifact["overview"])
+    if artifact.get("summary"):
+        parts.append(artifact["summary"])
+    if artifact.get("executive_summary"):
+        parts.append(artifact["executive_summary"])
+    if artifact.get("verdict"):
+        parts.append(artifact["verdict"])
+    if not parts:
+        # 尝试从 design_doc 等嵌套结构中提取
+        for key in ("design_doc", "comprehensive", "research_report", "business_report"):
+            inner = artifact.get(key, {})
+            if isinstance(inner, dict):
+                if inner.get("title"):
+                    parts.append(inner["title"])
+                if inner.get("overview"):
+                    parts.append(inner["overview"])
+                if inner.get("summary"):
+                    parts.append(inner["summary"])
+                if parts:
+                    break
+    return " | ".join(parts) if parts else "（无产出摘要）"
 
 
 # ---------- 标签 CRUD ----------
@@ -601,3 +690,129 @@ def delete_preference(user_id: str, key: str) -> bool:
             return cursor.rowcount > 0
         finally:
             conn.close()
+
+
+# ---------- Agent 角色 CRUD ----------
+
+
+def list_agent_roles(active_only: bool = False) -> list[dict[str, Any]]:
+    """列出所有角色，可选仅活跃角色"""
+    with _lock:
+        conn = _connect()
+        try:
+            if active_only:
+                rows = conn.execute(
+                    "SELECT * FROM agent_roles WHERE is_active = 1 ORDER BY is_builtin DESC, display_name ASC"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM agent_roles ORDER BY is_builtin DESC, display_name ASC"
+                ).fetchall()
+            return [_row_to_role_dict(r) for r in rows]
+        finally:
+            conn.close()
+
+
+def get_agent_role(role_id: str) -> dict[str, Any] | None:
+    """取单个角色"""
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM agent_roles WHERE id = ?", (role_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return _row_to_role_dict(row)
+        finally:
+            conn.close()
+
+
+def save_agent_role(role: dict[str, Any]) -> None:
+    """upsert 角色"""
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO agent_roles (
+                    id, display_name, perspective, expertise_domains,
+                    risk_appetite, default_stance, evidence_preference,
+                    model_override, background_brief, prompt_template,
+                    is_builtin, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    perspective=excluded.perspective,
+                    expertise_domains=excluded.expertise_domains,
+                    risk_appetite=excluded.risk_appetite,
+                    default_stance=excluded.default_stance,
+                    evidence_preference=excluded.evidence_preference,
+                    model_override=excluded.model_override,
+                    background_brief=excluded.background_brief,
+                    prompt_template=excluded.prompt_template,
+                    is_active=excluded.is_active,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    role["id"],
+                    role["display_name"],
+                    role.get("perspective", ""),
+                    json.dumps(role.get("expertise_domains", []), ensure_ascii=False),
+                    role.get("risk_appetite", "balanced"),
+                    role.get("default_stance", ""),
+                    role.get("evidence_preference", "balanced"),
+                    role.get("model_override", ""),
+                    role.get("background_brief", ""),
+                    role.get("prompt_template", ""),
+                    role.get("is_builtin", 0),
+                    role.get("is_active", 1),
+                    role.get("created_at", ""),
+                    role.get("updated_at", ""),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def delete_agent_role(role_id: str) -> bool:
+    """删除角色（内置角色不可删除）"""
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT is_builtin FROM agent_roles WHERE id = ?", (role_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            if row["is_builtin"]:
+                return False
+            conn.execute("DELETE FROM agent_roles WHERE id = ?", (role_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+def get_agent_roles_by_ids(role_ids: list[str]) -> list[dict[str, Any]]:
+    """批量取角色，按输入顺序返回"""
+    with _lock:
+        conn = _connect()
+        try:
+            placeholders = ",".join("?" for _ in role_ids)
+            rows = conn.execute(
+                f"SELECT * FROM agent_roles WHERE id IN ({placeholders}) AND is_active = 1",
+                role_ids,
+            ).fetchall()
+            role_map = {r["id"]: _row_to_role_dict(r) for r in rows}
+            return [role_map[rid] for rid in role_ids if rid in role_map]
+        finally:
+            conn.close()
+
+
+def _row_to_role_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """将 SQLite 行转为字典，解析 JSON 字段"""
+    d = dict(row)
+    d["expertise_domains"] = json.loads(d["expertise_domains"])
+    return d
