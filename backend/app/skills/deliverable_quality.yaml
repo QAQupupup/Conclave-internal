@@ -1,0 +1,53 @@
+# 产出评审清单 Skill
+# 定义不同类型产出物的验收标准和质量checklist
+
+id: deliverable_quality
+name: "产出质量验收"
+description: "不同类型产出物的验收标准和质量门槛，用于review阶段判断产出是否合格"
+version: 1
+type: checklist
+priority: 75
+tags: ["quality", "review", "acceptance"]
+
+applies_to:
+  stages: ["review", "arbitrate", "produce"]
+  deliverable_types: []
+  roles: ["moderator", "engineer"]
+  complexity: []
+
+prompt: |
+  # 产出质量验收标准
+
+  ## 通用质量门槛（所有产出必须满足）
+  1. 内容完整：不遗漏讨论中达成共识的关键结论
+  2. 逻辑一致：不与已确认的约束/证据冲突
+  3. 真实可执行：代码可运行、文档可操作、方案可落地
+  4. 不编造：不虚构数据、API、功能
+
+  ## 代码类产出验收（code_analysis/tested_system/deployable_service）
+  - [ ] 能在沙箱中正常启动/运行，无import错误
+  - [ ] 所有依赖在requirements.txt中正确声明（不含标准库）
+  - [ ] 有/health健康检查端点
+  - [ ] 数据库操作使用参数化查询
+  - [ ] 文件上传有安全检查
+  - [ ] 无硬编码密钥/密码
+  - [ ] README包含完整启动步骤
+  - [ ] Docker部署可正常build和run
+  - [ ] 端口在代码/Dockerfile/docker-compose三处一致
+  - [ ] 无mock数据，所有接口真实实现
+  - [ ] 必要目录在Dockerfile中创建
+
+  ## 文档类产出验收（prd_openapi/design_doc/research_report/business_report）
+  - [ ] 标题明确、结构清晰
+  - [ ] 关键决策有理由支撑
+  - [ ] 约束和假设明确列出
+  - [ ] API端点清单完整（PRD/OpenAPI）
+  - [ ] 开放问题明确标注
+  - [ ] 不包含TODO/占位符文本（除非明确标注为待补充）
+
+  ## 代码审查严重等级定义
+  - **critical**：服务无法启动、数据丢失风险、安全漏洞
+  - **high**：功能不工作、明显Bug、缺少关键安全措施
+  - **medium**：代码质量问题、性能问题、缺少文档
+  - **low**：风格问题、命名不规范、可优化点
+  - 存在critical或high问题时，产出不可接受，必须修复

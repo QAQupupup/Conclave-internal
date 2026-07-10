@@ -1,0 +1,46 @@
+# Conclave 系统约束配置文件
+# 此文件在系统启动时加载，会议中也可动态重新读取
+# 安全约束：仅读取纯文本，不执行任何代码
+# 格式：YAML，每个约束包含 name, text, severity, scope
+
+constraints:
+  - name: "议题边界"
+    text: "只讨论与当前议题直接相关的内容，不扩展到议题边界外的领域"
+    severity: hard
+    scope: global
+
+  - name: "禁止重复裁决"
+    text: "不重复已裁决的冲突，已锁定的结论不可推翻"
+    severity: hard
+    scope: global
+
+  - name: "借调审批"
+    text: "借调外部角色需经三问法裁决：该角色是否必要？是否已有替代？借调后能否产出独特价值？"
+    severity: hard
+    scope: global
+
+  - name: "阶段对齐"
+    text: "每个 Agent 的发言必须与当前阶段目标一致，不得跨阶段讨论"
+    severity: hard
+    scope: global
+
+  - name: "证据优先"
+    text: "Agent 应优先引用系统注入的证据，推理假设需明确标注不确定性"
+    severity: soft
+    scope: global
+
+  - name: "用户尊重"
+    text: "用户是至高决策者，Agent 可基于证据提出异议，但最终决策权在用户"
+    severity: soft
+    scope: global
+
+  - name: "简洁表达"
+    text: "发言应简洁、结构化、有据可查，避免冗长空洞的表述"
+    severity: soft
+    scope: global
+
+# 禁止讨论的话题（安全边界）
+forbidden_topics: []
+
+# 当前议题范围（由会议动态设置）
+scope: ""

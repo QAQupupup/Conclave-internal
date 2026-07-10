@@ -1,0 +1,69 @@
+# 代码生成规范 Skill
+# 封装代码质量要求，补充 bug_patterns 的正面规范
+
+id: code_conventions
+name: "代码生成规范"
+description: "代码生成时必须遵守的正面规范：项目结构、错误处理、安全、测试、文档等"
+version: 1
+type: checklist
+priority: 85
+tags: ["code", "quality", "conventions"]
+
+applies_to:
+  stages: ["produce", "review", "bugfix"]
+  deliverable_types: ["code_analysis", "tested_system", "deployable_service"]
+  roles: ["engineer"]
+  complexity: []
+
+prompt: |
+  # 代码生成规范
+
+  ## 项目结构规范
+  - 单文件不超过500行，超过时必须拆分为模块（routers/、models/、services/、auth/等）
+  - 简单服务（<300行）可以保持单文件 app.py
+  - 文件命名：snake_case.py，组件 PascalCase.tsx
+  - 配置项通过环境变量读取，提供合理默认值
+
+  ## 错误处理
+  - 所有外部IO（数据库、网络、文件）必须用try/except捕获
+  - API错误使用HTTPException返回合适的状态码（400/401/403/404/409/422/500）
+  - 不允许裸except:，必须指定异常类型
+  - 错误信息对用户友好，不要暴露堆栈/内部路径
+
+  ## 安全要求
+  - 所有用户输入必须验证（Pydantic模型/参数校验）
+  - SQL必须用参数化查询，禁止f-string拼接SQL
+  - 文件上传：消毒文件名（uuid重命名）、限制类型/大小、防止路径遍历
+  - 密码必须哈希存储（bcrypt/passlib），禁止明文
+  - JWT设置合理过期时间（access_token 24h以内）
+  - SECRET_KEY等敏感配置用环境变量，不硬编码
+  - CORS默认只允许localhost开发地址，生产环境通过环境变量配置
+  - 认证接口加rate limit
+
+  ## API设计
+  - RESTful风格：GET查询、POST创建、PUT更新、DELETE删除
+  - 统一响应格式：成功 `{"data": ...}`、错误 `{"detail": "..."}`
+  - 分页接口：支持 limit/offset 或 page/page_size，返回 total
+  - 必须提供 `/health` 健康检查端点返回 `{"status":"ok"}`
+  - API前缀统一用 `/api/v1/...`
+
+  ## 数据库
+  - 连接必须在所有路径（含异常）关闭，用context manager或try/finally
+  - 启用WAL模式（SQLite）提升并发
+  - 初始化时创建表和索引，用CREATE TABLE IF NOT EXISTS
+  - 外键约束必须开启（SQLite需PRAGMA foreign_keys=ON）
+
+  ## Docker/部署
+  - uvicorn必须绑定 `0.0.0.0`（不是127.0.0.1）
+  - Dockerfile基于python:3.12-slim，需要C扩展时安装gcc
+  - 必要目录（uploads/、data/）在Dockerfile中mkdir创建
+  - docker-compose.yml包含服务、端口映射、卷挂载
+  - README.md必须包含：功能简介、环境要求、安装步骤、配置说明、启动命令、默认账号密码、API端口
+  - requirements.txt版本固定（==x.y.z），只包含第三方包（不含标准库）
+  - Dockerfile、docker-compose、代码三处端口必须一致
+
+  ## 真实性要求
+  - 所有接口必须是真实实现，禁止返回硬编码mock数据
+  - 如果某个功能因Token预算简化实现，必须在代码注释中注明 `// TODO: 简化实现，需完善`
+  - 统计/分析类接口必须基于真实数据库查询
+  - 不要承诺未实现的功能

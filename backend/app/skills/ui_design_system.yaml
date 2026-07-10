@@ -1,0 +1,91 @@
+# UI 设计系统 Skill
+# 封装用户的审美偏好和前端设计规则
+# 来源：《个人签单风格与逻辑规范 v1.0》+ 历次前端Bug修复经验沉淀
+
+id: ui_design_system
+name: "UI设计系统"
+description: "用户的审美偏好、色彩体系、排版规则和前端反模式清单。生成任何前端代码（HTML/CSS/React组件）时必须遵守。"
+version: 2
+type: style
+priority: 90
+tags: ["design", "frontend", "css", "aesthetic"]
+
+applies_to:
+  stages: ["produce"]
+  deliverable_types: ["deployable_service", "design_doc"]
+  roles: ["engineer", "ux_designer"]
+  complexity: []  # 所有复杂度
+
+prompt: |
+  # 设计系统规范（必须严格遵守）
+
+  ## 核心设计哲学
+  - **反装饰，功能优先**：不为装饰而装饰，每个视觉元素必须服务于信息传达
+  - **克制色彩，纯色为王**：大面积留白+单一品牌色点缀，禁止多彩渐变、彩虹色
+  - **信息密度优先**：在可读性前提下尽量提高信息密度，避免不必要的padding/margin浪费
+  - **场景分层，各司其职**：不同层级信息用不同灰度区分，不依赖颜色区分层级
+
+  ## 色彩体系
+  - 背景：纯白 `#ffffff` 为主，次级 `#fafafa`，三级 `#f4f6f8`，悬浮 `#f4f6f8`
+  - 品牌色：**沉稳靛蓝 `#335c8e`**（唯一主色调，用于按钮、链接、选中态、强调）
+  - 品牌色悬浮态：`#264670`；浅色背景：`rgba(51,92,142,0.06)`
+  - 文字：主文字 `#111827`（冷灰非纯黑），次级 `#6b7280`，辅助 `#9ca3af`
+  - 边框：常规 `#e5e7eb`，柔和 `#f3f4f6`，强调 `#d1d5db`
+  - 状态色：成功 `#2d8a56`、警告 `#b87d2b`、错误 `#c53030`、信息 `#335c8e`
+  - 状态色背景：6%透明度（如 `rgba(45,138,86,0.06)`）
+  - **糖果色标记**（仅用于小面积点缀）：角色标识可用低饱和糖果色（#8B8FC8、#B07FD1、#E8A5C4、#7DB8A8 等），但面积不超过5%
+
+  ## 排版规则
+  - 字体：Inter, -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif
+  - 等宽字体："JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace
+  - 字号层级：标题16-18px semibold、正文13-14px、辅助11-12px、代码12px
+  - 行高：正文1.5-1.6，标题1.3
+  - 字重：常规400、中等500、半粗600、粗体700（不要用900/black）
+
+  ## 形状与间距
+  - 圆角：小元素4px、卡片6-8px、按钮6px、胶囊999px（全圆角仅用于badge/pill）
+  - 阴影：**极轻阴影**，透明度0.04-0.06，禁止重阴影和发光效果
+    - xs: `0 1px 2px rgba(0,0,0,0.04)`
+    - sm: `0 1px 3px rgba(0,0,0,0.06)`
+    - focus: `0 0 0 2px rgba(51,92,142,0.15)`
+  - 间距基准：4px为单位（4/8/12/16/20/24/32/40/48/64px）
+  - 过渡：`0.15s cubic-bezier(0.16,1,0.3,1)`，仅用于颜色/透明度/transform，**禁止动画布局属性**（width/height/top/left）
+
+  ## 布局与组件规范
+  - 表格：Notion风格，柔和表头（`#fafafa`背景）、浅灰行线（`#f3f4f6`）、扁平无阴影
+  - 按钮：主按钮靛蓝底白字、次按钮白底灰边框、文字按钮无底色
+  - Badge/Tag：inline-flex、左右padding 6px、圆角3px、字号11px、font-weight 600、line-height 1.6、max-width 200px截断
+  - 卡片：1px `#e5e7eb`边框、8px圆角、白色背景、无阴影（hover时才加sm阴影）
+  - 输入框：1px `#d1d5db`边框、6px圆角、focus时边框变`#335c8e`+focus ring
+
+  ## 前端CSS反模式（必须避免）
+  1. **文字溢出**：所有可能溢出的文本容器必须设置溢出保护：
+     - 单行截断：`overflow: hidden; text-overflow: ellipsis; white-space: nowrap`
+     - 多行文本：`word-break: break-word; overflow-wrap: anywhere`
+     - flex子项必须设 `min-width: 0`（否则flex item不会收缩导致溢出）
+     - 固定宽度文字标签设 `flex-shrink: 0` 防止被压缩
+  2. **Flex布局陷阱**：
+     - flex容器的子项需要收缩时，必须给子项设 `min-width: 0` 或 `min-height: 0`
+     - 不要让长文本撑破flex容器：给文本容器 `flex: 1; min-width: 0`
+     - 代码块/pre标签：必须 `overflow-x: auto` + `max-width: 100%`
+  3. **z-index管理**：modal=1000、dropdown=100、tooltip=200、toast=300，禁止使用9999
+  4. **禁止**：大面积渐变、3D效果、重阴影、动画布局属性、text-shadow、!important
+  5. **图表设计**：
+     - 数据点不超过12个（超过则采样）
+     - 线条宽度1.5px，不用蓝色用柔和深灰蓝
+     - 数据点标签仅显示端点或关键节点
+     - Y轴自动计算间隔避免重复标签
+     - canvas渲染优先，禁用入场动画
+  6. **Modal/面板**：
+     - 标题必须flex+截断，防止长标题挤压关闭按钮
+     - body必须 `overflow-x: hidden`
+     - 内容区设 `min-width: 0` 防止子元素撑开
+  7. **列表/会议列表**：最新内容在最上方（倒序，DESC by created_at），不要reverse
+  8. **中英文混排**：中文与英文/数字之间加半角空格（如"创建于 3 天前"）
+
+  ## 交互设计
+  - Hover反馈必须即时（0.15s过渡）
+  - 点击区域不小于32x32px（按钮最小尺寸）
+  - 加载状态使用skeleton或spinner，不要空白
+  - 错误状态要有明确的错误信息和恢复建议
+  - 空状态要有引导文案，不要只显示空白

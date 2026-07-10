@@ -1,0 +1,273 @@
+# Conclave 代码生成经验库
+# 本文件记录历次代码生成中发现的常见Bug和最佳实践，
+# 在每次produce阶段注入LLM prompt，避免重复犯错。
+# 维护规则：每次BugFix循环修复问题后，将根因+修复模式追加到对应分类。
+
+version: 1
+last_updated: "2026-07-10"
+
+# ===== Python/FastAPI 常见错误 =====
+python_fastapi:
+  - id: PY001
+    name: "忘记导入timedelta"
+    pattern: "使用了 datetime.utcnow() + timedelta(...) 但只 import 了 datetime, date"
+    fix: "必须同时 from datetime import datetime, timedelta, date"
+    severity: critical
+    example_bad: "from datetime import datetime, date\n# ... 使用了 timedelta(hours=24) 导致 NameError"
+    example_good: "from datetime import datetime, timedelta, date"
+
+  - id: PY002
+    name: "requirements.txt包含标准库"
+    pattern: "把 sqlite3、json、os、sys、uuid、datetime 等标准库写入 requirements.txt"
+    fix: "pip 无法安装标准库，requirements.txt 只放第三方包。sqlite3 是 Python 内置的，不要列出。"
+    severity: critical
+    example_bad: "fastapi==0.104.1\nsqlite3\nuvicorn==0.24.0"
+    example_good: "fastapi==0.104.1\nuvicorn[standard]==0.24.0"
+
+  - id: PY003
+    name: "JWT库混用"
+    pattern: "代码用 import jwt（PyJWT）但requirements装 python-jose[cryptography]，或反之"
+    fix: "必须保持一致。推荐使用 PyJWT：代码 import jwt，requirements 写 PyJWT==2.8.0"
+    severity: critical
+    example_bad: "代码: import jwt / requirements: python-jose[cryptography]==3.3.0"
+    example_good: "代码: import jwt / requirements: PyJWT==2.8.0"
+
+  - id: PY004
+    name: "数据库连接未正确关闭"
+    pattern: "在异常路径中忘记关闭数据库连接导致资源泄漏"
+    fix: "所有数据库操作使用 try/finally 或 context manager 确保 conn.close()"
+    severity: high
+
+  - id: PY005
+    name: "SQL注入风险"
+    pattern: "用f-string拼接SQL查询参数"
+    fix: "必须使用参数化查询 ? 占位符，绝不能用f-string拼接用户输入到SQL中"
+    severity: critical
+    example_bad: "f\"SELECT * FROM users WHERE username='{username}'\""
+    example_good: "\"SELECT * FROM users WHERE username=?\", (username,)"
+
+  - id: PY006
+    name: "硬编码密钥"
+    pattern: "SECRET_KEY硬编码为 'your-secret-key-change-in-production' 或类似默认值"
+    fix: "使用 os.environ.get('SECRET_KEY', 'dev-only-change-me')，在README中提醒用户在生产环境设置环境变量"
+    severity: medium
+
+  - id: PY007
+    name: "CORS配置过于宽泛"
+    pattern: "allow_origins=['*'] 在生产环境中不安全"
+    fix: "默认只允许 http://localhost:3000 和 http://localhost:5173 等开发地址，通过环境变量配置"
+    severity: medium
+
+  - id: PY008
+    name: "文件上传路径遍历"
+    pattern: "直接用用户上传的文件名拼接路径保存"
+    fix: "使用 uuid 生成安全文件名，原始文件名存入数据库；验证文件扩展名；uploads目录放在项目子目录"
+    severity: high
+    example_bad: "with open(f'uploads/{file.filename}', 'wb') as f:"
+    example_good: "safe_name = f'{uuid.uuid4()}_{secure_filename(file.filename)}'"
+
+  - id: PY009
+    name: "pwd_context和bcrypt兼容性"
+    pattern: "passlib的bcrypt在某些Python版本中与bcrypt库版本不兼容"
+    fix: "requirements 中指定 passlib[bcrypt]==1.7.4 且 bcrypt==4.0.1，或改用 pwd_context.hash() 前测试"
+    severity: medium
+
+  - id: PY010
+    name: "datetime.utcnow()已弃用"
+    pattern: "Python 3.12 中 datetime.utcnow() 被标记弃用"
+    fix: "使用 datetime.now(timezone.utc)，但为了简单性可继续用utcnow()，不要混用两种方式"
+    severity: low
+
+# ===== Docker/部署常见错误 =====
+docker_deployment:
+  - id: DK001
+    name: "Dockerfile CMD模块路径错误"
+    pattern: "文件名叫 app.py 但 CMD 写 uvicorn main:app 或反过来"
+    fix: "确保 CMD 中的模块名与实际文件名一致。文件是 app.py → CMD [\"uvicorn\", \"app:app\", ...]"
+    severity: critical
+
+  - id: DK002
+    name: "docker-compose中build上下文错误"
+    pattern: "Dockerfile中COPY . . 但build上下文不对，导致文件找不到"
+    fix: "确保build context是项目根目录；Dockerfile放在项目根；所有COPY源文件都在context内"
+    severity: high
+
+  - id: DK003
+    name: "数据库文件卷挂载路径不一致"
+    pattern: "Dockerfile中WORKDIR /app但docker-compose卷挂载到./data:/data，代码连./wiki.db"
+    fix: "统一使用WORKDIR /app，数据库文件放在/app/data/，卷挂载./data:/app/data"
+    severity: high
+
+  - id: DK004
+    name: "容器内pip安装失败"
+    pattern: "python:3.12-slim镜像缺少gcc导致含C扩展的包安装失败"
+    fix: "如果requirements中有需要编译的包（如bcrypt、numpy），在pip install前执行 apt-get update && apt-get install -y --no-install-recommends gcc python3-dev && rm -rf /var/lib/apt/lists/*"
+    severity: high
+
+  - id: DK005
+    name: "端口暴露不一致"
+    pattern: "Dockerfile EXPOSE 8000 但代码uvicorn监听8080或0.0.0.0绑定错误"
+    fix: "必须一致：EXPOSE端口=uvicorn端口；host必须是0.0.0.0不能是127.0.0.1（容器外无法访问）"
+    severity: critical
+    example_bad: "uvicorn.run(app, host='127.0.0.1', port=8000)"
+    example_good: "uvicorn.run(app, host='0.0.0.0', port=8000)"
+
+  - id: DK006
+    name: "忘记创建必要目录"
+    pattern: "代码写 uploads/ 目录但Dockerfile中没有mkdir，容器内目录不存在导致写文件失败"
+    fix: "Dockerfile中添加 RUN mkdir -p uploads data 等必要目录"
+    severity: high
+
+# ===== 前端/React常见错误 =====
+frontend_react:
+  - id: FE001
+    name: "API地址硬编码"
+    pattern: "前端fetch('http://localhost:8000/api/...') 硬编码后端地址"
+    fix: "使用环境变量 VITE_API_URL 或相对路径 /api/，通过Vite proxy配置代理"
+    severity: high
+
+  - id: FE002
+    name: "缺少key prop"
+    pattern: "列表渲染时忘记给元素加key属性"
+    fix: "使用稳定唯一ID作为key，不要用数组index（列表变化时会出问题）"
+    severity: medium
+
+  - id: FE003
+    name: "Flex子项溢出/文本撑破容器"
+    pattern: "flex布局中长文本/代码块撑破容器，导致页面横向滚动或内容溢出"
+    fix: "flex容器的子项需要收缩时必须设 min-width:0；文本容器设 flex:1;min-width:0；单行截断用 overflow:hidden;text-overflow:ellipsis;white-space:nowrap；多行用 word-break:break-word;overflow-wrap:anywhere"
+    severity: critical
+    example_bad: ".flex-child { flex: 1; } /* 长文本仍会溢出 */"
+    example_good: ".flex-child { flex: 1; min-width: 0; overflow: hidden; }"
+
+  - id: FE004
+    name: "Modal/Drawer内容溢出"
+    pattern: "弹窗/抽屉内长内容撑开容器，关闭按钮被挤走，标题挤压，body出现横向滚动条"
+    fix: "Modal标题用flex+min-width:0+truncate；Modal body设 overflow-x:hidden;min-width:0；内容区设max-height+overflow-y:auto"
+    severity: high
+    example_bad: ".modal-body { padding: 16px; } /* 子元素可撑开modal */"
+    example_good: ".modal-body { overflow-x: hidden; min-width: 0; max-height: 70vh; overflow-y: auto; }"
+
+  - id: FE005
+    name: "图表设计反模式（ECharts/折线图）"
+    pattern: "折线图数据点过多（>20个）、线条过粗（>2px）、使用高饱和蓝色、面积填充过重、入场动画过长、Y轴标签重复重叠、所有数据点都显示标签导致拥挤"
+    fix: "1) 数据点限制最多12个（超过则采样/takeRecent）；2) 线条宽度1.5px，颜色用柔和深灰蓝(#4A5568)而非品牌蓝；3) 去掉面积填充或用5%以下透明度；4) 仅首尾数据点显示symbol圆点；5) 末点显示数值标签(endLabel)；6) Y轴calcMinInterval自动计算避免标签重复；7) 网格线极淡#F7F8F9；8) 禁用入场动画或设为200-500ms；9) canvas渲染优先；10) tooltip appendToBody+confine防止溢出"
+    severity: high
+
+  - id: FE006
+    name: "CSS动画布局属性导致抖动"
+    pattern: "对width/height/top/left/padding/margin使用transition动画，导致布局重排(relayout)和页面卡顿"
+    fix: "只动画以下属性：color、background-color、border-color、opacity、transform、box-shadow。用transform:scale/translate代替width/height变化实现动画效果。"
+    severity: medium
+    example_bad: "transition: width 0.3s ease;"
+    example_good: "transition: transform 0.15s cubic-bezier(0.16,1,0.3,1), opacity 0.15s cubic-bezier(0.16,1,0.3,1);"
+
+  - id: FE007
+    name: "Badge/Tag文本溢出"
+    pattern: "标签/徽章文字过长时挤压布局或溢出容器边界"
+    fix: "Badge/Tag必须：display:inline-flex;align-items:center;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap；左右padding 6px、border-radius 3px、font-size 11px、font-weight 600"
+    severity: medium
+
+  - id: FE008
+    name: "z-index层级混乱"
+    pattern: "到处使用z-index:9999，导致弹窗被遮挡、下拉菜单出现在遮罩下面、tooltip穿透modal"
+    fix: "建立z-index层级体系：modal/drawer=1000、dropdown/popover=100、tooltip=200、toast=300、overlay=900。禁止使用9999及以上。"
+    severity: medium
+
+  - id: FE009
+    name: "列表排序方向错误"
+    pattern: "消息列表/会议列表/日志列表显示为正序（最早的在最上面），用户需要滚动到底部才能看到最新内容"
+    fix: "时间序列表统一倒序(DESC by created_at/timestamp)，最新内容在最上方。聊天消息流可正序（最新在底部）但需自动滚动到底部。"
+    severity: medium
+
+  - id: FE010
+    name: "ECharts/Canvas内存泄漏"
+    pattern: "组件unmount时未dispose ECharts实例，未清理ResizeObserver，导致内存泄漏和'Canvas is too large'警告"
+    fix: "useEffect cleanup中调用 chart.dispose()；ResizeObserver在cleanup中disconnect()；MutationObserver也需要cleanup；使用useRef保存实例引用。"
+    severity: high
+
+  - id: FE011
+    name: "UTF-8 BOM导致Python解析错误"
+    pattern: "Windows编辑器保存的文件含UTF-8 BOM(\\ufeff)，导致Python解析YAML/JSON/Python源码时出现编码错误"
+    fix: "所有源码文件保存为UTF-8无BOM格式。如果出现问题，用Python脚本：open(f,'r',encoding='utf-8-sig').read()然后open(f,'w',encoding='utf-8').write(content)去除BOM。"
+    severity: high
+
+  - id: FE012
+    name: "CSS阴影/渐变/装饰过重"
+    pattern: "使用多重阴影、大面积渐变背景、text-shadow、3D变换、发光效果，视觉噪音大"
+    fix: "遵循极简设计：阴影仅用xs(0 1px 2px rgba(0,0,0,0.04))或sm(0 1px 3px rgba(0,0,0,0.06))；禁止大面积渐变和彩虹色；品牌色仅用单一靛蓝#335c8e；背景以白色/浅灰为主。"
+    severity: medium
+
+  - id: FE013
+    name: "PostCSS @import解析错误"
+    pattern: "Vite+PostCSS 8.5+环境中使用CSS @import拆分文件时出现'Unclosed block'解析错误"
+    fix: "避免用CSS @import拆分样式文件。改为物理合并到单文件+注释分区，或使用CSS Modules/Tailwind方案。"
+    severity: medium
+
+# ===== 架构/设计常见问题 =====
+architecture:
+  - id: AR001
+    name: "Mock数据代替真实实现"
+    pattern: "分析统计类接口返回硬编码的mock数据而非真实数据库查询"
+    fix: "如果时间/Token预算不足以实现完整功能，要么明确标注TODO和简化实现，要么在接口文档中说明返回样例数据。绝不能假装实现了功能却返回假数据。"
+    severity: high
+
+  - id: AR002
+    name: "功能与需求不符"
+    pattern: "用户要Wiki系统但只生成了基础CRUD，缺少Wiki特色功能（[[页面链接]]、Markdown渲染、全文搜索、版本对比）"
+    fix: "在PRD阶段明确核心功能清单；代码实现时优先保证核心功能可用，次要功能可简化但必须标注"
+    severity: high
+
+  - id: AR003
+    name: "单文件过大"
+    pattern: "所有代码堆在一个app.py中超过1000行"
+    fix: "当代码超过500行时，应拆分为 routers/、models/、auth/、db/ 等模块"
+    severity: medium
+
+  - id: AR004
+    name: "缺少健康检查接口"
+    pattern: "服务没有 /health 或 / 根路径接口，无法验证服务是否正常启动"
+    fix: "添加 @app.get('/health') 或 @app.get('/') 返回 {\"status\": \"ok\"}"
+    severity: high
+
+  - id: AR005
+    name: "README不包含启动步骤"
+    pattern: "README缺少pip install、环境变量、启动命令、默认账号密码等关键信息"
+    fix: "README必须包含：1) 功能简介 2) 环境要求 3) 安装步骤 4) 配置说明（环境变量） 5) 启动命令 6) 默认账号密码 7) API端口"
+    severity: high
+
+  - id: AR006
+    name: "默认账号密码未在README中标注"
+    pattern: "如果系统有默认管理员账号，必须在README中清晰标注"
+    fix: "在README的'快速开始'部分明确写出：默认账号: admin / 默认密码: admin123（或说明需要首次注册）"
+    severity: high
+
+# ===== 代码Review检查清单 =====
+review_checklist:
+  # 后端通用
+  - "所有import是否完整？（特别是timedelta、BaseModel子类等）"
+  - "requirements.txt是否只包含第三方包？（不能有标准库）"
+  - "JWT/密码库是否与代码import一致？"
+  - "Dockerfile CMD模块名是否与文件名一致？"
+  - "uvicorn是否绑定0.0.0.0而非127.0.0.1？"
+  - "端口号是否在代码、Dockerfile、docker-compose.yml三处一致？"
+  - "数据库连接是否在所有路径下正确关闭？"
+  - "是否有SQL注入风险（用参数化查询而非f-string拼接）？"
+  - "文件上传是否安全（uuid重命名、类型限制、无路径遍历）？"
+  - "是否有/health健康检查端点？"
+  - "是否有硬编码密钥？（SECRET_KEY等应从环境变量读取）"
+  - "README是否包含完整启动步骤和默认账号密码？"
+  - "所有接口是否是真实实现而非mock数据？"
+  - "必要目录（uploads/、data/）是否在Dockerfile中创建？"
+  - "CORS配置是否合理（不过于宽泛）？"
+  # 前端专项
+  - "Flex子项是否设置了min-width:0防止长文本溢出？"
+  - "可能溢出的文本是否有text-overflow:ellipsis或word-break？"
+  - "Modal/Drawer是否设置overflow-x:hidden和min-width:0？"
+  - "ECharts实例是否在useEffect cleanup中dispose？ResizeObserver/MutationObserver是否disconnect？"
+  - "CSS transition是否只动画color/opacity/transform，而非width/height等布局属性？"
+  - "z-index是否遵循层级规范（modal=1000, dropdown=100, tooltip=200, toast=300），禁止9999？"
+  - "时间序列表是否倒序显示（最新内容在最上方）？"
+  - "Badge/Tag是否设置max-width+ellipsis防止文字溢出？"
+  - "图表数据点是否限制在12个以内？线条是否1.5px细线柔和色系？"
+  - "源码文件是否保存为UTF-8无BOM格式？"
