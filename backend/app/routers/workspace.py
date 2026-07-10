@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.observability.log_bus import log_bus
 from app.sandbox import run_command, run_python, get_status as sandbox_status
 
@@ -18,12 +19,8 @@ router = APIRouter(prefix="/workspace", tags=["workspace"])
 
 # ---- 安全配置 ----
 
-# 工作区根目录：默认为项目根目录下的 workspace/，可通过环境变量覆盖
-_DEFAULT_WS = os.environ.get(
-    "CONCLAVE_WORKSPACE_DIR",
-    str(Path(__file__).resolve().parents[3] / "workspace"),
-)
-WORKSPACE_ROOT = Path(_DEFAULT_WS).resolve()
+# 工作区根目录：使用 config.settings 中的 workspace_root（与 produce_node 写入路径一致）
+WORKSPACE_ROOT = Path(settings.workspace_root).resolve()
 WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
 
 # 命令执行超时（秒）
@@ -122,13 +119,24 @@ async def list_files(path: str = "") -> dict[str, Any]:
             stat = child.stat()
         except OSError:
             continue
+        is_dir = child.is_dir()
+        # [CON-11 修复] 子节点计数：递归树渲染需要预知目录是否可展开
+        # 旧版客户端只展示一层目录，要看到内嵌结构需多次请求
+        child_count = 0
+        if is_dir:
+            try:
+                child_count = sum(1 for c in child.iterdir() if not c.name.startswith(".") and c.name != "__pycache__")
+            except OSError:
+                child_count = 0
         items.append(
             {
                 "name": child.name,
                 "path": str(child.relative_to(WORKSPACE_ROOT)).replace("\\", "/"),
-                "type": "directory" if child.is_dir() else "file",
-                "size": stat.st_size if child.is_file() else 0,
+                "type": "directory" if is_dir else "file",
+                "size": stat.st_size if not is_dir else 0,
                 "modified": stat.st_mtime,
+                "child_count": child_count,
+                "expanded": False,
             }
         )
     return {

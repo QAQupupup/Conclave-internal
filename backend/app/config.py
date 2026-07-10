@@ -46,19 +46,48 @@ class Settings:
     rerank_base_url: str = _env("CONCLAVE_RERANK_BASE_URL", "")
     rerank_model: str = _env("CONCLAVE_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 
-    # 向量库地址：留空走内存向量存储
+    # Qdrant 向量库 URL（为空时用内存伪向量）
+    # Docker 内用容器名访问，本机开发用 localhost
+    # [CON-18 修复] 旧版在 L50 和 L78 重复定义 qdrant_url 字段，
+    # Python @dataclass(frozen=True) 实际上保留最后一个定义，
+    # 行为无歧义但严重违反代码规范。本次合并为单一定义。
+    # 默认值为空（与 use_qdrant property 配合：空值 → 用内存伪向量）
     qdrant_url: str = _env("CONCLAVE_QDRANT_URL", "")
     qdrant_collection: str = _env("CONCLAVE_QDRANT_COLLECTION", "conclave_chunks")
 
-    # SQLite 数据库路径
-    sqlite_path: str = _env("CONCLAVE_DB_PATH", "conclave.db")
+    # 数据库路径：SQLite（兼容旧模式，逐步迁移到 PostgreSQL）
+    sqlite_path: str = os.getenv("CONCLAVE_DB_PATH", "conclave.db")
+
+    # PostgreSQL 连接 URL（SQLAlchemy async）
+    # 格式: postgresql+asyncpg://user:pass@host:5432/db
+    database_url: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://conclave:conclave_dev@localhost:5432/conclave",
+    )
+
+    # Redis 连接 URL
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+    # 数据库模式：sqlite | postgresql（自动检测）
+    @property
+    def db_mode(self) -> str:
+        if self.database_url.startswith("postgresql"):
+            return "postgresql"
+        return "sqlite"
 
     # StubEmbedding 伪向量维度（仅 stub 模式用）
     embed_dim: int = int(_env("CONCLAVE_EMBED_DIM", "64"))
 
-    # Qdrant 向量库 URL（为空时用内存伪向量）
-    # Docker 内用容器名访问，本机开发用 localhost
-    qdrant_url: str = _env("CONCLAVE_QDRANT_URL", "http://qdrant:6333")
+    # [CON-18 修复] 删除了行 78 的 qdrant_url 重复字段定义。
+    # 单一来源：见 L50 附近。
+
+    # 会议工作区根目录
+    # [CON-24 修复] 旧版用 tempfile.mkdtemp() 创建会议工作区，进程崩溃后无法清理。
+    # 改为：默认 <conclave_root>/workspace/meetings/，每次启动清理孤立临时目录。
+    workspace_root: str = _env(
+        "CONCLAVE_WORKSPACE_DIR",
+        str(Path.home() / ".conclave" / "workspace"),
+    )
 
     # 三层记忆开关：CONCLAVE_MEMORY_DISABLED 环境变量存在（非空）时禁用
     memory_enabled: bool = _env("CONCLAVE_MEMORY_DISABLED", "") == ""

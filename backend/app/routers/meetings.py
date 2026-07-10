@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Any
@@ -10,13 +11,16 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.db import (
+from app.db_legacy import (
     add_meeting_tag,
     batch_delete_meetings,
+    get_agent_roles_by_ids,
     get_meeting,
     get_meeting_tags,
+    get_meetings_by_ids,
     hard_delete_meeting,
     list_all_tags,
+    list_agent_roles,
     list_messages,
     list_meetings,
     query_meetings,
@@ -29,9 +33,11 @@ from app.events import bus, make_event
 from app.models import MeetingStatus, Stage
 from app.orchestrator.runner import (
     Runner,
+    clear_state,
     get_state,
     load_or_create,
     set_state,
+    _process_interventions,
 )
 from app.orchestrator.state import apply_signal
 
@@ -53,6 +59,8 @@ class CreateMeetingRequest(BaseModel):
     """创建会议请求"""
     topic: str = Field(..., description="会议议题")
     deliverable_type: str = Field("prd_openapi", description="产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|code_analysis|tested_system")
+    role_ids: list[str] = Field(default_factory=list, description="预选角色 ID 列表，为空则自动生成")
+    reference_meeting_ids: list[str] = Field(default_factory=list, description="引用的历史会议 ID 列表")
 
 
 class CreateMeetingResponse(BaseModel):
@@ -91,6 +99,34 @@ class AddTagRequest(BaseModel):
 
 # ---------- 端点 ----------
 
+def _build_reference_context(ref_meetings: list[dict[str, Any]]) -> str:
+    """将引用的历史会议构建为注入 prompt 的上下文文本"""
+    if not ref_meetings:
+        return ""
+    lines = ["【历史会议参考】以下是你参与过的历史会议，请参考其结论、经验和产出："]
+    for i, m in enumerate(ref_meetings, 1):
+        topic = m.get("clarified_topic", m.get("topic", ""))
+        artifact_summary = m.get("artifact_summary", "无产出")
+        flow = m.get("flow_plan", "full")
+        decisions = m.get("decision_record", {})
+        decisions_text = ""
+        if isinstance(decisions, dict) and decisions.get("decisions"):
+            decisions_text = "；".join(
+                d.get("rationale", "")[:80] for d in decisions["decisions"]
+                if isinstance(d, dict)
+            )
+        key_qs = m.get("key_questions", [])
+        key_qs_text = "；".join(key_qs[:3]) if key_qs else "无"
+        lines.append(
+            f"\n{i}. 会议「{topic}」\n"
+            f"   关键问题：{key_qs_text}\n"
+            f"   产出摘要：{artifact_summary}\n"
+            f"   仲裁结论：{decisions_text or '无'}"
+        )
+    lines.append("\n请在本次会议中参考以上历史会议的结论，避免重复错误，并在此基础上深入讨论。")
+    return "\n".join(lines)
+
+
 @router.post("", response_model=CreateMeetingResponse)
 async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     """创建会议"""
@@ -112,6 +148,35 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     # 初始化运行态
     state = load_or_create(meeting_id, req.topic)
     state.deliverable_type = req.deliverable_type
+
+    # 加载角色配置：优先使用传入的 role_ids，否则从库中取所有活跃角色
+    if req.role_ids:
+        from app.routers.agent_roles import _init_builtin_roles
+        _init_builtin_roles()
+        role_rows = get_agent_roles_by_ids(req.role_ids)
+    else:
+        from app.routers.agent_roles import _init_builtin_roles
+        _init_builtin_roles()
+        role_rows = list_agent_roles(active_only=True)
+    state.role_configs = role_rows
+
+    # team_config 兼容：从 role_configs 构建
+    state.team_config = [
+        {"role": r["id"], "stance": r.get("default_stance", "")}
+        for r in role_rows
+    ]
+
+    # 历史会议引用：存储 ID 并构建参考上下文
+    state.reference_meeting_ids = [mid for mid in req.reference_meeting_ids if mid != meeting_id]
+    if state.reference_meeting_ids:
+        ref_meetings = get_meetings_by_ids(state.reference_meeting_ids)
+        state.reference_context = _build_reference_context(ref_meetings)
+        log_bus.info(
+            f"历史会议引用: count={len(ref_meetings)}",
+            logger="routers.meetings",
+            extra={"meeting_id": meeting_id, "ref_count": len(ref_meetings)},
+        )
+
     # 持久化
     save_meeting(
         meeting_id=meeting_id,
@@ -124,6 +189,12 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     # 发布创建事件
     await bus.publish(
         make_event("meeting.created", meeting_id, {"meeting_id": meeting_id, "topic": req.topic})
+    )
+    # [CON-20 修复] 同步广播 system 事件，通知前端 TaskBoard/Dashboard/Sidebar 立即刷新
+    # 旧版依赖 5-10s 轮询，造成用户操作反馈延迟。系统级事件 meeting_id="*"
+    await bus.publish(
+        make_event("system.meetings.changed", "*",
+                   {"action": "created", "meeting_id": meeting_id, "topic": req.topic})
     )
     return CreateMeetingResponse(
         meeting_id=meeting_id,
@@ -178,8 +249,17 @@ async def batch_delete(req: BatchDeleteRequest) -> dict[str, Any]:
         },
     )
     # 清理已删除会议的内存态
+    # [CON-17 修复] set_state(mid, None) 会因签名不匹配触发 TypeError，
+    # 改为 clear_state(mid) 以正确清理内存态。
     for mid in result["deleted"]:
-        set_state(mid, None)
+        clear_state(mid)
+
+    # [CON-20] system 广播：让前端 TaskBoard/Dashboard/Sidebar 立即感知
+    if result["deleted"]:
+        await bus.publish(
+            make_event("system.meetings.changed", "*",
+                       {"action": req.mode, "meeting_ids": result["deleted"]})
+        )
 
     return {
         "deleted": result["deleted"],
@@ -207,14 +287,188 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
         "clarified_topic": state.clarified_topic,
         "key_questions": state.key_questions,
         "team_config": state.team_config,
+        "role_configs": state.role_configs,
         "claims": state.claims,
         "conflicts": state.conflicts,
         "evidence_set": state.evidence_set,
         "decision_record": state.decision_record,
         "artifact": state.artifact,
         "messages": state.messages,
+        "intervention_messages": state.intervention_messages,
         "llm_trace": state.llm_trace.summary(),
         "confidence_flags": state.confidence_flags,
+    }
+
+
+@router.get("/{meeting_id}/summary")
+async def get_meeting_summary(meeting_id: str) -> dict[str, Any]:
+    """获取会议摘要（用于历史会议引用下拉选择器）。
+
+    返回简洁的会议摘要，包含 topic、产出、关键问题和仲裁结论。
+    不包含原始 LLM trace 和完整消息列表。
+    """
+    meeting = get_meeting(meeting_id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+    payload = meeting.get("payload", {})
+    artifact = payload.get("artifact")
+    from app.db_legacy import _extract_artifact_summary
+    return {
+        "meeting_id": meeting_id,
+        "topic": meeting.get("topic", ""),
+        "clarified_topic": payload.get("clarified_topic", meeting.get("topic", "")),
+        "status": meeting.get("status", ""),
+        "stage": meeting.get("stage", ""),
+        "created_at": meeting.get("created_at", ""),
+        "key_questions": payload.get("key_questions", [])[:5],
+        "artifact_summary": _extract_artifact_summary(artifact) if artifact else "（无产出）",
+        "flow_plan": payload.get("flow_plan", "full"),
+        "decision_record": payload.get("decision_record"),
+    }
+
+
+class InjectReferenceRequest(BaseModel):
+    """会议中注入历史会议引用请求"""
+    reference_meeting_ids: list[str] = Field(..., description="要引用的历史会议 ID 列表")
+
+
+class InterventionRequest(BaseModel):
+    """用户介入对话请求"""
+    content: str = Field(..., description="用户输入内容")
+    reply_to_id: str | None = Field(None, description="回复的消息 ID")
+
+
+@router.post("/{meeting_id}/intervene")
+async def intervene_meeting(meeting_id: str, req: InterventionRequest) -> dict[str, Any]:
+    """用户介入对话：向主持人发送私密消息。
+
+    主持人会收到该消息，处理后回复到 intervention_messages 中。
+    对话历史独立于 Agent 之间的聊天流，仅用户和主持人可见。
+    """
+    from app.observability.log_bus import log_bus
+    from app.context import get_request_id
+
+    state = get_state(meeting_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+
+    if state.status == MeetingStatus.DONE:
+        raise HTTPException(status_code=400, detail="会议已结束，无法介入")
+
+    import uuid as _uuid
+    msg_id = f"iv-{_uuid.uuid4().hex[:8]}"
+    timestamp = datetime.now().isoformat()
+
+    intervention_msg = {
+        "id": msg_id,
+        "sender": "user",
+        "content": req.content,
+        "reply_to_id": req.reply_to_id,
+        "timestamp": timestamp,
+        "processed": False,
+    }
+
+    state.intervention_messages.append(intervention_msg)
+
+    # 同时作为 injected_message 通知主持人
+    state.injected_messages.append({
+        "signal": "intervene",
+        "message_id": msg_id,
+        "content": req.content,
+        "reply_to_id": req.reply_to_id,
+        "at_stage": state.stage.value,
+        "rejected": False,
+    })
+
+    # 持久化
+    save_meeting(
+        meeting_id=meeting_id,
+        topic=state.topic,
+        status=state.status.value,
+        stage=state.stage.value,
+        created_at=state.created_at,
+        payload=state.snapshot(),
+    )
+
+    log_bus.info(
+        f"用户介入对话: {req.content[:50]}...",
+        logger="routers.meetings",
+        extra={"meeting_id": meeting_id, "msg_id": msg_id},
+    )
+
+    # 立即触发主持人回复（后台任务），不等待 runner 循环中当前节点完成
+    import asyncio
+    asyncio.create_task(_process_interventions(state))
+
+    return {
+        "meeting_id": meeting_id,
+        "message_id": msg_id,
+        "intervention_messages": state.intervention_messages,
+    }
+
+
+@router.post("/{meeting_id}/reference")
+async def inject_meeting_reference(meeting_id: str, req: InjectReferenceRequest) -> dict[str, Any]:
+    """在会议运行中注入历史会议引用（通过 @ 唤起或控制信号）。
+
+    会将引用上下文追加到 state.reference_context 和 state.injected_messages，
+    使下一轮 LLM 调用能感知到新引用的历史会议。
+    """
+    from app.observability.log_bus import log_bus
+    from app.context import get_request_id
+
+    state = get_state(meeting_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+
+    if state.status == MeetingStatus.DONE:
+        raise HTTPException(status_code=400, detail="会议已结束，无法注入引用")
+
+    new_ids = [mid for mid in req.reference_meeting_ids if mid not in state.reference_meeting_ids and mid != meeting_id]
+    if not new_ids:
+        return {"meeting_id": meeting_id, "injected": 0, "message": "无新增引用会议"}
+
+    ref_meetings = get_meetings_by_ids(new_ids)
+    new_context = _build_reference_context(ref_meetings)
+
+    # 追加到 reference_meeting_ids 和 reference_context
+    state.reference_meeting_ids.extend(new_ids)
+    if state.reference_context:
+        state.reference_context += "\n\n" + new_context
+    else:
+        state.reference_context = new_context
+
+    # 同时追加为 injected_message，让当前阶段正在运行的 LLM 也能感知
+    import uuid as _uuid
+    state.injected_messages.append({
+        "signal": "inject_reference",
+        "message_id": f"ref-{_uuid.uuid4().hex[:8]}",
+        "content": new_context,
+        "at_stage": state.stage.value,
+        "rejected": False,
+    })
+
+    # 持久化
+    save_meeting(
+        meeting_id=meeting_id,
+        topic=state.topic,
+        status=state.status.value,
+        stage=state.stage.value,
+        created_at=state.created_at,
+        payload=state.snapshot(),
+    )
+
+    log_bus.info(
+        f"会议中注入历史会议引用: count={len(new_ids)}",
+        logger="routers.meetings",
+        extra={"meeting_id": meeting_id, "ref_ids": new_ids},
+    )
+
+    return {
+        "meeting_id": meeting_id,
+        "injected": len(new_ids),
+        "total_references": len(state.reference_meeting_ids),
+        "message": f"已注入 {len(new_ids)} 个历史会议引用",
     }
 
 
@@ -359,15 +613,22 @@ async def remove_tag(meeting_id: str, tag: str) -> dict[str, Any]:
     return {"meeting_id": meeting_id, "tag": tag, "removed": True}
 
 
-@router.post("/{meeting_id}/run")
+@router.post("/{meeting_id}/run", status_code=202)
 async def run_meeting(meeting_id: str) -> dict[str, Any]:
     """触发会议完整流程（异步后台执行）
 
-    立即返回 running 状态，通过 WebSocket 观看实时进度。
-    - 会议不存在：404
-    - 已有后台任务在运行：409
-    - 已完成：返回 done
-    - 已终止：400
+    [CON-07 修复] 改为 202 Accepted + 提供 progress 端点 + 立即推 WS 进度事件。
+    旧版返回 200 OK 但响应体是 {"status": "running"}，客户端无法区分"已处理" vs "运行中"。
+    现在 202 Accepted 明确表示"已接受请求，开始处理"，配套提供：
+    - WS 推送（前端订阅后立即收到 stage.changed 事件）
+    - /meetings/{id}/progress 端点（轮询方式查进度）
+
+    状态码：
+    - 202：已接受，后台开始执行
+    - 404：会议不存在
+    - 409：会议正在运行中（防重入）
+    - 200：会议已完成（直接返回）
+    - 400：会议已终止
     """
     state = get_state(meeting_id)
     if state is None:
@@ -397,6 +658,21 @@ async def run_meeting(meeting_id: str) -> dict[str, Any]:
     from app.observability.log_bus import log_bus
     from app.context import get_request_id
 
+    # [CON-07 修复] 立即推一个 run.started 事件，前端可立即看到反馈
+    # 旧版要等 runner.run 内部 stage.changed 才有事件，对前端来说有 100ms+ 延迟
+    await bus.publish(
+        make_event(
+            "run.started",
+            meeting_id,
+            {
+                "meeting_id": meeting_id,
+                "stage": state.stage.value,
+                "status": state.status.value,
+                "ts": time.time(),
+            },
+        )
+    )
+
     log_bus.info(
         f"触发会议运行: meeting={meeting_id}",
         logger="routers.meetings",
@@ -413,6 +689,32 @@ async def run_meeting(meeting_id: str) -> dict[str, Any]:
         "meeting_id": meeting_id,
         "status": "running",
         "message": "会议已启动，通过 WS 观看实时进度",
+        "stage": state.stage.value,
+        "accepted_at": time.time(),
+    }
+
+
+@router.get("/{meeting_id}/progress")
+async def get_meeting_progress(meeting_id: str) -> dict[str, Any]:
+    """[CON-07 修复] 轮询式进度查询端点
+
+    用途：前端无 WS 时也能查到运行进度。
+    返回：status、stage、开始时间、消息数等。
+    """
+    state = get_state(meeting_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+
+    task = _running_tasks.get(meeting_id)
+    return {
+        "meeting_id": meeting_id,
+        "status": state.status.value,
+        "stage": state.stage.value,
+        "is_running": task is not None and not task.done(),
+        "message_count": len(state.messages),
+        "intervention_count": len(state.intervention_messages),
+        "evidence_count": sum(len(m.get("evidence_refs") or []) for m in state.messages),
+        "updated_at": time.time(),
     }
 
 
@@ -474,6 +776,28 @@ async def control_meeting(meeting_id: str, req: ControlRequest) -> dict[str, Any
                 {"signal": req.signal, "status": state.status.value, "payload": req.payload},
             )
         )
+        # 借调相关信号发布专门事件
+        if req.signal == "approve_borrow":
+            await bus.publish(make_event("borrow.approved_by_user", meeting_id, {
+                "meeting_id": meeting_id,
+                "request_id": req.payload.get("request_id", ""),
+                "pending_borrow_request": None,
+                "borrow_frozen": state.borrow_frozen,
+            }))
+        elif req.signal == "reject_borrow":
+            await bus.publish(make_event("borrow.rejected_by_user", meeting_id, {
+                "meeting_id": meeting_id,
+                "request_id": req.payload.get("request_id", ""),
+                "pending_borrow_request": None,
+                "reason": req.payload.get("reason", ""),
+                "borrow_frozen": state.borrow_frozen,
+            }))
+        elif req.signal == "freeze_borrow":
+            await bus.publish(make_event("borrow.frozen", meeting_id, {
+                "meeting_id": meeting_id,
+                "pending_borrow_request": None,
+                "borrow_frozen": True,
+            }))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {
@@ -683,6 +1007,7 @@ async def download_attachment(meeting_id: str, filename: str):
     """下载附件文件"""
     from fastapi.responses import FileResponse
     from pathlib import Path
+    from app.config import settings
 
     state = get_state(meeting_id)
     if state is None:
@@ -693,7 +1018,20 @@ async def download_attachment(meeting_id: str, filename: str):
     target = next((a for a in attachments if a.get("filename") == filename), None)
     if target is None:
         raise HTTPException(status_code=404, detail="附件不存在")
-    file_path = Path(target["path"])
+    # path 可能是相对于 workspace_root 的路径（如 "mtg-xxx/app.py"）或绝对路径
+    raw_path = Path(target["path"])
+    if raw_path.is_absolute():
+        file_path = raw_path
+    else:
+        file_path = Path(settings.workspace_root) / raw_path
+    # 安全检查：防止路径遍历
+    try:
+        file_path = file_path.resolve()
+        ws_root = Path(settings.workspace_root).resolve()
+        if not str(file_path).startswith(str(ws_root)):
+            raise HTTPException(status_code=403, detail="非法路径")
+    except (OSError, ValueError):
+        raise HTTPException(status_code=404, detail="附件路径无效")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="附件文件已丢失")
     return FileResponse(
@@ -701,3 +1039,127 @@ async def download_attachment(meeting_id: str, filename: str):
         filename=filename,
         media_type="application/octet-stream",
     )
+
+
+@router.get("/skills/list")
+async def list_skills():
+    """列出所有已加载的Agent Skills（供调试/前端展示）"""
+    from app.agents.skills import list_skills as _list_skills
+    return {"skills": _list_skills()}
+
+
+# ---------- LLM 模型管理端点 ----------
+
+class SetModelRequest(BaseModel):
+    """设置会议模型请求"""
+    provider_id: str = Field("", description="厂商ID: siliconflow|deepseek|openai|openrouter|custom")
+    model: str = Field("", description="模型ID，如 deepseek-ai/DeepSeek-V3.2")
+    api_key: str = Field("", description="自定义API Key（BYOK），为空则使用默认")
+    base_url: str = Field("", description="自定义Base URL（provider_id=custom时使用）")
+
+
+@router.get("/llm/providers")
+async def get_llm_providers():
+    """列出所有已注册的LLM厂商及其能力"""
+    from app.llm_providers import list_providers
+    return {"providers": list_providers()}
+
+
+@router.get("/llm/models")
+async def get_llm_models(
+    provider: str = "",
+    api_key: str = "",
+    base_url: str = "",
+    refresh: bool = False,
+):
+    """查询可用模型列表
+    
+    - provider: 厂商ID，为空则使用默认
+    - api_key: 自定义API Key（BYOK），为空则使用环境变量配置
+    - base_url: 自定义Base URL（custom厂商时使用）
+    - refresh: 是否强制刷新缓存
+    """
+    from app.llm_providers import fetch_models, categorize_models, RECOMMENDED_MODELS
+    models = await fetch_models(
+        provider_id=provider,
+        api_key=api_key,
+        base_url=base_url,
+        use_cache=not refresh,
+    )
+    categories = categorize_models(models)
+    return {
+        "models": models,
+        "categories": categories,
+        "recommended": RECOMMENDED_MODELS,
+        "total": len(models),
+    }
+
+
+@router.get("/llm/balance")
+async def get_llm_balance(
+    provider: str = "",
+    api_key: str = "",
+    base_url: str = "",
+):
+    """查询LLM账户余额
+    
+    - provider: 厂商ID
+    - api_key: 自定义API Key，为空则使用环境变量
+    """
+    from app.llm_providers import fetch_balance
+    result = await fetch_balance(provider_id=provider, api_key=api_key, base_url=base_url)
+    return result
+
+
+@router.post("/{meeting_id}/model")
+async def set_meeting_model(meeting_id: str, req: SetModelRequest):
+    """设置会议使用的模型和API Key（会议开始前调用）"""
+    from app.llm_providers import set_meeting_model as _set_model
+    # 校验会议存在
+    state = get_state(meeting_id)
+    if state is None:
+        # 尝试恢复
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            raise HTTPException(status_code=404, detail="会议不存在")
+    # 不允许已结束的会议修改
+    if state.status == MeetingStatus.DONE:
+        raise HTTPException(status_code=400, detail="会议已结束，无法切换模型")
+    cfg = _set_model(
+        meeting_id=meeting_id,
+        provider_id=req.provider_id,
+        model=req.model,
+        api_key=req.api_key,
+        base_url=req.base_url,
+    )
+    from app.observability.log_bus import log_bus
+    log_bus.info(
+        f"会议模型切换: provider={cfg.provider_id}, model={cfg.model}",
+        logger="routers.meetings",
+        extra={"meeting_id": meeting_id, "provider": cfg.provider_id, "model": cfg.model},
+    )
+    return {
+        "meeting_id": meeting_id,
+        "provider_id": cfg.provider_id,
+        "model": cfg.model,
+        "has_custom_key": bool(cfg.api_key),
+        "base_url": cfg.base_url,
+    }
+
+
+@router.get("/{meeting_id}/model")
+async def get_meeting_model(meeting_id: str):
+    """获取会议当前使用的模型配置"""
+    from app.llm_providers import get_meeting_llm_config
+    state = get_state(meeting_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+    base_url, api_key, model, provider_id = get_meeting_llm_config(meeting_id)
+    return {
+        "meeting_id": meeting_id,
+        "provider_id": provider_id,
+        "model": model,
+        "base_url": base_url,
+        "has_custom_key": bool(api_key) and api_key != __import__("app.config", fromlist=["settings"]).settings.llm_api_key,
+        "is_running": state.status not in (MeetingStatus.DONE,),
+    }

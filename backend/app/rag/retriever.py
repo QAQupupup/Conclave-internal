@@ -1,4 +1,4 @@
-# 检索 + 重排：真实 bge-reranker-v2-m3 或关键词加成兜底
+# 检索 + 重排：查询改写多路召回 + 混合检索 + bge-reranker-v2-m3 重排
 from __future__ import annotations
 
 import re
@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.rag.query_rewriter import rewrite_query
 from app.rag.store import get_store
 
 
@@ -39,32 +40,64 @@ def retrieve(
         d["full_length"] = len(chunk.text)
         d["expandable"] = len(chunk.text) > summary_max
         # 邻居链上下文：附带前 N 个 chunk 的文本
-        # 不依赖 chunk.prev_id 判断——文档首个 chunk prev_id 为空时
-        # get_neighbor_context 会返回仅含自身的文本，不会出错
         if expand_neighbors > 0:
             neighbor_ctx = store.get_neighbor_context(
                 chunk, prev_count=expand_neighbors, next_count=0,
             )
-            # 只有实际扩展到了邻居时才附加上下文（避免冗余）
             if len(neighbor_ctx) > len(chunk.text):
                 d["neighbor_context"] = neighbor_ctx[:summary_max * 3]
         out.append(d)
     return out
 
 
-def retrieve_for_conflict(
+async def retrieve_for_conflict(
     meeting_id: str,
     conflict_summary: str,
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
-    """针对单个冲突检索证据：召回 → 重排 → 邻居链扩展
+    """针对单个冲突检索证据：查询改写 → 多路召回 → 合并去重 → 重排 → 邻居链扩展
 
-    证据检索默认启用 1 级邻居展开，让 LLM 看到证据的上下文段落。
+    流程：
+    1. 查询改写：LLM 生成 2 个改写查询 + 原始查询（最多 3 路）
+    2. 多路召回：每路检索 top_k*2 个候选
+    3. 合并去重：按 chunk_id 去重，保留最高分
+    4. Reranker 重排：bge-reranker-v2-m3 或关键词加成
+    5. 邻居链扩展：附带前后 N 个 chunk 上下文
     """
-    base = retrieve(meeting_id, conflict_summary, top_k=top_k, expand_neighbors=1)
+    # 1. 查询改写
+    queries = await rewrite_query(conflict_summary)
+
+    # 2. 多路召回 + 合并去重
+    store = get_store(meeting_id)
+    if not store.all_chunks():
+        return []
+
+    seen: dict[str, dict[str, Any]] = {}
+    for q in queries:
+        candidates = store.search(q, top_k=max(top_k * 2, 10))
+        for chunk, score in candidates:
+            d = chunk.to_dict()
+            d["score"] = round(score, 4)
+            d["summary"] = chunk.summary(max_len=200)
+            d["full_length"] = len(chunk.text)
+            d["expandable"] = len(chunk.text) > 200
+            # 邻居链上下文
+            neighbor_ctx = store.get_neighbor_context(
+                chunk, prev_count=1, next_count=0,
+            )
+            if len(neighbor_ctx) > len(chunk.text):
+                d["neighbor_context"] = neighbor_ctx[:600]
+            # 去重：同一 chunk_id 保留最高分
+            if chunk.chunk_id not in seen or score > seen[chunk.chunk_id]["score"]:
+                seen[chunk.chunk_id] = d
+
+    base = list(seen.values())
+    base.sort(key=lambda x: x["score"], reverse=True)
+
     if not base:
-        return base
-    # 有 reranker 配置则用真实重排，否则关键词加成
+        return []
+
+    # 3. 重排
     if settings.use_real_rerank:
         return _rerank_with_siliconflow(conflict_summary, base, top_k)
     return _rerank_with_keywords(conflict_summary, base, top_k)
@@ -115,4 +148,7 @@ def _rerank_with_keywords(
 
 
 def _tokenize(text: str) -> list[str]:
-    return [w for w in re.split(r"[^a-z0-9\u4e00-\u9fa5]+", text.lower()) if len(w) > 1]
+    # [CON-26 修复] 用中英分词工具（jieba 中文按词切）替代单字切分
+    from app.rag.tokenize import tokenize
+
+    return tokenize(text)

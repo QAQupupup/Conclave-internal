@@ -260,10 +260,68 @@ def _inject_profile(prompt: str, agent_role: str) -> str:
         return prompt
 
 
-def build_clarify_prompt(topic: str, doc_summaries: list[str], anchor: str = "") -> ThinkRequest:
+def _inject_tools_to_prompt(prompt: str, available_tools: list[dict[str, Any]]) -> str:
+    """将可用工具描述注入到 prompt 中，让 LLM 知道可以调用哪些工具
+
+    工具描述格式（Function Calling 兼容）：
+        【可用工具】
+        1. tool_name: description
+           参数: param1 (type), param2 (type)
+        2. ...
+
+    输出要求：
+        - 如果当前信息不足以完成任务，设置 need_continue=true 并返回 tool_calls
+        - tool_calls 格式: [{"tool_name": "...", "arguments": {...}, "reason": "..."}]
+        - 如果任务完成，设置 need_continue=false
+    """
+    if not available_tools:
+        return prompt
+
+    tool_lines = ["\n\n【可用工具 - 你可以调用以下工具获取信息】"]
+    for i, tool in enumerate(available_tools, 1):
+        params = ", ".join(f"{k}: {v}" for k, v in tool.get("parameters", {}).items())
+        tool_lines.append(
+            f"{i}. {tool['name']}: {tool['description']}\n"
+            f"   参数: {params if params else '无'}"
+        )
+
+    tool_lines.append(
+        "\n【工具调用规则】\n"
+        "如果你需要调用工具获取信息，请在 JSON 输出中设置：\n"
+        '  "need_continue": true,\n'
+        '  "tool_calls": [{"tool_name": "工具名", "arguments": {参数}, "reason": "调用原因"}]\n'
+        "如果你已有足够信息，设置 need_continue=false 并给出最终结论。\n"
+        "工具调用结果会在下一轮对话中提供给你。"
+    )
+    return prompt + "\n".join(tool_lines)
+
+
+def _inject_skills(prompt: str, stage: str, deliverable_type: str = "", role: str = "", complexity: str = "") -> str:
+    """在prompt末尾注入匹配的Skill内容（动态加载设计规范/代码规范/沟通风格等）"""
+    try:
+        from app.agents.skills import format_skills_for_prompt
+        skills_text = format_skills_for_prompt(
+            stage=stage,
+            deliverable_type=deliverable_type,
+            role=role,
+            complexity=complexity,
+        )
+        if skills_text:
+            return f"{prompt}\n\n{skills_text}"
+    except Exception:
+        pass  # Skill加载失败不影响主流程
+    return prompt
+
+
+def build_clarify_prompt(topic: str, doc_summaries: list[str], anchor: str = "", available_tools: list[dict[str, Any]] | None = None, reference_context: str = "") -> ThinkRequest:
     """构造 clarify 阶段的思考请求"""
     prompt = render(MODERATOR_CLARIFY, topic=topic, doc_summaries="; ".join(doc_summaries) if doc_summaries else "无")
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
+    prompt = _inject_skills(prompt, stage="clarify", role=Role.MODERATOR.value)
+    if available_tools:
+        prompt = _inject_tools_to_prompt(prompt, available_tools)
+    if reference_context:
+        prompt = reference_context + "\n\n" + prompt
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -271,6 +329,7 @@ def build_clarify_prompt(topic: str, doc_summaries: list[str], anchor: str = "")
         stage="clarify",
         prompt=prompt,
         schema_hint="clarify",
+        available_tools=available_tools or [],
     )
 
 
@@ -280,6 +339,7 @@ def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: st
     persona = _get_role_persona(role.value)
     prompt = render(template, role_persona=persona, clarified_topic=clarified_topic, stance=stance)
     prompt = _inject_profile(prompt, role.value)
+    prompt = _inject_skills(prompt, stage="intra_team", role=role.value)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -325,6 +385,7 @@ def build_intra_react_prompt(
     if prior_summary:
         prompt = prompt + prior_summary
     prompt = _inject_profile(prompt, role.value)
+    prompt = _inject_skills(prompt, stage="intra_team", role=role.value)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -338,6 +399,7 @@ def build_intra_react_prompt(
 def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> ThinkRequest:
     prompt = render(CROSS_TEAM, team_conclusions=str(team_conclusions))
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
+    prompt = _inject_skills(prompt, stage="cross_team", role=Role.MODERATOR.value)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -348,9 +410,12 @@ def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> T
     )
 
 
-def build_evidence_prompt(conflict: dict, evidence_chunks: list[dict], anchor: str = "") -> ThinkRequest:
+def build_evidence_prompt(conflict: dict, evidence_chunks: list[dict], anchor: str = "", available_tools: list[dict[str, Any]] | None = None) -> ThinkRequest:
     prompt = render(EVIDENCE_CHECK, conflict=str(conflict), evidence_chunks=str(evidence_chunks))
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
+    prompt = _inject_skills(prompt, stage="evidence_check", role=Role.MODERATOR.value)
+    if available_tools:
+        prompt = _inject_tools_to_prompt(prompt, available_tools)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -358,12 +423,14 @@ def build_evidence_prompt(conflict: dict, evidence_chunks: list[dict], anchor: s
         stage="evidence_check",
         prompt=prompt,
         schema_hint="evidence_check",
+        available_tools=available_tools or [],
     )
 
 
 def build_arbitrate_prompt(evidence_set: list[dict], anchor: str = "") -> ThinkRequest:
     prompt = render(ARBITRATE, evidence_set=str(evidence_set))
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
+    prompt = _inject_skills(prompt, stage="arbitrate", role=Role.MODERATOR.value)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -382,8 +449,13 @@ def build_produce_prompt(
 ) -> ThinkRequest:
     if template is None:
         template = PRODUCE
-    prompt = render(template, decision_record=str(decision_record))
+    # 注入代码质量经验库（bug patterns）
+    from app.agents.bug_patterns import format_bug_patterns_for_prompt
+    bug_patterns = format_bug_patterns_for_prompt()
+    prompt = render(template, decision_record=str(decision_record), bug_patterns=bug_patterns)
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
+    # 注入匹配的Skills（UI设计规范、代码规范等，根据deliverable_type动态加载）
+    prompt = _inject_skills(prompt, stage="produce", deliverable_type=deliverable_type, role=Role.MODERATOR.value)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(

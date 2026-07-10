@@ -1,14 +1,29 @@
-# §2.3 三层记忆存储：进程内单例，会议结束触发提炼，下次会议注入画像
+# §2.3 三层记忆存储：进程内单例 + SQLite 持久化层
 from __future__ import annotations
 
+import json
 import logging
+import os
+import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.memory.models import FeatureMemory, ProfileMemory, RawMemory
 
 logger = logging.getLogger(__name__)
+
+# [CON-25 修复] 记忆子系统持久化路径
+# 默认 <workspace_root>/memory.db（与业务库分离，独立备份）
+# env: CONCLAVE_MEMORY_DB_PATH 覆盖
+_MEMORY_DB_PATH = os.environ.get(
+    "CONCLAVE_MEMORY_DB_PATH",
+    str(Path(settings.workspace_root) / "memory.db"),
+)
+_MEMORY_LOCK = threading.Lock()
 
 # StubLLM 模式规则提炼用的关键词表
 # 风险关键词：用于判断 risk_appetite / stance_style
@@ -40,6 +55,159 @@ class MemoryStore:
         self._raw: dict[str, list[RawMemory]] = {}
         self._features: dict[str, list[FeatureMemory]] = {}
         self._profiles: dict[str, ProfileMemory] = {}
+        # [CON-25 修复] 启动时从 SQLite 恢复所有持久化记忆
+        # 旧版纯内存，重启即丢。改为：
+        #   1) 启动时加载：把上一轮沉淀的画像 + 特征 + 原始发言恢复进内存
+        #   2) 写入时持久化：每次 update 同步落盘
+        #   3) 用独立 sqlite 文件（<workspace_root>/memory.db）便于备份/恢复
+        self._init_persistence()
+        self._load_from_db()
+
+    def _init_persistence(self) -> None:
+        """初始化记忆 SQLite 表结构"""
+        try:
+            Path(_MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+            with _MEMORY_LOCK, sqlite3.connect(_MEMORY_DB_PATH) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS raw_memories (
+                        id TEXT PRIMARY KEY,
+                        agent_role TEXT NOT NULL,
+                        meeting_id TEXT NOT NULL,
+                        stage TEXT,
+                        content TEXT,
+                        evidence_refs TEXT,
+                        adopted INTEGER,
+                        corrected_by TEXT,
+                        created_at TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS feature_memories (
+                        id TEXT PRIMARY KEY,
+                        agent_role TEXT NOT NULL,
+                        feature_type TEXT,
+                        feature_value TEXT,
+                        confidence REAL,
+                        sample_count INTEGER,
+                        source_meeting_ids TEXT,
+                        extracted_at TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS profile_memories (
+                        agent_role TEXT PRIMARY KEY,
+                        default_stance_style TEXT,
+                        ambiguity_tolerance REAL,
+                        evidence_dependency_level TEXT,
+                        collaboration_preference TEXT,
+                        escalation_threshold REAL,
+                        updated_at TEXT,
+                        version INTEGER
+                    )
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_agent ON raw_memories(agent_role)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_feat_agent ON feature_memories(agent_role)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("记忆持久化初始化失败（不影响运行）: %s", e)
+
+    def _load_from_db(self) -> None:
+        """启动时从 SQLite 恢复所有记忆"""
+        try:
+            with _MEMORY_LOCK, sqlite3.connect(_MEMORY_DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                # 画像
+                for row in conn.execute("SELECT * FROM profile_memories"):
+                    self._profiles[row["agent_role"]] = ProfileMemory(
+                        agent_role=row["agent_role"],
+                        default_stance_style=row["default_stance_style"] or "balanced",
+                        ambiguity_tolerance=row["ambiguity_tolerance"] or 0.5,
+                        evidence_dependency_level=row["evidence_dependency_level"] or "medium",
+                        collaboration_preference=row["collaboration_preference"] or "collaborative",
+                        escalation_threshold=row["escalation_threshold"] or 0.6,
+                        updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else datetime.now(timezone.utc),
+                        version=row["version"] or 1,
+                    )
+                # 行为特征
+                for row in conn.execute("SELECT * FROM feature_memories"):
+                    fm = FeatureMemory(
+                        id=row["id"],
+                        agent_role=row["agent_role"],
+                        feature_type=row["feature_type"] or "",
+                        feature_value=row["feature_value"] or "",
+                        confidence=row["confidence"] or 0.0,
+                        sample_count=row["sample_count"] or 0,
+                        source_meeting_ids=json.loads(row["source_meeting_ids"]) if row["source_meeting_ids"] else [],
+                        extracted_at=datetime.fromisoformat(row["extracted_at"]) if row["extracted_at"] else datetime.now(timezone.utc),
+                    )
+                    self._features.setdefault(fm.agent_role, []).append(fm)
+                # 原始发言
+                for row in conn.execute("SELECT * FROM raw_memories"):
+                    rm = RawMemory(
+                        id=row["id"],
+                        agent_role=row["agent_role"],
+                        meeting_id=row["meeting_id"] or "",
+                        stage=row["stage"] or "",
+                        content=row["content"] or "",
+                        evidence_refs=json.loads(row["evidence_refs"]) if row["evidence_refs"] else [],
+                        adopted=bool(row["adopted"]),
+                        corrected_by=row["corrected_by"],
+                        created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.now(timezone.utc),
+                    )
+                    self._raw.setdefault(rm.agent_role, []).append(rm)
+            if self._profiles:
+                logger.info("从 SQLite 恢复 %d 个画像, %d 个特征, %d 条原始发言",
+                            len(self._profiles), sum(len(v) for v in self._features.values()),
+                            sum(len(v) for v in self._raw.values()))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("记忆加载失败（使用空内存）: %s", e)
+
+    def _persist_raw(self, mem: RawMemory) -> None:
+        """[CON-25] 持久化单条原始记忆"""
+        try:
+            with _MEMORY_LOCK, sqlite3.connect(_MEMORY_DB_PATH) as conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO raw_memories
+                       (id, agent_role, meeting_id, stage, content, evidence_refs, adopted, corrected_by, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (mem.id, mem.agent_role, mem.meeting_id, mem.stage, mem.content,
+                     json.dumps(mem.evidence_refs or []), int(mem.adopted), mem.corrected_by,
+                     mem.created_at.isoformat() if mem.created_at else None),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("原始记忆持久化失败: %s", e)
+
+    def _persist_features(self, features: list[FeatureMemory]) -> None:
+        """[CON-25] 持久化行为特征"""
+        try:
+            with _MEMORY_LOCK, sqlite3.connect(_MEMORY_DB_PATH) as conn:
+                conn.executemany(
+                    """INSERT OR REPLACE INTO feature_memories
+                       (id, agent_role, feature_type, feature_value, confidence, sample_count, source_meeting_ids, extracted_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [(f.id, f.agent_role, f.feature_type, f.feature_value, f.confidence,
+                      f.sample_count, json.dumps(f.source_meeting_ids or []),
+                      f.extracted_at.isoformat() if f.extracted_at else None) for f in features],
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("行为特征持久化失败: %s", e)
+
+    def _persist_profile(self, profile: ProfileMemory) -> None:
+        """[CON-25] 持久化画像"""
+        try:
+            with _MEMORY_LOCK, sqlite3.connect(_MEMORY_DB_PATH) as conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO profile_memories
+                       (agent_role, default_stance_style, ambiguity_tolerance,
+                        evidence_dependency_level, collaboration_preference,
+                        escalation_threshold, updated_at, version)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (profile.agent_role, profile.default_stance_style, profile.ambiguity_tolerance,
+                     profile.evidence_dependency_level, profile.collaboration_preference,
+                     profile.escalation_threshold, profile.updated_at.isoformat() if profile.updated_at else None,
+                     profile.version),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("画像持久化失败: %s", e)
 
     # ---------- 原始发言层 ----------
 
@@ -67,6 +235,8 @@ class MemoryStore:
                 created_at=datetime.now(timezone.utc),
             )
             self._raw.setdefault(agent_role, []).append(mem)
+            # [CON-25] 持久化到 SQLite（异步落盘失败不影响内存）
+            self._persist_raw(mem)
             return mem
         except Exception as e:  # noqa: BLE001
             logger.warning("record_raw 失败: %s", e)
@@ -204,6 +374,8 @@ class MemoryStore:
             ))
 
             self._features.setdefault(agent_role, []).extend(features)
+            # [CON-25] 持久化行为特征
+            self._persist_features(features)
             return features
         except Exception as e:  # noqa: BLE001
             logger.warning("extract_features 失败: %s", e)
@@ -291,6 +463,8 @@ class MemoryStore:
             profile.updated_at = datetime.now(timezone.utc)
             profile.version += 1
             self._profiles[agent_role] = profile
+            # [CON-25] 持久化画像
+            self._persist_profile(profile)
             return profile
         except Exception as e:  # noqa: BLE001
             logger.warning("update_profile 失败: %s", e)

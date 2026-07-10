@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
+from collections import Counter
 from typing import Protocol
 
 import httpx
@@ -81,6 +83,40 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
+
+def _tokenize_query(text: str) -> list[str]:
+    """中文/英文分词：提取长度>=2 的词条（jieba 中文分词）
+
+    [CON-26 修复] 旧版用单字切分（re.split 按非中英字符），中文无空格分界时
+    把"会议系统设计"切成 6 个单字，召回率低。改为：
+    - 英文：按非字母数字字符切，长度 >= 2
+    - 中文：jieba.cut 按词切（jieba 未安装时退回单字）
+    """
+    from app.rag.tokenize import tokenize_query
+
+    return tokenize_query(text)
+
+
+def _keyword_score(text: str, query_terms: list[str], doc_freq: int = 1) -> float:
+    """简化 TF-IDF 关键词得分
+
+    对每个查询词条计算在文本中的命中次数，加权求和。
+    doc_freq 用于 IDF 惩罚（预留，当前固定为 1）。
+    """
+    if not query_terms or not text:
+        return 0.0
+    text_lower = text.lower()
+    score = 0.0
+    for term in query_terms:
+        count = text_lower.count(term)
+        if count > 0:
+            # TF: 命中次数 / 文本长度（归一化避免长文本优势）
+            tf = count / max(len(text_lower), 1)
+            # IDF: 简化为 1（未实现全局文档频率统计）
+            idf = 1.0 / max(doc_freq, 1)
+            score += tf * idf
+    return score
 
 
 class InMemoryVectorStore:
@@ -180,13 +216,51 @@ class InMemoryVectorStore:
     def search(self, query: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
         if not self._store:
             return []
+        return self.hybrid_search(query, top_k)
+
+    def hybrid_search(self, query: str, top_k: int = 5, rrf_k: int = 60) -> list[tuple[Chunk, float]]:
+        """混合检索：向量检索 + 关键词检索 → RRF 融合
+
+        RRF（Reciprocal Rank Fusion）：score = 1/(K + rank)
+        两路各取 top_k*2 个候选，RRF 融合后截取 top_k。
+        """
+        if not self._store:
+            return []
+
+        # 1. 向量检索
         qvec = self._embedding.embed(query)
-        scored = [
+        vec_scored = [
             (chunk, cosine_similarity(qvec, vec))
             for chunk, vec in self._store.values()
         ]
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[:top_k]
+        vec_scored.sort(key=lambda x: x[1], reverse=True)
+        vec_candidates = vec_scored[: top_k * 2]
+
+        # 2. 关键词检索（TF-IDF 简化版）
+        query_terms = _tokenize_query(query)
+        kw_scored = [
+            (chunk, _keyword_score(chunk.text, query_terms))
+            for chunk, _ in self._store.values()
+        ]
+        kw_scored.sort(key=lambda x: x[1], reverse=True)
+        kw_candidates = kw_scored[: top_k * 2]
+
+        # 3. RRF 融合
+        chunk_ranks: dict[str, tuple[Chunk, float, float]] = {}
+        for rank, (chunk, score) in enumerate(vec_candidates, start=1):
+            rrf = 1.0 / (rrf_k + rank)
+            chunk_ranks[chunk.chunk_id] = (chunk, rrf, score)
+        for rank, (chunk, kw_score) in enumerate(kw_candidates, start=1):
+            rrf = 1.0 / (rrf_k + rank)
+            if chunk.chunk_id in chunk_ranks:
+                existing = chunk_ranks[chunk.chunk_id]
+                chunk_ranks[chunk.chunk_id] = (existing[0], existing[1] + rrf, existing[2])
+            else:
+                chunk_ranks[chunk.chunk_id] = (chunk, rrf, 0.0)
+
+        # 按 RRF 分数排序
+        merged = sorted(chunk_ranks.values(), key=lambda x: x[1], reverse=True)
+        return [(chunk, round(rrf_score, 4)) for chunk, rrf_score, _ in merged[:top_k]]
 
     def all_chunks(self) -> list[Chunk]:
         return [c for c, _ in self._store.values()]
@@ -252,16 +326,21 @@ class QdrantVectorStore(InMemoryVectorStore):
         client.upsert(collection_name=self._collection, points=points)
 
     def search(self, query: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
-        """检索：Qdrant 向量搜索，失败时回退内存"""
+        """混合检索：Qdrant 向量检索 + 内存关键词检索 → RRF 融合
+
+        失败时回退到父类 hybrid_search（纯内存混合检索）。
+        """
         try:
             client = self._get_client()
             qvec = self._embedding.embed(query)
+
+            # 1. Qdrant 向量检索
             results = client.search(
                 collection_name=self._collection,
                 query_vector=qvec,
-                limit=top_k,
+                limit=top_k * 2,
             )
-            out: list[tuple[Chunk, float]] = []
+            vec_candidates: list[tuple[Chunk, float]] = []
             for r in results:
                 payload = r.payload or {}
                 chunk = Chunk(
@@ -275,13 +354,38 @@ class QdrantVectorStore(InMemoryVectorStore):
                     prev_id=payload.get("prev_id", ""),
                     next_id=payload.get("next_id", ""),
                 )
-                out.append((chunk, r.score or 0.0))
-            return out
+                vec_candidates.append((chunk, r.score or 0.0))
+
+            # 2. 关键词检索（内存中计分）
+            query_terms = _tokenize_query(query)
+            kw_scored = [
+                (chunk, _keyword_score(chunk.text, query_terms))
+                for chunk, _ in self._store.values()
+            ]
+            kw_scored.sort(key=lambda x: x[1], reverse=True)
+            kw_candidates = kw_scored[: top_k * 2]
+
+            # 3. RRF 融合
+            rrf_k = 60
+            chunk_ranks: dict[str, tuple[Chunk, float, float]] = {}
+            for rank, (chunk, score) in enumerate(vec_candidates, start=1):
+                rrf = 1.0 / (rrf_k + rank)
+                chunk_ranks[chunk.chunk_id] = (chunk, rrf, score)
+            for rank, (chunk, kw_score) in enumerate(kw_candidates, start=1):
+                rrf = 1.0 / (rrf_k + rank)
+                if chunk.chunk_id in chunk_ranks:
+                    existing = chunk_ranks[chunk.chunk_id]
+                    chunk_ranks[chunk.chunk_id] = (existing[0], existing[1] + rrf, existing[2])
+                else:
+                    chunk_ranks[chunk.chunk_id] = (chunk, rrf, 0.0)
+
+            merged = sorted(chunk_ranks.values(), key=lambda x: x[1], reverse=True)
+            return [(chunk, round(rrf_score, 4)) for chunk, rrf_score, _ in merged[:top_k]]
+
         except Exception:
-            # Qdrant 查询失败，回退内存搜索（仅在当前进程有缓存时有效）
             import logging
             logging.getLogger("app.rag.store").warning(
-                "Qdrant 查询失败，回退内存搜索（内存缓存: %d 条）",
+                "Qdrant 混合检索失败，回退内存混合检索（内存缓存: %d 条）",
                 len(self._store),
             )
             return super().search(query, top_k)

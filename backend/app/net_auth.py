@@ -1,4 +1,4 @@
-# 网络授权审批：沙箱执行因网络限制失败时，生成申请单供用户批复
+﻿# 网络授权审批：沙箱执行因网络限制失败时，生成申请单供用户批复
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db import _connect, _lock
+from app.db_legacy import _connect, _lock
 
 
 def init_auth_table() -> None:

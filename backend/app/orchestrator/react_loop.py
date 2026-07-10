@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any, Awaitable, Callable
 
@@ -229,31 +230,38 @@ class ReactLoop:
     使用方式：
         registry = ToolRegistry()
         registry.register("web_search", ...)
-        loop = ReactLoop(compute=get_compute(), tools=registry)
-        result = await loop.run(req, max_iterations=5)
+        loop = ReactLoop(compute=get_compute(), tools=registry, meeting_id="m1")
+        result = await loop.run(req, max_iterations=10)
     """
+
+    # 默认最大迭代次数（可通过环境变量 REACT_MAX_ITERATIONS 覆盖）
+    DEFAULT_MAX_ITERATIONS = int(os.environ.get("REACT_MAX_ITERATIONS", "10"))
 
     def __init__(
         self,
         compute: AgentCompute | None = None,
         tools: ToolRegistry | None = None,
+        meeting_id: str = "",
     ) -> None:
         self._compute = compute or get_compute()
         self._tools = tools or ToolRegistry()
+        self._meeting_id = meeting_id  # 用于注入到浏览器工具调用中
 
     async def run(
         self,
         req: ThinkRequest,
-        max_iterations: int = 5,
+        max_iterations: int | None = None,
     ) -> ThinkResponse:
         """执行 ReAct 循环
 
         Args:
             req: 初始 ThinkRequest（prompt 中包含任务描述）
-            max_iterations: 最大迭代次数（硬上限，作为一等公民终态）
+            max_iterations: 最大迭代次数（None 使用 DEFAULT_MAX_ITERATIONS）
         Returns:
             最终的 ThinkResponse（result 字段包含最终结论）
         """
+        if max_iterations is None:
+            max_iterations = self.DEFAULT_MAX_ITERATIONS
         # 注入 available_tools
         req.available_tools = self._tools.get_available_tools()
 
@@ -314,9 +322,13 @@ class ReactLoop:
 
             # 4. Act: 执行工具调用
             for call in response.tool_calls:
+                # 注入 meeting_id（浏览器工具需要，LLM 不知道 meeting_id）
+                args = dict(call.arguments)
+                if self._meeting_id and call.tool_name.startswith("browser."):
+                    args.setdefault("meeting_id", self._meeting_id)
                 # 记录工具调用成本
                 t0 = time.monotonic()
-                result = await self._tools.execute(call.tool_name, call.arguments)
+                result = await self._tools.execute(call.tool_name, args)
                 result.iteration = iteration
                 tool_history.append(result)
 
@@ -391,6 +403,78 @@ def create_default_tool_registry() -> ToolRegistry:
         "搜索网络获取证据。返回证据列表，每条包含 quote（引用文本）、url、source_tier（S/A/B/C/D）、signals（信号袋）。",
         _web_search,
         {"query": "str（搜索查询）", "top_k": "int（最大结果数，默认5）"},
+    )
+
+    # ---------- Browser 操作工具 ----------
+
+    async def _browser_goto(args: dict[str, Any]) -> Any:
+        from app.tools.browser_tool import get_browser_tool
+        tool = get_browser_tool()
+        url = str(args.get("url", ""))
+        meeting_id = str(args.get("meeting_id", ""))
+        return await tool.goto(meeting_id, url)
+
+    registry.register(
+        "browser.goto",
+        "导航到指定 URL。返回页面标题和文本内容摘要（前3000字符），自动去除广告和导航栏。",
+        _browser_goto,
+        {"url": "str（目标网址）", "meeting_id": "str（会议ID，从上下文获取）"},
+    )
+
+    async def _browser_extract(args: dict[str, Any]) -> Any:
+        from app.tools.browser_tool import get_browser_tool
+        tool = get_browser_tool()
+        meeting_id = str(args.get("meeting_id", ""))
+        max_length = int(args.get("max_length", 5000))
+        return await tool.extract_content(meeting_id, max_length)
+
+    registry.register(
+        "browser.extract",
+        "提取当前页面的主要内容（去除广告、导航等噪音）。返回清洗后的文本。",
+        _browser_extract,
+        {"meeting_id": "str（会议ID）", "max_length": "int（最大字符数，默认5000）"},
+    )
+
+    async def _browser_click(args: dict[str, Any]) -> Any:
+        from app.tools.browser_tool import get_browser_tool
+        tool = get_browser_tool()
+        meeting_id = str(args.get("meeting_id", ""))
+        selector = str(args.get("selector", ""))
+        return await tool.click(meeting_id, selector)
+
+    registry.register(
+        "browser.click",
+        "点击页面上的元素。使用 CSS 选择器定位，如 'a.more', 'button.next', '#load-more'。",
+        _browser_click,
+        {"meeting_id": "str（会议ID）", "selector": "str（CSS选择器）"},
+    )
+
+    async def _browser_scroll(args: dict[str, Any]) -> Any:
+        from app.tools.browser_tool import get_browser_tool
+        tool = get_browser_tool()
+        meeting_id = str(args.get("meeting_id", ""))
+        amount = int(args.get("amount", 500))
+        return await tool.scroll(meeting_id, "down", amount)
+
+    registry.register(
+        "browser.scroll",
+        "向下滚动页面以加载更多内容（如无限滚动页面）。",
+        _browser_scroll,
+        {"meeting_id": "str（会议ID）", "amount": "int（滚动像素，默认500）"},
+    )
+
+    async def _browser_evaluate(args: dict[str, Any]) -> Any:
+        from app.tools.browser_tool import get_browser_tool
+        tool = get_browser_tool()
+        meeting_id = str(args.get("meeting_id", ""))
+        expression = str(args.get("expression", "document.title"))
+        return await tool.evaluate(meeting_id, expression)
+
+    registry.register(
+        "browser.evaluate",
+        "在页面中执行 JavaScript 表达式并返回结果。用于提取特定数据，如 'document.querySelector(\".price\").innerText'。",
+        _browser_evaluate,
+        {"meeting_id": "str（会议ID）", "expression": "str（JavaScript表达式）"},
     )
 
     return registry

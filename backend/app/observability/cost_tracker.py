@@ -82,7 +82,24 @@ def estimate_llm_cost(model: str, input_tokens: int, output_tokens: int) -> floa
     """根据模型和 tokens 估算 LLM 调用成本（美元）
 
     定价表以"每百万 tokens 美元"为单位。
+    优先使用 llm_providers.MODEL_PRICING（覆盖SiliconFlow全模型），
+    回退到本地 _LLM_PRICING 表。
     """
+    # 优先使用 llm_providers 的完整定价表（人民币），换算为美元
+    try:
+        from app.llm_providers import get_model_pricing
+        p = get_model_pricing(model)
+        if p and p.get("input") is not None:
+            input_price_per_m = p["input"]
+            output_price_per_m = p["output"]
+            currency = p.get("currency", "CNY")
+            rate = 1.0 / 7.2 if currency == "CNY" else 1.0  # RMB→USD近似汇率
+            cost = (input_tokens / 1_000_000) * input_price_per_m * rate + \
+                   (output_tokens / 1_000_000) * output_price_per_m * rate
+            return round(cost, 6)
+    except Exception:
+        pass
+    # 回退：本地美元定价表
     pricing = _LLM_PRICING.get(model, _LLM_PRICING["_default"])
     cost = (input_tokens / 1_000_000) * pricing["input"] + \
            (output_tokens / 1_000_000) * pricing["output"]
@@ -101,7 +118,13 @@ class CostTracker:
         tracker.record_tool(node="evidence_check", tool_name="web_search",
                           latency_ms=5000)
         summary = tracker.summary()
+
+    设计说明：
+    - 全局单例，用于运维面板聚合统计
+    - 记录数有上限（MAX_RECORDS），超过自动裁剪最旧记录，防止内存泄漏
+    - summary() 支持按 meeting_id 过滤
     """
+    MAX_RECORDS: int = 10000  # 最多保留 1 万条记录（约覆盖数十次会议）
 
     def __init__(self) -> None:
         self._records: list[CostRecord] = []
@@ -139,6 +162,11 @@ class CostTracker:
             extra={"model": model, **(extra or {})},
         )
         self._records.append(record)
+        # 裁剪超过上限的旧记录（防止内存泄漏）
+        if len(self._records) > self.MAX_RECORDS:
+            # 移除最旧的记录
+            excess = len(self._records) - self.MAX_RECORDS
+            del self._records[:excess]
         self._emit(record)
         return record
 
@@ -165,6 +193,10 @@ class CostTracker:
             extra=extra or {},
         )
         self._records.append(record)
+        # 裁剪超过上限的旧记录
+        if len(self._records) > self.MAX_RECORDS:
+            excess = len(self._records) - self.MAX_RECORDS
+            del self._records[:excess]
         self._emit(record)
         return record
 

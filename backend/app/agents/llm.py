@@ -378,6 +378,10 @@ class RealLLM:
 
     读取 env: CONCLAVE_LLM_API_KEY / CONCLAVE_LLM_BASE_URL / CONCLAVE_LLM_MODEL
 
+    支持会议级别的模型覆盖：通过 llm_providers.get_meeting_llm_config(meeting_id)
+    读取当前会议设置的模型/API Key/Base URL 覆盖全局默认。
+    会议ID通过 contextvars.get_meeting_id() 获取。
+
     三明治模式（结构化输出加固）：
     1. 请求层：system message 注入对应 Pydantic 模型的 JSON Schema；
        传 response_format={"type":"json_object"}（接口不支持时自动降级）。
@@ -398,7 +402,33 @@ class RealLLM:
         self.model = settings.llm_model
         self._client = httpx.AsyncClient(timeout=120.0)
         # 接口是否支持 json_object 响应格式；遇到 400 时自动置 False 并回退
-        self._supports_json_mode: bool = True
+        # 注意：按 (base_url, model) 维度缓存，不同provider/model支持情况可能不同
+        self._json_mode_supported: dict[str, bool] = {}
+
+    def _resolve_config(self) -> tuple[str, str, str]:
+        """解析当前调用应使用的 (base_url, api_key, model)
+        
+        优先级：会议级覆盖 > 全局默认（环境变量）
+        """
+        try:
+            from app.context import get_meeting_id
+            from app.llm_providers import get_meeting_llm_config
+            mid = get_meeting_id()
+            if mid and mid != "-":
+                base_url, api_key, model, _pid = get_meeting_llm_config(mid)
+                if base_url and api_key and model:
+                    return base_url, api_key, model
+        except Exception:
+            pass
+        return self.base_url, self.api_key, self.model
+
+    def _supports_json(self, base_url: str, model: str) -> bool:
+        key = f"{base_url}|{model}"
+        return self._json_mode_supported.get(key, True)
+
+    def _set_json_mode(self, base_url: str, model: str, supported: bool) -> None:
+        key = f"{base_url}|{model}"
+        self._json_mode_supported[key] = supported
 
     async def aclose(self) -> None:
         """关闭底层 httpx 连接池，防止事件循环关闭时挂起"""
@@ -424,6 +454,8 @@ class RealLLM:
         # schema_hint 即阶段名，用于 trace 记录
         stage = schema_hint
         temp = STAGE_TEMPERATURES.get(stage, 0.0)
+        # 解析当前生效的模型配置（用于日志记录）
+        _log_base, _log_key, _log_model = self._resolve_config()
 
         current_prompt = prompt
         last_error = ""
@@ -448,7 +480,7 @@ class RealLLM:
                 log_bus.info(
                     f"LLM 调用成功: stage={stage}, attempt={attempt}",
                     logger="agents.llm",
-                    extra={"stage": stage, "attempt": attempt, "model": self.model, "temp": temp},
+                    extra={"stage": stage, "attempt": attempt, "model": _log_model, "temp": temp},
                 )
                 # 关键字段非空校验：intra_team 的 claims 空则视为解析失败，强制重试/降级
                 # （修复 claims 静默丢失问题）
@@ -493,9 +525,10 @@ class RealLLM:
             },
         )
         # 记录降级到 trace
+        _fb_base, _fb_key, _fb_model = self._resolve_config()
         record_call(
             stage=stage,
-            model=self.model,
+            model=_fb_model,
             temperature=STAGE_TEMPERATURES.get(stage, 0.0),
             seed=42,
             prompt=prompt,
@@ -526,12 +559,18 @@ class RealLLM:
         - top_p 固定 1.0
         - seed 固定 42（API 支持则同一输入必同一输出）
         - system message 末尾加 /no_think（关闭 Qwen3.5 思考模式）
+
+        支持会议级模型覆盖：每次调用解析 _resolve_config() 获取当前生效的
+        base_url / api_key / model，支持会议运行中切换模型和BYOK。
         """
         import time
 
-        url = f"{self.base_url.rstrip('/')}/chat/completions"
+        # 解析当前生效的 LLM 配置（支持会议级覆盖）
+        base_url, api_key, model = self._resolve_config()
+
+        url = f"{base_url.rstrip('/')}/chat/completions"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         system_content = "你是会议决策助手，严格输出 JSON，不要输出多余文本。"
@@ -545,7 +584,7 @@ class RealLLM:
         # 分阶段温度：按 stage 查表，默认 0（最严格）
         temp = STAGE_TEMPERATURES.get(stage, 0.0)
         body: dict[str, Any] = {
-            "model": self.model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_prompt},
@@ -555,8 +594,8 @@ class RealLLM:
             "top_p": 1.0,
             "seed": 42,
         }
-        # 请求层：优先传 json_object 响应格式
-        if self._supports_json_mode:
+        # 请求层：优先传 json_object 响应格式（按base_url+model维度缓存支持情况）
+        if self._supports_json(base_url, model):
             body["response_format"] = {"type": "json_object"}
 
         latency_ms = 0
@@ -564,41 +603,85 @@ class RealLLM:
         # DeepSeek-V3.2 生成 PRD+OpenAPI 可能需要 200-400s
         # produce_* 子类型同样需要长超时
         stage_timeout = 600.0 if stage.startswith("produce") else 120.0
+        t0 = time.monotonic()
         try:
-            t0 = time.monotonic()
             resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
             resp.raise_for_status()
             latency_ms = int((time.monotonic() - t0) * 1000)
         except httpx.HTTPStatusError as e:
+            latency_ms = int((time.monotonic() - t0) * 1000)
             # 接口可能不支持 response_format（返回 400），自动降级去掉该参数重试一次
             if (
-                self._supports_json_mode
+                self._supports_json(base_url, model)
                 and e.response.status_code == 400
                 and self._looks_like_json_mode_error(e)
             ):
-                self._supports_json_mode = False
+                self._set_json_mode(base_url, model, False)
                 body.pop("response_format", None)
-                t0 = time.monotonic()
-                resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
-                resp.raise_for_status()
-                latency_ms = int((time.monotonic() - t0) * 1000)
+                try:
+                    t0 = time.monotonic()
+                    resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
+                    resp.raise_for_status()
+                    latency_ms = int((time.monotonic() - t0) * 1000)
+                except httpx.HTTPStatusError as e2:
+                    # json_mode降级后仍然HTTP错误，记录失败调用
+                    latency_ms = int((time.monotonic() - t0) * 1000)
+                    record_call(
+                        stage=stage,
+                        model=model,
+                        temperature=temp,
+                        seed=42,
+                        prompt=user_prompt,
+                        raw_response=f"HTTP {e2.response.status_code}: {e2.response.text[:500]}",
+                        validation_status="invalid",
+                        attempt=attempt,
+                        latency_ms=latency_ms,
+                        input_tokens=0,
+                        output_tokens=0,
+                        total_tokens=0,
+                        error_detail=f"HTTPStatusError after json_mode fallback: {e2.response.status_code} {e2.response.text[:300]}",
+                    )
+                    raise
             else:
-                # 记录失败的调用到 trace
+                # 记录失败的HTTP错误调用到 trace（非json_mode 400或其他HTTP错误）
                 record_call(
                     stage=stage,
-                    model=self.model,
-                    temperature=0,
+                    model=model,
+                    temperature=temp,
                     seed=42,
                     prompt=user_prompt,
-                    raw_response=str(e),
+                    raw_response=f"HTTP {e.response.status_code}: {e.response.text[:500]}",
                     validation_status="invalid",
                     attempt=attempt,
                     latency_ms=latency_ms,
                     input_tokens=0,
                     output_tokens=0,
                     total_tokens=0,
+                    error_detail=f"HTTPStatusError: {e.response.status_code} {e.response.text[:300]}",
                 )
                 raise
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout,
+                httpx.PoolTimeout, httpx.NetworkError, httpx.TimeoutException,
+                OSError) as e:
+            # 网络级错误（连接失败、超时等）：必须先记录调用再抛出，
+            # 否则 complete() 中的 update_last_record 会污染上一条成功记录
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            record_call(
+                stage=stage,
+                model=model,
+                temperature=temp,
+                seed=42,
+                prompt=user_prompt,
+                raw_response=str(e)[:500],
+                validation_status="invalid",
+                attempt=attempt,
+                latency_ms=latency_ms,
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                error_detail=f"{type(e).__name__}: {str(e)[:300]}",
+            )
+            raise
 
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
@@ -610,7 +693,7 @@ class RealLLM:
         # 第1层：记录完整调用信息到 trace（temperature 用实际阶段温度）
         record_call(
             stage=stage,
-            model=self.model,
+            model=model,
             temperature=temp,
             seed=42,
             prompt=user_prompt,
@@ -624,11 +707,12 @@ class RealLLM:
             total_tokens=total_tokens,
         )
         # 成本可观测性：记录 LLM 调用成本到 CostTracker
+        # （estimate_llm_cost 内部会优先查 llm_providers 的多厂商定价表）
         try:
             from app.observability.cost_tracker import get_cost_tracker
             get_cost_tracker().record_llm(
                 node=stage,
-                model=self.model,
+                model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,

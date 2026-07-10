@@ -18,6 +18,13 @@ router = APIRouter(prefix="/regression", tags=["regression"])
 # 基线数据存储目录：backend/data/regression/
 _REGRESSION_DIR: Path = Path(__file__).resolve().parents[2] / "data" / "regression"
 
+# [UNIQ-01 修复] baseline_id 合法字符白名单
+# 旧版 _load_baseline 用 Path / f"{baseline_id}.json"，若 baseline_id 含 "../"
+# 可逃出 _REGRESSION_DIR 目录读取任意 JSON（如其他用户的数据）。
+# 限定 baseline_id 仅由 [a-zA-Z0-9-_] 构成，与创建时的 uuid4().hex[:8] 前缀一致。
+import re as _re
+_BASELINE_ID_PATTERN = _re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
 
 # ---------- 请求/响应模型 ----------
 
@@ -118,7 +125,13 @@ def _ensure_dir() -> None:
 def _save_baseline(baseline: dict[str, Any]) -> None:
     """保存基线到 JSON 文件"""
     _ensure_dir()
-    filepath = _REGRESSION_DIR / f"{baseline['baseline_id']}.json"
+    # [UNIQ-01 修复] 防御性检查（虽然 baseline_id 来自 uuid4().hex 但接口应稳健）
+    if not _BASELINE_ID_PATTERN.match(baseline.get("baseline_id", "")):
+        raise ValueError(f"非法 baseline_id: {baseline.get('baseline_id')!r}")
+    filepath = (_REGRESSION_DIR / f"{baseline['baseline_id']}.json").resolve()
+    # 再次检查：解析后仍在 _REGRESSION_DIR 内
+    if _REGRESSION_DIR.resolve() not in filepath.parents:
+        raise ValueError("baseline_id 解析后跳出存储目录")
     filepath.write_text(
         json.dumps(baseline, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
@@ -126,8 +139,16 @@ def _save_baseline(baseline: dict[str, Any]) -> None:
 
 
 def _load_baseline(baseline_id: str) -> dict[str, Any] | None:
-    """加载单个基线"""
-    filepath = _REGRESSION_DIR / f"{baseline_id}.json"
+    """加载单个基线
+
+    [UNIQ-01 修复] 强校验 baseline_id 字符集，防止路径穿越。
+    """
+    if not _BASELINE_ID_PATTERN.match(baseline_id):
+        raise HTTPException(status_code=400, detail=f"非法 baseline_id: {baseline_id!r}")
+    filepath = (_REGRESSION_DIR / f"{baseline_id}.json").resolve()
+    # 二次防御：解析后必须仍在 _REGRESSION_DIR 内
+    if _REGRESSION_DIR.resolve() not in filepath.parents:
+        raise HTTPException(status_code=400, detail="baseline_id 越界")
     if not filepath.exists():
         return None
     return json.loads(filepath.read_text(encoding="utf-8"))

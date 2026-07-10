@@ -1,4 +1,4 @@
-# §4 WebSocket 事件：DomainEvent + InMemoryEventBus
+﻿# §4 WebSocket 事件：DomainEvent + InMemoryEventBus
 from __future__ import annotations
 
 import asyncio
@@ -38,7 +38,7 @@ class InMemoryEventBus:
     async def publish(self, event: DomainEvent) -> None:
         """发布事件：写入 SQLite + 内存缓存，广播给订阅者"""
         # 持久化到 SQLite 并获取自增 seq
-        from app.db import save_event
+        from app.db_legacy import save_event
         ts_str = event.ts.isoformat() if hasattr(event.ts, "isoformat") else str(event.ts)
         db_seq = save_event(
             meeting_id=event.meeting_id,
@@ -101,7 +101,7 @@ class InMemoryEventBus:
         if events:
             return events[-1].seq
         # 内存无缓存，从 SQLite 取
-        from app.db import last_event_seq
+        from app.db_legacy import last_event_seq
         return last_event_seq(meeting_id)
 
     def clear(self, meeting_id: str) -> None:
@@ -110,7 +110,7 @@ class InMemoryEventBus:
 
     def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
         """从 SQLite 恢复事件到内存缓存"""
-        from app.db import load_events
+        from app.db_legacy import load_events
         rows = load_events(meeting_id)
         events = []
         for row in rows:

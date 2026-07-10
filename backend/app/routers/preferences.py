@@ -1,4 +1,4 @@
-# 用户偏好（主题等）持久化 API
+﻿# 用户偏好（主题等）持久化 API
 from __future__ import annotations
 
 from typing import Any
@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.db import (
+from app.db_legacy import (
     delete_preference,
     get_all_preferences,
     get_preference,
