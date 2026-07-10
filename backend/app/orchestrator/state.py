@@ -1,6 +1,7 @@
 # 状态机 + 控制信号处理
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from app.models import MeetingState, MeetingStatus, Stage
@@ -8,7 +9,7 @@ from app.models import MeetingState, MeetingStatus, Stage
 
 # ---------- 控制信号 ----------
 
-VALID_SIGNALS = {"pause", "resume", "abort", "inject", "loan"}
+VALID_SIGNALS = {"pause", "resume", "abort", "inject", "loan", "reject_user", "approve_borrow", "reject_borrow", "freeze_borrow"}
 
 
 class ControlError(Exception):
@@ -50,13 +51,17 @@ def _handle_abort(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
 
 def _handle_inject(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
     """inject: 追加注入消息，下一轮可见"""
+    import uuid
     msg = payload.get("message", payload.get("content", ""))
     if msg:
+        msg_id = f"inject-{uuid.uuid4().hex[:8]}"
         state.injected_messages.append(
             {
                 "signal": "inject",
+                "message_id": msg_id,
                 "content": msg,
                 "at_stage": state.stage.value,
+                "rejected": False,
             }
         )
     return state
@@ -113,6 +118,204 @@ def _handle_loan(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
     return state
 
 
+def _handle_reject_user(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
+    """reject_user: Agent 对用户注入消息提出证据驱动的拒绝投票
+
+    约束：
+    - 每个 Agent 必须提供证据（evidence_refs）才能拒绝
+    - 至少 2 个 Agent 投票拒绝后，注入消息被标记为 rejected
+    - 无证据的拒绝投票被忽略
+    """
+    target_message_id = str(payload.get("message_id", "")).strip()
+    agent_role = str(payload.get("agent_role", "")).strip()
+    evidence_refs = payload.get("evidence_refs", [])
+    reason = str(payload.get("reason", "")).strip()
+
+    if not target_message_id or not agent_role:
+        return state
+
+    # 证据约束：无证据的拒绝投票不记录
+    if not evidence_refs or len(evidence_refs) == 0:
+        state.injected_messages.append(
+            {
+                "signal": "reject_user",
+                "message_id": target_message_id,
+                "agent_role": agent_role,
+                "verdict": "ignored",
+                "reason": "拒绝投票缺少证据引用，已忽略",
+                "at_stage": state.stage.value,
+            }
+        )
+        return state
+
+    # 初始化 user_rejections 字典
+    if not hasattr(state, 'user_rejections') or state.user_rejections is None:
+        state.user_rejections = {}
+
+    if target_message_id not in state.user_rejections:
+        state.user_rejections[target_message_id] = []
+
+    # 防重复：同一 Agent 对同一消息只能投一次
+    existing_roles = {r.get("agent_role") for r in state.user_rejections[target_message_id]}
+    if agent_role in existing_roles:
+        return state
+
+    # 记录投票
+    vote = {
+        "agent_role": agent_role,
+        "evidence_refs": evidence_refs,
+        "reason": reason,
+        "at_stage": state.stage.value,
+    }
+    state.user_rejections[target_message_id].append(vote)
+
+    # 判断是否达到拒绝阈值（至少 2 个 Agent）
+    rejection_count = len(state.user_rejections[target_message_id])
+    is_rejected = rejection_count >= 2
+
+    state.injected_messages.append(
+        {
+            "signal": "reject_user",
+            "message_id": target_message_id,
+            "agent_role": agent_role,
+            "verdict": "rejected" if is_rejected else "voting",
+            "reason": reason,
+            "rejection_count": rejection_count,
+            "at_stage": state.stage.value,
+        }
+    )
+
+    # 如果达到阈值，标记对应注入消息为 rejected
+    if is_rejected:
+        for inj in state.injected_messages:
+            if inj.get("message_id") == target_message_id:
+                inj["rejected"] = True
+                inj["rejection_reason"] = "；".join(
+                    r.get("reason", "") for r in state.user_rejections[target_message_id]
+                )
+                break
+
+    return state
+
+
+def _handle_approve_borrow(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
+    """approve_borrow: 用户批准待审批的借调申请"""
+    request_id = str(payload.get("request_id", "")).strip()
+    pending = state.pending_borrow_request
+    if pending is None:
+        raise ControlError("没有待审批的借调申请")
+    if request_id and pending.get("id") != request_id:
+        raise ControlError(f"待审批申请 ID 不匹配: {request_id}")
+
+    target_role = pending.get("target_role", "")
+    # 检查宪章和重复借调
+    charter = state.charter
+    if charter is None:
+        raise ControlError("会议宪章尚未建立，无法借调")
+    if charter.is_already_borrowed(target_role):
+        state.pending_borrow_request = None
+        state.injected_messages.append({
+            "signal": "approve_borrow",
+            "request_id": pending.get("id"),
+            "target_role": target_role,
+            "verdict": "reject",
+            "reason": f"角色 {target_role} 已借调过",
+            "at_stage": state.stage.value,
+        })
+        return state
+    if len(state.borrowed_agents) >= 2:
+        state.pending_borrow_request = None
+        state.injected_messages.append({
+            "signal": "approve_borrow",
+            "request_id": pending.get("id"),
+            "target_role": target_role,
+            "verdict": "reject",
+            "reason": "借调数量已达上限（2）",
+            "at_stage": state.stage.value,
+        })
+        return state
+
+    # 批准借调
+    charter.register_borrow(target_role, "approve_temporary")
+    state.borrowed_agents.append({
+        "role": target_role,
+        "verdict": "approve_temporary",
+        "spoken": False,
+        "request": {
+            "target_role": target_role,
+            "goal": pending.get("goal", ""),
+            "necessary": pending.get("necessary", ""),
+            "no_loan_cost": pending.get("no_loan_cost", ""),
+            "stance": payload.get("stance", ""),
+        },
+    })
+    # 记录历史
+    state.borrow_request_history.append({
+        **pending,
+        "verdict": "approved_by_user",
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+    })
+    state.pending_borrow_request = None
+    state.injected_messages.append({
+        "signal": "approve_borrow",
+        "request_id": pending.get("id"),
+        "target_role": target_role,
+        "verdict": "approve_temporary",
+        "reason": "用户批准借调",
+        "at_stage": state.stage.value,
+    })
+    return state
+
+
+def _handle_reject_borrow(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
+    """reject_borrow: 用户拒绝待审批的借调申请"""
+    request_id = str(payload.get("request_id", "")).strip()
+    pending = state.pending_borrow_request
+    if pending is None:
+        raise ControlError("没有待审批的借调申请")
+    if request_id and pending.get("id") != request_id:
+        raise ControlError(f"待审批申请 ID 不匹配: {request_id}")
+
+    target_role = pending.get("target_role", "")
+    reason = str(payload.get("reason", "用户拒绝借调")).strip()
+    state.borrow_request_history.append({
+        **pending,
+        "verdict": "rejected_by_user",
+        "rejected_at": datetime.now(timezone.utc).isoformat(),
+        "reject_reason": reason,
+    })
+    state.pending_borrow_request = None
+    state.injected_messages.append({
+        "signal": "reject_borrow",
+        "request_id": pending.get("id"),
+        "target_role": target_role,
+        "verdict": "reject",
+        "reason": reason,
+        "at_stage": state.stage.value,
+    })
+    return state
+
+
+def _handle_freeze_borrow(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
+    """freeze_borrow: 冻结借调 - 用户决定从此不再允许借调"""
+    state.borrow_frozen = True
+    pending = state.pending_borrow_request
+    if pending is not None:
+        state.borrow_request_history.append({
+            **pending,
+            "verdict": "frozen_by_user",
+            "frozen_at": datetime.now(timezone.utc).isoformat(),
+        })
+        state.pending_borrow_request = None
+    state.injected_messages.append({
+        "signal": "freeze_borrow",
+        "frozen": True,
+        "at_stage": state.stage.value,
+        "pending_request_id": pending.get("id") if pending else None,
+    })
+    return state
+
+
 # 信号 → 处理器 注册表（命令模式 + Registry）
 _SIGNAL_HANDLERS: dict[str, Callable[[MeetingState, dict[str, Any]], MeetingState]] = {
     "pause": _handle_pause,
@@ -120,6 +323,10 @@ _SIGNAL_HANDLERS: dict[str, Callable[[MeetingState, dict[str, Any]], MeetingStat
     "abort": _handle_abort,
     "inject": _handle_inject,
     "loan": _handle_loan,
+    "reject_user": _handle_reject_user,
+    "approve_borrow": _handle_approve_borrow,
+    "reject_borrow": _handle_reject_borrow,
+    "freeze_borrow": _handle_freeze_borrow,
 }
 
 
@@ -180,8 +387,8 @@ def next_stage(current: Stage, flow_plan: str = "full") -> Stage | None:
 
 
 def is_terminal(state: MeetingState) -> bool:
-    """是否处于终态（done / aborted）"""
-    return state.status in (MeetingStatus.DONE, MeetingStatus.ABORTED)
+    """是否处于终态（done / aborted / failed）"""
+    return state.status in (MeetingStatus.DONE, MeetingStatus.ABORTED, MeetingStatus.FAILED)
 
 
 def should_pause(state: MeetingState) -> bool:

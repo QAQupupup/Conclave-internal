@@ -55,6 +55,7 @@ class MeetingStatus(str, Enum):
     PAUSED = "paused"
     ABORTED = "aborted"
     DONE = "done"
+    FAILED = "failed"  # [AUDIT-FIX P0-2/P0-4] 新增：节点异常或超时时的终态
 
 
 # ---------- 业务模型 ----------
@@ -178,9 +179,17 @@ class MeetingState(BaseModel):
     status: MeetingStatus = MeetingStatus.RUNNING
     clarified_topic: Optional[str] = None
     team_config: list[dict[str, Any]] = Field(default_factory=list)  # [{role, stance}]
+    # 角色配置：从 agent_roles 表加载的完整角色定义列表
+    # 每项: {id, display_name, perspective, expertise_domains, risk_appetite,
+    #        default_stance, evidence_preference, model_override, background_brief,
+    #        prompt_template}
+    role_configs: list[dict[str, Any]] = Field(default_factory=list)
     key_questions: list[str] = Field(default_factory=list)
     messages: list[dict[str, Any]] = Field(default_factory=list)  # 发言记录
     injected_messages: list[dict[str, Any]] = Field(default_factory=list)
+    # 用户介入对话：用户↔主持人 1v1 私密对话历史
+    # 每项: {id, sender: "user"|"moderator", content, reply_to_id?, timestamp}
+    intervention_messages: list[dict[str, Any]] = Field(default_factory=list)
     team_conclusions: list[dict[str, Any]] = Field(default_factory=list)  # 队内结论
     claims: list[dict[str, Any]] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
@@ -192,8 +201,17 @@ class MeetingState(BaseModel):
     # 议题路由计划：clarify 阶段 LLM 输出，Runner 据此裁剪后续阶段
     # "full" = 完整六阶段 / "standard" = 无冲突时跳过 evidence_check / "simple" = 跳过中间三阶段
     flow_plan: str = "full"
+    # 辩论深度：轻量(light) / 标准(standard) / 深度(deep)
+    # - light: 2-3 Agents, 1 轮队内发言, 跳过跨队辩论和证据核验
+    # - standard: 3-5 Agents, 2-3 轮辩论, 标准流程
+    # - deep: 5+ Agents, 完整多轮辩论, 证据核验 + 仲裁
+    debate_depth: str = "standard"
+    # 动态路由：是否启用元认知 Agent 决定下一阶段（替代固定六阶段顺序）
+    dynamic_routing: bool = True
     paused_snapshot: Optional[dict[str, Any]] = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
+    reference_meeting_ids: list[str] = Field(default_factory=list)  # 引用的历史会议 ID 列表
+    reference_context: str = ""  # 引用会议摘要文本（注入 prompt）
     # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）
     charter: Optional[MeetingCharter] = None
     # 漂移检查日志（非阻塞，记录每条发言的 drift 判定）
@@ -208,10 +226,29 @@ class MeetingState(BaseModel):
     # 每项: {"role": "security_expert", "verdict": "approve_temporary",
     #        "spoken": False, "request": {...}}
     borrowed_agents: list[dict[str, Any]] = Field(default_factory=list)
+    # 自动借调机制：主持人评估是否需要补充角色
+    # 自动通过的借调次数（< 3 次时主持人自动审批，>= 3 次需用户确认）
+    auto_borrow_count: int = 0
+    # 待用户审批的借调申请（超过自动通过阈值后挂起）
+    # 格式: {"id": "...", "target_role": "...", "goal": "...", "necessary": "...",
+    #        "no_loan_cost": "...", "requested_by": "moderator", "requested_at": "..."}
+    pending_borrow_request: Optional[dict[str, Any]] = None
+    borrow_frozen: bool = False  # 是否冻结借调（用户选择不再允许借调）
+    # 借调申请历史（含自动通过和用户审批的所有申请）
+    borrow_request_history: list[dict[str, Any]] = Field(default_factory=list)
     # 流水线优化：cross_team 阶段预检索的证据（evidence_check 优先使用）
     # 格式: {conflict_id: [evidence_chunks]}
-    _prefetched_evidence: Optional[dict[str, list[dict]]] = None
+    # [UNIQ-07 修复] 原字段名 _prefetched_evidence（下划线前缀）不会被 Pydantic
+    # 序列化，导致会议状态快照+SQLite 持久化时丢失该字段，进程重启后
+    # evidence_check 节点需要重新检索。改为 prefetched_evidence（无下划线）。
+    prefetched_evidence: Optional[dict[str, list[dict]]] = Field(default=None)
+    # Agent 拒绝权：用户注入消息后，Agent 可投票拒绝（需证据支撑，至少 2 票）
+    # 格式: {message_id: [{"agent_role": "...", "evidence_refs": [...], "reason": "..."}]}
+    user_rejections: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # [AUDIT-FIX P0-2/P0-4] 新增：异常终态记录，用于审计可追溯性
+    completed_at: Optional[datetime] = None
+    error_detail: Optional[str] = None  # 节点异常或超时时记录错误信息
 
     def model_post_init(self, __context: Any) -> None:
         """初始化后确保 conclusion_chain 和 llm_trace 的 meeting_id 正确"""
@@ -223,3 +260,48 @@ class MeetingState(BaseModel):
     def snapshot(self) -> dict[str, Any]:
         """生成快照用于 pause 暂存 / WS 回放"""
         return self.model_dump(mode="json")
+
+
+# ---------- Agent 角色模型 ----------
+
+class AgentRole(BaseModel):
+    """Agent 角色定义：可从数据库加载、API 返回、LLM 生成"""
+    id: str                                    # 英文标识，如 "fullstack_engineer"
+    display_name: str                          # 中文名
+    perspective: str = ""                      # 核心视角
+    expertise_domains: list[str] = Field(default_factory=list)
+    risk_appetite: str = "balanced"            # conservative | balanced | aggressive
+    default_stance: str = ""                   # 默认立场
+    evidence_preference: str = "balanced"      # 证据偏好
+    model_override: str = ""                   # 留空则用全局 LLM
+    background_brief: str = ""                 # 一句话背景
+    prompt_template: str = ""                  # 完整 prompt 模板
+    is_builtin: bool = False
+    is_active: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+
+    @classmethod
+    def from_db_row(cls, row: dict[str, Any]) -> "AgentRole":
+        return cls(
+            id=row["id"],
+            display_name=row["display_name"],
+            perspective=row.get("perspective", ""),
+            expertise_domains=row.get("expertise_domains", []),
+            risk_appetite=row.get("risk_appetite", "balanced"),
+            default_stance=row.get("default_stance", ""),
+            evidence_preference=row.get("evidence_preference", "balanced"),
+            model_override=row.get("model_override", ""),
+            background_brief=row.get("background_brief", ""),
+            prompt_template=row.get("prompt_template", ""),
+            is_builtin=bool(row.get("is_builtin", False)),
+            is_active=bool(row.get("is_active", True)),
+            created_at=row.get("created_at", ""),
+            updated_at=row.get("updated_at", ""),
+        )
+
+
+class AgentRoleListResponse(BaseModel):
+    """角色列表响应"""
+    roles: list[AgentRole]
+    total: int
