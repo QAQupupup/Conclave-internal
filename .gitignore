@@ -70,3 +70,6 @@ logs/
 
 # ===== Misc =====
 .trae-cn/
+.trae-html-share-packages/
+*.dev_token
+.dev_token
