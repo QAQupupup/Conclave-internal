@@ -7,7 +7,8 @@ import { ROLE_LABELS, STAGE_LABELS } from '../types/events.ts'
 import { FocusMode } from './FocusMode.tsx'
 import { formatTime, tryFormatJson, truncate } from '../lib/format.ts'
 import { useCopy } from '../hooks/useCopy.ts'
-import { renderMessageContent, formatRefLabel } from './MessageContent.tsx'
+import { renderMessageContent } from './MessageContent.tsx'
+import { EvidenceList } from './EvidenceBadge.tsx'
 
 interface MessageCardProps {
   message: MeetingMessage
@@ -17,9 +18,6 @@ interface MessageCardProps {
 
 /** 超过该字符数视为长消息，默认折叠 */
 const COLLAPSE_THRESHOLD = 300
-
-/** ref chip 默认可见数量，超出折叠为 "+N" */
-const REFS_VISIBLE = 3
 
 /** 角色 → CSS 颜色类 */
 function roleClass(role: MeetingMessage['agent_role']): string {
@@ -45,12 +43,6 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
   const { copied, copy } = useCopy()
   // 折叠时截断并加省略号，避免长消息挤压视图
   const truncatedText = isLong && !isExpanded ? truncate(displayText, COLLAPSE_THRESHOLD) : displayText
-
-  // ref chip 折叠：默认只显示前 3 个 + "+N 展开"
-  const hasManyRefs = refs.length > REFS_VISIBLE
-  const [refsExpanded, setRefsExpanded] = useState(false)
-  const visibleRefs = hasManyRefs && !refsExpanded ? refs.slice(0, REFS_VISIBLE) : refs
-  const hiddenCount = refs.length - REFS_VISIBLE
 
   return (
     <div className={`message-card ${roleClass(role)} message-in${isExpanded ? ' is-expanded' : ''}`}>
@@ -97,26 +89,7 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
       </div>
       {refs.length > 0 && (
         <div className="message-refs">
-          {visibleRefs.map((ref, i) => (
-            <button
-              key={`${ref}-${i}`}
-              className="ref-chip"
-              type="button"
-              onClick={() => onSelectRef?.(ref)}
-              title={`引用: ${ref}（点击在右侧证据面板定位）`}
-            >
-              {formatRefLabel(ref)}
-            </button>
-          ))}
-          {hasManyRefs && (
-            <button
-              type="button"
-              className="ref-chip-toggle"
-              onClick={() => setRefsExpanded(v => !v)}
-            >
-              {refsExpanded ? '收起' : `+${hiddenCount}`}
-            </button>
-          )}
+          <EvidenceList refs={refs} onSelectRef={onSelectRef} />
         </div>
       )}
       <FocusMode open={focused} onClose={() => setFocused(false)} title={ROLE_LABELS[role] ?? role}>

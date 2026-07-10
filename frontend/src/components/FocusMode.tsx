@@ -34,7 +34,7 @@ export function FocusMode({
     }
   }, [open, onClose])
 
-  if (!open) return <>{children}</>
+  if (!open) return null
 
   return (
     <div

@@ -1,7 +1,7 @@
 // 借调三问表单（模态）：提交时经 WS 发送 control signal loan
 // 借调三问：目标角色 / 借调目标 / 必要性 / 不借调的代价
 // 提交后显示反馈状态（发送中/已发送/连接失败），不立即关闭
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { FormEvent } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import type { BorrowRequestPayload } from '../types/events.ts'
@@ -20,6 +20,17 @@ export function BorrowDialog({ open, onClose }: BorrowDialogProps) {
   const [necessary, setNecessary] = useState('')
   const [noLoanCost, setNoLoanCost] = useState('')
   const [submitState, setSubmitState] = useState<SubmitState>('idle')
+  const sentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 清理 timer（组件卸载或对话框关闭时）
+  useEffect(() => {
+    return () => {
+      if (sentTimerRef.current) {
+        clearTimeout(sentTimerRef.current)
+        sentTimerRef.current = null
+      }
+    }
+  }, [])
 
   // 打开时重置表单
   useEffect(() => {
@@ -29,6 +40,10 @@ export function BorrowDialog({ open, onClose }: BorrowDialogProps) {
       setNecessary('')
       setNoLoanCost('')
       setSubmitState('idle')
+      if (sentTimerRef.current) {
+        clearTimeout(sentTimerRef.current)
+        sentTimerRef.current = null
+      }
     }
   }, [open])
 
@@ -51,8 +66,10 @@ export function BorrowDialog({ open, onClose }: BorrowDialogProps) {
     // 经 WS 发送 loan 控制信号
     sendBorrow(payload)
     // 短暂等待后显示已发送状态（WS send 是异步的，无法精确确认后端接收）
-    setTimeout(() => {
+    if (sentTimerRef.current) clearTimeout(sentTimerRef.current)
+    sentTimerRef.current = setTimeout(() => {
       setSubmitState('sent')
+      sentTimerRef.current = null
     }, 500)
   }
 

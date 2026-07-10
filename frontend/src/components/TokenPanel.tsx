@@ -2,6 +2,8 @@
 // 通过 GET /meetings/:id/trace 拉取数据，每 5s 轮询刷新
 import { useState, useEffect } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
+import { request, getMeetingModel, getLLMBalance } from '../lib/api.ts'
+import type { MeetingModelConfig, LLMBalanceResponse } from '../lib/api.ts'
 
 interface TraceData {
   meeting_id: string
@@ -40,34 +42,86 @@ interface BudgetData {
   total_calls: number
 }
 
+/** 阶段英文ID → 中文标签映射（含所有 schema_hint 阶段名） */
+const STAGE_LABELS: Record<string, string> = {
+  clarify: '澄清议题',
+  intra_team: '队内发言',
+  cross_team: '跨队辩论',
+  evidence_check: '证据对照',
+  arbitrate: '仲裁裁决',
+  produce_prd_openapi: '产出PRD',
+  produce_code_analysis: '产出代码分析',
+  produce_tested_system: '产出可测系统',
+  produce_deployable_service: '产出可部署服务',
+  produce_design_doc: '产出设计文档',
+  produce_comprehensive: '产出综合文档',
+  produce_research_report: '产出研究报告',
+  produce_business_report: '产出商业报告',
+  meta_next_stage: '阶段路由',
+}
+
+function stageLabel(stage: string): string {
+  if (STAGE_LABELS[stage]) return STAGE_LABELS[stage]
+  // 兜底：produce_xxx → 产出·xxx
+  if (stage.startsWith('produce_')) {
+    const suffix = stage.slice('produce_'.length)
+    return `产出·${suffix}`
+  }
+  return stage
+}
+
+/** 验证状态中文标签 */
+function statusLabel(status: string): { label: string; cls: string } {
+  switch (status) {
+    case 'valid': return { label: '成功', cls: 'valid' }
+    case 'invalid': return { label: '失败', cls: 'invalid' }
+    case 'fallback_stub': return { label: '降级', cls: 'fallback_stub' }
+    default: return { label: status, cls: '' }
+  }
+}
+
 export function TokenPanel() {
   const { meetingId } = useMeeting()
   const [trace, setTrace] = useState<TraceData | null>(null)
   const [budget, setBudget] = useState<BudgetData | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [modelConfig, setModelConfig] = useState<MeetingModelConfig | null>(null)
+  const [balance, setBalance] = useState<LLMBalanceResponse | null>(null)
 
   const refresh = async () => {
     if (!meetingId) return
-    setLoading(true)
     try {
-      const [traceResp, budgetResp] = await Promise.all([
-        fetch(`/meetings/${encodeURIComponent(meetingId)}/trace`),
-        fetch(`/meetings/${encodeURIComponent(meetingId)}/budget`),
+      const [data, bd] = await Promise.all([
+        request<TraceData>(`/meetings/${encodeURIComponent(meetingId)}/trace`),
+        request<BudgetData>(`/meetings/${encodeURIComponent(meetingId)}/budget`),
       ])
-      if (traceResp.ok) {
-        const data = await traceResp.json()
-        setTrace(data)
-      }
-      if (budgetResp.ok) {
-        const bd = await budgetResp.json()
-        setBudget(bd)
-      }
-    } catch {
-      // 静默
-    } finally {
-      setLoading(false)
+      setTrace(data)
+      setBudget(bd)
+    } catch (e) {
+      // 静默：轮询失败不影响 UI
     }
   }
+
+  // 加载当前模型配置和余额（仅首次，不轮询避免浪费请求）
+  useEffect(() => {
+    if (!meetingId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const cfg = await getMeetingModel(meetingId)
+        if (cancelled) setModelConfig(cfg)
+        // 查询余额（用当前 provider）
+        try {
+          const bal = await getLLMBalance({ provider: cfg.provider_id })
+          if (!cancelled) setBalance(bal)
+        } catch {
+          // 余额查询失败静默
+        }
+      } catch {
+        // 模型配置获取失败静默
+      }
+    })()
+    return () => { cancelled = true }
+  }, [meetingId])
 
   useEffect(() => {
     refresh()
@@ -88,12 +142,19 @@ export function TokenPanel() {
 
   return (
     <div className="token-panel">
-      <div className="token-panel-header">
-        <h3>Token 消耗</h3>
-        <button className="btn btn-sm" onClick={refresh} disabled={loading}>
-          ↻
-        </button>
-      </div>
+      {/* 当前模型信息条 */}
+      {modelConfig && (
+        <div className="token-model-bar">
+          <span className="token-model-label">模型</span>
+          <span className="token-model-name" title={modelConfig.model}>{modelConfig.model}</span>
+          {modelConfig.has_custom_key && <span className="custom-key-badge">自定义Key</span>}
+          {balance?.supported && balance.balance !== null && (
+            <span className={`token-model-balance${balance.balance < 1 ? ' low' : ''}`}>
+              余额 {balance.currency === 'CNY' ? '¥' : '$'}{balance.balance.toFixed(2)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 预算进度条 */}
       {budget && budget.budget > 0 && (
@@ -115,15 +176,15 @@ export function TokenPanel() {
       <div className="token-cards">
         <div className="token-card">
           <div className="token-card-label">总 Token</div>
-          <div className="token-card-value">{s.total_tokens || 0}</div>
+          <div className="token-card-value">{(s.total_tokens || 0).toLocaleString()}</div>
         </div>
         <div className="token-card">
           <div className="token-card-label">输入</div>
-          <div className="token-card-value in">{s.total_input_tokens || 0}</div>
+          <div className="token-card-value in">{(s.total_input_tokens || 0).toLocaleString()}</div>
         </div>
         <div className="token-card">
           <div className="token-card-label">输出</div>
-          <div className="token-card-value out">{s.total_output_tokens || 0}</div>
+          <div className="token-card-value out">{(s.total_output_tokens || 0).toLocaleString()}</div>
         </div>
         <div className="token-card">
           <div className="token-card-label">调用数</div>
@@ -138,13 +199,14 @@ export function TokenPanel() {
           {stages.map(([stage, v]: any) => {
             const tokens = (v.input_tokens || 0) + (v.output_tokens || 0)
             const pct = (tokens / maxTokens) * 100
+            const label = stageLabel(stage)
             return (
-              <div key={stage} className="token-bar-row">
-                <span className="token-bar-label">{stage}</span>
+              <div key={stage} className="token-bar-row" title={`${label}：${tokens.toLocaleString()} tokens`}>
+                <span className="token-bar-label">{label}</span>
                 <div className="token-bar-track">
                   <div className="token-bar-fill" style={{ width: `${pct}%` }} />
                 </div>
-                <span className="token-bar-value">{tokens}</span>
+                <span className="token-bar-value">{tokens.toLocaleString()}</span>
               </div>
             )
           })}
@@ -156,14 +218,18 @@ export function TokenPanel() {
         <div className="token-calls">
           <h4>调用明细</h4>
           <div className="token-call-list">
-            {trace.calls.map((c, i) => (
-              <div key={c.call_id || i} className="token-call-item">
-                <span className="call-stage">{c.stage}</span>
-                <span className="call-tokens">{c.total_tokens || 0} tok</span>
-                <span className="call-latency">{c.latency_ms}ms</span>
-                <span className={`call-status ${c.validation_status}`}>{c.validation_status}</span>
-              </div>
-            ))}
+            {trace.calls.map((c, i) => {
+              const sl = statusLabel(c.validation_status)
+              const label = stageLabel(c.stage)
+              return (
+                <div key={c.call_id || i} className="token-call-item" title={`${label} · ${c.total_tokens} tok · ${c.latency_ms}ms`}>
+                  <span className="call-stage">{label}</span>
+                  <span className="call-tokens">{(c.total_tokens || 0).toLocaleString()} tok</span>
+                  <span className="call-latency">{c.latency_ms}ms</span>
+                  <span className={`call-status ${sl.cls}`}>{sl.label}</span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

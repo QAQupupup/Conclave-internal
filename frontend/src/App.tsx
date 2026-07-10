@@ -15,12 +15,21 @@ import { EvidencePanel } from './components/EvidencePanel.tsx'
 import { ArtifactPanel } from './components/ArtifactPanel.tsx'
 import { ReportViewer } from './components/ReportViewer.tsx'
 import { TokenPanel } from './components/TokenPanel.tsx'
+import { ModelSelector } from './components/ModelSelector.tsx'
+import { IntervenePanel } from './components/IntervenePanel.tsx'
 import { BorrowDialog } from './components/BorrowDialog.tsx'
+import { BorrowApprovalDialog } from './components/BorrowApprovalDialog.tsx'
 import { MeetingSidebar } from './components/MeetingSidebar.tsx'
 import { WorkspacePanel } from './components/WorkspacePanel.tsx'
 import { ThemeSettings } from './components/ThemeSettings.tsx'
+import { SettingsPanel } from './components/SettingsPanel.tsx'
 import { LandingPage } from './components/LandingPage.tsx'
 import { TaskBoard } from './components/TaskBoard.tsx'
+import { FloatingBadges, PanelModal } from './components/FloatingBadges.tsx'
+import { DrawerMenu } from './components/DrawerMenu.tsx'
+import { DashboardView } from './components/DashboardView.tsx'
+import { PanelErrorBoundary } from './components/ErrorBoundary.tsx'
+import type { BadgeItem } from './components/FloatingBadges.tsx'
 
 /** 全局视图切换：会议 / 工作区 */
 type ViewTab = 'meeting' | 'workspace'
@@ -45,49 +54,132 @@ function TabBar({ tab, onChange }: { tab: ViewTab; onChange: (t: ViewTab) => voi
   )
 }
 
-/** 右侧面板 Tab：议题 / 证据 / 产出 / 报告 / Token */
-type RightPanelTab = 'topic' | 'evidence' | 'artifact' | 'report' | 'token'
-
-/** 会议主视图：顶部流程指示器+控制按钮 / 拓扑图 / 聊天流 + 右侧面板，借调模态 + 冲突联动选中态 + 右侧 Tab 切换 */
+/** 会议主视图：聊天流全宽 + 浮动徽标展开面板 */
 function MeetingView({
   onOpenInWorkspace,
-  rightTab,
-  setRightTab,
 }: {
   onOpenInWorkspace?: (filePath: string) => void
-  rightTab: RightPanelTab
-  setRightTab: (t: RightPanelTab) => void
 }) {
-  const { reset } = useMeeting()
+  // [CON-12] useMeeting 返回 selectMeeting、connected 等上下文
+  // 移除未用的 refreshMeeting 解构（实际无调用点）
+  const { meetingId, selectMeeting, store } = useMeeting()
   // 右侧证据面板选中冲突（聊天流点击证据 ref 时联动高亮）
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null)
-  // 借调表单模态开关
+  // 借调表单模态开关（用户手动发起）
   const [borrowOpen, setBorrowOpen] = useState(false)
-  // 拓扑图折叠/展开状态（持久化到 localStorage）
+  // 自动借调审批弹窗：监听 store 中的 pending_borrow_request
+  const pendingBorrowRequest = store.meeting?.pending_borrow_request ?? null
+  // 拓扑图折叠/展开状态
   const [graphCollapsed, setGraphCollapsed] = usePersistentState<boolean>(
     'conclave-graph-collapsed',
     false,
   )
-  // 聊天面板折叠/展开状态
-  const [chatCollapsed, setChatCollapsed] = usePersistentState<boolean>(
-    'conclave-chat-collapsed',
-    false,
-  )
-  // 右侧面板折叠/展开状态
-  const [rightCollapsed, setRightCollapsed] = usePersistentState<boolean>(
-    'conclave-right-collapsed',
-    false,
-  )
+  // 浮动徽标激活的面板 ID（空字符串表示全部关闭）
+  const [activeBadge, setActiveBadge] = useState('')
+
+  const badgeItems: BadgeItem[] = [
+    { id: 'topic', label: '议题', icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+        <line x1="2" y1="4" x2="14" y2="4" />
+        <line x1="2" y1="8" x2="11" y2="8" />
+        <line x1="2" y1="12" x2="14" y2="12" />
+      </svg>
+    ) },
+    { id: 'evidence', label: '证据', icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+        <circle cx="7" cy="7" r="4.5" />
+        <line x1="10.5" y1="10.5" x2="14" y2="14" />
+      </svg>
+    ) },
+    { id: 'artifact', label: '产出', icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="5" width="12" height="9" rx="1.5" />
+        <path d="M5 5V3.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V5" />
+      </svg>
+    ) },
+    { id: 'report', label: '报告', icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 1.5h7l3 3v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1z" />
+        <path d="M10 1.5v3h3" />
+        <line x1="5" y1="8" x2="11" y2="8" />
+        <line x1="5" y1="11" x2="9" y2="11" />
+      </svg>
+    ) },
+    { id: 'token', label: 'Token', icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <rect x="0.5" y="0.5" width="15" height="15" rx="3" fill="var(--bg-elev)" stroke="currentColor" strokeWidth="1.5" />
+        <text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor" fontFamily="system-ui, sans-serif">T</text>
+      </svg>
+    ) },
+    { id: 'model', label: '模型', icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 1.5l5.5 3v7L8 14.5 2.5 11.5v-7z" />
+        <path d="M8 1.5v13" />
+        <path d="M2.5 4.5L8 8l5.5-3.5" />
+      </svg>
+    ) },
+    { id: 'intervene', label: '介入', icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 2C4.7 2 2 4.7 2 8c0 1.1.3 2.1.8 3L2 14l3.2-.7C6.1 13.8 7 14 8 14c3.3 0 6-2.7 6-6s-2.7-6-6-6z" />
+      </svg>
+    ) },
+  ]
+
+  const badgeLabels: Record<string, string> = {
+    topic: '议题与团队',
+    evidence: '证据与裁决',
+    artifact: '产出物',
+    report: '会议报告',
+    token: 'Token 消耗',
+    model: '模型设置',
+    intervene: '介入对话',
+  }
+
+  const renderPanelContent = (id: string) => {
+    // [CON-05 修复] 面板级 ErrorBoundary 包裹，避免单个面板挂掉整个浮窗层
+    // 关键路径：仅包面板内容；modal 标题栏、关闭按钮不受影响
+    const wrap = (panelId: string, node: React.ReactNode) => (
+      <PanelErrorBoundary panel={panelId}>{node}</PanelErrorBoundary>
+    )
+    switch (id) {
+      case 'topic':
+        return wrap('topic', <TopicPanel />)
+      case 'evidence':
+        return wrap('evidence',
+          <EvidencePanel
+            selectedConflictId={selectedConflictId}
+            onSelectConflict={setSelectedConflictId}
+          />,
+        )
+      case 'artifact':
+        return wrap('artifact',
+          <ArtifactPanel
+            onOpenBorrow={() => setBorrowOpen(true)}
+            onOpenInWorkspace={onOpenInWorkspace}
+          />,
+        )
+      case 'report':
+        return wrap('report', <ReportViewer />)
+      case 'token':
+        return wrap('token', <TokenPanel />)
+      case 'model':
+        return wrap('model', <ModelSelector meetingId={meetingId} showHeader />)
+      case 'intervene':
+        return wrap('intervene', <IntervenePanel onClose={() => setActiveBadge('')} />)
+      default:
+        return null
+    }
+  }
 
   return (
-    <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}${chatCollapsed ? ' chat-collapsed' : ''}${rightCollapsed ? ' right-collapsed' : ''}`}>
-      {/* 顶部：六步流程指示器 + 会议控制按钮（替代原 Header） */}
+    <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}`}>
+      {/* 顶部：六步流程指示器 + 会议控制按钮 */}
       <div className="meeting-top-bar">
         <StageIndicator />
         <MeetingControls />
       </div>
 
-      {/* 主体：拓扑图 + 左侧聊天流 + 右侧三块面板 */}
+      {/* 主体：拓扑图 + 聊天流全宽 */}
       <div className="app-layout">
         <div className="graph-slot">
           <AgentGraph />
@@ -95,90 +187,42 @@ function MeetingView({
             type="button"
             className="graph-collapse-btn"
             onClick={() => setGraphCollapsed(v => !v)}
-            title={graphCollapsed ? '展开拓扑图' : '收起拓扑图（专注聊天/内容）'}
+            title={graphCollapsed ? '展开拓扑图' : '收起拓扑图'}
             aria-label={graphCollapsed ? '展开拓扑图' : '收起拓扑图'}
           >
             {graphCollapsed ? '▼' : '▲'}
           </button>
         </div>
-        <div className="app-body">
-          <div className="chat-slot">
+        <div className="app-body app-body-full">
+          <div className="chat-slot chat-slot-full">
             <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
-            <button
-              type="button"
-              className="panel-collapse-btn chat-collapse-btn"
-              onClick={() => setChatCollapsed(v => !v)}
-              title={chatCollapsed ? '展开聊天流' : '收起聊天流'}
-              aria-label={chatCollapsed ? '展开聊天流' : '收起聊天流'}
-            >
-              {chatCollapsed ? '›' : '‹'}
-            </button>
-          </div>
-          <div className="right-column-slot">
-            <div className="right-column">
-              <div className="right-tabs">
-                <button
-                  className={`right-tab ${rightTab === 'topic' ? 'active' : ''}`}
-                  onClick={() => setRightTab('topic')}
-                >
-                  议题
-                </button>
-                <button
-                  className={`right-tab ${rightTab === 'evidence' ? 'active' : ''}`}
-                  onClick={() => setRightTab('evidence')}
-                >
-                  证据
-                </button>
-                <button
-                  className={`right-tab ${rightTab === 'artifact' ? 'active' : ''}`}
-                  onClick={() => setRightTab('artifact')}
-                >
-                  产出
-                </button>
-                <button
-                  className={`right-tab ${rightTab === 'report' ? 'active' : ''}`}
-                  onClick={() => setRightTab('report')}
-                >
-                  报告
-                </button>
-                <button
-                  className={`right-tab ${rightTab === 'token' ? 'active' : ''}`}
-                  onClick={() => setRightTab('token')}
-                >
-                  Token
-                </button>
-              </div>
-              {rightTab === 'topic' && <TopicPanel />}
-              {rightTab === 'evidence' && (
-                <EvidencePanel
-                  selectedConflictId={selectedConflictId}
-                  onSelectConflict={setSelectedConflictId}
-                />
-              )}
-              {rightTab === 'artifact' && (
-                <ArtifactPanel
-                  onOpenBorrow={() => setBorrowOpen(true)}
-                  onOpenInWorkspace={onOpenInWorkspace}
-                />
-              )}
-              {rightTab === 'report' && <ReportViewer />}
-              {rightTab === 'token' && <TokenPanel />}
-            </div>
-            <button
-              type="button"
-              className="panel-collapse-btn right-collapse-btn"
-              onClick={() => setRightCollapsed(v => !v)}
-              title={rightCollapsed ? '展开右侧面板' : '收起右侧面板'}
-              aria-label={rightCollapsed ? '展开右侧面板' : '收起右侧面板'}
-            >
-              {rightCollapsed ? '‹' : '›'}
-            </button>
           </div>
         </div>
-        <button type="button" className="btn btn-ghost new-meeting-btn" onClick={reset}>
+        <button type="button" className="btn btn-ghost new-meeting-btn" onClick={() => selectMeeting(null)}>
           返回看板
         </button>
+
+        {/* 浮动徽标 */}
+        <FloatingBadges
+          badges={badgeItems}
+          activeId={activeBadge || null}
+          onSelect={setActiveBadge}
+        />
+
+        {/* 面板弹窗 */}
+        <PanelModal
+          open={activeBadge !== ''}
+          title={badgeLabels[activeBadge] || ''}
+          onClose={() => setActiveBadge('')}
+        >
+          {activeBadge ? renderPanelContent(activeBadge) : null}
+        </PanelModal>
+
         <BorrowDialog open={borrowOpen} onClose={() => setBorrowOpen(false)} />
+        <BorrowApprovalDialog
+          request={pendingBorrowRequest}
+          onClose={() => {}}
+        />
       </div>
     </div>
   )
@@ -220,15 +264,15 @@ function AppShell() {
   const { meetingId } = useMeeting()
   const { path } = useRouter()
   const [tab, setTab] = useState<ViewTab>('meeting')
-  // 右侧面板 Tab 状态提升到 AppShell，避免切换会议/工作区视图时丢失
-  const [rightTab, setRightTab] = useState<RightPanelTab>('topic')
-  // 左侧会议列表侧边栏的折叠/展开状态（持久化到 localStorage）
+  // 左侧会议列表侧边栏的折叠/展开状态（持久化到 localStorage，默认折叠聚焦内容）
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState<boolean>(
     'conclave-sidebar-collapsed',
-    false,
+    true,
   )
   // 主题设置面板开关
   const [themeOpen, setThemeOpen] = useState(false)
+  // LLM 设置面板开关
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const { mode, toggleMode } = useTheme()
   // 工作区跨视图跳转：从产出物"在工作区打开"时记录初始文件，切到 workspace Tab
   const [workspaceInitialFile, setWorkspaceInitialFile] = useState<string | undefined>(undefined)
@@ -264,16 +308,32 @@ function AppShell() {
       >
         主题
       </button>
+      <button
+        type="button"
+        className="btn btn-ghost settings-btn"
+        onClick={() => setSettingsOpen(true)}
+        title="LLM 设置"
+      >
+        ⚙ 设置
+      </button>
     </div>
   )
 
-  // 第二层：任务看板（/board 或其他非会议路由，无侧栏全宽）
+  // 第二层：看板/运维面板（无 meetingId，有左侧抽屉菜单）
   if (!meetingId) {
     return (
       <div className="app-shell board-shell">
-        {toolbar}
-        <TaskBoard onBackToLanding={() => navigate('/')} />
-        {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
+        <DrawerMenu currentPath={path} />
+        <div className="board-main">
+          {toolbar}
+          {path === '/dashboard' ? (
+            <DashboardView />
+          ) : (
+            <TaskBoard onBackToLanding={() => navigate('/')} />
+          )}
+          {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
+          {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+        </div>
       </div>
     )
   }
@@ -302,16 +362,13 @@ function AppShell() {
         {toolbar}
         <TabBar tab={tab} onChange={setTab} />
         {tab === 'meeting' ? (
-          <MeetingView
-            onOpenInWorkspace={handleOpenInWorkspace}
-            rightTab={rightTab}
-            setRightTab={setRightTab}
-          />
+          <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
         ) : (
           <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
         )}
       </div>
       {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

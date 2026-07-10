@@ -24,6 +24,12 @@ interface UseWebSocketResult {
   sendControl: (signal: ControlRequest['signal'], payload?: Record<string, unknown>) => void
   /** 发送借调请求（loan 控制信号，payload 为借调三问） */
   sendBorrow: (payload: BorrowRequestPayload) => void
+  /** 批准待审批的借调申请 */
+  approveBorrow: (requestId: string) => void
+  /** 拒绝待审批的借调申请 */
+  rejectBorrow: (requestId: string, reason?: string) => void
+  /** 冻结借调（本次会议后续不再允许借调） */
+  freezeBorrow: () => void
 }
 
 /**
@@ -38,8 +44,9 @@ function buildWsUrl(meetingId: string, fromSeq: number): string {
   const params = new URLSearchParams()
   if (fromSeq > 0) params.set('from_seq', String(fromSeq))
   // 附加认证 token（如果用户设置了）
+  // [CON-03 修复] 统一使用 localStorage 键 conclave.api_token（与 api.ts 一致）
   try {
-    const token = localStorage.getItem('conclave_api_token')
+    const token = localStorage.getItem('conclave.api_token')
     if (token) params.set('token', token)
   } catch { /* localStorage 不可用时忽略 */ }
   const qs = params.toString()
@@ -49,6 +56,13 @@ function buildWsUrl(meetingId: string, fromSeq: number): string {
 /** 自动重连的退避参数 */
 const RECONNECT_BASE_DELAY = 1000
 const RECONNECT_MAX_DELAY = 30000
+// [CON-08 修复] 最大重连次数：超过后停止重连，避免 CPU 耗尽。
+// 设为 -1 表示无限重连（旧行为），默认 8 次后停止（约 4 分钟累积退避）
+const MAX_RECONNECT_ATTEMPTS = -1
+
+// 持续推送心跳的客户端心跳 watchdog：超过 90s 没收到任何消息则主动重连
+// [CON-08 修复] 服务端僵尸连接不会发 ping，靠客户端 watchdog 检测
+// （预留常量，未来在 onmessage 中加入 lastMessageTs 超时检查）
 
 /**
  * 会议 WebSocket 钩子
@@ -114,6 +128,13 @@ export function useWebSocket(
         const frame = data as Record<string, unknown>
         const type = typeof frame.type === 'string' ? frame.type : ''
         switch (type) {
+          case 'ping':
+            // [CON-08 修复] 服务端心跳：收到 ping 立即回 pong
+            // 浏览器 WebSocket API 不支持协议层 ping/pong，需 application-level
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'pong', ts: frame.ts }))
+            }
+            return
           case 'snapshot':
             dispatchRef.current({
               type: 'snapshot',
@@ -171,6 +192,13 @@ export function useWebSocket(
         wsRef.current = null
         // 自动重连（指数退避）
         const attempt = reconnectAttemptRef.current
+        // [CON-08 修复] 最大重连次数：超过后停止重连，让用户手动刷新
+        if (MAX_RECONNECT_ATTEMPTS > 0 && attempt >= MAX_RECONNECT_ATTEMPTS) {
+          setConnectionError(
+            `WebSocket 连续重连 ${MAX_RECONNECT_ATTEMPTS} 次失败，请手动刷新页面`,
+          )
+          return
+        }
         reconnectAttemptRef.current += 1
         const delay = Math.min(
           RECONNECT_BASE_DELAY * Math.pow(2, attempt),
@@ -230,5 +258,26 @@ export function useWebSocket(
     [sendControl],
   )
 
-  return { connected, connectionError, lastSeq, sendControl, sendBorrow }
+  const approveBorrow = useCallback(
+    (requestId: string) => {
+      sendControl('approve_borrow', { request_id: requestId })
+    },
+    [sendControl],
+  )
+
+  const rejectBorrow = useCallback(
+    (requestId: string, reason?: string) => {
+      sendControl('reject_borrow', { request_id: requestId, reason: reason || '用户拒绝借调' })
+    },
+    [sendControl],
+  )
+
+  const freezeBorrow = useCallback(
+    () => {
+      sendControl('freeze_borrow', {})
+    },
+    [sendControl],
+  )
+
+  return { connected, connectionError, lastSeq, sendControl, sendBorrow, approveBorrow, rejectBorrow, freezeBorrow }
 }

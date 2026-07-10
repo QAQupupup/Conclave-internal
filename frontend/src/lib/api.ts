@@ -6,6 +6,9 @@ import type {
   CreateMeetingResponse,
   RunMeetingResponse,
   UploadDocumentResponse,
+  AgentRole,
+  AgentRoleListResponse,
+  GenerateRolesResponse,
 } from '../types/events.ts'
 
 /** 后端返回的错误结构（FastAPI HTTPException） */
@@ -13,9 +16,98 @@ interface ApiError {
   detail?: string
 }
 
-/** 统一请求封装：自动 JSON 化、解析错误 */
-async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+/** 认证 token 缓存（从后端 dev/info 端点获取或 env 注入） */
+let _authToken: string | null = null
+
+/**
+ * 初始化认证 token。
+ *
+ * 顺序：
+ * 1. localStorage 缓存（用户已在 UI 输入过）
+ * 2. URL 查询参数 ?api_token=xxx（首次访问自动保存）
+ * 3. 后端 /debug/auth-info 端点（开发模式）
+ * 4. import.meta.env.VITE_API_TOKEN（vite 构建时注入）
+ */
+export async function initAuthToken(): Promise<string | null> {
+  if (_authToken) return _authToken
+
+  // 1) localStorage
+  if (typeof localStorage !== 'undefined') {
+    const cached = localStorage.getItem('conclave.api_token')
+    if (cached) {
+      _authToken = cached
+      return cached
+    }
+  }
+
+  // 2) URL query
+  if (typeof window !== 'undefined') {
+    const urlToken = new URLSearchParams(window.location.search).get('api_token')
+    if (urlToken) {
+      _authToken = urlToken
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('conclave.api_token', urlToken)
+      }
+      return urlToken
+    }
+  }
+
+  // 3) 后端 dev info（开发模式自动发现）
+  try {
+    const resp = await fetch('/debug/auth-info')
+    if (resp.ok) {
+      const data = (await resp.json()) as { token?: string }
+      if (data.token) {
+        _authToken = data.token
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('conclave.api_token', data.token)
+        }
+        return data.token
+      }
+    }
+  } catch {
+    // 后端可能未提供该端点，忽略
+  }
+
+  // 4) 构建时注入
+  const envToken = (import.meta as unknown as { env?: { VITE_API_TOKEN?: string } })
+    .env?.VITE_API_TOKEN
+  if (envToken) {
+    _authToken = envToken
+    return envToken
+  }
+
+  return null
+}
+
+/** 手动设置 token（用户在登录 UI 输入后调用） */
+export function setAuthToken(token: string): void {
+  _authToken = token
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('conclave.api_token', token)
+  }
+}
+
+/** 清除 token（登出或 token 失效后） */
+export function clearAuthToken(): void {
+  _authToken = null
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('conclave.api_token')
+  }
+}
+
+/** 注入认证头：Bearer <token> */
+function buildHeaders(init: RequestInit): Headers {
   const headers = new Headers(init.headers)
+  if (_authToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${_authToken}`)
+  }
+  return headers
+}
+
+/** 统一请求封装：自动 JSON 化、注入认证、处理错误 */
+export async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = buildHeaders(init)
   let body = init.body
   // 非 FormData 时默认 JSON
   if (body && !(body instanceof FormData) && !headers.has('Content-Type')) {
@@ -30,6 +122,10 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // 忽略解析失败
     }
+    // 401 时清掉 token 强制重新初始化
+    if (res.status === 401) {
+      clearAuthToken()
+    }
     throw new Error(message)
   }
   // 204 等无内容
@@ -37,11 +133,11 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
-/** 创建会议：POST /meetings body {topic} */
-export async function createMeeting(topic: string, deliverableType?: string): Promise<CreateMeetingResponse> {
+/** 创建会议：POST /meetings body {topic, deliverable_type, reference_meeting_ids} */
+export async function createMeeting(topic: string, deliverableType?: string, referenceMeetingIds?: string[]): Promise<CreateMeetingResponse> {
   return request<CreateMeetingResponse>('/meetings', {
     method: 'POST',
-    body: JSON.stringify({ topic, deliverable_type: deliverableType }),
+    body: JSON.stringify({ topic, deliverable_type: deliverableType, reference_meeting_ids: referenceMeetingIds ?? [] }),
   })
 }
 
@@ -200,6 +296,9 @@ export interface FileItem {
   type: 'file' | 'directory'
   size: number
   modified: number
+  // [CON-11 修复] 新增字段：子节点数 + 展开状态（用于递归文件树）
+  child_count?: number
+  expanded?: boolean
 }
 
 /** 列出工作区文件：GET /workspace/files?path= */
@@ -309,4 +408,307 @@ export async function workspaceInfo(): Promise<{
   }
 }> {
   return request('/workspace/info', { method: 'GET' })
+}
+
+// ---- Agent 角色 API ----
+
+/** 列出所有角色：GET /agent-roles */
+export async function listAgentRoles(activeOnly = false): Promise<AgentRoleListResponse> {
+  const qs = activeOnly ? '?active_only=true' : ''
+  return request(`/agent-roles${qs}`, { method: 'GET' })
+}
+
+/** 生成角色：POST /agent-roles/generate */
+export async function generateRoles(topic: string): Promise<GenerateRolesResponse> {
+  return request<GenerateRolesResponse>('/agent-roles/generate', {
+    method: 'POST',
+    body: JSON.stringify({ topic }),
+  })
+}
+
+/** 创建角色：POST /agent-roles */
+export async function createAgentRole(role: Partial<AgentRole> & { id: string; display_name: string }): Promise<{ role: AgentRole }> {
+  return request('/agent-roles', {
+    method: 'POST',
+    body: JSON.stringify(role),
+  })
+}
+
+/** 更新角色：PUT /agent-roles/:id */
+export async function updateAgentRole(roleId: string, role: Partial<AgentRole> & { display_name: string }): Promise<{ role: AgentRole }> {
+  return request(`/agent-roles/${encodeURIComponent(roleId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(role),
+  })
+}
+
+/** 删除角色：DELETE /agent-roles/:id */
+export async function deleteAgentRole(roleId: string): Promise<{ role_id: string; deleted: boolean }> {
+  return request(`/agent-roles/${encodeURIComponent(roleId)}`, { method: 'DELETE' })
+}
+
+// ---- Metrics API ----
+
+/** 运维面板指标快照 */
+export interface MetricsSnapshot {
+  timestamp: number
+  system: {
+    cpu_percent: number
+    memory_mb: number
+    memory_percent: number
+    uptime_seconds: number
+  }
+  conclave: {
+    active_meetings: number
+    browser_contexts: number
+  }
+  throughput: {
+    api_requests_total: number
+    api_requests_per_minute: number
+    avg_latency_ms: number
+  }
+  llm: {
+    total_tokens: number
+    total_llm_tokens: number
+    total_cost_usd: number
+    total_calls: number
+    llm_calls: number
+    tool_calls: number
+    error_count: number
+    by_node: Record<string, { calls: number; cost_usd: number; tokens: number; latency_ms: number }>
+    by_tool: Record<string, { calls: number; cost_usd: number; tokens: number; latency_ms: number }>
+  }
+  infrastructure: {
+    status: string
+    components: Record<string, { status: string; latency_ms?: number; message?: string; [key: string]: unknown }>
+  }
+}
+
+/** 获取运维指标快照：GET /metrics */
+export async function getMetrics(): Promise<MetricsSnapshot> {
+  return request<MetricsSnapshot>('/metrics', { method: 'GET' })
+}
+
+/** [v2 修复] 获取基础设施连通性详情：GET /metrics/health
+ *  用于"刷新"按钮调用的轻量级端点（比 /metrics 快，无 LLM/throughput 计算）
+ */
+export async function getMetricsHealth(): Promise<MetricsSnapshot['infrastructure']> {
+  return request<MetricsSnapshot['infrastructure']>('/metrics/health', { method: 'GET' })
+}
+
+/** 时序数据点 */
+export interface MetricPoint {
+  ts: number
+  cpu: number
+  memory_mb: number
+  memory_pct: number
+  tokens: number
+  cost_usd: number
+  requests_total: number
+  requests_per_min: number
+  latency_ms: number
+  meetings: number
+  browser_ctx: number
+}
+
+/** 获取时序指标历史：GET /metrics/history?minutes=60 */
+export async function getMetricsHistory(minutes = 60): Promise<{
+  resolution_seconds: number
+  points: MetricPoint[]
+}> {
+  return request(`/metrics/history?minutes=${minutes}`, { method: 'GET' })
+}
+
+// ---- 历史会议引用 API ----
+
+/** 会议摘要（用于历史会议引用选择器） */
+export interface MeetingSummary {
+  meeting_id: string
+  topic: string
+  clarified_topic: string
+  status: string
+  stage: string
+  created_at: string
+  key_questions: string[]
+  artifact_summary: string
+  flow_plan: string
+  decision_record: Record<string, unknown> | null
+}
+
+/** 获取会议摘要：GET /meetings/:id/summary */
+export async function getMeetingSummary(meetingId: string): Promise<MeetingSummary> {
+  return request<MeetingSummary>(`/meetings/${encodeURIComponent(meetingId)}/summary`, { method: 'GET' })
+}
+
+/** 注入历史会议引用：POST /meetings/:id/reference */
+export async function injectMeetingReference(
+  meetingId: string,
+  referenceMeetingIds: string[]
+): Promise<{ meeting_id: string; injected: number; total_references: number; message: string }> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}/reference`, {
+    method: 'POST',
+    body: JSON.stringify({ reference_meeting_ids: referenceMeetingIds }),
+  })
+}
+
+// ---- 用户介入对话 API ----
+
+/** 介入对话消息 */
+export interface InterventionMessage {
+  id: string
+  sender: 'user' | 'moderator'
+  content: string
+  reply_to_id?: string
+  timestamp: string
+  processed?: boolean
+}
+
+/** 用户介入对话请求 */
+export interface InterventionRequest {
+  content: string
+  reply_to_id?: string
+}
+
+/** 介入对话响应 */
+export interface InterventionResponse {
+  meeting_id: string
+  message_id: string
+  intervention_messages: InterventionMessage[]
+}
+
+/** 用户介入对话：POST /meetings/:id/intervene */
+export async function interveneMeeting(
+  meetingId: string,
+  content: string,
+  replyToId?: string,
+): Promise<InterventionResponse> {
+  const body: InterventionRequest = { content }
+  if (replyToId) body.reply_to_id = replyToId
+  return request<InterventionResponse>(`/meetings/${encodeURIComponent(meetingId)}/intervene`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// ---- LLM 模型管理 API ----
+
+/** LLM 厂商信息 */
+export interface LLMProvider {
+  id: string
+  name: string
+  base_url: string
+  has_key: boolean
+  supports_balance: boolean
+  supports_custom_key: boolean
+  supports_models_list: boolean
+  pricing_note: string
+}
+
+/** 模型信息 */
+export interface LLMModel {
+  id: string
+  object?: string
+  created?: number
+  owned_by?: string
+  // 附加字段（后端补充）
+  pricing?: {
+    input: number
+    output: number
+    currency: string
+    tier: string
+  }
+}
+
+/** 模型分类结果 */
+export interface LLMModelCategories {
+  recommended?: LLMModel[]
+  free?: LLMModel[]
+  reasoning?: LLMModel[]
+  vision?: LLMModel[]
+  embedding?: LLMModel[]
+  chat?: LLMModel[]
+  [key: string]: LLMModel[] | undefined
+}
+
+/** 模型列表响应 */
+export interface LLMModelsResponse {
+  models: LLMModel[]
+  categories: LLMModelCategories
+  recommended: Array<{ id: string; desc: string }>
+  total: number
+}
+
+/** 余额响应 */
+export interface LLMBalanceResponse {
+  balance: number | null
+  currency: string
+  provider: string
+  supported: boolean
+  message?: string
+  raw?: Record<string, unknown>
+}
+
+/** 会议模型配置 */
+export interface MeetingModelConfig {
+  meeting_id: string
+  provider_id: string
+  model: string
+  has_custom_key: boolean
+  base_url: string
+}
+
+/** 列出 LLM 厂商：GET /meetings/llm/providers */
+export async function listLLMProviders(): Promise<{ providers: LLMProvider[] }> {
+  return request('/meetings/llm/providers', { method: 'GET' })
+}
+
+/** 查询可用模型列表：GET /meetings/llm/models?provider=&refresh=&api_key=&base_url= */
+export async function listLLMModels(params?: {
+  provider?: string
+  refresh?: boolean
+  api_key?: string
+  base_url?: string
+}): Promise<LLMModelsResponse> {
+  const qs = new URLSearchParams()
+  if (params?.provider) qs.set('provider', params.provider)
+  if (params?.refresh) qs.set('refresh', 'true')
+  if (params?.api_key) qs.set('api_key', params.api_key)
+  if (params?.base_url) qs.set('base_url', params.base_url)
+  const query = qs.toString()
+  return request(`/meetings/llm/models${query ? `?${query}` : ''}`, { method: 'GET' })
+}
+
+/** 查询余额：GET /meetings/llm/balance?provider=&api_key=&base_url= */
+export async function getLLMBalance(params?: {
+  provider?: string
+  api_key?: string
+  base_url?: string
+}): Promise<LLMBalanceResponse> {
+  const qs = new URLSearchParams()
+  if (params?.provider) qs.set('provider', params.provider)
+  if (params?.api_key) qs.set('api_key', params.api_key)
+  if (params?.base_url) qs.set('base_url', params.base_url)
+  const query = qs.toString()
+  return request(`/meetings/llm/balance${query ? `?${query}` : ''}`, { method: 'GET' })
+}
+
+/** 设置会议模型：POST /meetings/:id/model */
+export async function setMeetingModel(
+  meetingId: string,
+  config: {
+    provider_id?: string
+    model?: string
+    api_key?: string
+    base_url?: string
+  },
+): Promise<MeetingModelConfig> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}/model`, {
+    method: 'POST',
+    body: JSON.stringify(config),
+  })
+}
+
+/** 获取会议模型配置：GET /meetings/:id/model */
+export async function getMeetingModel(meetingId: string): Promise<MeetingModelConfig> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}/model`, { method: 'GET' })
 }

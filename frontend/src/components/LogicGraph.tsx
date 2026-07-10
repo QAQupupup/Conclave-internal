@@ -313,21 +313,57 @@ function LogicGraphInner({
       kind: 'feed' | 'resolve'
       key: string
     }> = []
-    // resolve: 1:1
+    // resolve: 1:1（conflict 顺序与 decision 顺序对齐）
     for (let i = 0; i < layout.conflictPos.length; i++) {
       const c = layout.conflictPos[i]
       const d = layout.decisionPos[i]
       if (d) list.push({ from: c, to: d, kind: 'resolve', key: `r-${i}` })
     }
-    // feed: 每个 claim 按索引连到对应 conflict（如果存在），否则均布
+    // [CON-09 修复] feed: 按真实 claim_refs 关联，不再按索引均布
+    // 旧版每个 claim 连接到 conflictNodes[i % len] 是错误的：与实际语义无关
+    // 真实关联：
+    //   1) 优先按 conflict.claim_refs 列表（显式声明该冲突涉及的主张 ID）
+    //   2) 退化：按 conflict.summary 文本匹配 claim.text
+    //   3) 仍无关联：标为孤立（不连线），UI 上加"未参与冲突"标签
     if (layout.claimPos.length > 0 && layout.conflictPos.length > 0) {
-      layout.claimPos.forEach((cp, i) => {
-        const target = layout.conflictPos[i % layout.conflictPos.length]
-        list.push({ from: cp, to: target, kind: 'feed', key: `f-${i}` })
+      // 建索引：rawId -> claim pos
+      const claimById = new Map<string, NodePos>()
+      layout.claimPos.forEach((cp) => {
+        const n = cp.node as ClaimNode
+        claimById.set(n.rawId, cp)
+        // 也用 normalized text 作 key（防 ID 不一致）
+        const txtKey = `t:${n.text.trim()}`
+        if (!claimById.has(txtKey)) claimById.set(txtKey, cp)
+      })
+      layout.conflictPos.forEach((cnPos, ci) => {
+        const cn = cnPos.node as ConflictNode
+        const refs: string[] = Array.isArray((conflicts[ci] as any)?.claim_refs) ? (conflicts[ci] as any).claim_refs : []
+        const connected = new Set<NodePos>()
+        // 1) 按显式 claim_refs
+        refs.forEach((rid) => {
+          const cp = claimById.get(rid)
+          if (cp) connected.add(cp)
+        })
+        // 2) 按 conflict summary 文本匹配 claim 文本
+        const summaryNorm = (cn.summary || '').trim()
+        if (summaryNorm) {
+          layout.claimPos.forEach((cp) => {
+            const cTxt = ((cp.node as ClaimNode).text || '').trim()
+            if (!cTxt) return
+            if (connected.has(cp)) return
+            if (summaryNorm.includes(cTxt) || cTxt.includes(summaryNorm)) {
+              connected.add(cp)
+            }
+          })
+        }
+        // 3) 仍无关联：不连线（保留为孤立点）
+        connected.forEach((cp) => {
+          list.push({ from: cp, to: cnPos, kind: 'feed', key: `f-${(cp.node as ClaimNode).rawId}-${ci}` })
+        })
       })
     }
     return list
-  }, [layout])
+  }, [layout, conflicts])
 
   /* ---------- 溢出 badge：claim 列底部的 "+N more" 节点 ---------- */
   const overflowBadge = useMemo<NodePos | null>(() => {

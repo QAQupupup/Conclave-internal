@@ -1,5 +1,5 @@
-// 任务看板：搜索 / 标签筛选 / 分页 / 批量操作 / 内联创建会议
-// 标签行内展示 + 搜索栏下方多选标签下拉
+// 会议看板：中后台表格列表页 — 搜索 / 标签筛选 / 分页 / 批量操作 / 内联创建
+// 参考 Ant Design Table 模式，适配 Linear/Notion 扁平极简风格
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { FormEvent } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
@@ -10,8 +10,11 @@ import {
   removeMeetingTag,
   batchDeleteMeetings,
   deleteMeeting,
+  generateRoles,
 } from '../lib/api.ts'
 import type { MeetingListItem, TagInfo } from '../lib/api.ts'
+import type { AgentRole } from '../types/events.ts'
+import { MeetingSearchSelect } from './MeetingSearchSelect.tsx'
 
 const PAGE_SIZE = 10
 
@@ -25,12 +28,26 @@ const STAGE_LABELS: Record<string, string> = {
   idle: '待启动',
 }
 
-const STATUS_CLASS: Record<string, string> = {
-  running: 'badge-running',
-  paused: 'badge-paused',
-  done: 'badge-done',
-  aborted: 'badge-aborted',
-  idle: 'badge-idle',
+// 角色头像颜色池
+const AVATAR_COLORS = [
+  '#4F46E5', '#0891B2', '#059669', '#D97706', '#DC2626',
+  '#7C3AED', '#2563EB', '#C026D3', '#0D9488', '#EA580C',
+]
+
+/** 根据角色 ID 生成极简 SVG 头像：圆形 + 首字母 */
+function RoleAvatar({ roleId, displayName, size = 32 }: { roleId: string; displayName: string; size?: number }) {
+  const colorIdx = roleId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % AVATAR_COLORS.length
+  const bg = AVATAR_COLORS[colorIdx]
+  const initial = (displayName || roleId).charAt(0).toUpperCase()
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
+      <circle cx="16" cy="16" r="15" fill={bg} opacity="0.12" />
+      <circle cx="16" cy="16" r="15" fill="none" stroke={bg} strokeWidth="1.5" opacity="0.8" />
+      <text x="16" y="21" textAnchor="middle" fontSize="14" fontWeight="600" fill={bg} fontFamily="system-ui, sans-serif">
+        {initial}
+      </text>
+    </svg>
+  )
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -39,6 +56,14 @@ const STATUS_LABEL: Record<string, string> = {
   done: '已完成',
   aborted: '已终止',
   idle: '待启动',
+}
+
+const STATUS_DOT: Record<string, string> = {
+  running: 'dot-running',
+  paused: 'dot-paused',
+  done: 'dot-done',
+  aborted: 'dot-aborted',
+  idle: 'dot-idle',
 }
 
 interface TaskBoardProps {
@@ -72,9 +97,19 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
   const [createFile, setCreateFile] = useState<File | null>(null)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [referenceIds, setReferenceIds] = useState<string[]>([])
 
   const [tagEditId, setTagEditId] = useState<string | null>(null)
   const [tagInput, setTagInput] = useState('')
+
+  // 角色卡片
+  const [createdRoles, setCreatedRoles] = useState<AgentRole[]>([])
+  const [rolesLoading, setRolesLoading] = useState(false)
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null)
+  const [editRoleForm, setEditRoleForm] = useState<Partial<AgentRole>>({})
+
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // 搜索防抖
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -112,8 +147,8 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
       })
       setMeetings(res.meetings)
       setTotal(res.total)
-    } catch {
-      // 静默
+    } catch (err) {
+      console.error('加载会议列表失败:', err)
     } finally {
       setLoading(false)
     }
@@ -123,8 +158,8 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
     try {
       const res = await listTags()
       setAllTags(res.tags)
-    } catch {
-      // 静默
+    } catch (err) {
+      console.error('加载标签列表失败:', err)
     }
   }, [])
 
@@ -149,7 +184,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
   }
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === meetings.length) {
+    if (selectedIds.size === meetings.length && meetings.length > 0) {
       setSelectedIds(new Set())
     } else {
       setSelectedIds(new Set(meetings.map((m) => m.meeting_id)))
@@ -169,33 +204,39 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
     setBatchBusy(true)
     try {
       const res = await batchDeleteMeetings([...selectedIds], batchMode)
-      await fetchMeetings()
-      await fetchTags()
-      setSelectedIds(new Set())
-      setShowBatchConfirm(false)
       if (res.failed.length > 0) {
         console.warn(`批量删除部分失败: ${res.failed.join(', ')}`)
       }
-    } catch {
-      // 静默
+      await fetchMeetings()
+      await fetchTags()
+    } catch (err) {
+      console.error('批量删除失败:', err)
     } finally {
+      setSelectedIds(new Set())
+      setShowBatchConfirm(false)
       setBatchBusy(false)
     }
   }
 
   const handleSingleDelete = async (id: string, mode: 'soft' | 'hard') => {
+    setDeletingId(id)
+    setDeleteError(null)
     try {
       await deleteMeeting(id, mode)
       await fetchMeetings()
       await fetchTags()
-    } catch {
-      // 静默
+    } catch (err) {
+      console.error('删除会议失败:', err)
+      setDeleteError('删除失败，请重试')
+    } finally {
+      setDeletingId(null)
     }
   }
 
   const handleAddTag = async (meetingId: string, tag: string) => {
     const trimmed = tag.trim()
     if (!trimmed) return
+    const prevMeetings = meetings
     try {
       await addMeetingTag(meetingId, trimmed)
       setMeetings((prev) =>
@@ -206,13 +247,15 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
         ),
       )
       await fetchTags()
-    } catch {
-      // 静默
+    } catch (err) {
+      console.error('添加标签失败:', err)
+      setMeetings(prevMeetings)
     }
     setTagInput('')
   }
 
   const handleRemoveTag = async (meetingId: string, tag: string) => {
+    const prevMeetings = meetings
     try {
       await removeMeetingTag(meetingId, tag)
       setMeetings((prev) =>
@@ -223,8 +266,9 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
         ),
       )
       await fetchTags()
-    } catch {
-      // 静默
+    } catch (err) {
+      console.error('移除标签失败:', err)
+      setMeetings(prevMeetings)
     }
   }
 
@@ -237,7 +281,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
     setCreateBusy(true)
     setCreateError(null)
     try {
-      const res = await createMeeting(createTopic.trim(), createDeliverable)
+      const res = await createMeeting(createTopic.trim(), createDeliverable, referenceIds.length > 0 ? referenceIds : undefined)
       if (createFile) {
         await uploadDocument(res.meeting_id, createFile)
       }
@@ -250,12 +294,50 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
     }
   }
 
+  // 生成角色：输入议题后自动触发
+  const handleGenerateRoles = useCallback(async () => {
+    if (!createTopic.trim() || createTopic.trim().length < 3) return
+    setRolesLoading(true)
+    try {
+      const res = await generateRoles(createTopic.trim())
+      setCreatedRoles(res.roles)
+    } catch (err) {
+      console.error('角色生成失败:', err)
+    } finally {
+      setRolesLoading(false)
+    }
+  }, [createTopic])
+
+  // 编辑角色
+  const handleEditRole = (role: AgentRole) => {
+    setEditingRoleId(role.id)
+    setEditRoleForm({ ...role })
+  }
+  const handleSaveRoleEdit = () => {
+    if (!editingRoleId) return
+    setCreatedRoles((prev) =>
+      prev.map((r) => (r.id === editingRoleId ? { ...r, ...editRoleForm } as AgentRole : r)),
+    )
+    setEditingRoleId(null)
+  }
+  const handleRemoveRole = (roleId: string) => {
+    setCreatedRoles((prev) => prev.filter((r) => r.id !== roleId))
+  }
+
   const totalPages = Math.ceil(total / PAGE_SIZE)
   const allSelected = meetings.length > 0 && selectedIds.size === meetings.length
+  const hasSelection = selectedIds.size > 0
+
+  const formatTime = (ts?: string) => {
+    if (!ts) return '-'
+    const d = new Date(ts)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
 
   return (
     <div className="task-board">
-      {/* 顶部工具栏 */}
+      {/* 顶部标题栏 */}
       <div className="board-header">
         <div className="board-header-left">
           <h2 className="board-title">会议看板</h2>
@@ -267,7 +349,6 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
               type="button"
               className="btn btn-ghost btn-sm"
               onClick={onBackToLanding}
-              title="返回封面"
             >
               封面
             </button>
@@ -286,49 +367,175 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
       {showCreate && (
         <div className="board-create-panel">
           <form onSubmit={handleCreate} className="board-create-form">
-            <input
-              className="board-search-input"
-              type="text"
-              value={createTopic}
-              onChange={(e) => setCreateTopic(e.target.value)}
-              placeholder="输入会议议题…"
-              disabled={createBusy}
-            />
-            <select
-              className="board-select"
-              value={createDeliverable}
-              onChange={(e) => setCreateDeliverable(e.target.value)}
-              disabled={createBusy}
-            >
-              <option value="prd_openapi">PRD + OpenAPI</option>
-              <option value="design_doc">设计文档</option>
-              <option value="comprehensive">综合文档</option>
-              <option value="research_report">调研报告</option>
-              <option value="business_report">商业报告</option>
-              <option value="code_analysis">代码分析</option>
-              <option value="tested_system">测试系统</option>
-              <option value="deployable_service">可部署服务</option>
-            </select>
-            <label className="board-file-label">
+            <div className="board-create-row">
               <input
-                type="file"
-                accept=".md,.markdown,text/markdown"
-                onChange={(e) => setCreateFile(e.target.files?.[0] ?? null)}
+                className="board-search-input"
+                type="text"
+                value={createTopic}
+                onChange={(e) => { setCreateTopic(e.target.value); setCreatedRoles([]) }}
+                placeholder="输入会议议题…"
                 disabled={createBusy}
               />
-              {createFile && <span className="board-file-name">{createFile.name}</span>}
-            </label>
-            <button type="submit" className="btn btn-primary btn-sm" disabled={createBusy || !createTopic.trim()}>
-              {createBusy ? '创建中…' : '创建并运行'}
-            </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleGenerateRoles}
+                disabled={rolesLoading || createTopic.trim().length < 3}
+              >
+                {rolesLoading ? '生成中…' : createdRoles.length > 0 ? '重新生成角色' : '生成角色'}
+              </button>
+            </div>
+            <div className="board-create-row">
+              <MeetingSearchSelect
+                selectedIds={referenceIds}
+                onChange={setReferenceIds}
+                placeholder="引用历史会议…"
+                compact
+              />
+            </div>
+            <div className="board-create-row">
+              <select
+                className="board-select"
+                value={createDeliverable}
+                onChange={(e) => setCreateDeliverable(e.target.value)}
+                disabled={createBusy}
+              >
+                <option value="prd_openapi">PRD + OpenAPI</option>
+                <option value="design_doc">设计文档</option>
+                <option value="comprehensive">综合文档</option>
+                <option value="research_report">调研报告</option>
+                <option value="business_report">商业报告</option>
+                <option value="code_analysis">代码分析</option>
+                <option value="tested_system">测试系统</option>
+                <option value="deployable_service">可部署服务</option>
+              </select>
+              <label className="board-file-label">
+                <input
+                  type="file"
+                  accept=".md,.markdown,text/markdown"
+                  onChange={(e) => setCreateFile(e.target.files?.[0] ?? null)}
+                  disabled={createBusy}
+                />
+                {createFile && <span className="board-file-name">{createFile.name}</span>}
+              </label>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={createBusy || !createTopic.trim()}>
+                {createBusy ? '创建中…' : '创建并运行'}
+              </button>
+            </div>
           </form>
+
+          {/* 角色卡片网格 */}
+          {createdRoles.length > 0 && (
+            <div className="role-cards-section">
+              <div className="role-cards-header">
+                <span className="role-cards-title">角色阵容</span>
+                <span className="role-cards-count">{createdRoles.length} 个角色</span>
+              </div>
+              <div className="role-cards-grid">
+                {createdRoles.map((role) => (
+                  <div key={role.id} className={`role-card${editingRoleId === role.id ? ' editing' : ''}`}>
+                    {editingRoleId === role.id ? (
+                      <div className="role-card-edit">
+                        <div className="role-card-edit-fields">
+                          <input
+                            className="role-edit-input"
+                            value={editRoleForm.display_name || ''}
+                            onChange={(e) => setEditRoleForm((f) => ({ ...f, display_name: e.target.value }))}
+                            placeholder="角色名称"
+                          />
+                          <textarea
+                            className="role-edit-textarea"
+                            value={editRoleForm.perspective || ''}
+                            onChange={(e) => setEditRoleForm((f) => ({ ...f, perspective: e.target.value }))}
+                            placeholder="核心视角"
+                            rows={2}
+                          />
+                          <textarea
+                            className="role-edit-textarea"
+                            value={editRoleForm.background_brief || ''}
+                            onChange={(e) => setEditRoleForm((f) => ({ ...f, background_brief: e.target.value }))}
+                            placeholder="一句话背景"
+                            rows={2}
+                          />
+                          <input
+                            className="role-edit-input"
+                            value={(editRoleForm.expertise_domains || []).join(', ')}
+                            onChange={(e) => setEditRoleForm((f) => ({
+                              ...f,
+                              expertise_domains: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                            }))}
+                            placeholder="专业领域，逗号分隔"
+                          />
+                          <select
+                            className="board-select"
+                            value={editRoleForm.risk_appetite || 'balanced'}
+                            onChange={(e) => setEditRoleForm((f) => ({ ...f, risk_appetite: e.target.value as AgentRole['risk_appetite'] }))}
+                          >
+                            <option value="conservative">保守</option>
+                            <option value="balanced">均衡</option>
+                            <option value="aggressive">激进</option>
+                          </select>
+                        </div>
+                        <div className="role-card-edit-actions">
+                          <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveRoleEdit}>保存</button>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditingRoleId(null)}>取消</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="role-card-header">
+                          <RoleAvatar roleId={role.id} displayName={role.display_name} />
+                          <div className="role-card-meta">
+                            <span className="role-card-name">{role.display_name}</span>
+                            <span className="role-card-perspective">{role.perspective}</span>
+                          </div>
+                          <div className="role-card-actions">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => handleEditRole(role)}
+                              title="编辑"
+                            >
+                              &#9998;
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => handleRemoveRole(role.id)}
+                              title="移除"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        </div>
+                        <div className="role-card-tags">
+                          {role.expertise_domains.map((d) => (
+                            <span key={d} className="role-card-tag">{d}</span>
+                          ))}
+                          <span className="role-card-tag role-card-risk">{role.risk_appetite === 'aggressive' ? '激进' : role.risk_appetite === 'conservative' ? '保守' : '均衡'}</span>
+                        </div>
+                        {role.background_brief && (
+                          <div className="role-card-brief">{role.background_brief}</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {createError && <div className="board-error">{createError}</div>}
         </div>
       )}
 
-      {/* 搜索栏 + 标签多选下拉 + 批量操作 */}
-      <div className="board-filter-bar">
+      {/* 工具栏：搜索 + 标签筛选 */}
+      <div className="board-toolbar">
         <div className="board-search-wrap">
+          <svg className="board-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
           <input
             className="board-search-input"
             type="text"
@@ -351,7 +558,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
         <div className="board-tag-dropdown" ref={tagDropdownRef}>
           <button
             type="button"
-            className={`board-tag-dropdown-btn${tagDropdownOpen ? ' open' : ''}`}
+            className={`board-tag-dropdown-btn${tagDropdownOpen ? ' open' : ''}${selectedTags.length > 0 ? ' has-value' : ''}`}
             onClick={() => setTagDropdownOpen((v) => !v)}
           >
             <span className="board-tag-dropdown-icon">🏷</span>
@@ -393,7 +600,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
           )}
         </div>
 
-        {/* 已选标签行内 chips */}
+        {/* 已选标签 chips */}
         {selectedTags.length > 0 && (
           <div className="board-active-tags">
             {selectedTags.map((tag) => (
@@ -410,10 +617,13 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
             ))}
           </div>
         )}
+      </div>
 
-        {selectedIds.size > 0 && (
-          <div className="board-batch-bar">
-            <span className="board-selected-count">已选 {selectedIds.size} 项</span>
+      {/* 选择提示条 */}
+      {hasSelection && (
+        <div className="board-alert">
+          <span className="board-alert-text">已选 {selectedIds.size} 项</span>
+          <div className="board-alert-actions">
             <select
               className="board-select board-select-sm"
               value={batchMode}
@@ -437,183 +647,200 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
               取消选择
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* 会议列表 */}
-      <div className="board-list-area">
-        {meetings.length > 0 && (
-          <div className="board-list-header">
-            <label className="board-checkbox-label">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={toggleSelectAll}
-              />
-              <span>全选</span>
-            </label>
-            <span className="board-list-info">
-              第 {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} 条 / 共 {total} 条
-            </span>
-          </div>
-        )}
+      {/* 删除错误提示 */}
+      {deleteError && (
+        <div className="board-error" style={{ marginBottom: 8 }}>
+          {deleteError}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setDeleteError(null)}
+            style={{ marginLeft: 8 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
-        {loading && meetings.length === 0 ? (
-          <div className="board-loading">加载中…</div>
-        ) : meetings.length === 0 ? (
-          <div className="board-empty">
-            {searchQuery || selectedTags.length
-              ? '没有匹配的会议记录'
-              : '暂无会议，点击"新建会议"创建'}
-          </div>
-        ) : (
-          <div className="board-meeting-list">
-            {meetings.map((m) => (
-              <div
-                key={m.meeting_id}
-                className={`board-meeting-card${selectedIds.has(m.meeting_id) ? ' selected' : ''}`}
-              >
-                <label className="board-card-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(m.meeting_id)}
-                    onChange={() => toggleSelect(m.meeting_id)}
-                  />
-                </label>
-                <div
-                  className="board-card-main"
-                  onClick={() => selectMeeting(m.meeting_id)}
-                >
-                  <div className="board-card-top">
-                    <span
-                      className={`board-status-badge ${STATUS_CLASS[m.status] || 'badge-idle'}`}
-                    >
-                      {STATUS_LABEL[m.status] || m.status}
-                    </span>
-                    {m.is_running && <span className="board-running-dot" title="正在运行" />}
-                    <span className="board-stage-tag">
-                      {STAGE_LABELS[m.stage] || m.stage}
-                    </span>
-                    {/* 行内标签 */}
-                    <div className="board-card-inline-tags">
-                      {(m.tags || []).map((tag) => (
-                        <span key={tag} className="board-chip">
-                          {tag}
-                          <button
-                            type="button"
-                            className="board-chip-remove"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleRemoveTag(m.meeting_id, tag)
+      {/* 表格 */}
+      <div className="board-table-wrap">
+        <table className="board-table">
+          <thead>
+            <tr>
+              <th className="board-th board-th-check">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                />
+              </th>
+              <th className="board-th board-th-status">状态</th>
+              <th className="board-th board-th-topic">议题</th>
+              <th className="board-th board-th-stage">阶段</th>
+              <th className="board-th board-th-tags">标签</th>
+              <th className="board-th board-th-time">创建时间</th>
+              <th className="board-th board-th-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && meetings.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="board-td-empty">加载中…</td>
+              </tr>
+            ) : meetings.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="board-td-empty">
+                  {searchQuery || selectedTags.length
+                    ? '没有匹配的会议记录'
+                    : '暂无会议，点击"新建会议"创建'}
+                </td>
+              </tr>
+            ) : (
+              meetings.map((m) => {
+                const isSelected = selectedIds.has(m.meeting_id)
+                const isDeleting = deletingId === m.meeting_id
+                return (
+                  <tr
+                    key={m.meeting_id}
+                    className={`board-row${isSelected ? ' selected' : ''}`}
+                    onClick={() => selectMeeting(m.meeting_id)}
+                  >
+                    <td className="board-td board-td-check" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(m.meeting_id)}
+                      />
+                    </td>
+                    <td className="board-td board-td-status">
+                      <span className={`board-status-dot ${STATUS_DOT[m.status] || 'dot-idle'}`} />
+                      <span className="board-status-text">{STATUS_LABEL[m.status] || m.status}</span>
+                    </td>
+                    <td className="board-td board-td-topic">
+                      <span className="board-topic-text">{m.topic || '(无议题)'}</span>
+                      <span className="board-topic-id">{m.meeting_id.slice(-8)}</span>
+                    </td>
+                    <td className="board-td board-td-stage">
+                      <span className="board-stage-tag">{STAGE_LABELS[m.stage] || m.stage}</span>
+                    </td>
+                    <td className="board-td board-td-tags" onClick={(e) => e.stopPropagation()}>
+                      <div className="board-tags-inline">
+                        {(m.tags || []).map((tag) => (
+                          <span key={tag} className="board-chip">
+                            {tag}
+                            <button
+                              type="button"
+                              className="board-chip-remove"
+                              onClick={() => handleRemoveTag(m.meeting_id, tag)}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        {tagEditId === m.meeting_id ? (
+                          <input
+                            className="board-tag-input"
+                            type="text"
+                            value={tagInput}
+                            autoFocus
+                            onChange={(e) => setTagInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                void handleAddTag(m.meeting_id, tagInput)
+                              } else if (e.key === 'Escape') {
+                                setTagEditId(null)
+                                setTagInput('')
+                              }
                             }}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                      {tagEditId === m.meeting_id ? (
-                        <input
-                          className="board-tag-input"
-                          type="text"
-                          value={tagInput}
-                          autoFocus
-                          onChange={(e) => setTagInput(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              void handleAddTag(m.meeting_id, tagInput)
-                            } else if (e.key === 'Escape') {
+                            onBlur={() => {
+                              if (tagInput.trim()) void handleAddTag(m.meeting_id, tagInput)
                               setTagEditId(null)
                               setTagInput('')
-                            }
-                          }}
-                          onBlur={() => {
-                            if (tagInput.trim()) void handleAddTag(m.meeting_id, tagInput)
-                            setTagEditId(null)
-                            setTagInput('')
-                          }}
-                          placeholder="标签名"
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          className="board-chip-add"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setTagEditId(m.meeting_id)
-                            setTagInput('')
-                          }}
-                        >
-                          +
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="board-card-topic">{m.topic}</div>
-                  <div className="board-card-meta">
-                    <span className="board-card-id">{m.meeting_id}</span>
-                    {m.created_at && (
-                      <span className="board-card-time">
-                        {new Date(m.created_at).toLocaleString('zh-CN')}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                            }}
+                            placeholder="标签名"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="board-chip-add"
+                            onClick={() => {
+                              setTagEditId(m.meeting_id)
+                              setTagInput('')
+                            }}
+                          >
+                            +
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="board-td board-td-time">
+                      {formatTime(m.created_at)}
+                    </td>
+                    <td className="board-td board-td-actions" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleSingleDelete(m.meeting_id, 'soft')}
+                        disabled={isDeleting}
+                      >
+                        {isDeleting ? '…' : '删除'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
-                <div className="board-card-actions">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm board-card-delete"
-                    onClick={() => handleSingleDelete(m.meeting_id, 'soft')}
-                    title="软删除（可恢复）"
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {totalPages > 1 && (
-          <div className="board-pagination">
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setPage(0)}
-              disabled={page === 0}
-            >
-              首页
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-            >
-              ‹
-            </button>
-            <span className="board-page-info">
-              {page + 1} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              disabled={page >= totalPages - 1}
-            >
-              ›
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setPage(totalPages - 1)}
-              disabled={page >= totalPages - 1}
-            >
-              末页
-            </button>
-          </div>
-        )}
+      {/* 分页 */}
+      <div className="board-pagination">
+        <span className="board-pagination-total">共 {total} 条</span>
+        <div className="board-pagination-nav">
+          <button
+            type="button"
+            className="board-page-btn"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+          >
+            ‹
+          </button>
+          {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+            // 显示页码逻辑：尽量显示当前页附近的页码
+            let pageNum: number
+            if (totalPages <= 7) {
+              pageNum = i
+            } else if (page < 3) {
+              pageNum = i
+            } else if (page > totalPages - 4) {
+              pageNum = totalPages - 7 + i
+            } else {
+              pageNum = page - 3 + i
+            }
+            return (
+              <button
+                key={pageNum}
+                type="button"
+                className={`board-page-btn${pageNum === page ? ' active' : ''}`}
+                onClick={() => setPage(pageNum)}
+              >
+                {pageNum + 1}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            className="board-page-btn"
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page >= totalPages - 1}
+          >
+            ›
+          </button>
+        </div>
       </div>
 
       {/* 批量删除确认弹窗 */}

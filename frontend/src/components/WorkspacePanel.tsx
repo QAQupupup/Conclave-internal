@@ -1,6 +1,20 @@
-// 工作区面板：文件树 + 代码编辑器 + 终端输出
+// 工作区面板：递归文件树 + 代码编辑器 + 终端输出
 // 让 Conclave 产出能直接被写入文件、运行、查看结果
+//
+// [CON-11 修复] 文件树改为递归结构 + 按需展开：
+//   旧版：buildTree 只看一层，目录点击 = 切换根目录（不是展开），
+//         内嵌项目（src/utils/helper.py）无法直达，需要反复刷新。
+//   新版：
+//     1) 客户端维护扁平 tree map（path -> NodeState），目录有 children 数组
+//     2) 点击目录 = 切换 expanded 状态（不重新拉根目录）
+//     3) 首次展开某目录时调 listFiles 懒加载子节点
+//     4) 用后端返回的 child_count 字段（>= 1）判断目录是否可展开
+//
+// [CON-11 修复] 文件名后缀 → Monaco language 映射：
+//   旧版 hardcode 永远 'python'（readFile 也会带 language 后端字段，
+//   但客户端忽略，统一用 python）。现在按扩展名做 lookup 表。
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type React from 'react'
 import Editor from '@monaco-editor/react'
 import {
   listFiles,
@@ -12,23 +26,76 @@ import {
   type FileItem,
 } from '../lib/api.ts'
 
-/** 文件树节点 */
+/** 文件树节点（递归） */
 interface TreeNode {
   name: string
   path: string
   type: 'file' | 'directory'
+  /** 仅 directory 有：是否已展开 */
+  expanded?: boolean
+  /** 仅 directory 有：子节点是否已加载 */
+  loaded?: boolean
+  /** 仅 directory 有：子节点（懒加载） */
   children?: TreeNode[]
+  /** 仅 directory 有：可见子节点数（用于折叠态显示 (3)） */
+  child_count?: number
+  /** 加载状态：防止重复请求 */
+  loading?: boolean
 }
 
-/** 将扁平 FileItem 列表转为树结构（仅一层展开，简化实现） */
-function buildTree(items: FileItem[]): TreeNode[] {
-  const dirs = items.filter((i) => i.type === 'directory')
-  const files = items.filter((i) => i.type === 'file')
-  return [...dirs, ...files].map((i) => ({
+/** 将扁平 FileItem 列表转为树节点列表（顶层） */
+function buildRootTree(items: FileItem[]): TreeNode[] {
+  return items.map((i) => ({
     name: i.name,
     path: i.path,
-    type: i.type as 'file' | 'directory',
+    type: i.type,
+    expanded: false,
+    loaded: false,
+    child_count: i.child_count ?? 0,
   }))
+}
+
+/**
+ * [CON-11] 文件扩展名 → Monaco language id 映射
+ * 覆盖 Conclave 主要产出场景（数据分析、代码生成、报告）
+ * 未列出的扩展名 fallback 到后端 readFile 返回的 language 字段
+ */
+const EXT_LANG_MAP: Record<string, string> = {
+  // Python 系列
+  '.py': 'python', '.pyi': 'python', '.pyw': 'python',
+  // Web/前端
+  '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript',
+  '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
+  '.html': 'html', '.htm': 'html', '.css': 'css', '.scss': 'scss',
+  '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml', '.toml': 'ini',
+  // 通用脚本
+  '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell',
+  '.ps1': 'powershell', '.bat': 'bat', '.cmd': 'bat',
+  // 系统语言
+  '.go': 'go', '.rs': 'rust', '.java': 'java', '.kt': 'kotlin',
+  '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.hpp': 'cpp', '.cc': 'cpp',
+  '.cs': 'csharp', '.rb': 'ruby', '.php': 'php', '.lua': 'lua',
+  '.sql': 'sql', '.r': 'r',
+  // 数据
+  '.md': 'markdown', '.markdown': 'markdown',
+  '.xml': 'xml', '.svg': 'xml', '.tex': 'latex',
+  // 配置
+  '.ini': 'ini', '.cfg': 'ini', '.conf': 'ini', '.env': 'ini',
+  '.dockerfile': 'dockerfile', 'Dockerfile': 'dockerfile',
+}
+
+/** 根据文件路径推断 Monaco language */
+function detectLanguage(path: string, fallback: string = 'plaintext'): string {
+  const lower = path.toLowerCase()
+  // Dockerfile（无扩展名）
+  if (lower.endsWith('dockerfile')) return 'dockerfile'
+  // 找扩展名
+  const dotIdx = lower.lastIndexOf('.')
+  if (dotIdx > 0 && dotIdx < lower.length - 1) {
+    const ext = lower.slice(dotIdx)
+    if (EXT_LANG_MAP[ext]) return EXT_LANG_MAP[ext]
+  }
+  return fallback
 }
 
 interface WorkspacePanelProps {
@@ -43,7 +110,11 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
   const pathPrefix = meetingId ? `${meetingId}/` : ''
 
   // 文件树
+  // [CON-11 修复] 改用嵌套 tree（递归） + 扁平化 pathMap 索引
+  // 旧版是单层 tree.map，遇到 src/ 下多个子文件就进不去
   const [tree, setTree] = useState<TreeNode[]>([])
+  // path → node，便于 O(1) 更新目录的 expanded/children
+  const [pathMap, setPathMap] = useState<Map<string, TreeNode>>(new Map())
   const [currentPath, setCurrentPath] = useState<string>('')
   const [loading, setLoading] = useState(false)
 
@@ -71,13 +142,18 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
   // 编辑器内容变化标记
   const editorRef = useRef<Parameters<NonNullable<Parameters<typeof Editor>[0]['onMount']>>[0] | null>(null)
 
-  /** 刷新文件列表 */
+  /** 刷新文件列表（顶层） */
   const refreshTree = useCallback(async (path = '') => {
     setLoading(true)
     try {
       const fullPath = pathPrefix + path
       const res = await listFiles(fullPath)
-      setTree(buildTree(res.items))
+      const nodes = buildRootTree(res.items)
+      setTree(nodes)
+      // 重建 pathMap
+      const map = new Map<string, TreeNode>()
+      nodes.forEach((n) => map.set(n.path, n))
+      setPathMap(map)
       setCurrentPath(path)
     } catch (e) {
       setTerminalHistory((h) => [
@@ -89,6 +165,76 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
     }
   }, [pathPrefix])
 
+  /**
+   * [CON-11 修复] 切换目录展开状态 + 懒加载子节点
+   * - 旧版：点击目录直接 refreshTree(node.path)，丢失父目录上下文
+   * - 新版：保持根目录不变，仅加载该目录的子节点
+   */
+  const toggleExpand = useCallback(async (dirPath: string) => {
+    const node = pathMap.get(dirPath)
+    if (!node || node.type !== 'directory') return
+
+    // 已展开 → 收起
+    if (node.expanded) {
+      setPathMap((prev) => {
+        const next = new Map(prev)
+        const target = next.get(dirPath)
+        if (target) {
+          next.set(dirPath, { ...target, expanded: false })
+        }
+        return next
+      })
+      return
+    }
+
+    // 未展开 → 标记展开
+    setPathMap((prev) => {
+      const next = new Map(prev)
+      const target = next.get(dirPath)
+      if (target) {
+        next.set(dirPath, { ...target, expanded: true, loading: !target.loaded })
+      }
+      return next
+    })
+
+    // 懒加载：未加载过的才请求
+    if (!node.loaded) {
+      try {
+        const fullPath = pathPrefix + dirPath
+        const res = await listFiles(fullPath)
+        const childNodes: TreeNode[] = buildRootTree(res.items)
+        setPathMap((prev) => {
+          const next = new Map(prev)
+          const target = next.get(dirPath)
+          if (target) {
+            next.set(dirPath, {
+              ...target,
+              loaded: true,
+              loading: false,
+              children: childNodes,
+            })
+            // 索引子节点
+            childNodes.forEach((c) => next.set(c.path, c))
+          }
+          return next
+        })
+      } catch (e) {
+        setPathMap((prev) => {
+          const next = new Map(prev)
+          const target = next.get(dirPath)
+          if (target) {
+            next.set(dirPath, { ...target, loading: false })
+          }
+          return next
+        })
+        setTerminalHistory((h) => [
+          ...h,
+          { type: 'err', text: `展开目录失败: ${(e as Error).message}` },
+        ])
+      }
+    }
+  }, [pathMap, pathPrefix])
+
   /** 打开文件 */
   const openFile = useCallback(async (path: string) => {
     try {
@@ -96,7 +242,9 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
       const res = await readFile(fullPath)
       setFilePath(res.path)
       setFileContent(res.content)
-      setFileLang(res.language)
+      // [CON-11 修复] 优先用后端 language 字段，客户端扩展名映射作为 fallback
+      // 旧版固定 'python'，导致 .ts/.json/.md 等文件被当作 Python 高亮
+      setFileLang(detectLanguage(res.path, res.language || 'plaintext'))
       setDirty(false)
     } catch (e) {
       setTerminalHistory((h) => [
@@ -227,6 +375,56 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
     }
   }, [refreshTree, openFile, initialFile])
 
+  // [CON-11 修复] 递归渲染文件树
+  // 旧版只渲染顶层，内嵌项目无法展示。
+  // 新版：递归组件 TreeNodeView 接收 nodes 数组 + depth 缩进，依次渲染
+  // 目录点击 → toggleExpand；文件点击 → openFile
+  const renderTreeNodes = (nodes: TreeNode[], depth: number = 0): React.ReactElement => {
+    if (nodes.length === 0) {
+      return <div className="ws-tree-empty">空目录</div>
+    }
+    return (
+      <>
+        {nodes.map((node) => {
+          const isDir = node.type === 'directory'
+          const expanded = node.expanded ?? false
+          const childCount = node.child_count ?? 0
+          const isActive = filePath === node.path
+          return (
+            <div key={node.path} className="ws-tree-entry">
+              <div
+                className={`ws-tree-item ${node.type} ${isActive ? 'active' : ''}`}
+                style={{ paddingLeft: `${depth * 14 + 8}px` }}
+                onClick={() => {
+                  if (isDir) {
+                    toggleExpand(node.path)
+                  } else {
+                    openFile(node.path)
+                  }
+                }}
+              >
+                <span className="ws-icon">
+                  {isDir ? (expanded ? '📂' : '📁') : '📄'}
+                </span>
+                <span className="ws-name">{node.name}</span>
+                {isDir && childCount > 0 && !expanded && (
+                  <span className="ws-count">({childCount})</span>
+                )}
+                {isDir && node.loading && <span className="ws-spin">…</span>}
+              </div>
+              {/* 递归渲染子节点：仅当目录已展开且有 children */}
+              {isDir && expanded && node.children && (
+                <div className="ws-tree-children">
+                  {renderTreeNodes(node.children, depth + 1)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </>
+    )
+  }
+
   return (
     <div className="workspace-panel">
       {/* 工具栏 */}
@@ -281,26 +479,7 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
             {tree.length === 0 && !loading ? (
               <div className="ws-empty">空目录</div>
             ) : (
-              tree.map((node) => (
-                <div
-                  key={node.path}
-                  className={`ws-tree-item ${node.type} ${
-                    filePath === node.path ? 'active' : ''
-                  }`}
-                  onClick={() => {
-                    if (node.type === 'file') {
-                      openFile(node.path)
-                    } else {
-                      refreshTree(node.path)
-                    }
-                  }}
-                >
-                  <span className="ws-icon">
-                    {node.type === 'directory' ? '📁' : '📄'}
-                  </span>
-                  <span className="ws-name">{node.name}</span>
-                </div>
-              ))
+              renderTreeNodes(tree)
             )}
           </div>
         </div>

@@ -1,5 +1,5 @@
 // 轻量客户端路由：基于 History API，无第三方依赖
-// 三条路由：/ → 封面页，/board → 任务看板，/meeting/:id → 会议视图
+// 路由：/ → 封面页，/board → 任务看板，/dashboard → 运维面板，/meeting/:id → 会议视图
 // 所有 navigate 调用通过订阅机制通知监听者，popstate 也触发通知
 
 type Listener = () => void
@@ -44,4 +44,9 @@ export function isLandingPath(): boolean {
 /** 判断当前是否在看板页 */
 export function isBoardPath(): boolean {
   return window.location.pathname === '/board'
+}
+
+/** 判断当前是否在运维面板 */
+export function isDashboardPath(): boolean {
+  return window.location.pathname === '/dashboard'
 }

@@ -18,8 +18,8 @@ export function MeetingControls() {
     setLoading(signal)
     try {
       await controlMeeting(meetingId, signal)
-    } catch {
-      // 静默：错误已在 reducer 中处理，避免阻塞 UI
+    } catch (err) {
+      console.error(`会议控制操作 ${signal} 失败:`, err)
     } finally {
       setLoading(null)
     }
@@ -83,8 +83,8 @@ export function MeetingControls() {
                 type="button"
                 className="btn btn-danger"
                 onClick={async () => {
-                  setAbortConfirm(false)
                   await control('abort')
+                  setAbortConfirm(false)
                 }}
                 disabled={busy}
               >

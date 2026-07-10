@@ -1,18 +1,34 @@
 // 初始页面：输入议题 + 上传 md + 创建 + 运行
-// 流程：输入议题 →（可选）上传 md → 创建 → 点 Run 触发 → 自动连 WS → 实时看发言流
+// 流程：输入议题 →（可选）选择模型/Key → 上传 md → 创建 → 点 Run 触发 → 自动连 WS → 实时看发言流
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
+import { MeetingSearchSelect } from './MeetingSearchSelect.tsx'
+import { ModelSelector, type ModelSelection } from './ModelSelector.tsx'
+import { setMeetingModel as apiSetMeetingModel } from '../lib/api.ts'
+import { getDefaultSelection, setApiKey as saveApiKey, setDefaultSelection, loadPreferences } from '../lib/llmPreferences.ts'
 
 export function CreateMeeting() {
   const { createMeeting, uploadDocument, selectMeeting, runMeeting } = useMeeting()
   const [topic, setTopic] = useState('')
   const [deliverableType, setDeliverableType] = useState('prd_openapi')
   const [file, setFile] = useState<File | null>(null)
+  const [referenceIds, setReferenceIds] = useState<string[]>([])
+  // 初始值从本地偏好读取
+  const [modelSel, setModelSel] = useState<ModelSelection>(() => getDefaultSelection())
+  const [modelExpanded, setModelExpanded] = useState(false)
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
+
+  // 获取默认选择用于对比是否自定义
+  const defaultSel = getDefaultSelection()
+  // 判断是否自定义了模型配置（与本地默认偏好不同）
+  const isCustomModel = modelSel.provider_id !== defaultSel.provider_id
+    || modelSel.model !== defaultSel.model
+    || (modelSel.api_key !== '' && modelSel.api_key !== defaultSel.api_key)
+    || modelSel.base_url !== defaultSel.base_url
 
   // 创建会议
   const handleCreate = async (e: FormEvent) => {
@@ -25,13 +41,40 @@ export function CreateMeeting() {
     setError(null)
     setInfo(null)
     try {
-      const res = await createMeeting(topic.trim(), deliverableType)
+      const res = await createMeeting(topic.trim(), deliverableType, referenceIds.length > 0 ? referenceIds : undefined)
       setCreatedId(res.meeting_id)
+      // 如果用户自定义了模型/Key，在会议创建后立即应用
+      if (isCustomModel) {
+        try {
+          await apiSetMeetingModel(res.meeting_id, {
+            provider_id: modelSel.provider_id,
+            model: modelSel.model,
+            api_key: modelSel.api_key || undefined,
+            base_url: modelSel.base_url || undefined,
+          })
+          // 保存 API Key 到本地偏好
+          if (modelSel.api_key) {
+            saveApiKey(modelSel.provider_id, modelSel.api_key)
+          }
+          // 如果开启了自动保存，将当前模型设为默认
+          const prefs = loadPreferences()
+          if (prefs.auto_save_model) {
+            setDefaultSelection({
+              provider_id: modelSel.provider_id,
+              model: modelSel.model,
+              base_url: modelSel.base_url,
+            })
+          }
+          setInfo(`会议已创建，已设置模型：${modelSel.model}`)
+        } catch (me) {
+          setInfo(`会议已创建，但模型设置失败：${me instanceof Error ? me.message : String(me)}`)
+        }
+      }
       // 可选：上传 md 文档
       if (file) {
         const up = await uploadDocument(res.meeting_id, file)
-        setInfo(`已上传 ${up.doc_id}，切块 ${up.chunks} 段`)
-      } else {
+        setInfo(prev => `${prev ? prev + '；' : ''}已上传 ${up.doc_id}，切块 ${up.chunks} 段`)
+      } else if (!isCustomModel) {
         setInfo('会议已创建，可点击"运行"开始六阶段流程')
       }
     } catch (err) {
@@ -98,6 +141,15 @@ export function CreateMeeting() {
           </label>
 
           <label className="form-row">
+            <span className="field-label">引用历史会议（可选）</span>
+            <MeetingSearchSelect
+              selectedIds={referenceIds}
+              onChange={setReferenceIds}
+              placeholder="搜索历史会议作为参考依据…"
+            />
+          </label>
+
+          <label className="form-row">
             <span className="field-label">上传资料（可选 .md）</span>
             <input
               type="file"
@@ -107,6 +159,34 @@ export function CreateMeeting() {
             />
             {file && <span className="file-name">{file.name}</span>}
           </label>
+
+          {/* 模型选择（可折叠） */}
+          <div className="form-row">
+            <button
+              type="button"
+              className="model-section-toggle"
+              onClick={() => setModelExpanded(v => !v)}
+              disabled={!!createdId || busy}
+            >
+              <span className="model-toggle-arrow">{modelExpanded ? '▾' : '▸'}</span>
+              <span className="field-label">模型与 API Key</span>
+              {!modelExpanded && (
+                <span className="model-current-brief">
+                  {isCustomModel ? modelSel.model : `默认：${defaultSel.model}`}
+                  {modelSel.api_key && ' · 自定义Key'}
+                </span>
+              )}
+            </button>
+            {modelExpanded && (
+              <div className="model-section-body">
+                <ModelSelector
+                  value={modelSel}
+                  onChange={setModelSel}
+                  disabled={!!createdId || busy}
+                />
+              </div>
+            )}
+          </div>
 
           {!createdId ? (
             <button type="submit" className="btn btn-primary" disabled={busy || !topic.trim()}>

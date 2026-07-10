@@ -226,25 +226,25 @@ export function ReportViewer() {
             {ext.artifact.design_doc && (
               <div className="artifact-block">
                 <h4>{ext.artifact.design_doc.title}</h4>
-                <pre>{JSON.stringify(ext.artifact.design_doc, null, 2)}</pre>
+                <pre className="code-block">{JSON.stringify(ext.artifact.design_doc, null, 2)}</pre>
               </div>
             )}
             {ext.artifact.comprehensive && (
               <div className="artifact-block">
                 <h4>{ext.artifact.comprehensive.title}</h4>
-                <pre>{JSON.stringify(ext.artifact.comprehensive, null, 2)}</pre>
+                <pre className="code-block">{JSON.stringify(ext.artifact.comprehensive, null, 2)}</pre>
               </div>
             )}
             {ext.artifact.research_report && (
               <div className="artifact-block">
                 <h4>{ext.artifact.research_report.title}</h4>
-                <pre>{JSON.stringify(ext.artifact.research_report, null, 2)}</pre>
+                <pre className="code-block">{JSON.stringify(ext.artifact.research_report, null, 2)}</pre>
               </div>
             )}
             {ext.artifact.business_report && (
               <div className="artifact-block">
                 <h4>{ext.artifact.business_report.title}</h4>
-                <pre>{JSON.stringify(ext.artifact.business_report, null, 2)}</pre>
+                <pre className="code-block">{JSON.stringify(ext.artifact.business_report, null, 2)}</pre>
               </div>
             )}
             {ext.artifact.code_analysis && (
@@ -284,11 +284,108 @@ export function ReportViewer() {
             )}
             {ext.artifact.deployable_service && (
               <div className="artifact-block">
-                <h4>{ext.artifact.deployable_service.title}</h4>
-                <p>{ext.artifact.deployable_service.description}</p>
+                <h4>{ext.artifact.deployable_service.title || '可部署服务'}</h4>
+                {ext.artifact.deployable_service.description && (
+                  <p>{ext.artifact.deployable_service.description}</p>
+                )}
+
+                {/* === 服务访问入口 === */}
+                {ext.artifact.deployment && (
+                  <div className={`service-access ${ext.artifact.deployment.ok ? 'service-ok' : 'service-fail'}`}>
+                    <div className="service-access-header">
+                      <span className={`service-status-dot ${ext.artifact.deployment.ok ? 'dot-ok' : 'dot-fail'}`}></span>
+                      <strong>{ext.artifact.deployment.ok ? '服务已启动，可直接访问' : '服务启动失败'}</strong>
+                    </div>
+                    {ext.artifact.deployment.ok && ext.artifact.deployment.access_url && (
+                      <div className="service-url-row">
+                        <span className="service-url-label">访问地址:</span>
+                        <a
+                          href={ext.artifact.deployment.access_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="service-url-link"
+                        >
+                          {ext.artifact.deployment.access_url}
+                          <span className="service-url-icon">↗</span>
+                        </a>
+                      </div>
+                    )}
+                    {ext.artifact.deployment.credentials &&
+                      (ext.artifact.deployment.credentials.username || ext.artifact.deployment.credentials.password) && (
+                      <div className="service-credentials">
+                        <span className="cred-label">账号:</span>
+                        <code>{ext.artifact.deployment.credentials.username || '（无，需自行注册）'}</code>
+                        {ext.artifact.deployment.credentials.password && (
+                          <>
+                            <span className="cred-label">密码:</span>
+                            <code>{ext.artifact.deployment.credentials.password}</code>
+                          </>
+                        )}
+                        {ext.artifact.deployment.credentials.note && (
+                          <span className="cred-note">（{ext.artifact.deployment.credentials.note}）</span>
+                        )}
+                      </div>
+                    )}
+                    {ext.artifact.review && (
+                      <div className="service-review-info">
+                        代码审查: {ext.artifact.review.rounds}轮，
+                        <span className={ext.artifact.review.passed ? 'review-ok' : 'review-fail'}>
+                          {ext.artifact.review.passed ? '通过' : '存在未修复问题'}
+                        </span>
+                      </div>
+                    )}
+                    {!ext.artifact.deployment.ok && ext.artifact.deployment.error && (
+                      <div className="service-error">
+                        错误: {ext.artifact.deployment.error}
+                        {ext.artifact.deployment.logs && (
+                          <details>
+                            <summary>查看启动日志</summary>
+                            <pre className="code-block error">{ext.artifact.deployment.logs}</pre>
+                          </details>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 评分入口 */}
+                <div className="service-rating">
+                  <span className="rating-label">对本次产出评分:</span>
+                  <div className="rating-stars" data-meeting={state.meeting_id}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        className="rating-star"
+                        data-score={star}
+                        title={`${star}分`}
+                        onClick={(e) => {
+                          const el = e.currentTarget as HTMLElement
+                          const all = el.parentElement?.querySelectorAll('.rating-star')
+                          all?.forEach((s: any, i: number) => {
+                            s.classList.toggle('star-active', i < star)
+                          })
+                          // 存储评分到 localStorage
+                          try {
+                            const ratings = JSON.parse(localStorage.getItem('conclave_ratings') || '{}')
+                            ratings[state.meeting_id] = star
+                            localStorage.setItem('conclave_ratings', JSON.stringify(ratings))
+                          } catch {}
+                        }}
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </div>
+                  <span className="rating-hint">（点击星标评分，帮助系统改进产出质量）</span>
+                </div>
+
+                <h5>应用代码 (app.py)</h5>
                 <pre className="code-block">{ext.artifact.deployable_service.app_code}</pre>
                 {ext.artifact.deployable_service.requirements_txt && (
-                  <pre className="code-block">{ext.artifact.deployable_service.requirements_txt}</pre>
+                  <>
+                    <h5>requirements.txt</h5>
+                    <pre className="code-block">{ext.artifact.deployable_service.requirements_txt}</pre>
+                  </>
                 )}
                 {ext.artifact.deployable_service.dockerfile && (
                   <>
@@ -304,8 +401,11 @@ export function ReportViewer() {
                 )}
                 {ext.artifact.execution && (
                   <div className="execution-result">
-                    <h5>部署文件</h5>
+                    <h5>部署结果</h5>
                     <pre className="code-block">{ext.artifact.execution.stdout}</pre>
+                    {ext.artifact.execution.stderr && (
+                      <pre className="code-block error">{ext.artifact.execution.stderr}</pre>
+                    )}
                   </div>
                 )}
               </div>

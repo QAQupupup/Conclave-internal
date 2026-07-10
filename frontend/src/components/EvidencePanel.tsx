@@ -6,6 +6,7 @@ import {
   EVIDENCE_SOURCE_LABEL as SOURCE_LABEL,
   classifyEvidenceSource as sourceType,
 } from '../constants.ts'
+import { EvidenceBadge, parseEvidenceRef } from './EvidenceBadge.tsx'
 
 interface EvidencePanelProps {
   selectedConflictId: string | null
@@ -79,7 +80,12 @@ export function EvidencePanel({ selectedConflictId, onSelectConflict }: Evidence
                             <div className={`evidence-type-tag src-${st}`}>{SOURCE_LABEL[st]}</div>
                             <blockquote className="evidence-quote">{a.quote}</blockquote>
                             <div className="evidence-meta">
-                              <span className="evidence-source">{a.source}</span>
+                              <EvidenceBadge
+                                item={{
+                                  ...parseEvidenceRef(a.source ?? ''),
+                                  quote: undefined,
+                                }}
+                              />
                               {a.supports && (
                                 <span className={`evidence-supports ${a.supports}`}>
                                   {SUPPORTS_LABEL[a.supports] ?? a.supports}

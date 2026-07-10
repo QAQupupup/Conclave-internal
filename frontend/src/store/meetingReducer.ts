@@ -9,9 +9,12 @@
 import type {
   AgentSpokePayload,
   ArtifactGeneratedPayload,
+  BorrowAutoApprovedPayload,
+  BorrowAwaitingUserPayload,
   ControlSignalPayload,
   DomainEvent,
   EvidenceAttachedPayload,
+  InterventionReplyPayload,
   MeetingState,
   StageChangedPayload,
 } from '../types/events.ts'
@@ -177,6 +180,17 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
             meeting: { ...meeting, flow_plan: p.flow_plan },
           }
         }
+        case 'intervention.reply': {
+          const p = ev.payload as InterventionReplyPayload
+          if (p.meeting_id && p.meeting_id !== meeting.meeting_id) return store
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              intervention_messages: p.intervention_messages ?? meeting.intervention_messages,
+            },
+          }
+        }
         case 'meeting.fallback_warning': {
           const p = ev.payload as { fallback_stages: string[]; message: string; severity: string }
           return {
@@ -184,6 +198,66 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
             meeting: {
               ...meeting,
               fallback_warning: { stages: p.fallback_stages, message: p.message },
+            },
+          }
+        }
+        case 'borrow.auto_approved': {
+          const p = ev.payload as BorrowAutoApprovedPayload
+          // 自动批准后 borrowed_agents 已在后端更新，通过 snapshot 同步；
+          // 这里主要更新 auto_borrow_count
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              auto_borrow_count: p.auto_borrow_count,
+            },
+          }
+        }
+        case 'borrow.awaiting_user': {
+          const p = ev.payload as BorrowAwaitingUserPayload
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              pending_borrow_request: {
+                id: p.request_id,
+                requester: 'moderator',
+                target_role: p.target_role,
+                goal: p.goal,
+                necessary: p.necessary,
+                no_loan_cost: p.no_loan_cost,
+                requested_at: new Date().toISOString(),
+                stage: meeting.stage ?? '',
+              },
+              auto_borrow_count: p.auto_borrow_count,
+            },
+          }
+        }
+        case 'borrow.approved_by_user': {
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              pending_borrow_request: null,
+            },
+          }
+        }
+        case 'borrow.rejected_by_user': {
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              pending_borrow_request: null,
+            },
+          }
+        }
+        case 'borrow.frozen': {
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              pending_borrow_request: null,
+              borrow_frozen: true,
             },
           }
         }

@@ -15,7 +15,7 @@ interface MeetingListItem {
 }
 
 export function MeetingSidebar() {
-  const { meetingId, selectMeeting, reset } = useMeeting()
+  const { meetingId, selectMeeting } = useMeeting()
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
   const [concurrentLimit, setConcurrentLimit] = useState(0)
   const [runningCount, setRunningCount] = useState(0)
@@ -25,22 +25,23 @@ export function MeetingSidebar() {
     'conclave-meeting-list-collapsed',
     false,
   )
-  // 删除确认状态：记录当前待确认删除的会议 ID
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  // 删除确认状态：记录当前待确认删除的会议 ID 及模式
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; mode: 'soft' | 'hard' } | null>(null)
   // 删除中的会议 ID（loading）
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  // 删除模式选择
-  const [deleteMode, setDeleteMode] = useState<'soft' | 'hard'>('soft')
 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
       const data = await listMeetings()
-      setMeetings(data.meetings.reverse()) // 最新的在前
+      // 后端已按 created_at DESC 返回（最新在前）。运行中的会议置顶。
+      const running = data.meetings.filter(m => m.is_running)
+      const others = data.meetings.filter(m => !m.is_running)
+      setMeetings([...running, ...others])
       setConcurrentLimit(data.concurrent_limit)
       setRunningCount(data.running_count)
-    } catch {
-      // 静默失败
+    } catch (err) {
+      console.error('刷新会议列表失败:', err)
     } finally {
       setLoading(false)
     }
@@ -60,24 +61,24 @@ export function MeetingSidebar() {
 
   /** 执行删除 */
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (id: string, mode: 'soft' | 'hard') => {
       setDeletingId(id)
       try {
-        await deleteMeeting(id, deleteMode)
+        await deleteMeeting(id, mode)
         // 如果删除的是当前选中的会议，重置到创建页
         if (id === meetingId) {
-          reset()
+          selectMeeting(null)
         }
         // 刷新列表
         await refresh()
-      } catch {
-        // 静默失败，可扩展为 toast
+      } catch (err) {
+        console.error('删除会议失败:', err)
       } finally {
         setDeletingId(null)
         setPendingDelete(null)
       }
     },
-    [deleteMode, meetingId, reset, refresh],
+    [meetingId, selectMeeting, refresh],
   )
 
   return (
@@ -88,7 +89,7 @@ export function MeetingSidebar() {
           {loading ? '⟳' : '↻'}
         </button>
       </div>
-      <button className="btn btn-primary sidebar-new-btn" onClick={reset}>
+      <button className="btn btn-primary sidebar-new-btn" onClick={() => selectMeeting(null)}>
         + 新建会议
       </button>
 
@@ -115,8 +116,9 @@ export function MeetingSidebar() {
           {meetings.map((m) => {
             const sl = statusLabel(m.status, m.stage)
             const isActive = m.meeting_id === meetingId
-            const isPendingDelete = pendingDelete === m.meeting_id
+            const isPendingDelete = pendingDelete?.id === m.meeting_id
             const isDeleting = deletingId === m.meeting_id
+            const currentDeleteMode = pendingDelete?.mode ?? 'soft'
             return (
               <div
                 key={m.meeting_id}
@@ -136,7 +138,7 @@ export function MeetingSidebar() {
                     disabled={m.is_running || isDeleting}
                     onClick={(e) => {
                       e.stopPropagation()
-                      setPendingDelete(m.meeting_id)
+                      setPendingDelete({ id: m.meeting_id, mode: 'soft' })
                     }}
                   >
                     {isDeleting ? '⟳' : '×'}
@@ -151,23 +153,23 @@ export function MeetingSidebar() {
                   <div className="delete-confirm" onClick={(e) => e.stopPropagation()}>
                     <div className="delete-confirm-title">确认删除？</div>
                     <div className="delete-confirm-modes">
-                      <label className={`delete-mode-option ${deleteMode === 'soft' ? 'active' : ''}`}>
+                      <label className={`delete-mode-option ${currentDeleteMode === 'soft' ? 'active' : ''}`}>
                         <input
                           type="radio"
                           name={`del-mode-${m.meeting_id}`}
                           value="soft"
-                          checked={deleteMode === 'soft'}
-                          onChange={() => setDeleteMode('soft')}
+                          checked={currentDeleteMode === 'soft'}
+                          onChange={() => setPendingDelete({ id: m.meeting_id, mode: 'soft' })}
                         />
                         <span>软删除（保留数据）</span>
                       </label>
-                      <label className={`delete-mode-option ${deleteMode === 'hard' ? 'active' : ''}`}>
+                      <label className={`delete-mode-option ${currentDeleteMode === 'hard' ? 'active' : ''}`}>
                         <input
                           type="radio"
                           name={`del-mode-${m.meeting_id}`}
                           value="hard"
-                          checked={deleteMode === 'hard'}
-                          onChange={() => setDeleteMode('hard')}
+                          checked={currentDeleteMode === 'hard'}
+                          onChange={() => setPendingDelete({ id: m.meeting_id, mode: 'hard' })}
                         />
                         <span>永久删除（不可恢复）</span>
                       </label>
@@ -176,7 +178,7 @@ export function MeetingSidebar() {
                       <button
                         type="button"
                         className="btn btn-sm btn-danger"
-                        onClick={() => handleDelete(m.meeting_id)}
+                        onClick={() => handleDelete(m.meeting_id, currentDeleteMode)}
                         disabled={isDeleting}
                       >
                         {isDeleting ? '删除中…' : '确认删除'}

@@ -89,7 +89,7 @@ function AttachmentsSection({
                 {meetingId && (
                   <a
                     className="btn btn-sm btn-ghost"
-                    href={`/api/meetings/${meetingId}/attachments/${encodeURIComponent(att.filename)}`}
+                    href={`/meetings/${meetingId}/attachments/${encodeURIComponent(att.filename)}`}
                     download={att.filename}
                     title="下载"
                   >

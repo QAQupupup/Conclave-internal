@@ -8,6 +8,12 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- [CON-06 修复] ECharts 改用 npm 包导入（import * as echarts from 'echarts'），
+         替代 CDN 加载。原因：
+         1) CDN 不可控（jsdelivr 在某些地区访问慢/被墙）
+         2) 跨域安全风险（CDN 被劫持 → 全局 echarts 被替换）
+         3) 版本锁定可控（package.json 写死 ^5.4.3，构建产物包含）
+         4) 配合 ResourceChart 的 npm 化，所有图表功能走 ESM 严格类型检查 -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
