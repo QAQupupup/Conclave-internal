@@ -71,8 +71,9 @@ _WS_PATHS = {"/ws"}
 
 # ---- 速率限制 ----
 # [CON-03 修复] 防止暴力破解 + DoS
-# 默认：每 IP 60 次/分钟，认证失败 5 次/分钟封禁 60 秒
-_RATE_LIMIT_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_PER_MIN", "60"))
+# 默认：每 IP 600 次/分钟（10 req/sec），认证失败 5 次/分钟封禁 60 秒
+# 600/min 适配 Conclave 正常使用场景：侧边栏轮询(12/min) + 工作区文件操作 + 会议状态查询
+_RATE_LIMIT_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_PER_MIN", "600"))
 _RATE_LIMIT_FAIL_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_FAIL_PER_MIN", "5"))
 _RATE_BLOCK_SECONDS = int(os.environ.get("CONCLAVE_RATE_BLOCK_SECONDS", "60"))
 
