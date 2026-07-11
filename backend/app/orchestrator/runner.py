@@ -12,6 +12,7 @@ from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus, Stage
 from app.observability.log_bus import log_bus
 from app.orchestrator.nodes import NODES, decide_next_stage, _inc_loop_count, _let_borrowed_agents_speak
+from app.orchestrator.fast_path import classify_intent_async, run_fast_path
 from app.orchestrator.state import STAGE_ORDER, is_terminal, should_pause
 
 logger = get_logger("orchestrator.runner")
@@ -207,6 +208,37 @@ class Runner:
             )
         )
 
+        # --- Fast Path 分流 ---
+        # 如果 state 已标记 flow_plan="fast"（例如 API 层预设），或议题被分类为简单查询，
+        # 跳过六阶段管线，直接单次 LLM 调用完成后返回。
+        use_fast_path = False
+        if state.flow_plan == "fast":
+            use_fast_path = True
+            logger.info("会议 %s 使用 Fast Path（flow_plan=fast 已预设）", state.meeting_id)
+        else:
+            intent = await classify_intent_async(state.topic)
+            if intent == "fast_path":
+                use_fast_path = True
+                state.flow_plan = "fast"
+                logger.info("会议 %s 意图分流为 fast_path", state.meeting_id)
+
+        if use_fast_path:
+            try:
+                state = await run_fast_path(state.topic, state)
+            except Exception as exc:
+                logger.error("Fast Path 异常: %s", exc, exc_info=True)
+                state.status = MeetingStatus.FAILED
+                state.error_detail = str(exc)[:2000]
+                from datetime import datetime as _dt_fp
+                state.completed_at = _dt_fp.now()
+            # 持久化最终状态后返回（不进入六阶段管线）
+            self._persist(state)
+            reset_meeting_id(mid_token)
+            reset_runner_session_id(rsid_token)
+            if rid_token is not None:
+                reset_request_id(rid_token)
+            return state
+
         # [AUDIT-FIX P0-4] 新增：try/except 兜底，确保节点异常时状态转为 FAILED
         # 而非遗留 RUNNING 僵死态。同时记录 error_detail 供审计追溯。
         try:
@@ -366,7 +398,18 @@ class Runner:
         return state
 
     def _persist(self, state: MeetingState) -> None:
-        """持久化会议状态与发言到 SQLite"""
+        """持久化会议状态与发言到 SQLite
+
+        MeetingState 瘦身优化：大字段（llm_trace, evidence_set,
+        conclusion_chain, borrowed_agents）通过 extract_aux() 分离存储
+        到 meeting_aux 表，主 payload 仅保留轻量字段。
+        """
+        from app.db_legacy import save_meeting_aux
+
+        # 提取 aux 大字段（在 snapshot 之前调用，因为 extract_aux 会清空这些字段）
+        aux = state.extract_aux()
+
+        # 先保存会议主记录（确保 meetings 表中有记录，满足 meeting_aux 的外键约束）
         save_meeting(
             meeting_id=state.meeting_id,
             topic=state.topic,
@@ -375,6 +418,10 @@ class Runner:
             created_at=state.created_at,
             payload=state.snapshot(),
         )
+
+        # 再保存 aux 大字段到独立表（依赖 meetings.id 外键）
+        save_meeting_aux(state.meeting_id, aux)
+
         # 持久化尚未入库的发言（按 id 去重 upsert）
         for msg in state.messages:
             save_message(msg)
@@ -431,14 +478,18 @@ def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None 
     if existing is not None:
         return existing
     # 尝试从 SQLite 恢复
-    from app.db_legacy import get_meeting
+    from app.db_legacy import get_meeting, get_meeting_aux
     record = get_meeting(meeting_id)
     if record is not None:
         payload = record["payload"]
         try:
             state = MeetingState(**payload)
+            # 从 meeting_aux 表加载大字段并注入（向后兼容：旧会议无 aux 数据时安全跳过）
+            aux = get_meeting_aux(meeting_id)
+            if aux:
+                state.inject_aux(aux)
             set_state(state)
-            logger.info("会议 %s 从 SQLite 恢复运行态", meeting_id)
+            logger.info("会议 %s 从 SQLite 恢复运行态（aux=%d keys）", meeting_id, len(aux))
             return state
         except Exception as e:
             logger.warning("会议 %s 从 SQLite 恢复失败: %s，创建新状态", meeting_id, e)
@@ -452,7 +503,7 @@ def recover_crashed_meetings() -> list[str]:
     重启后把它们标记为 paused，用户可以手动 resume 继续。
     返回被恢复的会议 ID 列表。
     """
-    from app.db_legacy import recover_running_meetings, save_meeting
+    from app.db_legacy import recover_running_meetings, save_meeting, save_meeting_aux, get_meeting_aux
     from app.models import MeetingStatus
     from app.observability.log_bus import log_bus
 
@@ -466,9 +517,15 @@ def recover_crashed_meetings() -> list[str]:
             payload = json.loads(payload)
         try:
             state = MeetingState(**payload)
+            # 从 meeting_aux 表恢复大字段（向后兼容）
+            aux = get_meeting_aux(meeting_id)
+            if aux:
+                state.inject_aux(aux)
             state.status = MeetingStatus.PAUSED
             state.paused_snapshot = state.snapshot()
             set_state(state)
+            # 持久化时分离 aux 大字段（先保存主记录，再保存 aux，满足外键约束）
+            persist_aux = state.extract_aux()
             save_meeting(
                 state.meeting_id,
                 state.topic,
@@ -477,6 +534,7 @@ def recover_crashed_meetings() -> list[str]:
                 state.created_at,
                 state.snapshot(),
             )
+            save_meeting_aux(meeting_id, persist_aux)
             recovered_ids.append(meeting_id)
             log_bus.warning(
                 f"崩溃恢复：会议 {meeting_id} 从 running 标记为 paused",

@@ -104,6 +104,17 @@ def init_db() -> None:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active);
+
+                CREATE TABLE IF NOT EXISTS meeting_aux (
+                    meeting_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (meeting_id, key),
+                    FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_meeting_aux_meeting ON meeting_aux(meeting_id);
                 """
             )
             conn.commit()
@@ -162,6 +173,97 @@ def get_meeting(meeting_id: str) -> dict[str, Any] | None:
             return d
         finally:
             conn.close()
+
+
+# ---------- meeting_aux 辅助大字段持久化 ----------
+
+# 需要从 payload 中分离的 aux 字段名列表
+_AUX_KEYS = ("llm_trace", "evidence_set", "conclusion_chain", "borrowed_agents")
+
+
+def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
+    """将 aux 大字段单独持久化到 meeting_aux 表。
+
+    每个 aux key 对应一行，value_json 存 JSON 序列化后的值。
+    使用 INSERT OR REPLACE 实现 upsert。
+
+    Args:
+        meeting_id: 会议 ID
+        aux: extract_aux() 返回的 dict，key 为字段名，value 为可 JSON 序列化的值
+    """
+    if not aux:
+        return
+    now = datetime.now().isoformat()
+    with _lock:
+        conn = _connect()
+        try:
+            for key, value in aux.items():
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO meeting_aux (meeting_id, key, value_json, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        meeting_id,
+                        key,
+                        json.dumps(value, ensure_ascii=False, default=str),
+                        now,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_meeting_aux(meeting_id: str) -> dict[str, Any]:
+    """从 meeting_aux 表加载某会议的全部辅助大字段。
+
+    向后兼容：如果 meeting_aux 表不存在或该会议无 aux 数据，返回空 dict。
+
+    Args:
+        meeting_id: 会议 ID
+
+    Returns:
+        dict，key 为字段名，value 为反序列化后的值。可能为空 dict。
+    """
+    aux: dict[str, Any] = {}
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                "SELECT key, value_json FROM meeting_aux WHERE meeting_id = ?",
+                (meeting_id,),
+            ).fetchall()
+            for row in rows:
+                try:
+                    aux[row["key"]] = json.loads(row["value_json"])
+                except (json.JSONDecodeError, KeyError):
+                    pass  # 损坏的 aux 数据跳过，不影响主流程
+        except Exception:
+            # 表可能不存在（旧数据库），静默返回空 dict
+            pass
+        finally:
+            conn.close()
+    return aux
+
+
+def strip_aux_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """从 payload dict 中移除 aux 大字段，返回清理后的副本。
+
+    用于在 save_meeting 之前精简 payload，配合 save_meeting_aux 使用。
+    返回新的 dict，不修改原始输入。
+
+    Args:
+        payload: MeetingState.snapshot() 返回的 dict
+
+    Returns:
+        移除了 aux 字段的 payload 副本
+    """
+    cleaned = dict(payload)
+    for key in _AUX_KEYS:
+        if key in cleaned:
+            cleaned[key] = {"_aux": True}
+    return cleaned
 
 
 def list_meetings(include_deleted: bool = False) -> list[dict[str, Any]]:

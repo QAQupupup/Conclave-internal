@@ -257,6 +257,79 @@ class MeetingState(BaseModel):
         if not self.llm_trace.meeting_id:
             self.llm_trace.meeting_id = self.meeting_id
 
+    # ---------- Aux 大字段分离（MeetingState 瘦身）----------
+
+    # 需要从热路径 payload 中分离的大字段名称列表
+    _AUX_KEYS: tuple[str, ...] = ("llm_trace", "evidence_set", "conclusion_chain", "borrowed_agents")
+
+    def extract_aux(self) -> dict[str, Any]:
+        """将大字段提取到独立 dict，自身字段重置为默认值。
+
+        返回的 dict 可单独持久化到 meeting_aux 表，避免序列化到主 payload JSON。
+        调用后 self 中的对应字段被替换为空/默认值，大幅减小 snapshot() 体积。
+
+        Returns:
+            dict，key 为字段名，value 为该字段的 JSON 可序列化值
+        """
+        aux: dict[str, Any] = {}
+
+        # llm_trace: CallTrace Pydantic 模型
+        aux["llm_trace"] = self.llm_trace.model_dump(mode="json")
+        self.llm_trace = CallTrace(meeting_id=self.meeting_id)
+
+        # evidence_set: list[dict]
+        aux["evidence_set"] = list(self.evidence_set)
+        self.evidence_set = []
+
+        # conclusion_chain: ConclusionChain Pydantic 模型
+        aux["conclusion_chain"] = self.conclusion_chain.model_dump(mode="json")
+        self.conclusion_chain = ConclusionChain(meeting_id=self.meeting_id)
+
+        # borrowed_agents: list[dict]
+        aux["borrowed_agents"] = list(self.borrowed_agents)
+        self.borrowed_agents = []
+
+        return aux
+
+    def inject_aux(self, aux: dict[str, Any]) -> None:
+        """从 aux dict 恢复大字段到自身。
+
+        向后兼容：如果某个 key 不存在于 aux 中，则保持当前值不变。
+
+        Args:
+            aux: extract_aux() 返回的 dict，或从 DB 加载的等效数据
+        """
+        if "llm_trace" in aux and aux["llm_trace"]:
+            try:
+                self.llm_trace = CallTrace.model_validate(aux["llm_trace"])
+            except Exception:
+                pass  # 数据损坏时保留默认空值
+
+        if "evidence_set" in aux and aux["evidence_set"]:
+            self.evidence_set = list(aux["evidence_set"])
+
+        if "conclusion_chain" in aux and aux["conclusion_chain"]:
+            try:
+                self.conclusion_chain = ConclusionChain.model_validate(aux["conclusion_chain"])
+            except Exception:
+                pass
+
+        if "borrowed_agents" in aux and aux["borrowed_agents"]:
+            self.borrowed_agents = list(aux["borrowed_agents"])
+
+    def snapshot_lite(self) -> dict[str, Any]:
+        """生成轻量快照：排除 aux 大字段，用于热路径序列化。
+
+        与 snapshot() 不同，此方法不包含 llm_trace / evidence_set /
+        conclusion_chain / borrowed_agents 的实际数据。
+        """
+        data = self.model_dump(mode="json")
+        # 将大字段替换为占位标记，表明数据存储在 aux 表
+        for key in self._AUX_KEYS:
+            if key in data:
+                data[key] = {"_aux": True}
+        return data
+
     def snapshot(self) -> dict[str, Any]:
         """生成快照用于 pause 暂存 / WS 回放"""
         return self.model_dump(mode="json")

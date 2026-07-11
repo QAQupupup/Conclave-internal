@@ -58,6 +58,10 @@ class Settings:
     # 数据库路径：SQLite（兼容旧模式，逐步迁移到 PostgreSQL）
     sqlite_path: str = os.getenv("CONCLAVE_DB_PATH", "conclave.db")
 
+    # 持久化后端选择："legacy"（raw sqlite3）| "orm"（SQLAlchemy async）
+    # runner / event bus 仍走 legacy；router 可逐步切到 orm
+    db_backend: str = _env("CONCLAVE_DB_BACKEND", "legacy")
+
     # PostgreSQL 连接 URL（SQLAlchemy async）
     # 格式: postgresql+asyncpg://user:pass@host:5432/db
     database_url: str = os.getenv(

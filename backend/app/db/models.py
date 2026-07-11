@@ -231,3 +231,34 @@ class NetAuthRequestModel(Base):
         Index("idx_auth_meeting", "meeting_id"),
         Index("idx_auth_status", "status"),
     )
+
+
+# ============================================================
+# 8. meeting_aux — 会议辅助大字段存储（MeetingState 瘦身）
+# ============================================================
+# 将 MeetingState 中的大字段（llm_trace, evidence_set, conclusion_chain,
+# borrowed_agents）从主 payload JSON 中分离，减少热路径序列化开销。
+# 采用 (meeting_id, key) 组合主键，支持灵活扩展。
+class MeetingAuxModel(Base):
+    __tablename__ = "meeting_aux"
+
+    meeting_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("meetings.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    key: Mapped[str] = mapped_column(
+        String(50), primary_key=True,
+        comment="aux field name: llm_trace|evidence_set|conclusion_chain|borrowed_agents",
+    )
+    value_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}",
+        comment="JSON-serialized aux field value",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("idx_meeting_aux_meeting", "meeting_id"),
+    )

@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI):
             async with session.bind.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
+    # 日志：当前持久化后端
+    import logging as _logging
+    _logger = _logging.getLogger("lifespan")
+    _logger.info("db_backend=%s | db_mode=%s", settings.db_backend, settings.db_mode)
+
     # Redis 初始化（不可用时降级，不阻塞启动）
     await init_redis(app)
 
