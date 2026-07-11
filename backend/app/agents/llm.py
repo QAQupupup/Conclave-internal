@@ -487,6 +487,13 @@ class RealLLM:
                         current_prompt, schema_desc, stage, attempt,
                         config_override=(_p_url, _p_key, _p_model),
                     )
+                    # [FALLBACK] 最小输出长度校验：防止 LLM 返回空内容导致管线空转
+                    if len(content.strip()) < 50:
+                        raise ValidationError(
+                            f"LLM 返回内容过短 ({len(content.strip())} chars)，"
+                            f"阶段={stage} 模型={_p_model} 输出质量不足",
+                            model_cls or str,
+                        )
                     parsed = self._extract_json(content)
                     if model_cls is not None:
                         validated: BaseModel = model_cls.model_validate(parsed)
