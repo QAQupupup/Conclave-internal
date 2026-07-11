@@ -712,3 +712,75 @@ export async function setMeetingModel(
 export async function getMeetingModel(meetingId: string): Promise<MeetingModelConfig> {
   return request(`/meetings/${encodeURIComponent(meetingId)}/model`, { method: 'GET' })
 }
+
+// ---- CAPTCHA 值守 API ----
+
+/** CAPTCHA 值守状态 */
+export interface CaptchaStatus {
+  guard_mode: boolean
+  vnc_ready: boolean
+  pending_count: number
+  vnc_url: string | null
+  vnc_port: number
+  cdp_port: number
+}
+
+/** CAPTCHA 会话信息 */
+export interface CaptchaSessionInfo {
+  session_id: string
+  url: string
+  captcha_types: string[]
+  page_title: string
+  screenshot?: string
+  created_at: number
+  meeting_id: string | null
+  status: string
+  resolved_at: number | null
+  vnc_url: string | null
+  vnc_port: number
+  timeout: number
+  elapsed: number
+}
+
+/** captcha.pending 事件 payload */
+export interface CaptchaPendingPayload {
+  session_id: string
+  url: string
+  captcha_types: string[]
+  page_title: string
+  has_screenshot: boolean
+  vnc_ready: boolean
+  vnc_url: string | null
+  timeout: number
+}
+
+/** captcha.resolved / captcha.timeout 事件 payload */
+export interface CaptchaSessionEventPayload {
+  session_id: string
+}
+
+/** 获取 CAPTCHA 值守状态：GET /api/captcha/status */
+export async function getCaptchaStatus(): Promise<CaptchaStatus> {
+  return request<CaptchaStatus>('/api/captcha/status', { method: 'GET' })
+}
+
+/** 切换值守模式：POST /api/captcha/guard-mode */
+export async function setGuardMode(enabled: boolean): Promise<{ ok: boolean; guard_mode: boolean; vnc_ready: boolean }> {
+  return request('/api/captcha/guard-mode', {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+/** 获取验证码会话截图（返回 data:image/png;base64,... 格式）：GET /api/captcha/sessions/:id/screenshot */
+export async function getCaptchaScreenshot(sessionId: string): Promise<{ session_id: string; screenshot: string }> {
+  return request(`/api/captcha/sessions/${encodeURIComponent(sessionId)}/screenshot`, { method: 'GET' })
+}
+
+/** 通知后端验证码已解决：POST /api/captcha/resolve */
+export async function resolveCaptcha(sessionId: string): Promise<{ ok: boolean; session_id: string }> {
+  return request('/api/captcha/resolve', {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+}

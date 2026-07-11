@@ -1,7 +1,7 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
 import { useState } from 'react'
-import { ConfigProvider, Tabs, Button, Tooltip } from 'antd'
+import { ConfigProvider, Tabs, Button, Tooltip, Typography } from 'antd'
 import {
   TeamOutlined,
   CodeOutlined,
@@ -9,7 +9,6 @@ import {
   SunOutlined,
   SettingOutlined,
   SkinOutlined,
-  ArrowLeftOutlined,
   UpOutlined,
   DownOutlined,
   MenuFoldOutlined,
@@ -49,7 +48,10 @@ import { TaskBoard } from './components/TaskBoard.tsx'
 import { FloatingBadges, PanelModal } from './components/FloatingBadges.tsx'
 import { DrawerMenu } from './components/DrawerMenu.tsx'
 import { DashboardView } from './components/DashboardView.tsx'
+import { ModelsView } from './components/ModelsView.tsx'
 import { PanelErrorBoundary } from './components/ErrorBoundary.tsx'
+import { LogPanel } from './components/LogPanel.tsx'
+import { CaptchaGuard } from './components/CaptchaGuard.tsx'
 import type { BadgeItem } from './components/FloatingBadges.tsx'
 
 /** 全局视图切换：会议 / 工作区 */
@@ -61,7 +63,7 @@ function MeetingView({
 }: {
   onOpenInWorkspace?: (filePath: string) => void
 }) {
-  const { meetingId, selectMeeting, store } = useMeeting()
+  const { meetingId, store } = useMeeting()
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null)
   const [borrowOpen, setBorrowOpen] = useState(false)
   const pendingBorrowRequest = store.meeting?.pending_borrow_request ?? null
@@ -150,15 +152,6 @@ function MeetingView({
             <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
           </div>
         </div>
-        <Button
-          type="text"
-          icon={<ArrowLeftOutlined />}
-          onClick={() => selectMeeting(null)}
-          style={{ position: 'absolute', top: 12, right: 12, zIndex: 10 }}
-        >
-          返回看板
-        </Button>
-
         <FloatingBadges
           badges={badgeItems}
           activeId={activeBadge || null}
@@ -212,9 +205,9 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   )
 }
 
-/** 根据 URL path 切换三层视图：/ → 封面，/board → 看板，/meeting/:id → 会议 */
+/** 根据 URL path 切换三层视图：/ → 封面，/board → 看板，/models → 模型管理，/meeting/:id → 会议 */
 function AppShell() {
-  const { meetingId } = useMeeting()
+  const { meetingId, store, selectMeeting } = useMeeting()
   const { path } = useRouter()
   const [tab, setTab] = useState<ViewTab>('meeting')
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState<boolean>(
@@ -231,57 +224,70 @@ function AppShell() {
     setTab('workspace')
   }
 
-  // 第一层：封面页（仅 / 路由）
+  // 第一层：封面页（仅 / 路由）—— CaptchaGuard 由外层 CaptchaGuardLayer 控制不在首页显示
   if (path === '/') {
     return <LandingPage onEnter={() => navigate('/board')} />
   }
 
-  // 主题工具栏
-  const toolbar = (
-    <div className="app-toolbar" style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, padding: '8px 12px' }}>
-      <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
-        <Button
-          type="text"
-          size="small"
-          icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
-          onClick={toggleMode}
-        />
-      </Tooltip>
-      <Tooltip title="主题设置">
-        <Button
-          type="text"
-          size="small"
-          icon={<SkinOutlined />}
-          onClick={() => setThemeOpen(true)}
-        >
-          主题
-        </Button>
-      </Tooltip>
-      <Tooltip title="LLM 设置">
-        <Button
-          type="text"
-          size="small"
-          icon={<SettingOutlined />}
-          onClick={() => setSettingsOpen(true)}
-        >
-          设置
-        </Button>
-      </Tooltip>
-    </div>
-  )
-
-  // 第二层：看板/运维面板（无 meetingId，有左侧抽屉菜单）
+  // 第二层：看板/运维面板/模型管理（无 meetingId，有左侧抽屉菜单）
   if (!meetingId) {
+    const pageTitles: Record<string, string> = {
+      '/dashboard': '会议看板',
+      '/models': '模型管理',
+      '/ops': '运维面板',
+    }
+    const pageTitle = pageTitles[path] || '页面'
     return (
-      <div className="app-shell board-shell" style={{ display: 'flex' }}>
+      <div className="app-shell board-shell" style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
         <DrawerMenu currentPath={path} />
-        <div className="board-main" style={{ flex: 1 }}>
-          {toolbar}
-          {path === '/dashboard' ? (
-            <DashboardView />
-          ) : (
-            <TaskBoard onBackToLanding={() => navigate('/')} />
-          )}
+        <div className="board-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+          {/* 统一页面头部：标题 + 面包屑 + 工具栏 */}
+          <div style={{
+            padding: '16px 32px 12px',
+            borderBottom: '1px solid var(--border, #e5e7eb)',
+            background: 'var(--bg, #fff)',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Typography.Title level={4} style={{ margin: 0, fontSize: 18 }}>{pageTitle}</Typography.Title>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginTop: 2 }}>
+                会议看板 / {pageTitle}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
+                <Button type="text" size="small"
+                  icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
+                  onClick={toggleMode} />
+              </Tooltip>
+              <Tooltip title="主题设置">
+                <Button type="text" size="small" icon={<SkinOutlined />}
+                  onClick={() => setThemeOpen(true)}>主题</Button>
+              </Tooltip>
+              <Tooltip title="设置">
+                <Button type="text" size="small" icon={<SettingOutlined />}
+                  onClick={() => setSettingsOpen(true)}>设置</Button>
+              </Tooltip>
+            </div>
+          </div>
+          {/* 页面内容区，统一padding，可滚动 */}
+          <div style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '24px 32px 32px',
+            background: 'var(--bg-secondary, #f8f9fb)',
+          }}>
+            {path === '/dashboard' ? (
+              <DashboardView />
+            ) : path === '/models' ? (
+              <ModelsView />
+            ) : (
+              <TaskBoard onBackToLanding={() => navigate('/')} />
+            )}
+          </div>
           {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
           {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
         </div>
@@ -295,17 +301,7 @@ function AppShell() {
       <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
         {!sidebarCollapsed ? (
           <div className="sidebar-expanded-pane" style={{ position: 'relative' }}>
-            <MeetingSidebar />
-            <Tooltip title="收起会议列表（专注内容）">
-              <Button
-                type="text"
-                size="small"
-                icon={<MenuFoldOutlined />}
-                className="sidebar-collapse-btn"
-                onClick={() => setSidebarCollapsed(true)}
-                style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}
-              />
-            </Tooltip>
+            <MeetingSidebar onCollapseSidebar={() => setSidebarCollapsed(true)} />
           </div>
         ) : (
           <div className="sidebar-collapsed-pane">
@@ -313,8 +309,41 @@ function AppShell() {
           </div>
         )}
       </aside>
-      <div className="app-main" style={{ flex: 1 }}>
-        {toolbar}
+      <div className="app-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+        {/* 会议级统一导航栏：面包屑 + 返回 + 工具栏合为一行 */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '10px 24px', borderBottom: '1px solid var(--border, #e5e7eb)',
+          flexShrink: 0, minHeight: 44, background: 'var(--bg, #fff)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minWidth: 0 }}>
+            <a style={{ color: 'var(--accent, #4f46e5)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+               onClick={() => { selectMeeting(null); navigate('/board') }}>
+              会议看板
+            </a>
+            <span style={{ color: 'var(--text-secondary, #999)' }}>/</span>
+            <span style={{ color: 'var(--text-secondary, #666)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {store.meeting?.topic
+                ? (store.meeting.topic.length > 30 ? store.meeting.topic.slice(0, 30) + '…' : store.meeting.topic)
+                : meetingId}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+            <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
+              <Button type="text" size="small"
+                icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
+                onClick={toggleMode} />
+            </Tooltip>
+            <Tooltip title="主题设置">
+              <Button type="text" size="small" icon={<SkinOutlined />}
+                onClick={() => setThemeOpen(true)} />
+            </Tooltip>
+            <Tooltip title="LLM 设置">
+              <Button type="text" size="small" icon={<SettingOutlined />}
+                onClick={() => setSettingsOpen(true)} />
+            </Tooltip>
+          </div>
+        </div>
         <Tabs
           activeKey={tab}
           onChange={(key) => setTab(key as ViewTab)}
@@ -322,16 +351,19 @@ function AppShell() {
             { key: 'meeting', label: <span><TeamOutlined /> 会议</span> },
             { key: 'workspace', label: <span><CodeOutlined /> 工作区</span> },
           ]}
-          style={{ padding: '0 16px' }}
+          style={{ padding: '0 24px', flexShrink: 0 }}
         />
-        {tab === 'meeting' ? (
-          <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
-        ) : (
-          <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
-        )}
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {tab === 'meeting' ? (
+            <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
+          ) : (
+            <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
+          )}
+        </div>
       </div>
       {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      <LogPanel />
     </div>
   )
 }
@@ -346,6 +378,26 @@ function AntdThemeWrapper({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** CAPTCHA 守卫挂载点：仅在非首页显示，保持 WS 连接跨视图存活 */
+function CaptchaGuardLayer() {
+  const { path } = useRouter()
+  if (path === '/') return null
+  return (
+    <div style={{
+      position: 'fixed', top: 8, right: 200, zIndex: 1100,
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '4px 10px',
+      background: 'var(--bg, #fff)',
+      border: '1px solid var(--border, #e5e7eb)',
+      borderRadius: 6,
+      boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+      fontSize: 12,
+    }}>
+      <CaptchaGuard compact />
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -353,6 +405,7 @@ export default function App() {
         <MeetingProvider>
           <AppShell />
         </MeetingProvider>
+        <CaptchaGuardLayer />
       </AntdThemeWrapper>
     </ThemeProvider>
   )

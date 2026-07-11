@@ -373,6 +373,7 @@ code {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 /* meeting-view 内的 app-layout：覆盖默认 100vh / 三行栅格 */

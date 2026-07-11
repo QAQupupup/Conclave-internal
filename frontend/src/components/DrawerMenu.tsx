@@ -1,7 +1,7 @@
 // 左侧可折叠抽屉菜单：在看板/运维面板层级显示
 // 使用 AntD Layout.Sider + Menu + Button
 import { Layout, Menu, Button } from 'antd'
-import { AppstoreOutlined, BarChartOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BarChartOutlined, CloudServerOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { navigate } from '../lib/router.ts'
 import { usePersistentState } from '../hooks/usePersistentState.ts'
 
@@ -20,9 +20,10 @@ export function DrawerMenu({ currentPath }: DrawerMenuProps) {
   const menuItems = [
     { key: '/board', icon: <AppstoreOutlined />, label: '会议看板' },
     { key: '/dashboard', icon: <BarChartOutlined />, label: '运维面板' },
+    { key: '/models', icon: <CloudServerOutlined />, label: '模型管理' },
   ]
 
-  const selectedKey = currentPath === '/dashboard' ? '/dashboard' : '/board'
+  const selectedKey = menuItems.find(item => item.key === currentPath)?.key ?? '/board'
 
   return (
     <Sider

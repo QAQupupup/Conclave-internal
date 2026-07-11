@@ -407,6 +407,21 @@ export interface MeetingState {
   deliverable_type?: string
   /** 降级警告：有阶段使用了 StubLLM 兜底 */
   fallback_warning?: { stages: string[]; message: string } | null
+  /** Produce 阶段进度信息 */
+  produce_progress?: { step: string; message: string; percent: number } | null
+  /** 实时日志条目 */
+  logs?: LogEntry[]
+}
+
+/** 日志条目 */
+export interface LogEntry {
+  id: string
+  level: 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG'
+  logger: string
+  message: string
+  timestamp: string
+  agent_role?: string
+  stage?: string
 }
 
 /** 借调 agent 信息 */

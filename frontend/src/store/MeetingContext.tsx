@@ -177,7 +177,9 @@ export function MeetingProvider({ children }: { children: ReactNode }) {
 
   return (
     <MeetingShellContext.Provider value={shellValue}>
-      {meetingId === null ? children : <MeetingDataProviderOuter meetingId={meetingId}>{children}</MeetingDataProviderOuter>}
+      {/* key={meetingId} 确保切换会议时内层 Provider 完全卸载重挂，reducer state 自然重置，
+          防止旧会议的 messages/logs/claims 等大量数据残留在内存中 */}
+      {meetingId === null ? children : <MeetingDataProviderOuter key={meetingId} meetingId={meetingId}>{children}</MeetingDataProviderOuter>}
     </MeetingShellContext.Provider>
   )
 }

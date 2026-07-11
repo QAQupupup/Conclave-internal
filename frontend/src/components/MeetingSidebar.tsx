@@ -1,8 +1,11 @@
 // 会议列表侧边栏：展示所有历史会议，支持切换 / 新建 / 删除 / 折叠
 // 使用 AntD List + Button + Popconfirm + Badge + Tag + Typography + Radio + Space
 import { useState, useEffect, useCallback } from 'react'
-import { Button, List, Badge, Tag, Typography, Radio, Space, Empty } from 'antd'
-import { PlusOutlined, ReloadOutlined, DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { Button, List, Badge, Tag, Typography, Radio, Space, Empty, Tooltip, Input } from 'antd'
+import {
+  PlusOutlined, ReloadOutlined, DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
 import { listMeetings, deleteMeeting } from '../lib/api.ts'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { usePersistentState } from '../hooks/usePersistentState.ts'
@@ -19,7 +22,12 @@ interface MeetingListItem {
   is_running?: boolean
 }
 
-export function MeetingSidebar() {
+interface MeetingSidebarProps {
+  /** 收起整个侧边栏的回调 */
+  onCollapseSidebar?: () => void
+}
+
+export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
   const { meetingId, selectMeeting } = useMeeting()
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
   const [concurrentLimit, setConcurrentLimit] = useState(0)
@@ -31,6 +39,28 @@ export function MeetingSidebar() {
   )
   const [pendingDelete, setPendingDelete] = useState<{ id: string; mode: 'soft' | 'hard' } | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // 相对时间显示
+  const relativeTime = (dateStr?: string) => {
+    if (!dateStr) return ''
+    const d = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - d.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 1) return '刚刚'
+    if (diffMin < 60) return `${diffMin}分钟前`
+    const diffHour = Math.floor(diffMin / 60)
+    if (diffHour < 24) return `${diffHour}小时前`
+    const diffDay = Math.floor(diffHour / 24)
+    if (diffDay < 7) return `${diffDay}天前`
+    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  }
+
+  // 搜索过滤后的会议列表
+  const filteredMeetings = searchQuery.trim()
+    ? meetings.filter(m => m.topic.toLowerCase().includes(searchQuery.toLowerCase()) || m.meeting_id.includes(searchQuery))
+    : meetings
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -80,35 +110,51 @@ export function MeetingSidebar() {
 
   return (
     <div className="meeting-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border-color, #e5e7eb)' }}>
-        <Text strong>会议列表</Text>
-        <Button type="text" size="small" icon={<ReloadOutlined spin={loading} />} onClick={refresh} />
-      </div>
-
-      <div style={{ padding: '12px 16px' }}>
-        <Button type="primary" icon={<PlusOutlined />} block onClick={() => selectMeeting(null)}>
+      <div style={{ padding: '8px 12px', display: 'flex', gap: 4, alignItems: 'center' }}>
+        <Button type="primary" icon={<PlusOutlined />} size="small" onClick={() => selectMeeting(null)}>
           新建会议
         </Button>
+        <div style={{ flex: 1 }} />
+        <Tooltip title="刷新">
+          <Button type="text" size="small" icon={<ReloadOutlined spin={loading} />} onClick={refresh} />
+        </Tooltip>
+        {onCollapseSidebar && (
+          <Tooltip title="收起会议列表（专注内容）">
+            <Button type="text" size="small" icon={<MenuFoldOutlined />} onClick={onCollapseSidebar} />
+          </Tooltip>
+        )}
       </div>
 
-      <div style={{ padding: '0 16px' }}>
+      {/* 历史会议标题 + 搜索 */}
+      <div style={{ padding: '0 12px' }}>
         <div
-          style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '8px 0' }}
+          style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '6px 0' }}
           onClick={() => setListCollapsed(v => !v)}
         >
           <Button type="text" size="small" icon={listCollapsed ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />} />
-          <Text strong style={{ flex: 1 }}>历史会议 ({meetings.length})</Text>
+          <Text strong style={{ flex: 1, fontSize: 13 }}>历史会议 ({filteredMeetings.length})</Text>
           {runningCount > 0 && <Badge count={runningCount} style={{ backgroundColor: '#52c41a' }} />}
         </div>
+        {!listCollapsed && meetings.length > 3 && (
+          <Input
+            size="small"
+            placeholder="搜索会议..."
+            prefix={<SearchOutlined />}
+            allowClear
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ marginBottom: 6 }}
+          />
+        )}
       </div>
 
       {!listCollapsed && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
-          {meetings.length === 0 ? (
-            <Empty description="暂无会议" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 6px' }}>
+          {filteredMeetings.length === 0 ? (
+            <Empty description={searchQuery ? '无匹配会议' : '暂无会议'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
           ) : (
             <List
-              dataSource={meetings}
+              dataSource={filteredMeetings}
               renderItem={(m) => {
                 const sl = statusLabel(m.status, m.stage)
                 const isActive = m.meeting_id === meetingId
@@ -123,8 +169,8 @@ export function MeetingSidebar() {
                       cursor: isPendingDelete || isDeleting ? 'default' : 'pointer',
                       background: isActive ? 'var(--accent-bg, #eef2ff)' : isPendingDelete ? '#fff2f0' : 'transparent',
                       borderRadius: 6,
-                      padding: '8px 12px',
-                      marginBottom: 4,
+                      padding: '6px 10px',
+                      marginBottom: 2,
                       border: isActive ? '1px solid var(--accent-color, #4f46e5)' : '1px solid transparent',
                     }}
                     actions={[
@@ -145,18 +191,18 @@ export function MeetingSidebar() {
                   >
                     <List.Item.Meta
                       title={
-                        <Space>
+                        <Space size={4}>
                           {m.is_running && <Badge status="processing" />}
-                          <Text ellipsis style={{ maxWidth: 160 }}>{m.topic || '(无议题)'}</Text>
+                          <Text ellipsis style={{ maxWidth: 140, fontSize: 13 }}>{m.topic || '(无议题)'}</Text>
                         </Space>
                       }
                       description={
-                        <Space>
-                          <Tag color={sl.cls === 'ok' ? 'green' : sl.cls === 'running' ? 'blue' : 'default'} style={{ margin: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <Tag color={sl.cls === 'ok' ? 'green' : sl.cls === 'running' ? 'blue' : 'default'} style={{ margin: 0, fontSize: 11, lineHeight: '18px' }}>
                             {sl.text}
                           </Tag>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{m.meeting_id.slice(-8)}</Text>
-                        </Space>
+                          <Text type="secondary" style={{ fontSize: 11 }}>{relativeTime(m.created_at)}</Text>
+                        </div>
                       }
                     />
                     {isPendingDelete && (
@@ -193,8 +239,8 @@ export function MeetingSidebar() {
         </div>
       )}
 
-      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color, #e5e7eb)', textAlign: 'center' }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>
+      <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color, #e5e7eb)', textAlign: 'center' }}>
+        <Text type="secondary" style={{ fontSize: 11 }}>
           运行中 {runningCount} / 上限 {concurrentLimit}
         </Text>
       </div>

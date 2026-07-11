@@ -30,6 +30,26 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // CAPTCHA / API 接口（值守模式、截图等）
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // 调试端点
+      '/debug': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // 指标端点
+      '/metrics': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // Agent 角色管理
+      '/agent-roles': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

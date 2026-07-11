@@ -1,7 +1,7 @@
 // 左侧聊天流：渲染发言卡片列表，新消息时智能自动滚动 + 阶段分隔线
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Typography, Divider } from 'antd'
-import { ArrowDownOutlined, MessageOutlined } from '@ant-design/icons'
+import { Button, Typography, Divider, Progress } from 'antd'
+import { ArrowDownOutlined, MessageOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { MessageCard } from './MessageCard.tsx'
 import { STAGE_LABELS } from '../types/events.ts'
@@ -22,6 +22,9 @@ const RAPID_INTERVAL = 300
 export function ChatPanel({ onSelectRef }: ChatPanelProps) {
   const { store } = useMeeting()
   const messages = store.meeting?.messages ?? []
+  const stage = store.meeting?.stage
+  const status = store.meeting?.status
+  const produceProgress = store.meeting?.produce_progress
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [showNewMsg, setShowNewMsg] = useState(false)
@@ -85,6 +88,24 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
             onSelectRef={onSelectRef}
           />
         ))}
+        {/* Produce 阶段进度条 */}
+        {stage === 'produce' && status === 'running' && produceProgress && produceProgress.percent < 100 && (
+          <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <LoadingOutlined style={{ color: '#1890ff' }} />
+              <Text strong style={{ fontSize: 13 }}>{produceProgress.message}</Text>
+            </div>
+            <Progress
+              percent={produceProgress.percent}
+              size="small"
+              status="active"
+              strokeColor={{
+                '0%': '#1890ff',
+                '100%': '#52c41a',
+              }}
+            />
+          </div>
+        )}
       </div>
       {showNewMsg && (
         <Button

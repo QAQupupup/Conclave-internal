@@ -15,6 +15,7 @@ import type {
   DomainEvent,
   EvidenceAttachedPayload,
   InterventionReplyPayload,
+  LogEntry,
   MeetingState,
   StageChangedPayload,
 } from '../types/events.ts'
@@ -259,6 +260,35 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
               pending_borrow_request: null,
               borrow_frozen: true,
             },
+          }
+        }
+        case 'produce.progress': {
+          const p = ev.payload as { step: string; message: string; percent: number }
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              produce_progress: { step: p.step, message: p.message, percent: p.percent },
+            },
+          }
+        }
+        case 'log.entry': {
+          const p = ev.payload as { level: string; logger: string; message: string; timestamp: string; agent_role?: string; stage?: string }
+          const newEntry: LogEntry = {
+            id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            level: p.level as LogEntry['level'],
+            logger: p.logger,
+            message: p.message,
+            timestamp: p.timestamp,
+            agent_role: p.agent_role,
+            stage: p.stage,
+          }
+          const existingLogs = meeting.logs ?? []
+          // 最多保留500条日志，防止内存溢出
+          const logs = [...existingLogs, newEntry].slice(-500)
+          return {
+            ...store,
+            meeting: { ...meeting, logs },
           }
         }
         // control.ack / loan.requested / loan.resolved / error 等暂不改变核心状态

@@ -50,3 +50,8 @@ export function isBoardPath(): boolean {
 export function isDashboardPath(): boolean {
   return window.location.pathname === '/dashboard'
 }
+
+/** 判断当前是否在模型管理页 */
+export function isModelsPath(): boolean {
+  return window.location.pathname === '/models'
+}
