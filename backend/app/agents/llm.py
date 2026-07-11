@@ -8,7 +8,7 @@ from typing import Any, Protocol
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.agents.schemas import SCHEMA_MAP, ClaimListResult
+from app.agents.schemas import SCHEMA_MAP, ClaimListResult, ProduceResult
 from app.agents.trace import record_call, update_last_record
 from app.config import settings
 from app.logging_config import get_logger
@@ -231,6 +231,60 @@ class StubLLM:
                         "main_code": "def add(a, b):\n    return a + b\n\ndef multiply(a, b):\n    return a * b\n",
                         "test_code": "from main_generated import add, multiply\n\ndef test_add():\n    assert add(1, 2) == 3\n\ndef test_add_negative():\n    assert add(-1, -1) == -2\n\ndef test_multiply():\n    assert multiply(3, 4) == 12\n",
                         "run_command": "python -m pytest test_generated.py -v",
+                    }
+                }
+            if "可部署服务" in prompt or "deployable_service" in prompt:
+                return {
+                    "deployable_service": {
+                        "title": "示例 Wiki 服务",
+                        "description": "基础 FastAPI Wiki 服务（Stub 降级数据）",
+                        "app_code": (
+                            "from fastapi import FastAPI\n"
+                            "from pydantic import BaseModel\n"
+                            "\n"
+                            "app = FastAPI(title=\"Stub Wiki\")\n"
+                            "\n"
+                            "pages = {}\n"
+                            "\n"
+                            "class Page(BaseModel):\n"
+                            "    title: str\n"
+                            "    content: str = \"\"\n"
+                            "\n"
+                            "@app.get(\"/health\")\n"
+                            "def health():\n"
+                            "    return {\"status\": \"ok\"}\n"
+                            "\n"
+                            "@app.get(\"/pages/{title}\")\n"
+                            "def get_page(title: str):\n"
+                            "    return pages.get(title, {\"detail\": \"not found\"})\n"
+                            "\n"
+                            "@app.post(\"/pages\")\n"
+                            "def create_page(page: Page):\n"
+                            "    pages[page.title] = page\n"
+                            "    return {\"status\": \"created\", \"title\": page.title}\n"
+                        ),
+                        "requirements_txt": "fastapi\nuvicorn[standard]\n",
+                        "dockerfile": (
+                            "FROM python:3.12-slim\n"
+                            "WORKDIR /app\n"
+                            "COPY requirements.txt .\n"
+                            "RUN pip install --no-cache-dir -r requirements.txt\n"
+                            "COPY app.py .\n"
+                            "EXPOSE 8000\n"
+                            'CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]\n'
+                        ),
+                        "docker_compose": (
+                            "version: '3.8'\n"
+                            "services:\n"
+                            "  wiki:\n"
+                            "    build: .\n"
+                            "    ports:\n"
+                            "      - \"8000:8000\"\n"
+                        ),
+                        "readme": "# Stub Wiki\n\n开发降级模式生成的示例服务。\n\n## 启动\n```bash\npip install -r requirements.txt\nuvicorn app:app --host 0.0.0.0 --port 8000\n```\n",
+                        "port": 8000,
+                        "run_command": "uvicorn app:app --host 0.0.0.0 --port 8000",
+                        "credentials": {},
                     }
                 }
             # 默认：PRD + OpenAPI
@@ -530,6 +584,26 @@ class RealLLM:
                             raise ValidationError(
                                 f"intra_team 阶段 claims 为空，LLM 未输出有效论点",
                                 ClaimListResult,
+                            )
+                    # produce 阶段：校验代码类产出的关键字段非空
+                    if schema_hint.startswith("produce") and isinstance(result, dict):
+                        _ds = result.get("deployable_service")
+                        if isinstance(_ds, dict) and not _ds.get("app_code"):
+                            raise ValidationError(
+                                "deployable_service.app_code 为空，LLM 未生成有效应用代码",
+                                model_cls or ProduceResult,
+                            )
+                        _ca = result.get("code_analysis")
+                        if isinstance(_ca, dict) and not _ca.get("code"):
+                            raise ValidationError(
+                                "code_analysis.code 为空，LLM 未生成有效代码",
+                                model_cls or ProduceResult,
+                            )
+                        _ts = result.get("tested_system")
+                        if isinstance(_ts, dict) and not _ts.get("main_code") and not _ts.get("test_code"):
+                            raise ValidationError(
+                                "tested_system 主代码和测试代码均为空",
+                                model_cls or ProduceResult,
                             )
                     _circuit_breaker.record_success()
                     return result
