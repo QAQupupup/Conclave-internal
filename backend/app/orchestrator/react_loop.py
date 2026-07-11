@@ -322,9 +322,10 @@ class ReactLoop:
 
             # 4. Act: 执行工具调用
             for call in response.tool_calls:
-                # 注入 meeting_id（浏览器工具需要，LLM 不知道 meeting_id）
+                # 注入 meeting_id（浏览器工具和工作区工具都需要）
                 args = dict(call.arguments)
-                if self._meeting_id and call.tool_name.startswith("browser."):
+                if self._meeting_id:
+                    # 所有工具都可能需要 meeting_id（用于文件隔离、浏览器上下文等）
                     args.setdefault("meeting_id", self._meeting_id)
                 # 记录工具调用成本
                 t0 = time.monotonic()
@@ -384,25 +385,55 @@ class ReactLoop:
 # ---------- 默认工具注册表工厂 ----------
 
 def create_default_tool_registry() -> ToolRegistry:
-    """创建默认工具注册表（web_search + browser 操作）
+    """创建默认工具注册表（web_search + browser 操作 + workspace 文件/命令工具）
 
     在 evidence_check 和 produce 节点中使用。
     """
     registry = ToolRegistry()
 
-    # web_search 工具
+    # ========== 网络搜索工具 ==========
     async def _web_search(args: dict[str, Any]) -> Any:
         from app.tools.web_search import get_web_search
         query = args.get("query", "")
         top_k = args.get("top_k", 5)
         tool = get_web_search()
-        return await tool.search(query, top_k)
+        # 传递可选参数：language, time_range, country
+        kwargs: dict[str, Any] = {}
+        for key in ("language", "time_range", "country"):
+            if key in args and args[key]:
+                kwargs[key] = args[key]
+        return await tool.search(query, top_k, **kwargs)
 
     registry.register(
         "web_search",
-        "搜索网络获取证据。返回证据列表，每条包含 quote（引用文本）、url、source_tier（S/A/B/C/D）、signals（信号袋）。",
+        "搜索网络获取证据。返回证据列表，每条包含 quote（引用文本）、url、source_tier（S/A/B/C/D）、signals（信号袋）。"
+        "支持中文搜索（默认）和英文搜索，可按时间过滤结果。",
         _web_search,
-        {"query": "str（搜索查询）", "top_k": "int（最大结果数，默认5）"},
+        {
+            "query": "str（搜索查询）",
+            "top_k": "int（最大结果数，默认5）",
+            "language": "str（可选，搜索语言：zh-CN/en-US，默认zh-CN）",
+            "time_range": "str（可选，时间过滤：day/week/month/year）",
+        },
+    )
+
+    # web_fetch 工具：直接抓取指定 URL 内容
+    async def _web_fetch(args: dict[str, Any]) -> Any:
+        from app.tools.web_search import get_web_fetch
+        url = args.get("url", "")
+        max_chars = args.get("max_chars", 5000)
+        tool = get_web_fetch()
+        return await tool.fetch_url(url, max_chars)
+
+    registry.register(
+        "web_fetch",
+        "直接抓取指定 URL 的网页内容，无需先搜索。当你已知具体网址（如从搜索结果中获得）时使用此工具获取详细内容。"
+        "返回页面标题、正文内容、分块信息和来源评级。",
+        _web_fetch,
+        {
+            "url": "str（要抓取的完整URL，如 https://example.com/doc）",
+            "max_chars": "int（可选，最大返回字符数，默认5000）",
+        },
     )
 
     # ---------- Browser 操作工具 ----------
@@ -476,5 +507,15 @@ def create_default_tool_registry() -> ToolRegistry:
         _browser_evaluate,
         {"meeting_id": "str（会议ID）", "expression": "str（JavaScript表达式）"},
     )
+
+    # ========== 工作区文件/命令工具 ==========
+    try:
+        from app.tools.workspace_tools import register_workspace_tools
+        register_workspace_tools(registry)
+    except Exception as e:
+        import logging
+        logging.getLogger("orchestrator.react_loop").warning(
+            "工作区工具注册失败: %s", str(e)[:200]
+        )
 
     return registry

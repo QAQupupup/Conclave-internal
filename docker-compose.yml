@@ -26,6 +26,7 @@ services:
     container_name: conclave-backend
     ports:
       - "8000:8000"
+      - "6080:6080"   # noVNC Web 远程操作端口（CAPTCHA 值守模式）
     # [v4 安全加固] entrypoint 以 root 启动完成特权操作后降权到 uid 1000
     # 不再在 compose 中写死 user: "1000:1000"，而是由 entrypoint.sh 处理：
     #   1. root: 配置 docker.sock 权限、预拉取镜像、chown 目录
@@ -39,9 +40,11 @@ services:
       - SETUID
       - SETGID
       - DAC_OVERRIDE  # 处理 volume 权限
+      - SYS_ADMIN     # Xvfb 有头浏览器需要（值守模式）
     security_opt:
       - no-new-privileges:true
-      - seccomp:unconfined  # docker CLI + Playwright 需要 fork/exec 权限
+      - seccomp:unconfined  # docker CLI + Playwright + Xvfb 需要 fork/exec 权限
+    shm_size: "1g"  # Chromium + Xvfb 需要较大共享内存
     volumes:
       # Docker socket：让后端能创建沙箱 sibling 容器
       # entrypoint.sh 启动时自动配置权限，使 uid 1000 能访问

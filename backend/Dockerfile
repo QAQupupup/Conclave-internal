@@ -1,67 +1,103 @@
-# ===== Conclave 后端 Dockerfile（三阶段构建） =====
-# 架构：base（docker-ce-cli + Playwright，极少变更）→ builder（pip 依赖）→ work（运行时）
-# 优势：代码/依赖变更只触发 builder+work 阶段，base 层的 ~600MB 下载永久缓存
+# ===== Conclave 后端 Dockerfile（四阶段构建，最大化缓存命中）=====
+# 分层策略（从底到顶，变更频率递增）：
+#   1. system-deps : apt 源配置 + 所有系统依赖（curl/gnupg/Xvfb/VNC/字体/docker-cli/Playwright 浏览器依赖）
+#   2. playwright  : pip install playwright + playwright install chromium（~600MB，极少变更）
+#   3. builder     : pip install requirements.txt（依赖变更时触发）
+#   4. work        : COPY 前三层产物 + 源码（代码变更时只重建这一层）
 #
 # 运行时：entrypoint.sh 以 root 启动 → 配置 Docker socket 权限 → 预拉取沙箱镜像 → 降权到 uid 1000 运行 uvicorn
 
-# ---------- 阶段 1: base ----------
-FROM docker.m.daocloud.io/library/python:3.12-slim AS base
+# ---------- 阶段 1: system-deps（系统依赖，最底层，永久缓存） ----------
+FROM docker.m.daocloud.io/library/python:3.12-slim AS system-deps
 
 # pip 镜像源（国内加速）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 安装 curl（healthcheck 用）+ docker CLI（沙箱 sibling 容器用）+ Playwright 系统依赖
+# === 替换 apt 源为清华 TUNA 镜像（兼容 Debian Bookworm/Trixie DEB822 格式）===
+RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
+    { echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME) $(. /etc/os-release && echo $VERSION_CODENAME)-updates"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+      echo ""; \
+      echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian-security"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME)-security"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+    } > /etc/apt/sources.list.d/tuna.sources
+
+# 一次性安装所有系统依赖（减少镜像层数 + Docker cache 粒度最粗）
+# 包含：
+#   - curl/ca-certificates/gnupg : 基础工具 + Docker GPG key
+#   - xvfb/x11vnc/websockify/novnc : CAPTCHA 值守模式虚拟显示 + VNC + Web VNC
+#   - fonts-wqy-zenhei/fonts-noto-cjk : 中文字体（浏览器截图/headed 模式显示中文）
+#   - docker-ce-cli : 沙箱 sibling 容器
+#   - Playwright 浏览器运行依赖（lib 系列）
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        curl ca-certificates gnupg && \
+        curl ca-certificates gnupg \
+        xvfb x11vnc websockify novnc \
+        fonts-wqy-zenhei fonts-noto-cjk \
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+        libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
+        libxshmfence1 && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
     chmod a+r /etc/apt/keyrings/docker.asc && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends docker-ce-cli && \
+    ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html 2>/dev/null || true && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 安装 Playwright Python 包 + Chromium 浏览器 + 浏览器系统依赖（~600MB，最耗时）
+# ---------- 阶段 2: playwright（浏览器安装，~600MB，极少变更） ----------
+FROM system-deps AS playwright
+
 RUN pip install --no-cache-dir playwright && \
     playwright install --with-deps chromium && \
-    playwright install-deps chromium && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* /tmp/*
 
-# ---------- 阶段 2: builder ----------
-FROM base AS builder
+# ---------- 阶段 3: builder（Python 依赖，requirements.txt 变更时重建） ----------
+FROM playwright AS builder
 
 WORKDIR /build
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ---------- 阶段 3: work（最终运行镜像） ----------
-FROM base AS work
+# ---------- 阶段 4: work（最终运行镜像，代码变更时只重建这层） ----------
+FROM system-deps AS work
 
 WORKDIR /app
 
+# 从 playwright 层复制 Playwright 包 + 浏览器
+COPY --from=playwright /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=playwright /usr/local/bin /usr/local/bin
+COPY --from=playwright /root/.cache/ms-playwright /root/.cache/ms-playwright
+
+# 从 builder 层复制 Python 依赖
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# 复制源码（最常变，放最后）
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --no-deps -r requirements.txt 2>/dev/null; \
     pip check || echo "WARNING: pip check found issues, but continuing..."
 
-# 复制源码
 COPY . .
 
 RUN pip install --no-cache-dir --no-deps -e .
 
 # 创建 app 用户（uid 1000），用于降权运行
-# 注意：不在这里 chown，entrypoint.sh 启动时会处理
 RUN groupadd -g 1000 app 2>/dev/null || true && \
     useradd -u 1000 -g 1000 -m -d /home/app -s /bin/bash app 2>/dev/null || true && \
     mkdir -p /workspace /app/data /home/app && \
     chown -R 1000:1000 /home/app
 
-# 给 app 用户创建 .docker 目录（docker pull 需要写入配置）
 RUN mkdir -p /home/app/.docker && chown -R 1000:1000 /home/app/.docker
 
 # 复制 entrypoint 脚本
@@ -81,9 +117,10 @@ ENV CONCLAVE_WORKSPACE_DIR=/workspace \
     CONCLAVE_SANDBOX_IMAGE_DATASCIENCE=conclave-python-datascience:latest \
     CONCLAVE_SANDBOX_MODE=auto \
     DATASCIENCE_DOCKERFILE=/app/docker/sandbox-datascience/Dockerfile \
-    HOME=/home/app
+    HOME=/home/app \
+    DISPLAY=:99
 
-EXPOSE 8000
+EXPOSE 8000 6080 9222
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1

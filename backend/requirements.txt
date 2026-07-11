@@ -25,6 +25,9 @@ alembic>=1.13
 # 缓存 / 队列
 redis[hiredis]>=5.0
 
+# 加密（API Key 持久化）
+cryptography>=42.0
+
 # 开发依赖（测试用）
 pytest>=8.0
 pytest-asyncio>=0.23
