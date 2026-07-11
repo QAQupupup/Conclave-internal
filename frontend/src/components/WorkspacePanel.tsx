@@ -45,18 +45,6 @@ interface TreeNode {
   loading?: boolean
 }
 
-/** 将扁平 FileItem 列表转为树节点列表（顶层） */
-function buildRootTree(items: FileItem[]): TreeNode[] {
-  return items.map((i) => ({
-    name: i.name,
-    path: i.path,
-    type: i.type,
-    expanded: false,
-    loaded: false,
-    child_count: i.child_count ?? 0,
-  }))
-}
-
 /**
  * [CON-11] 文件扩展名 → Monaco language id 映射
  * 覆盖 Conclave 主要产出场景（数据分析、代码生成、报告）
@@ -120,6 +108,31 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
   const [currentPath, setCurrentPath] = useState<string>('')
   const [loading, setLoading] = useState(false)
 
+  /**
+   * 将扁平 FileItem 列表转为树节点列表（顶层）
+   * [BUG FIX] 后端 listFiles 返回的 path 是相对 WORKSPACE_ROOT 的完整路径
+   * （含 meetingId 前缀），需剥离 pathPrefix 使树节点路径始终相对会议根目录。
+   * 否则 openFile / toggleExpand 再拼一次前缀会导致路径翻倍。
+   */
+  const buildRootTreeItems = useCallback(
+    (items: FileItem[]): TreeNode[] =>
+      items.map((i) => {
+        let relPath = i.path
+        if (pathPrefix && relPath.startsWith(pathPrefix)) {
+          relPath = relPath.slice(pathPrefix.length)
+        }
+        return {
+          name: i.name,
+          path: relPath,
+          type: i.type,
+          expanded: false,
+          loaded: false,
+          child_count: i.child_count ?? 0,
+        }
+      }),
+    [pathPrefix],
+  )
+
   // 编辑器
   const [fileContent, setFileContent] = useState('')
   const [filePath, setFilePath] = useState('')
@@ -150,7 +163,7 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
     try {
       const fullPath = pathPrefix + path
       const res = await listFiles(fullPath)
-      const nodes = buildRootTree(res.items)
+      const nodes = buildRootTreeItems(res.items)
       setTree(nodes)
       // 重建 pathMap
       const map = new Map<string, TreeNode>()
@@ -204,7 +217,7 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
       try {
         const fullPath = pathPrefix + dirPath
         const res = await listFiles(fullPath)
-        const childNodes: TreeNode[] = buildRootTree(res.items)
+        const childNodes: TreeNode[] = buildRootTreeItems(res.items)
         setPathMap((prev) => {
           const next = new Map(prev)
           const target = next.get(dirPath)
@@ -261,8 +274,9 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
     if (!filePath) return
     setSaving(true)
     try {
-      // filePath 已包含完整路径（由 openFile 设置），直接保存
-      await writeFile(filePath, fileContent)
+      // filePath 是相对会议根的路径，需加 pathPrefix 拼接完整路径
+      const fullPath = pathPrefix + filePath
+      await writeFile(fullPath, fileContent)
       setDirty(false)
       setTerminalHistory((h) => [
         ...h,
@@ -276,7 +290,7 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
     } finally {
       setSaving(false)
     }
-  }, [filePath, fileContent])
+  }, [filePath, fileContent, pathPrefix])
 
   /** 执行终端命令 */
   const runTerminalCommand = useCallback(async () => {
