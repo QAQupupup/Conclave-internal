@@ -248,7 +248,7 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
         ])
       }
     }
-  }, [pathMap, pathPrefix])
+  }, [pathMap, pathPrefix, buildRootTreeItems])
 
   /** 打开文件 */
   const openFile = useCallback(async (path: string) => {
