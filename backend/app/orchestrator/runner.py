@@ -199,6 +199,24 @@ class Runner:
         logger.info("会议 %s 开始运行，起始阶段: %s (session=%s)", state.meeting_id, state.stage.value, rsid)
         # 进入运行态（resume / 首次执行统一标记为 running）
         state.status = MeetingStatus.RUNNING
+
+        # ===== 模型快照：在运行开始时 resolve 所有角色/阶段的最终模型 =====
+        # 运行时 LLM 调用直接读取快照，不再动态 resolve，消除中途切模型的不确定性
+        if not state.resolved_models:
+            try:
+                from app.llm_providers import resolve_models_for_meeting
+                state.resolved_models = resolve_models_for_meeting(
+                    role_configs=state.role_configs,
+                    meeting_model=state.model_override,
+                    stage_overrides=None,  # 阶段覆盖预留，暂未开放
+                )
+                log_bus.info(
+                    f"模型快照完成: {len(state.resolved_models)} 个角色/阶段",
+                    logger="orchestrator.runner",
+                    extra={"resolved_models": state.resolved_models},
+                )
+            except Exception as e:
+                log_bus.warning(f"模型快照失败（将回退到动态 resolve）: {e}", logger="orchestrator.runner")
         # 起始事件：进入首个阶段
         await bus.publish(
             make_event(
@@ -262,9 +280,14 @@ class Runner:
                 state = await node(state)
                 elapsed = time.monotonic() - t0
 
+                # 节点执行后，state.stage 已被节点设置为管线中的下一个阶段（默认推进）
+                # 不再强制回写 current_stage——借调 agent 发言和持久化都以"刚完成的阶段"current_stage为准，
+                # 而 state.stage 表示"下一目标阶段"，由后续动态路由或固定推进逻辑最终确定。
+
                 # 处理待处理的介入消息（用户→主持人私密对话）
                 state = await _process_interventions(state)
                 # 节点执行期间用户可能审批通过了借调申请，让新借调的agent立即发言
+                # 借调 agent 的 stage 标签使用刚完成的 current_stage，确保前端正确归类
                 await _let_borrowed_agents_speak(state, current_stage)
                 conf = state.confidence_flags.get(current_stage.value, "unknown")
                 logger.info("会议 %s 阶段 %s 完成 (%.2fs, confidence=%s)", state.meeting_id, current_stage.value, elapsed, conf)
@@ -295,12 +318,15 @@ class Runner:
                     break
 
                 # 动态路由：元认知 Agent 决定下一阶段
-                if state.dynamic_routing and state.stage != Stage.PRODUCE:
+                # 元认知基于"刚完成的阶段"current_stage决策，而非节点预设的下一阶段
+                if state.dynamic_routing and current_stage != Stage.PRODUCE:
+                    # 临时将 stage 设为刚完成的阶段，供 decide_next_stage 正确判断当前位置
+                    state.stage = current_stage
                     # 递增循环计数
-                    _inc_loop_count(state, state.stage)
-                    # 元认知决策
+                    _inc_loop_count(state, current_stage)
+                    # 元认知决策（基于刚完成的阶段）
                     next_stage = await decide_next_stage(state)
-                    old_stage = state.stage
+                    old_stage = current_stage
 
                     # [REGRESSION] 回退检测与上限保护
                     _MAX_TOTAL_REGRESSIONS = 5
@@ -343,6 +369,13 @@ class Runner:
                             f"动态路由: 重复阶段 {old_stage.value}",
                             logger="orchestrator.runner",
                         )
+                else:
+                    # 非动态路由模式：节点内部已通过 _next_stage() 设置了正确的下一阶段，
+                    # 无需 runner 重复设置。如果节点未设置（防御性），兜底推进到 PRODUCE。
+                    if state.stage == current_stage:
+                        from app.orchestrator.state import next_stage as _ns
+                        nxt = _ns(current_stage, state.flow_plan)
+                        state.stage = nxt or Stage.PRODUCE
 
                 # 发布阶段切换事件
                 from_stage = current_stage.value
@@ -454,11 +487,75 @@ def clear_state(meeting_id: str) -> bool:
     [CON-17 修复] 原 set_state(mid, None) 错误调用因签名不匹配会触发 TypeError。
     本函数专门用于清理已结束或已删除会议的内存态。
 
+    同时清理：
+    - _states 中的 MeetingState 对象
+    - _intervention_locks 中的 asyncio.Lock 对象
+
     Returns:
         bool: 是否真的有状态被删除（True=删除成功，False=会议本就不在内存中）。
     """
+    removed = False
     with _states_lock:
-        return _states.pop(meeting_id, None) is not None
+        if _states.pop(meeting_id, None) is not None:
+            removed = True
+    _intervention_locks.pop(meeting_id, None)
+    return removed
+
+
+def cleanup_meeting_resources(meeting_id: str) -> None:
+    """统一清理会议结束/删除后的所有内存资源。
+
+    调用此函数可清理：
+    1. runner._states 中的 MeetingState 对象
+    2. runner._intervention_locks 中的锁对象
+    3. events.bus._history 中的事件历史
+    4. rag.store 中的向量缓存
+    5. sandbox 中的长期服务容器
+    6. llm_providers 中的会议级模型覆盖
+    7. browser_tool 中的浏览器上下文
+    """
+    # 1 & 2. 清理 runner 状态
+    clear_state(meeting_id)
+
+    # 3. 清理事件总线历史
+    try:
+        from app.events import bus
+        bus.clear(meeting_id)
+    except Exception:
+        pass
+
+    # 4. 清理 RAG 向量缓存
+    try:
+        from app.rag.store import clear_store
+        clear_store(meeting_id)
+    except Exception:
+        pass
+
+    # 5. 停止并清理沙箱服务容器
+    try:
+        from app.sandbox import stop_service
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(stop_service(meeting_id))
+        except RuntimeError:
+            pass
+    except Exception:
+        pass
+
+    # 6. 清理会议级模型配置覆盖
+    try:
+        from app.llm_providers import clear_meeting_config
+        clear_meeting_config(meeting_id)
+    except Exception:
+        pass
+
+    # 7. 释放浏览器上下文
+    try:
+        from app.tools.browser_tool import browser_pool
+        browser_pool.release_meeting(meeting_id)
+    except Exception:
+        pass
 
 
 def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:

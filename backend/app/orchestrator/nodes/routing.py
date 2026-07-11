@@ -2,6 +2,12 @@
 from __future__ import annotations
 
 from app.models import MeetingState, Stage
+from ._helpers import _resolve_model_for_call
+
+
+def _resolve_model_for_routing(state: MeetingState) -> str:
+    """解析元认知 Agent 使用的模型（轻量调用，不指定角色/阶段覆盖）"""
+    return _resolve_model_for_call(state, role="meta_cognition", stage="meta")
 
 # 阶段跳转规则（元认知 Agent 的输出约束）
 # 防止无限循环和无效跳转
@@ -93,17 +99,57 @@ async def decide_next_stage(state: MeetingState) -> Stage:
     if valid_next == {Stage.PRODUCE}:
         return Stage.PRODUCE
 
-    # 检查循环上限
+    # 检查循环上限：达到上限时推进到下一个固定阶段，而非直接跳到 PRODUCE
     max_loops = _MAX_LOOP_COUNT.get(current, 1)
     loop_count = _get_loop_count(state, current)
-    if loop_count >= max_loops and Stage.PRODUCE in valid_next:
+    if loop_count >= max_loops:
+        from app.orchestrator.state import next_stage as _ns
+        forced_next = _ns(current, state.flow_plan)
+        if forced_next and forced_next in valid_next:
+            # 推进到管线中的下一个阶段（非PRODUCE），给后续阶段发言机会
+            return forced_next
+        # 没有更多后续阶段，才返回 PRODUCE
         return Stage.PRODUCE
 
-    # 轻量辩论：intra_team 后直接 produce
-    if state.debate_depth == "light" and current == Stage.INTRA_TEAM:
-        return Stage.PRODUCE
+    # ===== 辩论深度强制阶段保护 =====
+    # 防止 LLM 元认知 Agent（尤其是 Flash 模型）过于激进地跳过关键讨论阶段
+    # 通过 conclusion_chain 中已锁定的阶段判断哪些阶段已被执行
+    visited_stages = {c.stage for c in state.conclusion_chain.conclusions}
 
-    # 标准辩论：无冲突时跳过 evidence_check
+    mandatory_stages: set[Stage] = set()
+    if state.debate_depth == "deep":
+        # 深度辩论：所有中间阶段必须至少执行一次
+        for s in (Stage.INTRA_TEAM, Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE):
+            if s.value not in visited_stages:
+                mandatory_stages.add(s)
+    elif state.debate_depth == "standard":
+        # 标准辩论：intra_team 必须执行；有冲突时 evidence_check 也必须执行
+        if Stage.INTRA_TEAM.value not in visited_stages:
+            mandatory_stages.add(Stage.INTRA_TEAM)
+        if state.conflicts and Stage.EVIDENCE_CHECK.value not in visited_stages:
+            mandatory_stages.add(Stage.EVIDENCE_CHECK)
+    elif state.debate_depth == "light":
+        # 轻量辩论：快速但不跳过——至少执行 intra_team（一轮队内发言）和 arbitrate（仲裁）
+        if Stage.INTRA_TEAM.value not in visited_stages:
+            mandatory_stages.add(Stage.INTRA_TEAM)
+        if Stage.ARBITRATE.value not in visited_stages and Stage.INTRA_TEAM.value in visited_stages:
+            # intra_team跑完后必须经过arbitrate才能到produce
+            mandatory_stages.add(Stage.ARBITRATE)
+
+    if mandatory_stages:
+        # 只保留强制阶段 + produce（作为最终兜底出口）
+        forced_choices = (mandatory_stages | {Stage.PRODUCE}) & valid_next
+        if forced_choices and Stage.PRODUCE not in mandatory_stages:
+            # 强制阶段未执行完毕时，只允许选择强制阶段（排除 PRODUCE 终态出口）。
+            # 注意：不能无条件排除 ARBITRATE——当 ARBITRATE 本身就是强制阶段时
+            # （如 light 深度在 INTRA_TEAM 完成后），排除它会导致收窄结果为空集，
+            # valid_next 不变，LLM 仍可跳过仲裁直接选 produce。
+            forced_no_produce = forced_choices - {Stage.PRODUCE}
+            if forced_no_produce:
+                # 仍有强制阶段要跑，缩小 LLM 选择范围
+                valid_next = forced_no_produce
+
+    # 标准辩论：无冲突时跳过 evidence_check（cross_team后直接arbitrate）
     if state.debate_depth == "standard" and current == Stage.CROSS_TEAM:
         if not state.conflicts:
             return Stage.ARBITRATE if Stage.ARBITRATE in valid_next else Stage.PRODUCE
@@ -115,16 +161,27 @@ async def decide_next_stage(state: MeetingState) -> Stage:
         summary = _build_state_summary(state)
         valid_stages_str = ", ".join(s.value for s in valid_next)
 
+        # 构建强制阶段提示（如果 valid_next 被收窄了）
+        mandatory_hint = ""
+        if mandatory_stages:
+            ms_names = ", ".join(s.value for s in mandatory_stages)
+            mandatory_hint = (
+                f"\n## 强制阶段\n"
+                f"以下阶段尚未执行，必须至少完成一次后才能跳过：{ms_names}\n"
+                f"在上述强制阶段全部完成之前，请不要选择 produce（最终产出）。\n"
+            )
+
         prompt = (
             f"你是会议流程的元认知控制器。根据当前会议状态，决定下一个最合适的阶段。\n\n"
             f"## 当前状态\n{summary}\n\n"
-            f"## 可选下一阶段\n{valid_stages_str}\n\n"
+            f"## 可选下一阶段\n{valid_stages_str}\n"
+            f"{mandatory_hint}\n"
             f"## 决策规则\n"
-            f"- 如果核心问题已解决且裁决充分，选择 produce\n"
+            f"- 每个关键阶段（intra_team, cross_team, evidence_check）都应至少执行一次，不要跳过\n"
+            f"- 如果核心问题已解决且所有必要阶段已完成，选择 produce\n"
             f"- 如果仍有未解决的冲突，选择 evidence_check 或 arbitrate\n"
             f"- 如果论点不够充分，可以重复当前阶段（intra_team/cross_team）\n"
             f"- 如果证据对照发现新冲突或证据不足，可以回退到 cross_team 重新辩论\n"
-            f"- 如果裁决结论不够收敛，可以回退到 evidence_check 补充证据\n"
             f"- 回退有成本（额外 token + 延迟），仅在必要时使用\n"
             f"- 辩论深度为 {state.debate_depth}，轻量级应尽快结束\n\n"
             f"只输出一个阶段名称（小写英文），不要任何其他内容。"
@@ -137,6 +194,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
             schema_hint="meta_next_stage",
             temperature=0,
             seed=42,
+            model=_resolve_model_for_routing(state),
         ))
 
         next_stage_str = (resp.result.get("next_stage", "") if isinstance(resp.result, dict)
