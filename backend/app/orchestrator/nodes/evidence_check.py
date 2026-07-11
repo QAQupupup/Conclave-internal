@@ -16,6 +16,8 @@ from ._helpers import (
     _full_anchor,
     _worst_confidence,
     _run_with_consistency,
+    _resolve_model_for_call,
+    _emit_agent_spoke,
 )
 from .borrow import _let_borrowed_agents_speak
 
@@ -161,6 +163,7 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
                 anchor = _full_anchor(state, "evidence_check")
                 req = build_evidence_prompt(conflict, evidence_chunks, anchor=anchor,
                                             available_tools=tool_registry.get_available_tools())
+                req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "evidence_check")
                 # ReactLoop 多轮执行（默认 10 轮，可通过 REACT_MAX_ITERATIONS 环境变量配置）
                 resp = await react.run(req)
                 result = resp.result
@@ -173,6 +176,7 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
         # 降级：单次 LLM 调用（无工具）
         async def call_fn(anchor: str, _conflict=conflict, _chunks=evidence_chunks) -> dict[str, Any]:
             req = build_evidence_prompt(_conflict, _chunks, anchor=anchor)
+            req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "evidence_check")
             resp = await compute.think(req)
             return resp.result
 
@@ -215,6 +219,21 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     state.conclusion_chain.lock("evidence_check", {"evidence_set": evidence_set})
     # 第5层：记录置信度（取最差值）
     state.confidence_flags["evidence_check"] = worst_confidence
+
+    # 记录证据对照阶段主持人总结
+    total_ev = sum(len(es.get("assessments", [])) for es in evidence_set)
+    supporting = sum(
+        1 for es in evidence_set
+        for a in es.get("assessments", [])
+        if a.get("supports") in ("side_a", "side_b")
+    )
+    neutral = total_ev - supporting
+    summary = (
+        f"证据对照完成：共检索 {total_ev} 条证据，"
+        f"其中 {supporting} 条明确支持某一方观点，{neutral} 条为中性/通用知识。"
+    )
+    await _emit_agent_spoke(state, Role.MODERATOR, Stage.EVIDENCE_CHECK, summary)
+
     # 改造三：让待发言的借调 agent 在证据对照阶段也发言一次（兜底）
     await _let_borrowed_agents_speak(state, Stage.EVIDENCE_CHECK)
     nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan)

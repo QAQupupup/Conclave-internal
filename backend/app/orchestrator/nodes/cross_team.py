@@ -13,6 +13,7 @@ from ._helpers import (
     _emit_agent_spoke,
     _record_drift,
     _run_with_consistency,
+    _resolve_model_for_call,
 )
 from .borrow import _let_borrowed_agents_speak, _moderator_assess_borrow
 from .evidence_check import _prefetch_evidence
@@ -30,6 +31,7 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
         req = build_cross_team_prompt(state.team_conclusions, anchor=anchor)
+        req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "cross_team")
         resp = await compute.think(req)
         return resp.result
 
@@ -61,7 +63,45 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
                 conflict_lines.append(f"  {i}. {type_label}：{side_a[:30]} vs {side_b[:30]}")
         content = "\n".join(conflict_lines)
     else:
-        content = "跨队辩论结束，各方观点一致，未发现争议点。"
+        # 无冲突时展示各方核心共识，而非只说"未发现争议点"
+        consensus_lines = ["跨队辩论结束，各方观点高度一致，未发现争议点。"]
+        consensus_lines.append("")
+        consensus_lines.append("各方核心论点汇总：")
+        # 从 team_conclusions 中提取每个角色的核心论点（每角色最多展示2条）
+        role_labels = {
+            "product_architect": "产品架构师",
+            "engineer": "工程师",
+            "security_expert": "安全专家",
+            "ux_designer": "UX设计师",
+            "data_engineer": "数据工程师",
+            "marketing_expert": "市场专家",
+            "moderator": "主持人",
+        }
+        displayed_count = 0
+        for conclusion in state.team_conclusions:
+            role_val = conclusion.get("role", "")
+            role_name = role_labels.get(role_val, role_val)
+            claims = conclusion.get("claims", [])
+            if claims:
+                consensus_lines.append(f"  【{role_name}】")
+                for ci, c in enumerate(claims[:2], 1):
+                    claim_text = c.get("claim", c.get("text", "")).strip()
+                    if claim_text:
+                        if len(claim_text) > 70:
+                            claim_text = claim_text[:67] + "…"
+                        consensus_lines.append(f"    {ci}. {claim_text}")
+                displayed_count += 1
+        if displayed_count == 0 and state.claims:
+            # team_conclusions 为空时从 state.claims 汇总
+            for c in state.claims[:6]:
+                role_val = c.get("agent_role", "")
+                role_name = role_labels.get(role_val, role_val)
+                claim_text = c.get("claim", c.get("text", "")).strip()
+                if claim_text:
+                    if len(claim_text) > 70:
+                        claim_text = claim_text[:67] + "…"
+                    consensus_lines.append(f"  • [{role_name}] {claim_text}")
+        content = "\n".join(consensus_lines)
     await _emit_agent_spoke(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
     _record_drift(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
 

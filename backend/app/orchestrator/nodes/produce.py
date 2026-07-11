@@ -11,7 +11,26 @@ from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, MeetingStatus, Role, Stage
 
-from ._helpers import _record_drift, _run_with_consistency
+from ._helpers import _record_drift, _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
+
+
+async def _emit_progress(state: MeetingState, step: str, message: str, percent: int = 0) -> None:
+    """发送 produce 阶段进度事件到前端"""
+    try:
+        await bus.publish(
+            make_event(
+                "produce.progress",
+                state.meeting_id,
+                {
+                    "meeting_id": state.meeting_id,
+                    "step": step,
+                    "message": message,
+                    "percent": percent,
+                },
+            )
+        )
+    except Exception:
+        pass  # 进度事件失败不影响主流程
 
 
 def _detect_network_level(code: str) -> str:
@@ -243,6 +262,9 @@ async def produce_node(state: MeetingState) -> MeetingState:
     from app.agents.prompts import get_produce_template
     template = get_produce_template(state.deliverable_type)
 
+    # 发送进度：开始生成
+    await _emit_progress(state, "llm_generate", "正在调用大模型生成产出内容，这可能需要几分钟...", 10)
+
     # [DATA-BRIDGE] 综合证据数据，供代码生成类产出使用
     evidence_summary = _synthesize_evidence_for_produce(state)
     if evidence_summary:
@@ -261,6 +283,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             deliverable_type=state.deliverable_type,
             evidence_summary=evidence_summary or None,
         )
+        req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "produce")
         resp = await compute.think(req)
         return resp.result
 
@@ -268,6 +291,10 @@ async def produce_node(state: MeetingState) -> MeetingState:
     _lb.info("produce: LLM 调用+一致性检查完成", logger="orchestrator.nodes.produce",
              extra={"confidence": confidence, "deliverable_type": state.deliverable_type,
                     "has_prd": bool(result.get("prd")), "openapi_len": len(result.get("openapi", ""))})
+
+    # 发送进度：LLM生成完成，开始后续处理
+    await _emit_progress(state, "llm_done", "大模型生成完成，正在处理产出内容...", 40)
+
     # 构建 artifact
     prd = result.get("prd", {})
     openapi = result.get("openapi", "")
@@ -277,6 +304,50 @@ async def produce_node(state: MeetingState) -> MeetingState:
         "prd": prd,
         "openapi": openapi,
     }
+
+    # 记录产出阶段的Agent发言
+    if state.deliverable_type == "prd_openapi":
+        prd_title = prd.get("title", "未命名产品")
+        api_count = len(prd.get("api_endpoints", []))
+        summary = (
+            f"产出完成：{prd_title}\n"
+            f"产品目标：{prd.get('goal', 'N/A')[:200]}\n"
+            f"OpenAPI 规范：{len(openapi)} 字符"
+            + (f"，包含 {api_count} 个 API 端点" if api_count else "")
+        )
+        await _emit_agent_spoke(state, Role.PRODUCT_ARCHITECT, Stage.PRODUCE, summary)
+        if openapi:
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    f"已生成 OpenAPI 规范（{len(openapi)} 字符），包含完整的接口定义和数据模型。")
+    elif state.deliverable_type in ("code_analysis", "data_science"):
+        code_data = result.get("code_analysis", {})
+        code_len = len(code_data.get("code", ""))
+        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                f"代码生成完成：{code_len} 字符，准备沙箱执行验证...")
+    elif state.deliverable_type == "tested_system":
+        ts_data = result.get("tested_system", {})
+        main_len = len(ts_data.get("main_code", ""))
+        test_len = len(ts_data.get("test_code", ""))
+        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                f"系统代码和测试已生成：主代码 {main_len} 字符，测试代码 {test_len} 字符，准备运行测试...")
+    elif state.deliverable_type == "deployable_service":
+        ds_data = result.get("deployable_service", {})
+        app_len = len(ds_data.get("app_code", ""))
+        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                f"可部署服务代码已生成：应用代码 {app_len} 字符，开始代码审查和Docker部署...")
+    elif state.deliverable_type == "design_doc":
+        dd = result.get("design_doc", {})
+        await _emit_agent_spoke(state, Role.PRODUCT_ARCHITECT, Stage.PRODUCE,
+                                f"设计文档已生成：{dd.get('title', '未命名')}")
+    elif state.deliverable_type == "comprehensive":
+        await _emit_agent_spoke(state, Role.MODERATOR, Stage.PRODUCE, "综合产出已生成。")
+    elif state.deliverable_type == "research_report":
+        await _emit_agent_spoke(state, Role.PRODUCT_ARCHITECT, Stage.PRODUCE, "研究报告已生成。")
+    elif state.deliverable_type == "business_report":
+        await _emit_agent_spoke(state, Role.MODERATOR, Stage.PRODUCE, "商业分析报告已生成。")
+    else:
+        await _emit_agent_spoke(state, Role.MODERATOR, Stage.PRODUCE,
+                                f"产出物生成完成（类型：{state.deliverable_type}）。")
 
     # 代码执行类产出：调用沙箱执行代码
     if state.deliverable_type in ("code_analysis", "data_science"):
@@ -329,9 +400,21 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 }
                 if refined.get("net_auth"):
                     state.artifact["net_auth"] = refined["net_auth"]
+                # 记录代码执行结果消息
+                exec_result = refined.get("execution", {})
+                if exec_result.get("exit_code") == 0:
+                    out_preview = (exec_result.get("stdout", "") or "")[:300]
+                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                            f"代码执行成功。输出预览：\n{out_preview}")
+                else:
+                    err_preview = (exec_result.get("stderr", "") or exec_result.get("error", ""))[:300]
+                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                            f"代码执行遇到问题：{err_preview}")
             except Exception as e:
                 state.artifact["code_analysis"] = code_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                        f"代码执行异常：{str(e)[:200]}")
         else:
             state.artifact["code_analysis"] = code_data
 
@@ -397,9 +480,21 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 }
                 if refined.get("net_auth"):
                     state.artifact["net_auth"] = refined["net_auth"]
+                # 记录测试执行结果消息
+                test_result = refined.get("execution", {})
+                if refined.get("success") and test_result.get("exit_code") == 0:
+                    out_preview = (test_result.get("stdout", "") or "")[:300]
+                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                            f"测试全部通过（{refined.get('rounds_used', 1)}轮修复）。结果预览：\n{out_preview}")
+                else:
+                    err_preview = (test_result.get("stderr", "") or test_result.get("error", ""))[:300]
+                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                            f"测试执行完成，但存在问题：{err_preview}")
             except Exception as e:
                 state.artifact["tested_system"] = ts_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                        f"测试执行异常：{str(e)[:200]}")
         else:
             state.artifact["tested_system"] = ts_data
 
@@ -432,6 +527,8 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 "docker-compose.yml": docker_compose_content,
             }
 
+            await _emit_progress(state, "code_review", "正在进行代码审查和修复...", 50)
+
             for review_rounds in range(1, max_review_rounds + 1):
                 _lb.info(f"produce: 代码审查第{review_rounds}轮", logger="orchestrator.nodes.produce")
                 # 调用LLM做代码审查
@@ -451,6 +548,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
                     stage="review",
                     prompt=review_prompt,
                     schema_hint="code_review",
+                    model=_resolve_model_for_call(state, Role.ENGINEER.value, "review"),
                 )
                 # 为review阶段注入Skills（deliverable_quality, code_conventions等）
                 try:
@@ -477,6 +575,9 @@ async def produce_node(state: MeetingState) -> MeetingState:
                                         logger="orchestrator.nodes.produce")
                         _lb.info(f"produce: 代码审查通过（第{review_rounds}轮，{len(issues)}个低/中级别问题）",
                                  logger="orchestrator.nodes.produce")
+                        # 记录审查通过消息
+                        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                                f"代码审查第{review_rounds}轮通过（{len(issues)}个低/中级别问题，不影响部署）")
                         break
 
                     # 有critical/high问题，修复
@@ -501,6 +602,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
                             stage="bugfix",
                             prompt=fix_prompt,
                             schema_hint="bugfix",  # [AUDIT-FIX P1-2] 修复：补全 schema_hint 确保 trace 记录正确 stage
+                            model=_resolve_model_for_call(state, Role.ENGINEER.value, "bugfix"),
                         )
                         # 为bugfix阶段注入Skills（code_conventions等）
                         try:
@@ -619,6 +721,7 @@ uvicorn app:app --host 0.0.0.0 --port {service_port}
             try:
                 from app.sandbox import deploy_service
                 _lb.info("produce: 开始沙箱部署服务...", logger="orchestrator.nodes.produce")
+                await _emit_progress(state, "deploying", "正在Docker沙箱中部署服务，这可能需要1-2分钟...", 75)
 
                 # 确保有/health端点 - 如果app_code中没有，自动注入
                 if "/health" not in app_code and '"/health"' not in app_code and "'/health'" not in app_code:
@@ -671,6 +774,15 @@ def health():
                 "sandboxed": True,
                 "files": ["app.py", "requirements.txt", "Dockerfile", "docker-compose.yml", "README.md"],
             }
+            # 记录部署结果消息
+            if deployment_info.get("ok"):
+                url = deployment_info.get("access_url", "")
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                        f"服务部署成功！访问地址：{url}")
+            else:
+                err = deployment_info.get("error", "未知错误")
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                        f"服务部署失败：{err}")
         else:
             state.artifact["deployable_service"] = ds_data
     else:
@@ -687,7 +799,7 @@ def health():
         attachments = _scan_artifacts(ws_root, state.meeting_id)
         if attachments:
             state.artifact["attachments"] = attachments
-            _lb.info("produce: 扫描到 %d 个附件文件", len(attachments),
+            _lb.info(f"produce: 扫描到 {len(attachments)} 个附件文件",
                      logger="orchestrator.nodes.produce",
                      extra={"attachment_files": [a["filename"] for a in attachments]})
 
@@ -712,6 +824,8 @@ def health():
         )
     )
     _lb.info("produce: artifact.generated 事件已发布", logger="orchestrator.nodes.produce")
+    # 发送进度：产出完成
+    await _emit_progress(state, "done", "产出物生成完成！", 100)
     # 产物阶段也做一次漂移检查（针对产出文本）
     artifact_text = json.dumps(state.artifact, ensure_ascii=False, default=str)
     _record_drift(state, Role.MODERATOR, Stage.PRODUCE, artifact_text)
