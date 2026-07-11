@@ -288,6 +288,35 @@ async def produce_node(state: MeetingState) -> MeetingState:
         return resp.result
 
     result, confidence = await _run_with_consistency(state, "produce", call_fn)
+
+    # 内容完整性校验：检查关键字段是否为空
+    # 一致性检查只验证结果不与已锁定结论矛盾，不验证内容是否为空
+    _empty_fields = []
+    if state.deliverable_type == "deployable_service":
+        _ds = result.get("deployable_service") or {}
+        if not _ds.get("app_code"):
+            _empty_fields.append("deployable_service.app_code")
+    elif state.deliverable_type in ("code_analysis", "data_science"):
+        _cd = result.get("code_analysis") or {}
+        if not _cd.get("code"):
+            _empty_fields.append("code_analysis.code")
+    elif state.deliverable_type == "tested_system":
+        _ts = result.get("tested_system") or {}
+        if not _ts.get("main_code") and not _ts.get("test_code"):
+            _empty_fields.append("tested_system.main_code/test_code")
+    elif state.deliverable_type == "prd_openapi":
+        if not result.get("prd") and not result.get("openapi"):
+            _empty_fields.append("prd/openapi")
+    if _empty_fields:
+        _lb.warning(
+            f"produce: LLM 返回内容不完整 — 空字段: {_empty_fields}",
+            logger="orchestrator.nodes.produce",
+            extra={"deliverable_type": state.deliverable_type, "empty_fields": _empty_fields},
+        )
+        if confidence == "high":
+            confidence = "low"
+            state.confidence_flags["produce"] = "low"
+
     _lb.info("produce: LLM 调用+一致性检查完成", logger="orchestrator.nodes.produce",
              extra={"confidence": confidence, "deliverable_type": state.deliverable_type,
                     "has_prd": bool(result.get("prd")), "openapi_len": len(result.get("openapi", ""))})
@@ -322,19 +351,31 @@ async def produce_node(state: MeetingState) -> MeetingState:
     elif state.deliverable_type in ("code_analysis", "data_science"):
         code_data = result.get("code_analysis", {})
         code_len = len(code_data.get("code", ""))
-        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                f"代码生成完成：{code_len} 字符，准备沙箱执行验证...")
+        if code_len == 0:
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    "代码生成失败：LLM 返回的代码为空，跳过沙箱执行。产出物可能不完整，建议重试。")
+        else:
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    f"代码生成完成：{code_len} 字符，准备沙箱执行验证...")
     elif state.deliverable_type == "tested_system":
         ts_data = result.get("tested_system", {})
         main_len = len(ts_data.get("main_code", ""))
         test_len = len(ts_data.get("test_code", ""))
-        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                f"系统代码和测试已生成：主代码 {main_len} 字符，测试代码 {test_len} 字符，准备运行测试...")
+        if main_len == 0 and test_len == 0:
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    "代码生成失败：LLM 返回的主代码和测试代码均为空，跳过测试执行。产出物可能不完整，建议重试。")
+        else:
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    f"系统代码和测试已生成：主代码 {main_len} 字符，测试代码 {test_len} 字符，准备运行测试...")
     elif state.deliverable_type == "deployable_service":
         ds_data = result.get("deployable_service", {})
         app_len = len(ds_data.get("app_code", ""))
-        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                f"可部署服务代码已生成：应用代码 {app_len} 字符，开始代码审查和Docker部署...")
+        if app_len == 0:
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    "代码生成失败：LLM 返回的应用代码为空，跳过代码审查和部署。产出物可能不完整，建议重试。")
+        else:
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    f"可部署服务代码已生成：应用代码 {app_len} 字符，开始代码审查和Docker部署...")
     elif state.deliverable_type == "design_doc":
         dd = result.get("design_doc", {})
         await _emit_agent_spoke(state, Role.PRODUCT_ARCHITECT, Stage.PRODUCE,
