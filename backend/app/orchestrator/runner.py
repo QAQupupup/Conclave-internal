@@ -269,6 +269,35 @@ class Runner:
                     # 元认知决策
                     next_stage = await decide_next_stage(state)
                     old_stage = state.stage
+
+                    # [REGRESSION] 回退检测与上限保护
+                    _MAX_TOTAL_REGRESSIONS = 5
+                    if not hasattr(state, "_regression_count"):
+                        state._regression_count = 0
+
+                    if next_stage != old_stage and next_stage != Stage.PRODUCE:
+                        from_idx = STAGE_ORDER.index(old_stage) if old_stage in STAGE_ORDER else -1
+                        to_idx = STAGE_ORDER.index(next_stage) if next_stage in STAGE_ORDER else -1
+                        if to_idx < from_idx and from_idx >= 0 and to_idx >= 0:
+                            # 回退转移
+                            state._regression_count += 1
+                            log_bus.info(
+                                f"阶段回退 ({state._regression_count}/{_MAX_TOTAL_REGRESSIONS}): "
+                                f"{old_stage.value} → {next_stage.value}",
+                                logger="orchestrator.runner",
+                                extra={
+                                    "from": old_stage.value, "to": next_stage.value,
+                                    "regression_count": state._regression_count,
+                                },
+                            )
+                            if state._regression_count >= _MAX_TOTAL_REGRESSIONS:
+                                # 回退上限：强制前进到 produce
+                                log_bus.warning(
+                                    f"回退次数达上限 ({_MAX_TOTAL_REGRESSIONS})，强制推进到 produce",
+                                    logger="orchestrator.runner",
+                                )
+                                next_stage = Stage.PRODUCE
+
                     if next_stage != old_stage:
                         state.stage = next_stage
                         log_bus.info(
