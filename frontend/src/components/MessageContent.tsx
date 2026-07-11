@@ -1,32 +1,33 @@
 // 消息内容语义化渲染器
 // 把 LLM 生成的 [constraint]、[assumption]、[common_knowledge]、[doc:xxx]、[risk:high] 等标签
-// 解析为彩色中文 badge，提升可读性
+// 解析为 AntD Tag 彩色 badge，提升可读性
+import { Tag } from 'antd'
 import type { ReactNode } from 'react'
 
-/** 标签类型定义：label=中文显示，cls=CSS类 */
+/** 标签类型定义：label=中文显示，color=AntD Tag color */
 interface TagInfo {
   label: string
-  cls: string
+  color: string
 }
 
 /** 精确匹配标签（无参数后缀）：[fact]、[assumption] 等，同时支持 LLM 直接输出的中文标签 */
 const EXACT_TAGS: Record<string, TagInfo> = {
   // 英文标签（标准）
-  constraint:     { label: '约束',   cls: 'tag-constraint' },
-  assumption:     { label: '假设',   cls: 'tag-assumption' },
-  common_knowledge: { label: '常识', cls: 'tag-common' },
-  fact:           { label: '事实',   cls: 'tag-fact' },
-  decision:       { label: '决策',   cls: 'tag-decision' },
-  question:       { label: '问题',   cls: 'tag-question' },
-  requirement:    { label: '需求',   cls: 'tag-requirement' },
+  constraint:       { label: '约束',   color: 'orange' },
+  assumption:       { label: '假设',   color: 'gold' },
+  common_knowledge: { label: '常识',   color: 'blue' },
+  fact:             { label: '事实',   color: 'green' },
+  decision:         { label: '决策',   color: 'purple' },
+  question:         { label: '问题',   color: 'cyan' },
+  requirement:      { label: '需求',   color: 'magenta' },
   // 中文标签别名（LLM 偶尔会直接输出中文括号标签）
-  '约束':         { label: '约束',   cls: 'tag-constraint' },
-  '假设':         { label: '假设',   cls: 'tag-assumption' },
-  '常识':         { label: '常识',   cls: 'tag-common' },
-  '事实':         { label: '事实',   cls: 'tag-fact' },
-  '决策':         { label: '决策',   cls: 'tag-decision' },
-  '问题':         { label: '问题',   cls: 'tag-question' },
-  '需求':         { label: '需求',   cls: 'tag-requirement' },
+  '约束':           { label: '约束',   color: 'orange' },
+  '假设':           { label: '假设',   color: 'gold' },
+  '常识':           { label: '常识',   color: 'blue' },
+  '事实':           { label: '事实',   color: 'green' },
+  '决策':           { label: '决策',   color: 'purple' },
+  '问题':           { label: '问题',   color: 'cyan' },
+  '需求':           { label: '需求',   color: 'magenta' },
 }
 
 /** 前缀匹配标签（带参数后缀）：[doc:用户调研]、[web:xxx]、[risk:high] 等 */
@@ -35,21 +36,24 @@ const PREFIX_TAGS: Array<{ prefix: string; build: (arg: string) => TagInfo }> = 
     prefix: 'risk:',
     build: (level) => {
       const label = level === 'high' ? '高风险' : level === 'medium' ? '中风险' : level === 'low' ? '低风险' : `风险:${level}`
-      const cls = level === 'high' ? 'tag-risk-high' : level === 'medium' ? 'tag-risk' : 'tag-risk-low'
-      return { label, cls }
+      const color = level === 'high' ? 'red' : level === 'medium' ? 'orange' : 'default'
+      return { label, color }
     },
   },
   {
     prefix: 'doc:',
-    build: (name) => ({ label: `文档:${name}`, cls: 'tag-doc' }),
+    build: (name) => ({ label: `文档:${name}`, color: 'geekblue' }),
   },
   {
     prefix: 'web:',
-    build: (_url) => ({ label: '网络', cls: 'tag-web' }),
+    build: (_url) => ({ label: '网络', color: 'geekblue' }),
   },
   {
     prefix: 'common_knowledge:',
-    build: (side) => ({ label: side ? `常识·${side === 'side_a' ? 'A方' : side === 'side_b' ? 'B方' : side}` : '常识', cls: 'tag-common' }),
+    build: (side) => ({
+      label: side ? `常识·${side === 'side_a' ? 'A方' : side === 'side_b' ? 'B方' : side}` : '常识',
+      color: 'blue',
+    }),
   },
 ]
 
@@ -85,7 +89,7 @@ function tryMatchTag(text: string, position: number): { info: TagInfo; length: n
   return null
 }
 
-/** 解析一行文本（不含换行符），把标签替换为 badge */
+/** 解析一行文本（不含换行符），把标签替换为 AntD Tag */
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const parts: ReactNode[] = []
   let lastIndex = 0
@@ -99,9 +103,9 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
         parts.push(text.slice(lastIndex, i))
       }
       parts.push(
-        <span key={`${keyPrefix}-tag-${key++}`} className={`msg-tag ${match.info.cls}`}>
+        <Tag key={`${keyPrefix}-tag-${key++}`} color={match.info.color} style={{ marginInlineEnd: 4 }}>
           {match.info.label}
-        </span>,
+        </Tag>,
       )
       i += match.length
       lastIndex = i

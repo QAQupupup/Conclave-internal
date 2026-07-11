@@ -1,15 +1,13 @@
 /**
  * ThemeSettings：主题设置面板（亮暗切换 + Token 级覆盖）
- *
- * 形态：弹窗模态框，分三个区块
- * 1. 主题模式：亮/暗切换
- * 2. Token 覆盖：按 group 分组（色彩/语义色/形状/字体），每项可编辑 + 重置
- * 3. 同步状态 + 全部重置
- *
- * 风格：遵循《个人签单风格与逻辑规范 v1.0》——纯白底、靛蓝主色、S3 色块标签、1px 边框
+ * 使用 AntD Drawer + Segmented + Collapse + ColorPicker + Button + Typography
  */
 import { useState } from 'react'
+import { Drawer, Segmented, Collapse, ColorPicker, Button, Typography, Space, Input, Tag } from 'antd'
+import { UndoOutlined } from '@ant-design/icons'
 import { OVERRIDABLE_TOKENS, useTheme } from '../store/ThemeContext'
+
+const { Text } = Typography
 
 interface Props {
   onClose: () => void
@@ -34,112 +32,104 @@ export function ThemeSettings({ onClose }: Props) {
     error: '同步失败',
   }[syncStatus]
 
-  return (
-    <div className="theme-settings-overlay" onClick={onClose}>
-      <div className="theme-settings-modal" onClick={e => e.stopPropagation()}>
-        {/* 头部 */}
-        <div className="ts-header">
-          <div className="ts-title-row">
-            <h2 className="ts-title">主题设置</h2>
-            <span className={`ts-sync ts-sync-${syncStatus}`}>{syncLabel}</span>
-          </div>
-          <p className="ts-subtitle">默认规则基于《个人签单风格与逻辑规范 v1.0》，此处可覆盖</p>
-        </div>
+  const syncColor = {
+    idle: 'default',
+    syncing: 'processing',
+    synced: 'success',
+    error: 'error',
+  }[syncStatus] as string
 
-        {/* 主题模式 */}
-        <div className="ts-section">
-          <div className="ts-section-label">主题模式</div>
-          <div className="ts-mode-toggle">
-            <button
-              className={`ts-mode-btn ${mode === 'light' ? 'active' : ''}`}
-              onClick={() => setMode('light')}
-            >
-              亮色
-            </button>
-            <button
-              className={`ts-mode-btn ${mode === 'dark' ? 'active' : ''}`}
-              onClick={() => setMode('dark')}
-            >
-              暗色
-            </button>
-          </div>
-        </div>
-
-        {/* Token 覆盖 */}
-        <div className="ts-section">
-          <div className="ts-section-label">Token 覆盖</div>
-          {Object.entries(grouped).map(([group, tokens]) => (
-            <div key={group} className="ts-group">
-              <button
-                className={`ts-group-header ${expandedGroup === group ? 'expanded' : ''}`}
-                onClick={() => setExpandedGroup(expandedGroup === group ? '' : group)}
-              >
-                <span>{group}</span>
-                <span className="ts-group-count">{tokens.length}</span>
-              </button>
-              {expandedGroup === group && (
-                <div className="ts-token-list">
-                  {tokens.map(([token, meta]) => (
-                    <div key={token} className="ts-token-row">
-                      <div className="ts-token-label">
-                        <span className="ts-token-name">{meta.label}</span>
-                        <code className="ts-token-key">--{token}</code>
-                      </div>
-                      <div className="ts-token-control">
-                        {meta.type === 'color' && (
-                          <input
-                            type="color"
-                            className="ts-color-picker"
-                            value={overrides[token] || getComputedStyle(document.documentElement).getPropertyValue(`--${token}`).trim() || '#000000'}
-                            onChange={e => setTokenOverride(token, e.target.value)}
-                          />
-                        )}
-                        {meta.type === 'size' && (
-                          <input
-                            type="text"
-                            className="ts-text-input"
-                            placeholder="如 6px"
-                            value={overrides[token] || ''}
-                            onChange={e => setTokenOverride(token, e.target.value)}
-                          />
-                        )}
-                        {meta.type === 'font' && (
-                          <input
-                            type="text"
-                            className="ts-text-input ts-font-input"
-                            placeholder="字体栈"
-                            value={overrides[token] || ''}
-                            onChange={e => setTokenOverride(token, e.target.value)}
-                          />
-                        )}
-                        {overrides[token] && (
-                          <button
-                            className="ts-reset-btn"
-                            onClick={() => resetToken(token)}
-                            title="重置为默认"
-                          >
-                            重置
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+  const collapseItems = Object.entries(grouped).map(([group, tokens]) => ({
+    key: group,
+    label: (
+      <Space>
+        <Text>{group}</Text>
+        <Tag>{tokens.length}</Tag>
+      </Space>
+    ),
+    children: (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {tokens.map(([token, meta]) => (
+          <div key={token} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text style={{ fontSize: 13 }}>{meta.label}</Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: 11 }}>--{token}</Text>
             </div>
-          ))}
-        </div>
-
-        {/* 底部操作 */}
-        <div className="ts-footer">
-          <button className="ts-reset-all" onClick={resetAllTokens}>
-            重置全部 Token
-          </button>
-          <button className="ts-close-btn" onClick={onClose}>
-            完成
-          </button>
-        </div>
+            <Space size={4}>
+              {meta.type === 'color' && (
+                <ColorPicker
+                  size="small"
+                  value={overrides[token] || getComputedStyle(document.documentElement).getPropertyValue(`--${token}`).trim() || '#000000'}
+                  onChange={(_, hex) => setTokenOverride(token, hex)}
+                />
+              )}
+              {(meta.type === 'size' || meta.type === 'font') && (
+                <Input
+                  size="small"
+                  placeholder={meta.type === 'size' ? '如 6px' : '字体栈'}
+                  value={overrides[token] || ''}
+                  onChange={e => setTokenOverride(token, e.target.value)}
+                  style={{ width: meta.type === 'font' ? 160 : 80 }}
+                />
+              )}
+              {overrides[token] && (
+                <Button type="text" size="small" icon={<UndoOutlined />} onClick={() => resetToken(token)} style={{ fontSize: 11 }}>
+                  重置
+                </Button>
+              )}
+            </Space>
+          </div>
+        ))}
       </div>
-    </div>
+    ),
+  }))
+
+  return (
+    <Drawer
+      open
+      title={
+        <Space>
+          <Text strong>主题设置</Text>
+          <Tag color={syncColor}>{syncLabel}</Tag>
+        </Space>
+      }
+      onClose={onClose}
+      width={420}
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Button icon={<UndoOutlined />} onClick={resetAllTokens}>
+            重置全部 Token
+          </Button>
+          <Button type="primary" onClick={onClose}>完成</Button>
+        </div>
+      }
+    >
+      <div style={{ marginBottom: 24 }}>
+        <Text strong style={{ display: 'block', marginBottom: 8 }}>主题模式</Text>
+        <Segmented
+          value={mode}
+          onChange={(val) => setMode(val as 'light' | 'dark')}
+          options={[
+            { label: '亮色', value: 'light' },
+            { label: '暗色', value: 'dark' },
+          ]}
+          block
+        />
+      </div>
+
+      <div>
+        <Text strong style={{ display: 'block', marginBottom: 8 }}>Token 覆盖</Text>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+          默认规则基于设计规范，此处可覆盖
+        </Text>
+        <Collapse
+          activeKey={expandedGroup || undefined}
+          onChange={(keys) => setExpandedGroup(Array.isArray(keys) ? keys[0] ?? '' : keys ?? '')}
+          items={collapseItems}
+          size="small"
+        />
+      </div>
+    </Drawer>
   )
 }

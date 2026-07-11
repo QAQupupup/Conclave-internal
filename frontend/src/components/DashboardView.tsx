@@ -1,5 +1,7 @@
 // 运维面板主视图：概览卡片 + 连通性 + 性能图表
+// 使用 AntD Card + Spin + Alert + Typography
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { Spin, Alert, Typography, Space } from 'antd'
 import {
   getMetrics,
   getMetricsHistory,
@@ -10,13 +12,14 @@ import { MetricCard } from './MetricCard.tsx'
 import { HealthGrid } from './HealthGrid.tsx'
 import { ResourceChart } from './ResourceChart.tsx'
 
+const { Title, Text } = Typography
+
 export function DashboardView() {
   const [snapshot, setSnapshot] = useState<MetricsSnapshot | null>(null)
   const [history, setHistory] = useState<MetricPoint[]>([])
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  // [v2 修复] 连通性手动刷新状态
   const [healthRefreshing, setHealthRefreshing] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -47,15 +50,11 @@ export function DashboardView() {
     }
   }, [fetchData])
 
-  // [v2 修复] 健康度手动刷新：
-  // 旧版 10s 轮询，但要立即反馈（如刚启动 docker）必须等下次 tick
-  // 新版：点击按钮 → 调 /metrics/health 强制重检 → 更新 snapshot
   const refreshHealth = useCallback(async () => {
     setHealthRefreshing(true)
     try {
       const { getMetricsHealth } = await import('../lib/api.ts')
       const health = await getMetricsHealth()
-      // 只替换 infrastructure 部分，保留 llm/throughput 等高频数据
       setSnapshot((prev) => (prev ? { ...prev, infrastructure: health } : prev))
       setLastUpdate(new Date())
     } catch (e) {
@@ -86,32 +85,34 @@ export function DashboardView() {
     : 0
   const componentOkCount = snapshot?.infrastructure?.components
     ? Object.values(snapshot.infrastructure.components).filter(
-        (c) => c.status === 'ok' || c.status === 'closed',
+        (c: any) => c.status === 'ok' || c.status === 'closed',
       ).length
     : 0
 
   if (loading) {
     return (
-      <div className="dashboard-view">
-        <div className="dashboard-loading">加载中...</div>
+      <div className="dashboard-view" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+        <Spin size="large" tip="加载中..." />
       </div>
     )
   }
 
   return (
-    <div className="dashboard-view">
-      <div className="dashboard-header">
-        <h2 className="dashboard-title">运维面板</h2>
-        <div className="dashboard-meta">
-          {error && <span className="dashboard-error">{error}</span>}
-          <span className="dashboard-update">
-            {lastUpdate ? `更新于 ${lastUpdate.toLocaleTimeString('zh-CN')}` : ''}
-          </span>
-        </div>
+    <div className="dashboard-view" style={{ padding: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <Title level={3} style={{ margin: 0 }}>运维面板</Title>
+        <Space>
+          {error && <Alert message={error} type="error" showIcon style={{ padding: '4px 12px' }} />}
+          {lastUpdate && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              更新于 {lastUpdate.toLocaleTimeString('zh-CN')}
+            </Text>
+          )}
+        </Space>
       </div>
 
       {/* 概览卡片行 */}
-      <div className="metric-grid">
+      <div className="metric-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
         <MetricCard
           label="活跃会议"
           value={snapshot?.conclave.active_meetings ?? 0}
@@ -140,30 +141,18 @@ export function DashboardView() {
       </div>
 
       {/* 内容区：左连通性 + 右图表 */}
-      <div className="dashboard-content">
-        <div className="dashboard-left">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div>
           <HealthGrid
             infra={snapshot?.infrastructure ?? null}
             onRefresh={refreshHealth}
             refreshing={healthRefreshing}
           />
         </div>
-        <div className="dashboard-right">
-          <ResourceChart
-            type="memory"
-            data={history}
-            title="内存消耗"
-          />
-          <ResourceChart
-            type="tokens"
-            data={history}
-            title="Token 消耗"
-          />
-          <ResourceChart
-            type="throughput"
-            data={history}
-            title="API 吞吐量"
-          />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <ResourceChart type="memory" data={history} title="内存消耗" />
+          <ResourceChart type="tokens" data={history} title="Token 消耗" />
+          <ResourceChart type="throughput" data={history} title="API 吞吐量" />
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 // 浮动徽标：证据/产出/报告/Token/议题 五个功能入口
-// 鼠标移入显示名称，点击弹出模态面板
-import { useState, useCallback } from 'react'
+// 使用 AntD Button + Tooltip + Modal + Badge
+import { useCallback } from 'react'
+import { Button, Tooltip, Modal, Badge } from 'antd'
 import type { ReactNode } from 'react'
 
 export interface BadgeItem {
@@ -29,28 +30,22 @@ export function PanelModal({
   onClose: () => void
   children: ReactNode
 }) {
-  if (!open) return null
-
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal panel-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>{title}</h3>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">
-            ×
-          </button>
-        </div>
-        <div className="panel-modal-body">
-          {children}
-        </div>
-      </div>
-    </div>
+    <Modal
+      open={open}
+      title={title}
+      onCancel={onClose}
+      footer={null}
+      width={720}
+      centered
+      destroyOnClose
+    >
+      {children}
+    </Modal>
   )
 }
 
 export function FloatingBadges({ badges, activeId, onSelect }: FloatingBadgesProps) {
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
-
   const handleClick = useCallback(
     (id: string) => {
       if (activeId === id) {
@@ -63,27 +58,27 @@ export function FloatingBadges({ badges, activeId, onSelect }: FloatingBadgesPro
   )
 
   return (
-    <div className="floating-badges">
-      {badges.map((b) => (
-        <button
-          key={b.id}
-          type="button"
-          className={`floating-badge${activeId === b.id ? ' active' : ''}`}
-          onClick={() => handleClick(b.id)}
-          onMouseEnter={() => setHoveredId(b.id)}
-          onMouseLeave={() => setHoveredId(null)}
-          title={b.label}
-          aria-label={b.label}
-        >
-          <span className="floating-badge-icon">{b.icon}</span>
-          {hoveredId === b.id && (
-            <span className="floating-badge-tooltip">{b.label}</span>
-          )}
-          {b.badge && (
-            <span className="floating-badge-dot">{b.badge}</span>
-          )}
-        </button>
-      ))}
+    <div className="floating-badges" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {badges.map((b) => {
+        const isActive = activeId === b.id
+        const btn = (
+          <Badge key={b.id} count={b.badge || 0} size="small" offset={[-4, 4]}>
+            <Button
+              type={isActive ? 'primary' : 'default'}
+              shape="circle"
+              icon={b.icon}
+              onClick={() => handleClick(b.id)}
+              aria-label={b.label}
+              style={{ width: 40, height: 40 }}
+            />
+          </Badge>
+        )
+        return (
+          <Tooltip key={b.id} title={b.label} placement="left">
+            {btn}
+          </Tooltip>
+        )
+      })}
     </div>
   )
 }

@@ -1,5 +1,7 @@
 // 右中：冲突列表 → 选中展开证据与裁决
 // conflict → evidence → verdict 三段式
+// 使用 AntD Card + Collapse + Tag + Typography + Empty
+import { Card, Collapse, Tag, Typography, Empty } from 'antd'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import type { Decision, EvidenceSet } from '../types/events.ts'
 import {
@@ -8,9 +10,17 @@ import {
 } from '../constants.ts'
 import { EvidenceBadge, parseEvidenceRef } from './EvidenceBadge.tsx'
 
+const { Text } = Typography
+
 interface EvidencePanelProps {
   selectedConflictId: string | null
   onSelectConflict: (id: string | null) => void
+}
+
+const VERDICT_COLOR: Record<string, string> = {
+  a: 'blue',
+  b: 'purple',
+  compromise: 'gold',
 }
 
 const VERDICT_LABEL: Record<string, string> = {
@@ -19,14 +29,19 @@ const VERDICT_LABEL: Record<string, string> = {
   compromise: '折中',
 }
 
+const SUPPORTS_COLOR: Record<string, string> = {
+  a: 'blue',
+  b: 'purple',
+  neutral: 'default',
+  irrelevant: 'default',
+}
+
 const SUPPORTS_LABEL: Record<string, string> = {
   a: '支持 A',
   b: '支持 B',
   neutral: '中立',
   irrelevant: '无关',
 }
-
-// 证据来源分类着色（统一在 constants.ts 实现，保持单一数据源）
 
 export function EvidencePanel({ selectedConflictId, onSelectConflict }: EvidencePanelProps) {
   const { store } = useMeeting()
@@ -42,81 +57,97 @@ export function EvidencePanel({ selectedConflictId, onSelectConflict }: Evidence
   const decisionOf = (cid: string): Decision | undefined =>
     decisions.find((d) => d.conflict_id === cid)
 
+  const activeKey = selectedConflictId ? [selectedConflictId] : []
+
   return (
     <section className="panel evidence-panel">
       <div className="panel-title">冲突与证据</div>
-      {conflicts.length === 0 && <div className="empty-hint">暂无冲突（cross_team 阶段产出）</div>}
-      <ul className="conflict-list">
-        {conflicts.map((c) => {
-          const isOpen = selectedConflictId === c.id
-          const ev = evidenceOf(c.id)
-          const dec = decisionOf(c.id)
-          return (
-            <li
-              key={c.id}
-              className={`conflict-item ${isOpen ? 'open' : ''}`}
-              onClick={() => onSelectConflict(isOpen ? null : c.id)}
-            >
-              <div className="conflict-summary">
-                <span className="conflict-type">{c.conflict_type ?? c.type ?? 'conflict'}</span>
-                <span className="conflict-text">{c.summary}</span>
-              </div>
-              <div className="conflict-sides">
-                <div className="side side-a">A：{c.side_a}</div>
-                <div className="side side-b">B：{c.side_b}</div>
-              </div>
-              {isOpen && (
-                <div className="conflict-detail">
-                  <div className="detail-section">
-                    <span className="field-label">证据</span>
+      {conflicts.length === 0 ? (
+        <Empty description="暂无冲突（cross_team 阶段产出）" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+      ) : (
+        <Collapse
+          activeKey={activeKey}
+          onChange={(keys) => {
+            const key = keys[0]
+            onSelectConflict(key === selectedConflictId ? null : (key ?? null))
+          }}
+          items={conflicts.map((c) => {
+            const ev = evidenceOf(c.id)
+            const dec = decisionOf(c.id)
+            return {
+              key: c.id,
+              label: (
+                <div>
+                  <Tag style={{ marginInlineEnd: 8 }}>{c.conflict_type ?? c.type ?? 'conflict'}</Tag>
+                  <Text>{c.summary}</Text>
+                </div>
+              ),
+              children: (
+                <div>
+                  <Card size="small" title="双方立场" style={{ marginBottom: 12 }}>
+                    <div style={{ marginBottom: 4 }}>
+                      <Tag color="blue">A 方</Tag>
+                      <Text>{c.side_a}</Text>
+                    </div>
+                    <div>
+                      <Tag color="purple">B 方</Tag>
+                      <Text>{c.side_b}</Text>
+                    </div>
+                  </Card>
+
+                  <Card size="small" title="证据" style={{ marginBottom: 12 }}>
                     {!ev || ev.assessments.length === 0 ? (
-                      <div className="muted">暂无证据</div>
+                      <Text type="secondary">暂无证据</Text>
                     ) : (
-                      <ul className="evidence-list">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {ev.assessments.map((a, i) => {
                           const st = sourceType(a.source)
                           return (
-                          <li key={i} className="evidence-item">
-                            <div className={`evidence-type-tag src-${st}`}>{SOURCE_LABEL[st]}</div>
-                            <blockquote className="evidence-quote">{a.quote}</blockquote>
-                            <div className="evidence-meta">
-                              <EvidenceBadge
-                                item={{
-                                  ...parseEvidenceRef(a.source ?? ''),
-                                  quote: undefined,
-                                }}
-                              />
-                              {a.supports && (
-                                <span className={`evidence-supports ${a.supports}`}>
-                                  {SUPPORTS_LABEL[a.supports] ?? a.supports}
-                                </span>
-                              )}
+                            <div key={i} style={{ padding: 8, background: 'var(--bg-secondary, #f9fafb)', borderRadius: 4 }}>
+                              <Tag style={{ marginBottom: 4 }}>{SOURCE_LABEL[st]}</Tag>
+                              <blockquote style={{ margin: '4px 0', padding: '4px 8px', borderLeft: '2px solid var(--border-color, #e5e7eb)' }}>
+                                <Text>{a.quote}</Text>
+                              </blockquote>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                                <EvidenceBadge
+                                  item={{
+                                    ...parseEvidenceRef(a.source ?? ''),
+                                    quote: undefined,
+                                  }}
+                                />
+                                {a.supports && (
+                                  <Tag color={SUPPORTS_COLOR[a.supports] ?? 'default'}>
+                                    {SUPPORTS_LABEL[a.supports] ?? a.supports}
+                                  </Tag>
+                                )}
+                              </div>
                             </div>
-                          </li>
                           )
                         })}
-                      </ul>
+                      </div>
                     )}
-                  </div>
-                  <div className="detail-section">
-                    <span className="field-label">裁决</span>
+                  </Card>
+
+                  <Card size="small" title="裁决">
                     {dec ? (
-                      <div className="verdict">
-                        <span className={`verdict-tag ${dec.verdict}`}>
+                      <div>
+                        <Tag color={VERDICT_COLOR[dec.verdict] ?? 'default'} style={{ marginBottom: 8 }}>
                           {VERDICT_LABEL[dec.verdict] ?? dec.verdict}
-                        </span>
-                        <span className="verdict-rationale">{dec.rationale}</span>
+                        </Tag>
+                        <div>
+                          <Text>{dec.rationale}</Text>
+                        </div>
                       </div>
                     ) : (
-                      <div className="muted">待 arbitrate 阶段裁决</div>
+                      <Text type="secondary">待 arbitrate 阶段裁决</Text>
                     )}
-                  </div>
+                  </Card>
                 </div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
+              ),
+            }
+          })}
+        />
+      )}
     </section>
   )
 }

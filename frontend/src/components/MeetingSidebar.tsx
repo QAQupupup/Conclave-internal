@@ -1,9 +1,14 @@
 // 会议列表侧边栏：展示所有历史会议，支持切换 / 新建 / 删除 / 折叠
+// 使用 AntD List + Button + Popconfirm + Badge + Tag + Typography + Radio + Space
 import { useState, useEffect, useCallback } from 'react'
+import { Button, List, Badge, Tag, Typography, Radio, Space, Empty } from 'antd'
+import { PlusOutlined, ReloadOutlined, DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { listMeetings, deleteMeeting } from '../lib/api.ts'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { usePersistentState } from '../hooks/usePersistentState.ts'
 import { STAGE_LABELS, getMeetingStatusInfo } from '../constants.ts'
+
+const { Text } = Typography
 
 interface MeetingListItem {
   meeting_id: string
@@ -20,21 +25,17 @@ export function MeetingSidebar() {
   const [concurrentLimit, setConcurrentLimit] = useState(0)
   const [runningCount, setRunningCount] = useState(0)
   const [loading, setLoading] = useState(false)
-  // 会议列表折叠状态（持久化）
   const [listCollapsed, setListCollapsed] = usePersistentState<boolean>(
     'conclave-meeting-list-collapsed',
     false,
   )
-  // 删除确认状态：记录当前待确认删除的会议 ID 及模式
   const [pendingDelete, setPendingDelete] = useState<{ id: string; mode: 'soft' | 'hard' } | null>(null)
-  // 删除中的会议 ID（loading）
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
       const data = await listMeetings()
-      // 后端已按 created_at DESC 返回（最新在前）。运行中的会议置顶。
       const running = data.meetings.filter(m => m.is_running)
       const others = data.meetings.filter(m => !m.is_running)
       setMeetings([...running, ...others])
@@ -49,7 +50,6 @@ export function MeetingSidebar() {
 
   useEffect(() => {
     refresh()
-    // 每 5 秒刷新一次列表（捕获运行中会议的状态变化）
     const timer = setInterval(refresh, 5000)
     return () => clearInterval(timer)
   }, [refresh])
@@ -59,17 +59,14 @@ export function MeetingSidebar() {
     return getMeetingStatusInfo(status, stageLabel)
   }
 
-  /** 执行删除 */
   const handleDelete = useCallback(
     async (id: string, mode: 'soft' | 'hard') => {
       setDeletingId(id)
       try {
         await deleteMeeting(id, mode)
-        // 如果删除的是当前选中的会议，重置到创建页
         if (id === meetingId) {
           selectMeeting(null)
         }
-        // 刷新列表
         await refresh()
       } catch (err) {
         console.error('删除会议失败:', err)
@@ -82,125 +79,124 @@ export function MeetingSidebar() {
   )
 
   return (
-    <div className="meeting-sidebar">
-      <div className="sidebar-header">
-        <h3>会议列表</h3>
-        <button className="btn btn-sm" onClick={refresh} disabled={loading}>
-          {loading ? '⟳' : '↻'}
-        </button>
+    <div className="meeting-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border-color, #e5e7eb)' }}>
+        <Text strong>会议列表</Text>
+        <Button type="text" size="small" icon={<ReloadOutlined spin={loading} />} onClick={refresh} />
       </div>
-      <button className="btn btn-primary sidebar-new-btn" onClick={() => selectMeeting(null)}>
-        + 新建会议
-      </button>
 
-      {/* 会议列表折叠/展开 */}
-      <div
-        className={`meeting-list-zone ${listCollapsed ? 'is-collapsed' : ''}`}
-      >
-        <button
-          type="button"
-          className="meeting-list-toggle"
+      <div style={{ padding: '12px 16px' }}>
+        <Button type="primary" icon={<PlusOutlined />} block onClick={() => selectMeeting(null)}>
+          新建会议
+        </Button>
+      </div>
+
+      <div style={{ padding: '0 16px' }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '8px 0' }}
           onClick={() => setListCollapsed(v => !v)}
-          title={listCollapsed ? '展开列表' : '收起列表'}
         >
-          <span className={`toggle-arrow ${listCollapsed ? 'is-collapsed' : ''}`}>›</span>
-          <span className="toggle-label">
-            历史会议 ({meetings.length})
-          </span>
-          <span className="toggle-running">
-            {runningCount > 0 && <span className="running-pulse" title={`${runningCount} 个运行中`} />}
-          </span>
-        </button>
-        <div className="meeting-list">
-          {meetings.length === 0 && <div className="meeting-empty">暂无会议</div>}
-          {meetings.map((m) => {
-            const sl = statusLabel(m.status, m.stage)
-            const isActive = m.meeting_id === meetingId
-            const isPendingDelete = pendingDelete?.id === m.meeting_id
-            const isDeleting = deletingId === m.meeting_id
-            const currentDeleteMode = pendingDelete?.mode ?? 'soft'
-            return (
-              <div
-                key={m.meeting_id}
-                className={`meeting-item ${isActive ? 'active' : ''} ${isPendingDelete ? 'pending-delete' : ''}`}
-                onClick={() => !isPendingDelete && !isDeleting && selectMeeting(m.meeting_id)}
-              >
-                <div className="meeting-topic">
-                  {m.is_running && (
-                    <span className="running-pulse" title="运行中" aria-hidden="true" />
-                  )}
-                  <span className="meeting-topic-text">{m.topic || '(无议题)'}</span>
-                  {/* 删除按钮：hover 时显示，运行中的会议禁用 */}
-                  <button
-                    type="button"
-                    className="meeting-delete-btn"
-                    title={m.is_running ? '运行中，无法删除' : '删除会议'}
-                    disabled={m.is_running || isDeleting}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setPendingDelete({ id: m.meeting_id, mode: 'soft' })
-                    }}
-                  >
-                    {isDeleting ? '⟳' : '×'}
-                  </button>
-                </div>
-                <div className="meeting-meta">
-                  <span className={`meeting-status ${sl.cls}`}>{sl.text}</span>
-                  <span className="meeting-id">{m.meeting_id.slice(-8)}</span>
-                </div>
-                {/* 删除确认面板 */}
-                {isPendingDelete && (
-                  <div className="delete-confirm" onClick={(e) => e.stopPropagation()}>
-                    <div className="delete-confirm-title">确认删除？</div>
-                    <div className="delete-confirm-modes">
-                      <label className={`delete-mode-option ${currentDeleteMode === 'soft' ? 'active' : ''}`}>
-                        <input
-                          type="radio"
-                          name={`del-mode-${m.meeting_id}`}
-                          value="soft"
-                          checked={currentDeleteMode === 'soft'}
-                          onChange={() => setPendingDelete({ id: m.meeting_id, mode: 'soft' })}
-                        />
-                        <span>软删除（保留数据）</span>
-                      </label>
-                      <label className={`delete-mode-option ${currentDeleteMode === 'hard' ? 'active' : ''}`}>
-                        <input
-                          type="radio"
-                          name={`del-mode-${m.meeting_id}`}
-                          value="hard"
-                          checked={currentDeleteMode === 'hard'}
-                          onChange={() => setPendingDelete({ id: m.meeting_id, mode: 'hard' })}
-                        />
-                        <span>永久删除（不可恢复）</span>
-                      </label>
-                    </div>
-                    <div className="delete-confirm-actions">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-danger"
-                        onClick={() => handleDelete(m.meeting_id, currentDeleteMode)}
-                        disabled={isDeleting}
-                      >
-                        {isDeleting ? '删除中…' : '确认删除'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-ghost"
-                        onClick={() => setPendingDelete(null)}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+          <Button type="text" size="small" icon={listCollapsed ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />} />
+          <Text strong style={{ flex: 1 }}>历史会议 ({meetings.length})</Text>
+          {runningCount > 0 && <Badge count={runningCount} style={{ backgroundColor: '#52c41a' }} />}
         </div>
       </div>
 
-      <div className="sidebar-footer">
-        运行中 {runningCount} / 上限 {concurrentLimit}
+      {!listCollapsed && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
+          {meetings.length === 0 ? (
+            <Empty description="暂无会议" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <List
+              dataSource={meetings}
+              renderItem={(m) => {
+                const sl = statusLabel(m.status, m.stage)
+                const isActive = m.meeting_id === meetingId
+                const isPendingDelete = pendingDelete?.id === m.meeting_id
+                const isDeleting = deletingId === m.meeting_id
+                const currentDeleteMode = pendingDelete?.mode ?? 'soft'
+                return (
+                  <List.Item
+                    key={m.meeting_id}
+                    onClick={() => !isPendingDelete && !isDeleting && selectMeeting(m.meeting_id)}
+                    style={{
+                      cursor: isPendingDelete || isDeleting ? 'default' : 'pointer',
+                      background: isActive ? 'var(--accent-bg, #eef2ff)' : isPendingDelete ? '#fff2f0' : 'transparent',
+                      borderRadius: 6,
+                      padding: '8px 12px',
+                      marginBottom: 4,
+                      border: isActive ? '1px solid var(--accent-color, #4f46e5)' : '1px solid transparent',
+                    }}
+                    actions={[
+                      <Button
+                        key="delete"
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        disabled={m.is_running || isDeleting}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setPendingDelete({ id: m.meeting_id, mode: 'soft' })
+                        }}
+                        title={m.is_running ? '运行中，无法删除' : '删除会议'}
+                      />,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          {m.is_running && <Badge status="processing" />}
+                          <Text ellipsis style={{ maxWidth: 160 }}>{m.topic || '(无议题)'}</Text>
+                        </Space>
+                      }
+                      description={
+                        <Space>
+                          <Tag color={sl.cls === 'ok' ? 'green' : sl.cls === 'running' ? 'blue' : 'default'} style={{ margin: 0 }}>
+                            {sl.text}
+                          </Tag>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{m.meeting_id.slice(-8)}</Text>
+                        </Space>
+                      }
+                    />
+                    {isPendingDelete && (
+                      <div onClick={(e) => e.stopPropagation()} style={{ padding: 8, background: 'var(--bg-secondary, #fafafa)', borderRadius: 4, marginTop: 8, width: '100%' }}>
+                        <Text strong style={{ fontSize: 12 }}>确认删除？</Text>
+                        <Radio.Group
+                          size="small"
+                          value={currentDeleteMode}
+                          onChange={(e) => setPendingDelete({ id: m.meeting_id, mode: e.target.value })}
+                          style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '8px 0' }}
+                        >
+                          <Radio value="soft">软删除（保留数据）</Radio>
+                          <Radio value="hard">永久删除（不可恢复）</Radio>
+                        </Radio.Group>
+                        <Space>
+                          <Button
+                            type="primary"
+                            danger
+                            size="small"
+                            loading={isDeleting}
+                            onClick={() => handleDelete(m.meeting_id, currentDeleteMode)}
+                          >
+                            确认删除
+                          </Button>
+                          <Button size="small" onClick={() => setPendingDelete(null)}>取消</Button>
+                        </Space>
+                      </div>
+                    )}
+                  </List.Item>
+                )
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color, #e5e7eb)', textAlign: 'center' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          运行中 {runningCount} / 上限 {concurrentLimit}
+        </Text>
       </div>
     </div>
   )

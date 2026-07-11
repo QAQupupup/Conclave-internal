@@ -15,6 +15,8 @@
 //   但客户端忽略，统一用 python）。现在按扩展名做 lookup 表。
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type React from 'react'
+import { Button, Space } from 'antd'
+import { ReloadOutlined, PlusOutlined, SaveOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import Editor from '@monaco-editor/react'
 import {
   listFiles,
@@ -429,30 +431,37 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
     <div className="workspace-panel">
       {/* 工具栏 */}
       <div className="ws-toolbar">
-        <button
-          className="btn btn-sm"
-          onClick={() => refreshTree(currentPath)}
-          disabled={loading}
-        >
-          {loading ? '...' : '刷新'}
-        </button>
-        <button className="btn btn-sm" onClick={newFile}>
-          新建
-        </button>
-        <button
-          className="btn btn-sm btn-primary"
-          onClick={saveFile}
-          disabled={!dirty || saving}
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
-        <button
-          className="btn btn-sm"
-          onClick={runEditorCode}
-          disabled={running || !fileContent.trim()}
-        >
-          ▶ 运行代码
-        </button>
+        <Space size={4}>
+          <Button
+            size="small"
+            icon={<ReloadOutlined spin={loading} />}
+            onClick={() => refreshTree(currentPath)}
+            disabled={loading}
+          >
+            刷新
+          </Button>
+          <Button size="small" icon={<PlusOutlined />} onClick={newFile}>
+            新建
+          </Button>
+          <Button
+            type="primary"
+            size="small"
+            icon={<SaveOutlined />}
+            onClick={saveFile}
+            disabled={!dirty || saving}
+            loading={saving}
+          >
+            保存
+          </Button>
+          <Button
+            size="small"
+            icon={<PlayCircleOutlined />}
+            onClick={runEditorCode}
+            disabled={running || !fileContent.trim()}
+          >
+            运行代码
+          </Button>
+        </Space>
         {dirty && <span className="ws-dirty">●</span>}
         {/* 沙箱状态徽章 */}
         {sandbox && (

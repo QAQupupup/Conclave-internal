@@ -1,5 +1,7 @@
-// 系统封面页：优雅极简入口，点击"进入"后跳转至任务看板
+// 系统封面页：使用 AntD Button + Typography
 import { useEffect, useState } from 'react'
+import { Button, Typography } from 'antd'
+import { ArrowRightOutlined } from '@ant-design/icons'
 
 interface LandingPageProps {
   onEnter: () => void
@@ -9,7 +11,6 @@ export function LandingPage({ onEnter }: LandingPageProps) {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    // 入场动画
     const timer = setTimeout(() => setVisible(true), 50)
     return () => clearTimeout(timer)
   }, [])
@@ -29,20 +30,24 @@ export function LandingPage({ onEnter }: LandingPageProps) {
             <circle cx="46" cy="24" r="2.5" fill="currentColor" />
           </svg>
         </div>
-        <h1 className="landing-title">Conclave</h1>
-        <p className="landing-tagline">
+        <Typography.Title level={1} className="landing-title" style={{ margin: '16px 0 8px' }}>
+          Conclave
+        </Typography.Title>
+        <Typography.Paragraph className="landing-tagline" type="secondary" style={{ fontSize: 16, margin: '0 0 8px' }}>
           多智能体会议系统 · 结构化议题审议与决策
-        </p>
-        <p className="landing-desc">
+        </Typography.Paragraph>
+        <Typography.Paragraph className="landing-desc" type="secondary" style={{ margin: '0 0 32px' }}>
           多角色智能体协作 · 六阶段审议流程 · 实时可观测
-        </p>
-        <button
-          type="button"
-          className="btn btn-primary landing-enter-btn"
+        </Typography.Paragraph>
+        <Button
+          type="primary"
+          size="large"
+          icon={<ArrowRightOutlined />}
           onClick={onEnter}
+          className="landing-enter-btn"
         >
           进入系统
-        </button>
+        </Button>
       </div>
     </div>
   )

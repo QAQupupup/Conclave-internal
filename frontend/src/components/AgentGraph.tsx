@@ -7,6 +7,8 @@
 //   - 支持动态路由(flow_plan/dynamic_routing)：跳过的阶段在进度条上标注
 //   - 连线用柔和贝塞尔曲线，按关系类型着色；不画全连接，只画有语义的连线
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Space } from 'antd'
+import { ZoomInOutlined, ZoomOutOutlined, ExpandOutlined } from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { ROLE_META, STAGE_LABELS, STAGE_ORDER } from '../types/events.ts'
 import type { MeetingState, Role, Stage } from '../types/events.ts'
@@ -496,20 +498,17 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
           <span className="graph-title">会议拓扑</span>
           <span className="graph-stats">{agents.length} 位成员{conflicts.length > 0 ? ` · ${conflicts.length} 项冲突` : ''}</span>
         </div>
-        <div className="graph-zoom-controls">
-          <button type="button" className="btn btn-sm" onClick={() => setScale(s => Math.min(2, s + 0.15))}>+</button>
+        <Space size={4}>
+          <Button size="small" icon={<ZoomInOutlined />} onClick={() => setScale(s => Math.min(2, s + 0.15))} />
           <span className="graph-zoom-label">{Math.round(scale * 100)}%</span>
-          <button type="button" className="btn btn-sm" onClick={() => setScale(s => Math.max(0.5, s - 0.15))}>−</button>
-          <button type="button" className="btn btn-sm" onClick={() => { setScale(1); setTranslate({ x: 0, y: 0 }) }}>重置</button>
+          <Button size="small" icon={<ZoomOutOutlined />} onClick={() => setScale(s => Math.max(0.5, s - 0.15))} />
+          <Button size="small" onClick={() => { setScale(1); setTranslate({ x: 0, y: 0 }) }}>重置</Button>
           {!focused && (
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => setFocused(true)}>
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ marginRight: 4 }}>
-                <path d="M2 5V2H5M11 5V2H8M2 8V11H5M11 8V11H8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
+            <Button type="primary" size="small" icon={<ExpandOutlined />} onClick={() => setFocused(true)}>
               聚焦查看
-            </button>
+            </Button>
           )}
-        </div>
+        </Space>
       </div>
 
       {/* 阶段进度迷你条 */}

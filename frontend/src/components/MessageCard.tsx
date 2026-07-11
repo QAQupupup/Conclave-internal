@@ -1,7 +1,9 @@
 // 单条发言卡片：按角色着色，渲染内容与 claim_refs（证据 ref 可点击高亮右侧面板）
 // 增强：淡入上滑动画、HH:MM:SS 发言时间、超长消息折叠/展开
-// 增强 2：复制按钮、FocusMode 放大查看（保持原有简洁样式，不做颜色高亮）
+// 增强 2：复制按钮、FocusMode 放大查看（使用 AntD Card + Tag + Button + Typography）
 import { useState } from 'react'
+import { Card, Tag, Button, Space, Typography } from 'antd'
+import { ExpandOutlined, CompressOutlined, CopyOutlined, CheckOutlined, ZoomInOutlined } from '@ant-design/icons'
 import type { MeetingMessage } from '../types/events.ts'
 import { ROLE_LABELS, STAGE_LABELS } from '../types/events.ts'
 import { FocusMode } from './FocusMode.tsx'
@@ -9,6 +11,8 @@ import { formatTime, tryFormatJson, truncate } from '../lib/format.ts'
 import { useCopy } from '../hooks/useCopy.ts'
 import { renderMessageContent } from './MessageContent.tsx'
 import { EvidenceList } from './EvidenceBadge.tsx'
+
+const { Text } = Typography
 
 interface MessageCardProps {
   message: MeetingMessage
@@ -19,7 +23,21 @@ interface MessageCardProps {
 /** 超过该字符数视为长消息，默认折叠 */
 const COLLAPSE_THRESHOLD = 300
 
-/** 角色 → CSS 颜色类 */
+/** 角色 → AntD Tag color */
+function roleTagColor(role: MeetingMessage['agent_role']): string {
+  switch (role) {
+    case 'moderator':
+      return 'purple'
+    case 'product_architect':
+      return 'blue'
+    case 'engineer':
+      return 'green'
+    default:
+      return 'default'
+  }
+}
+
+/** 角色 → CSS class（保留用于卡片边框着色） */
 function roleClass(role: MeetingMessage['agent_role']): string {
   switch (role) {
     case 'moderator':
@@ -45,56 +63,71 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
   const truncatedText = isLong && !isExpanded ? truncate(displayText, COLLAPSE_THRESHOLD) : displayText
 
   return (
-    <div className={`message-card ${roleClass(role)} message-in${isExpanded ? ' is-expanded' : ''}`}>
+    <Card
+      className={`message-card ${roleClass(role)} message-in${isExpanded ? ' is-expanded' : ''}`}
+      size="small"
+      styles={{ body: { padding: '12px 16px' } }}
+    >
       <div className="message-head">
-        <span className="message-role">{ROLE_LABELS[role] ?? role}</span>
-        <span className="message-stage">{STAGE_LABELS[message.stage] ?? message.stage}</span>
-        {message.created_at && (
-          <span className="message-time">{formatTime(message.created_at)}</span>
-        )}
+        <Space size={8}>
+          <Tag color={roleTagColor(role)} style={{ margin: 0 }}>
+            {ROLE_LABELS[role] ?? role}
+          </Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {STAGE_LABELS[message.stage] ?? message.stage}
+          </Text>
+          {message.created_at && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {formatTime(message.created_at)}
+            </Text>
+          )}
+        </Space>
       </div>
-      <div className="message-content">{renderMessageContent(truncatedText)}</div>
-      <div className="message-actions">
-        <div className="message-actions-left">
+      <div className="message-content" style={{ marginBlock: '8px 0' }}>
+        {renderMessageContent(truncatedText)}
+      </div>
+      <div className="message-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+        <Space size={4}>
           {isLong && (
-            <button
-              type="button"
-              className="btn btn-ghost expand-btn"
+            <Button
+              type="text"
+              size="small"
+              icon={isExpanded ? <CompressOutlined /> : <ExpandOutlined />}
               onClick={() => setIsExpanded(v => !v)}
             >
               {isExpanded ? '收起' : '展开全部'}
-            </button>
+            </Button>
           )}
-        </div>
-        <div className="message-actions-right">
-          <button
-            type="button"
-            className={`btn btn-ghost copy-btn${copied ? ' is-copied' : ''}`}
+        </Space>
+        <Space size={4}>
+          <Button
+            type="text"
+            size="small"
+            icon={copied ? <CheckOutlined /> : <CopyOutlined />}
             onClick={() => copy(displayText)}
-            title="复制完整内容到剪贴板"
           >
             {copied ? '已复制' : '复制'}
-          </button>
+          </Button>
           {isLong && (
-            <button
-              type="button"
-              className="btn btn-ghost focus-btn"
+            <Button
+              type="text"
+              size="small"
+              icon={<ZoomInOutlined />}
               onClick={() => setFocused(true)}
-              title="放大查看完整内容"
             >
               放大查看
-            </button>
+            </Button>
           )}
-        </div>
+        </Space>
       </div>
       {refs.length > 0 && (
-        <div className="message-refs">
+        <div className="message-refs" style={{ marginTop: 8 }}>
           <EvidenceList refs={refs} onSelectRef={onSelectRef} />
         </div>
       )}
       <FocusMode open={focused} onClose={() => setFocused(false)} title={ROLE_LABELS[role] ?? role}>
         <div className="message-content-full">{renderMessageContent(displayText)}</div>
       </FocusMode>
-    </div>
+    </Card>
   )
 }

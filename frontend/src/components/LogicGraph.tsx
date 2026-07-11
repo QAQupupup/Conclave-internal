@@ -10,6 +10,8 @@
 //  6) 边的起点/终点精确到节点中线，贝塞尔弧线
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
+import { Button, Space } from 'antd'
+import { ZoomInOutlined, ZoomOutOutlined, ExpandOutlined } from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { FocusMode } from './FocusMode.tsx'
 
@@ -500,28 +502,22 @@ function LogicGraphInner({
         <span className="logic-graph-stats">
           {claimNodes.length} 主张 · {conflictNodes.length} 冲突 · {decisionNodes.length} 裁决
         </span>
-        <div className="logic-graph-controls">
-          <button className="btn btn-sm" onClick={zoomOut} title="缩小">−</button>
+        <Space size={4}>
+          <Button size="small" icon={<ZoomOutOutlined />} onClick={zoomOut} title="缩小" />
           <span className="logic-graph-zoom">{Math.round(scale * 100)}%</span>
-          <button className="btn btn-sm" onClick={zoomIn} title="放大">+</button>
-          <button className="btn btn-sm" onClick={fit} title="适应窗口">适应</button>
-          <button className="btn btn-sm" onClick={reset} title="重置">重置</button>
-          <button
-            className="btn btn-sm btn-primary logic-graph-focus-btn"
+          <Button size="small" icon={<ZoomInOutlined />} onClick={zoomIn} title="放大" />
+          <Button size="small" onClick={fit} title="适应窗口">适应</Button>
+          <Button size="small" onClick={reset} title="重置">重置</Button>
+          <Button
+            type="primary"
+            size="small"
+            icon={<ExpandOutlined />}
             onClick={onFocus}
-            title="聚焦模式（撑起画布专注查看，不改变缩放）"
+            title="聚焦模式"
           >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ marginRight: 4 }}>
-              <path
-                d="M2 5V2H5M11 5V2H8M2 8V11H5M11 8V11H8"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
             聚焦查看
-          </button>
-        </div>
+          </Button>
+        </Space>
       </div>
 
       <div

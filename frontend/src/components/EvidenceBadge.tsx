@@ -1,16 +1,20 @@
 // 统一证据渲染组件：把机器可读的证据引用转换为人类友好格式
 // 支持三级可靠性：已核验(verified) / 可追溯(traceable) / 推理假设(assumption)
-// 格式：图标 + 来源名称 + 可靠性标签 + 可点击链接
+// 使用 AntD Tag + Badge + Typography
 import { useState } from 'react'
+import { Tag, Button, Space, Typography } from 'antd'
+import { CheckCircleOutlined, LinkOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+
+const { Text } = Typography
 
 // ---------- 证据等级 ----------
 
 export type EvidenceLevel = 'verified' | 'traceable' | 'assumption'
 
-const LEVEL_CONFIG: Record<EvidenceLevel, { label: string; cls: string; icon: string }> = {
-  verified:   { label: '已核验', cls: 'ev-lvl-verified',   icon: '✓' },
-  traceable:  { label: '可追溯', cls: 'ev-lvl-traceable',  icon: '↗' },
-  assumption: { label: '推理假设', cls: 'ev-lvl-assumption', icon: '?' },
+const LEVEL_CONFIG: Record<EvidenceLevel, { label: string; color: string; icon: React.ReactNode }> = {
+  verified:   { label: '已核验', color: 'green', icon: <CheckCircleOutlined /> },
+  traceable:  { label: '可追溯', color: 'blue', icon: <LinkOutlined /> },
+  assumption: { label: '推理假设', color: 'orange', icon: <QuestionCircleOutlined /> },
 }
 
 // ---------- 证据条目 ----------
@@ -98,23 +102,21 @@ export function EvidenceBadge({ item, onClick, expanded: forceExpanded, classNam
   }
 
   return (
-    <span className={`evidence-badge ${cfg.cls} ${className}${expanded ? ' is-expanded' : ''}`}>
-      <button
-        type="button"
-        className="evidence-badge-trigger"
+    <span className={`evidence-badge ${className}${expanded ? ' is-expanded' : ''}`}>
+      <Tag
+        icon={cfg.icon}
+        color={cfg.color}
+        style={{ cursor: 'pointer', marginBottom: 4 }}
         onClick={handleClick}
         title={item.sourceName ?? item.id}
       >
-        <span className="evidence-badge-icon">{cfg.icon}</span>
-        <span className="evidence-badge-label">
-          {item.sourceName ?? item.id}
-        </span>
-        <span className={`evidence-badge-level ${cfg.cls}`}>{cfg.label}</span>
-      </button>
+        <span>{item.sourceName ?? item.id}</span>
+        <span style={{ marginInlineStart: 4, opacity: 0.7 }}>({cfg.label})</span>
+      </Tag>
       {expanded && item.quote && (
-        <span className="evidence-badge-quote">
-          「{item.quote}」
-        </span>
+        <div style={{ padding: '4px 8px', background: 'var(--bg-secondary, #f9fafb)', borderRadius: 4, marginTop: 4 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>「{item.quote}」</Text>
+        </div>
       )}
     </span>
   )
@@ -140,7 +142,7 @@ export function EvidenceList({ refs, onSelectRef, visibleCount = 3 }: EvidenceLi
   if (refs.length === 0) return null
 
   return (
-    <div className="evidence-list">
+    <div className="evidence-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
       {visible.map((ref, i) => (
         <EvidenceBadge
           key={`${ref}-${i}`}
@@ -149,13 +151,13 @@ export function EvidenceList({ refs, onSelectRef, visibleCount = 3 }: EvidenceLi
         />
       ))}
       {hasMany && (
-        <button
-          type="button"
-          className="evidence-list-toggle"
+        <Button
+          type="link"
+          size="small"
           onClick={() => setExpanded(v => !v)}
         >
           {expanded ? '收起' : `+${hidden}`}
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -170,19 +172,19 @@ export interface EvidenceDetailProps {
 
 export function EvidenceDetail({ items, title = '证据链' }: EvidenceDetailProps) {
   if (items.length === 0) {
-    return <div className="evidence-detail-empty">暂无证据引用</div>
+    return <Text type="secondary">暂无证据引用</Text>
   }
   return (
     <div className="evidence-detail">
-      <div className="evidence-detail-title">{title}</div>
-      <div className="evidence-detail-list">
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>{title}</Text>
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
         {items.map((item, i) => (
-          <div key={item.id} className="evidence-detail-row">
-            <span className="evidence-detail-index">{i + 1}.</span>
+          <div key={item.id} style={{ display: 'flex', gap: 8 }}>
+            <Text type="secondary">{i + 1}.</Text>
             <EvidenceBadge item={item} expanded />
           </div>
         ))}
-      </div>
+      </Space>
     </div>
   )
 }

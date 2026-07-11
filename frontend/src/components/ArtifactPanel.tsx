@@ -1,8 +1,13 @@
 // 右下：PRD 结构化预览 + OpenAPI 语法高亮 + 一键复制 + 借调入口 + 附件列表(跳转工作区)
+// 使用 AntD Card + Button + List + Tag + Empty + Typography + Collapse
+import { Card, Button, List, Tag, Empty, Typography, Space, Divider } from 'antd'
+import { CopyOutlined, CheckOutlined, DownloadOutlined, FolderOpenOutlined, UserSwitchOutlined } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import type { PRD } from '../types/events.ts'
 import { useCopy } from '../hooks/useCopy.ts'
+
+const { Text, Title } = Typography
 
 interface Attachment {
   filename: string
@@ -25,14 +30,14 @@ export function ArtifactPanel({ onOpenBorrow, onOpenInWorkspace }: ArtifactPanel
 
   return (
     <section className="panel artifact-panel">
-      <div className="panel-title">
-        产物预览
-        <button type="button" className="btn btn-ghost borrow-btn" onClick={onOpenBorrow}>
+      <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>产物预览</span>
+        <Button type="link" size="small" icon={<UserSwitchOutlined />} onClick={onOpenBorrow}>
           借调专家
-        </button>
+        </Button>
       </div>
       {!artifact ? (
-        <div className="empty-hint">会议进行中，产出物将在 produce 阶段生成</div>
+        <Empty description="会议进行中，产出物将在 produce 阶段生成" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
         <div className="artifact-body">
           <PRDSection prd={artifact.prd} />
@@ -63,121 +68,109 @@ function AttachmentsSection({
   if (list.length === 0) return null
 
   return (
-    <div className="attachments-block">
-      <div className="attachments-head">
-        <span className="field-label">产出文件（{list.length}）</span>
-      </div>
-      <ul className="attachments-list">
-        {list.map((att, i) => {
-          // 从完整路径提取相对路径（用于工作区跳转）
-          const relPath = meetingId
-            ? att.filename
-            : att.path.split(/[/\\]/).slice(-1)[0]
+    <Card size="small" title={`产出文件（${list.length}）`} style={{ marginTop: 12 }}>
+      <List
+        size="small"
+        dataSource={list}
+        renderItem={(att, i) => {
+          const relPath = meetingId ? att.filename : att.path.split(/[/\\]/).slice(-1)[0]
           return (
-            <li key={i} className="attachment-item">
-              <span className="attachment-icon">{att.ext || '📄'}</span>
-              <div className="attachment-info">
-                <span className="attachment-name">{att.filename}</span>
-                {att.size != null && (
-                  <span className="attachment-size">
-                    {att.size > 1024 ? `${(att.size / 1024).toFixed(1)}KB` : `${att.size}B`}
-                  </span>
-                )}
-              </div>
-              <div className="attachment-actions">
-                {/* 下载链接 */}
-                {meetingId && (
+            <List.Item
+              key={i}
+              actions={[
+                meetingId && (
                   <a
-                    className="btn btn-sm btn-ghost"
+                    key="download"
                     href={`/meetings/${meetingId}/attachments/${encodeURIComponent(att.filename)}`}
                     download={att.filename}
                     title="下载"
                   >
-                    下载
+                    <Button type="text" size="small" icon={<DownloadOutlined />}>下载</Button>
                   </a>
-                )}
-                {/* 在工作区打开 */}
-                {onOpenInWorkspace && (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    title="在工作区编辑器中打开"
+                ),
+                onOpenInWorkspace && (
+                  <Button
+                    key="workspace"
+                    type="text"
+                    size="small"
+                    icon={<FolderOpenOutlined />}
                     onClick={() => onOpenInWorkspace(relPath)}
                   >
                     在工作区打开
-                  </button>
-                )}
-              </div>
-            </li>
+                  </Button>
+                ),
+              ].filter(Boolean) as ReactNode[]}
+            >
+              <List.Item.Meta
+                title={
+                  <Space>
+                    <Tag>{att.ext || 'FILE'}</Tag>
+                    <Text>{att.filename}</Text>
+                  </Space>
+                }
+                description={att.size != null ? (att.size > 1024 ? `${(att.size / 1024).toFixed(1)}KB` : `${att.size}B`) : undefined}
+              />
+            </List.Item>
           )
-        })}
-      </ul>
-    </div>
+        }}
+      />
+    </Card>
   )
 }
 
 /* ============================ PRD 区域 ============================ */
 
-/** 列表字段图标 */
-const LIST_ICONS: { icon: string; cls: string }[] = [
-  { icon: '◆', cls: 'icon-assumption' },
-  { icon: '■', cls: 'icon-constraint' },
-  { icon: '→', cls: 'icon-api' },
-  { icon: '?', cls: 'icon-question' },
-]
-
 function PRDSection({ prd }: { prd: PRD | undefined }) {
   const { copied, copy } = useCopy()
   const handleCopy = () => copy(prdToMarkdown(prd))
   return (
-    <div className="prd-block">
-      <div className="prd-head">
-        <div className="prd-title">{prd?.title || '未命名 PRD'}</div>
-        <button type="button" className="btn btn-ghost copy-btn" onClick={handleCopy}>
+    <Card size="small" style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <Title level={5} style={{ margin: 0 }}>{prd?.title || '未命名 PRD'}</Title>
+        <Button
+          type="text"
+          size="small"
+          icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+          onClick={handleCopy}
+        >
           {copied ? '已复制' : '复制 PRD'}
-        </button>
+        </Button>
       </div>
-      <div className="prd-field">
-        <span className="field-label">目标</span>
-        <div className="field-value">{prd?.goal || '—'}</div>
+      <div style={{ marginBottom: 8 }}>
+        <Text type="secondary">目标</Text>
+        <div><Text>{prd?.goal || '—'}</Text></div>
       </div>
-      <div className="prd-field">
-        <span className="field-label">范围</span>
-        <div className="field-value">{prd?.scope || '—'}</div>
+      <div style={{ marginBottom: 8 }}>
+        <Text type="secondary">范围</Text>
+        <div><Text>{prd?.scope || '—'}</Text></div>
       </div>
-      <ListField icon={LIST_ICONS[0]} label="假设" items={prd?.assumptions} />
-      <ListField icon={LIST_ICONS[1]} label="约束" items={prd?.constraints} />
-      <ListField icon={LIST_ICONS[2]} label="API 端点" items={prd?.api_endpoints} />
-      <ListField icon={LIST_ICONS[3]} label="遗留问题" items={prd?.open_questions} />
-    </div>
+      <Divider style={{ margin: '8px 0' }} />
+      <ListField label="假设" items={prd?.assumptions} color="gold" />
+      <ListField label="约束" items={prd?.constraints} color="orange" />
+      <ListField label="API 端点" items={prd?.api_endpoints} color="blue" />
+      <ListField label="遗留问题" items={prd?.open_questions} color="red" />
+    </Card>
   )
 }
 
-/** 带图标的字符串列表字段 */
-function ListField({
-  icon,
-  label,
-  items,
-}: {
-  icon: { icon: string; cls: string }
-  label: string
-  items?: string[]
-}) {
+/** 带颜色标签的字符串列表字段 */
+function ListField({ label, items, color }: { label: string; items?: string[]; color: string }) {
   const arr = items ?? []
   return (
-    <div className="prd-field">
-      <span className="field-label">
-        {label}（{arr.length}）
-      </span>
-      <ul className="prd-list">
-        {arr.length === 0 && <li className="muted">无</li>}
-        {arr.map((item, i) => (
-          <li key={i}>
-            <span className={`list-icon ${icon.cls}`}>{icon.icon}</span>
-            <span className="list-text">{item}</span>
-          </li>
-        ))}
-      </ul>
+    <div style={{ marginBottom: 8 }}>
+      <Text type="secondary">{label}（{arr.length}）</Text>
+      {arr.length === 0 ? (
+        <div><Text type="secondary">无</Text></div>
+      ) : (
+        <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+          {arr.map((item, i) => (
+            <li key={i} style={{ marginBottom: 2 }}>
+              <Tag color={color} style={{ marginInlineEnd: 4 }}>{label.charAt(0)}</Tag>
+              <Text>{item}</Text>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -217,21 +210,23 @@ function OpenAPISection({ yaml }: { yaml: string | undefined }) {
   const text = yaml || '# 暂无 OpenAPI'
   const handleCopy = () => copy(text)
   return (
-    <div className="openapi-block">
-      <div className="openapi-head">
-        <span className="field-label">OpenAPI 片段</span>
-        <button type="button" className="btn btn-ghost copy-btn" onClick={handleCopy}>
-          {copied ? '已复制' : '复制 OpenAPI'}
-        </button>
-      </div>
-      <pre className="code-block yaml-code">{highlightYaml(text)}</pre>
-    </div>
+    <Card size="small" title="OpenAPI 片段" style={{ marginTop: 12 }} extra={
+      <Button
+        type="text"
+        size="small"
+        icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+        onClick={handleCopy}
+      >
+        {copied ? '已复制' : '复制 OpenAPI'}
+      </Button>
+    }>
+      <pre className="code-block yaml-code" style={{ margin: 0, fontSize: 12, maxHeight: 300, overflow: 'auto' }}>{highlightYaml(text)}</pre>
+    </Card>
   )
 }
 
 /**
  * YAML 简单语法高亮：键名蓝、字符串绿、注释灰，其余默认色。按行处理。
- * 不引入外部库，仅用正则做 key:value 拆分。
  */
 function highlightYaml(text: string): ReactNode {
   const lines = text.split('\n')
@@ -246,31 +241,27 @@ function highlightYaml(text: string): ReactNode {
   )
 }
 
-/** 处理单行：整行注释 / key:value / 列表项 / 普通行 */
 function renderYamlLine(line: string): ReactNode {
-  // 整行注释（含前导空白）
   const commentOnly = line.match(/^(\s*)(#.*)$/)
   if (commentOnly) {
     return (
       <>
         {commentOnly[1]}
-        <span className="yaml-comment">{commentOnly[2]}</span>
+        <span style={{ color: '#8b949e' }}>{commentOnly[2]}</span>
       </>
     )
   }
-  // key: value
   const kv = line.match(/^(\s*)([\w.-]+):(.*)$/)
   if (kv) {
     return (
       <>
         {kv[1]}
-        <span className="yaml-key">{kv[2]}</span>
-        <span className="yaml-colon">:</span>
+        <span style={{ color: '#79c0ff' }}>{kv[2]}</span>
+        <span>:</span>
         {renderValue(kv[3])}
       </>
     )
   }
-  // 列表项
   const li = line.match(/^(\s*-\s+)(.*)$/)
   if (li) {
     return (
@@ -280,11 +271,9 @@ function renderYamlLine(line: string): ReactNode {
       </>
     )
   }
-  // 其余：高亮行内字符串与注释
   return renderValue(line)
 }
 
-/** 处理值部分：剥离行内注释，高亮引号字符串 */
 function renderValue(valuePart: string): ReactNode {
   const { main, comment } = splitComment(valuePart)
   const strMatch = main.match(/^(\s*)("[^"]*"|'[^']*')(.*)$/)
@@ -292,21 +281,20 @@ function renderValue(valuePart: string): ReactNode {
     return (
       <>
         {strMatch[1]}
-        <span className="yaml-string">{strMatch[2]}</span>
+        <span style={{ color: '#a5d6ff' }}>{strMatch[2]}</span>
         {strMatch[3]}
-        {comment ? <span className="yaml-comment">{comment}</span> : null}
+        {comment ? <span style={{ color: '#8b949e' }}>{comment}</span> : null}
       </>
     )
   }
   return (
     <>
       {main}
-      {comment ? <span className="yaml-comment">{comment}</span> : null}
+      {comment ? <span style={{ color: '#8b949e' }}>{comment}</span> : null}
     </>
   )
 }
 
-/** 把值中的行内注释拆分出来（引号外的 # 视为注释起点） */
 function splitComment(valuePart: string): { main: string; comment: string } {
   let inDouble = false
   let inSingle = false
@@ -316,7 +304,6 @@ function splitComment(valuePart: string): { main: string; comment: string } {
     else if (ch === "'" && !inDouble) inSingle = !inSingle
     else if (ch === '#' && !inDouble && !inSingle) {
       const prev = valuePart[i - 1]
-      // # 前为空白或行首才算注释起点
       if (prev === undefined || prev === ' ' || prev === '\t') {
         return { main: valuePart.slice(0, i), comment: valuePart.slice(i) }
       }

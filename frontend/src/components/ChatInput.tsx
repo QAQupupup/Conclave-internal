@@ -1,8 +1,13 @@
 // 聊天输入框：支持 @ 唤起历史会议搜索 → 注入引用
 // 类似 Cursor/Terminal 中的 @mention 交互模式
+// 使用 AntD Input.TextArea + Button + Tag
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { Input, Button, Tag, Typography, Space } from 'antd'
+import { SendOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { listMeetings, type MeetingListItem } from '../lib/api.ts'
+
+const { Text } = Typography
 
 interface Props {
   meetingId: string
@@ -17,7 +22,7 @@ export function ChatInput({ meetingId }: Props) {
   const [selectedRefs, setSelectedRefs] = useState<{ id: string; topic: string }[]>([])
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const textareaRef = useRef<import('antd/es/input/TextArea').TextAreaRef>(null)
   const mentionRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -136,56 +141,92 @@ export function ChatInput({ meetingId }: Props) {
     <div className="chat-input-wrap">
       {/* 已选引用标签 */}
       {selectedRefs.length > 0 && (
-        <div className="chat-input-refs">
-          {selectedRefs.map(ref => (
-            <span key={ref.id} className="chat-input-ref-chip" title={ref.topic}>
-              📎 {ref.topic.slice(0, 25)}
-              <button onClick={() => removeRef(ref.id)} className="chat-input-ref-remove">&times;</button>
-            </span>
-          ))}
+        <div className="chat-input-refs" style={{ marginBottom: 8 }}>
+          <Space wrap size={[4, 4]}>
+            {selectedRefs.map(ref => (
+              <Tag
+                key={ref.id}
+                icon={<PaperClipOutlined />}
+                closable
+                onClose={() => removeRef(ref.id)}
+                color="blue"
+              >
+                {ref.topic.slice(0, 25)}
+              </Tag>
+            ))}
+          </Space>
         </div>
       )}
 
-      <div className="chat-input-row">
-        <textarea
+      <div className="chat-input-row" style={{ display: 'flex', gap: 8 }}>
+        <Input.TextArea
           ref={textareaRef}
-          className="chat-input-textarea"
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="输入消息… 输入 @ 引用历史会议"
-          rows={1}
+          autoSize={{ minRows: 1, maxRows: 4 }}
           disabled={busy}
+          style={{ flex: 1 }}
         />
-        <button
-          className="chat-input-send"
+        <Button
+          type="primary"
+          icon={<SendOutlined />}
           onClick={handleSubmit}
-          disabled={busy || !text.trim()}
+          loading={busy}
+          disabled={!text.trim()}
           title="发送 (Enter)"
-        >
-          {busy ? '…' : '↑'}
-        </button>
+        />
       </div>
 
-      {status && <div className="chat-input-status">{status}</div>}
+      {status && (
+        <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+          {status}
+        </Text>
+      )}
 
       {/* @mention 下拉 */}
       {showMention && (
-        <div ref={mentionRef} className="chat-mention-dropdown">
-          <div className="chat-mention-header">引用历史会议</div>
+        <div
+          ref={mentionRef}
+          className="chat-mention-dropdown"
+          style={{
+            background: 'var(--card-bg, #fff)',
+            border: '1px solid var(--border-color, #e5e7eb)',
+            borderRadius: 8,
+            marginTop: 4,
+            maxHeight: 260,
+            overflowY: 'auto',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          }}
+        >
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color, #e5e7eb)' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>引用历史会议</Text>
+          </div>
           {mentionResults.length === 0 && (
-            <div className="chat-mention-empty">未找到匹配的会议</div>
+            <div style={{ padding: '12px', textAlign: 'center' }}>
+              <Text type="secondary">未找到匹配的会议</Text>
+            </div>
           )}
           {mentionResults.map(m => {
             const isSelected = selectedRefs.some(r => r.id === m.meeting_id)
             return (
               <div
                 key={m.meeting_id}
-                className={`chat-mention-item${isSelected ? ' selected' : ''}`}
+                style={{
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  background: isSelected ? 'var(--accent-bg, #eef2ff)' : 'transparent',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
                 onClick={() => selectMention(m)}
+                onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--hover-bg, #f9fafb)' }}
+                onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
               >
-                <span className="chat-mention-topic">{m.topic}</span>
-                <span className="chat-mention-id">{m.meeting_id.slice(-8)}</span>
+                <Text ellipsis style={{ maxWidth: '70%' }}>{m.topic}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{m.meeting_id.slice(-8)}</Text>
               </div>
             )
           })}

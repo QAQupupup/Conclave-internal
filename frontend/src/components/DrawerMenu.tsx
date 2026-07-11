@@ -1,7 +1,11 @@
 // 左侧可折叠抽屉菜单：在看板/运维面板层级显示
-// 与会议视图内的 MeetingSidebar 互斥（不同层级）
+// 使用 AntD Layout.Sider + Menu + Button
+import { Layout, Menu, Button } from 'antd'
+import { AppstoreOutlined, BarChartOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { navigate } from '../lib/router.ts'
 import { usePersistentState } from '../hooks/usePersistentState.ts'
+
+const { Sider } = Layout
 
 interface DrawerMenuProps {
   currentPath: string
@@ -13,71 +17,49 @@ export function DrawerMenu({ currentPath }: DrawerMenuProps) {
     false,
   )
 
-  const items = [
-    { id: 'board', label: '会议看板', path: '/board' },
-    { id: 'dashboard', label: '运维面板', path: '/dashboard' },
+  const menuItems = [
+    { key: '/board', icon: <AppstoreOutlined />, label: '会议看板' },
+    { key: '/dashboard', icon: <BarChartOutlined />, label: '运维面板' },
   ]
 
-  const activeItem = items.find((item) => item.path === currentPath)?.id || 'board'
-
-  if (collapsed) {
-    return (
-      <div className="drawer-menu drawer-collapsed">
-        <button
-          type="button"
-          className="drawer-expand-btn"
-          onClick={() => setCollapsed(false)}
-          title="展开菜单"
-          aria-label="展开菜单"
-        >
-          <span className="drawer-icon">›</span>
-        </button>
-      </div>
-    )
-  }
+  const selectedKey = currentPath === '/dashboard' ? '/dashboard' : '/board'
 
   return (
-    <div className="drawer-menu">
-      <div className="drawer-header">
-        <span className="drawer-title">Conclave</span>
-        <button
-          type="button"
-          className="drawer-collapse-btn"
-          onClick={() => setCollapsed(true)}
-          title="收起菜单"
-          aria-label="收起菜单"
-        >
-          ‹
-        </button>
+    <Sider
+      collapsible
+      collapsed={collapsed}
+      onCollapse={setCollapsed}
+      trigger={null}
+      width={200}
+      collapsedWidth={48}
+      style={{
+        background: 'var(--card-bg, #fff)',
+        borderRight: '1px solid var(--border-color, #e5e7eb)',
+        minHeight: '100vh',
+      }}
+    >
+      <div style={{
+        padding: collapsed ? '16px 8px' : '16px',
+        display: 'flex',
+        justifyContent: collapsed ? 'center' : 'space-between',
+        alignItems: 'center',
+        borderBottom: '1px solid var(--border-color, #e5e7eb)',
+      }}>
+        {!collapsed && <span style={{ fontWeight: 600, fontSize: 16 }}>Conclave</span>}
+        <Button
+          type="text"
+          size="small"
+          icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+          onClick={() => setCollapsed(!collapsed)}
+        />
       </div>
-      <nav className="drawer-nav">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`drawer-item ${item.id === activeItem ? 'active' : ''}`}
-            onClick={() => navigate(item.path)}
-          >
-            <span className="drawer-item-icon">
-              {item.id === 'board' ? (
-                <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <rect x="1" y="1" width="6" height="6" rx="1" />
-                  <rect x="9" y="1" width="6" height="6" rx="1" />
-                  <rect x="1" y="9" width="6" height="6" rx="1" />
-                  <rect x="9" y="9" width="6" height="6" rx="1" />
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="1" y="3" width="4" height="10" rx="1" />
-                  <rect x="6.5" y="6" width="4" height="7" rx="1" />
-                  <rect x="12" y="1" width="4" height="12" rx="1" />
-                </svg>
-              )}
-            </span>
-            <span className="drawer-item-label">{item.label}</span>
-          </button>
-        ))}
-      </nav>
-    </div>
+      <Menu
+        mode="inline"
+        selectedKeys={[selectedKey]}
+        items={menuItems}
+        onClick={({ key }) => navigate(key)}
+        style={{ borderRight: 'none' }}
+      />
+    </Sider>
   )
 }

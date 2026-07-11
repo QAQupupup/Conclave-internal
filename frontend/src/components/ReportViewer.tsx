@@ -1,5 +1,9 @@
 // 报告查看器：可折叠的会议完整报告，支持下载 Markdown
 // 展示会议信息、执行摘要、议题澄清、团队讨论、冲突与裁决、证据对照、最终产出
+// 使用 AntD Card + Typography + Divider + Button + Tag + Rate + Descriptions
+import { Card, Button, Divider, Tag, Typography, Rate, Descriptions, Space } from 'antd'
+import { DownloadOutlined } from '@ant-design/icons'
+import { useState } from 'react'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { LogicGraph } from './LogicGraph.tsx'
 import { CollapsibleSection } from './CollapsibleSection.tsx'
@@ -7,6 +11,8 @@ import { formatDateTime } from '../lib/format.ts'
 import { downloadFile } from '../lib/download.ts'
 import { STAGE_NAMES } from '../constants.ts'
 import { renderMessageContent } from './MessageContent.tsx'
+
+const { Text, Title, Paragraph } = Typography
 
 /** 格式化时间（使用统一的 lib/format，保持单一数据源） */
 const fmtTime = formatDateTime
@@ -19,7 +25,6 @@ function reportToMarkdown(state: any): string {
   if (state.clarified_topic) md += `> 澄清议题: ${state.clarified_topic}\n`
   md += '\n---\n\n'
 
-  // 关键问题
   if (state.key_questions?.length) {
     md += '## 关键问题\n'
     state.key_questions.forEach((q: string, i: number) => {
@@ -28,7 +33,6 @@ function reportToMarkdown(state: any): string {
     md += '\n'
   }
 
-  // 团队配置
   if (state.team_config?.length) {
     md += '## 团队配置\n'
     state.team_config.forEach((m: any) => {
@@ -37,7 +41,6 @@ function reportToMarkdown(state: any): string {
     md += '\n'
   }
 
-  // 发言记录
   if (state.messages?.length) {
     md += '## 讨论记录\n'
     state.messages.forEach((msg: any) => {
@@ -46,7 +49,6 @@ function reportToMarkdown(state: any): string {
     })
   }
 
-  // 冲突
   if (state.conflicts?.length) {
     md += '## 冲突点\n'
     state.conflicts.forEach((c: any, i: number) => {
@@ -56,7 +58,6 @@ function reportToMarkdown(state: any): string {
     })
   }
 
-  // 裁决
   if (state.decision_record?.decisions?.length) {
     md += '## 裁决结果\n'
     state.decision_record.decisions.forEach((d: any, i: number) => {
@@ -71,7 +72,6 @@ function reportToMarkdown(state: any): string {
     md += '\n'
   }
 
-  // 产出物
   if (state.artifact) {
     md += '## 最终产出\n'
     md += '```json\n' + JSON.stringify(state.artifact, null, 2) + '\n```\n'
@@ -80,14 +80,18 @@ function reportToMarkdown(state: any): string {
   return md
 }
 
-/** 阶段中文标签：直接复用 constants.ts 的 STAGE_NAMES（= STAGE_LABELS），保持单一数据源 */
-
 export function ReportViewer() {
   const { store } = useMeeting()
   const state = store.meeting
+  const [rating, setRating] = useState<number>(() => {
+    try {
+      const ratings = JSON.parse(localStorage.getItem('conclave_ratings') || '{}')
+      return ratings[state?.meeting_id ?? ''] || 0
+    } catch { return 0 }
+  })
+
   if (!state) return null
 
-  // llm_trace 与多类型 artifact 扩展字段不在严格类型中，统一按 any 访问
   const ext = state as any
 
   const messages = state.messages || []
@@ -100,48 +104,54 @@ export function ReportViewer() {
 
   return (
     <div className="report-viewer">
-      <div className="report-toolbar">
-        <h2>会议报告</h2>
-        <button
-          className="btn btn-sm"
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <Title level={3} style={{ margin: 0 }}>会议报告</Title>
+        <Button
+          icon={<DownloadOutlined />}
           onClick={() => downloadFile(`report_${state.meeting_id}.md`, reportToMarkdown(state))}
         >
           下载 Markdown
-        </button>
+        </Button>
       </div>
 
       {/* 会议信息 */}
       <CollapsibleSection title="会议信息" defaultOpen>
-        <div className="report-info">
-          <div><strong>议题:</strong> {state.topic}</div>
-          <div><strong>会议ID:</strong> {state.meeting_id}</div>
-          <div><strong>状态:</strong> {state.status}</div>
-          <div><strong>阶段:</strong> {state.stage}</div>
-          {state.clarified_topic && <div><strong>澄清议题:</strong> {state.clarified_topic}</div>}
-        </div>
+        <Descriptions column={1} size="small" bordered>
+          <Descriptions.Item label="议题">{state.topic}</Descriptions.Item>
+          <Descriptions.Item label="会议ID">{state.meeting_id}</Descriptions.Item>
+          <Descriptions.Item label="状态">
+            <Tag color={state.status === 'done' ? 'green' : 'blue'}>{state.status}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="阶段">{state.stage}</Descriptions.Item>
+          {state.clarified_topic && (
+            <Descriptions.Item label="澄清议题">{state.clarified_topic}</Descriptions.Item>
+          )}
+        </Descriptions>
       </CollapsibleSection>
 
       {/* 执行摘要 */}
       <CollapsibleSection title="执行摘要" defaultOpen>
-        <div className="report-summary">
+        <div>
           {state.confidence_flags &&
             Object.entries(state.confidence_flags).map(([stage, conf]) => (
-              <div key={stage} className="summary-row">
-                <span className="summary-stage">{STAGE_NAMES[stage as keyof typeof STAGE_NAMES] || stage}</span>
-                <span className={`summary-conf ${conf}`}>{conf}</span>
+              <div key={stage} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text>{STAGE_NAMES[stage as keyof typeof STAGE_NAMES] || stage}</Text>
+                <Tag color={conf === 'high' ? 'green' : conf === 'low' ? 'orange' : 'red'}>{String(conf)}</Tag>
               </div>
             ))}
           {ext.llm_trace && (
-            <div className="trace-summary">
-              <div>LLM 调用: {ext.llm_trace.total_calls || 0} 次</div>
-              <div>成功率: {ext.llm_trace.success_rate || 'N/A'}</div>
-              {ext.llm_trace.total_tokens > 0 && (
-                <div>
-                  Token: {ext.llm_trace.total_tokens} (输入 {ext.llm_trace.total_input_tokens} + 输出{' '}
-                  {ext.llm_trace.total_output_tokens})
-                </div>
-              )}
-            </div>
+            <Card size="small" style={{ marginTop: 8 }}>
+              <Space direction="vertical" size={4}>
+                <Text>LLM 调用: {ext.llm_trace.total_calls || 0} 次</Text>
+                <Text>成功率: {ext.llm_trace.success_rate || 'N/A'}</Text>
+                {ext.llm_trace.total_tokens > 0 && (
+                  <Text>
+                    Token: {ext.llm_trace.total_tokens} (输入 {ext.llm_trace.total_input_tokens} + 输出{' '}
+                    {ext.llm_trace.total_output_tokens})
+                  </Text>
+                )}
+              </Space>
+            </Card>
           )}
         </div>
       </CollapsibleSection>
@@ -149,9 +159,9 @@ export function ReportViewer() {
       {/* 关键问题 */}
       {state.key_questions && state.key_questions.length > 0 && (
         <CollapsibleSection title="关键问题">
-          <ol className="report-questions">
+          <ol style={{ margin: 0, paddingLeft: 20 }}>
             {state.key_questions.map((q: string, i: number) => (
-              <li key={i}>{q}</li>
+              <li key={i} style={{ marginBottom: 4 }}>{q}</li>
             ))}
           </ol>
         </CollapsibleSection>
@@ -160,54 +170,51 @@ export function ReportViewer() {
       {/* 团队配置 */}
       {state.team_config && state.team_config.length > 0 && (
         <CollapsibleSection title="团队配置">
-          <div className="report-team">
+          <Space direction="vertical" style={{ width: '100%' }}>
             {state.team_config.map((m: any, i: number) => (
-              <div key={i} className="team-member">
-                <span className="member-role">{m.role}</span>
-                <span className="member-stance">{m.stance}</span>
+              <div key={i} style={{ display: 'flex', gap: 8 }}>
+                <Tag color="blue">{m.role}</Tag>
+                <Text>{m.stance}</Text>
               </div>
             ))}
-          </div>
+          </Space>
         </CollapsibleSection>
       )}
 
       {/* 各阶段发言 */}
       {Object.entries(stageMessages).map(([stage, msgs]) => (
         <CollapsibleSection key={stage} title={STAGE_NAMES[stage as keyof typeof STAGE_NAMES] || stage}>
-          <div className="report-messages">
+          <Space direction="vertical" style={{ width: '100%' }} size={8}>
             {msgs.map((msg: any, i: number) => (
-              <div key={i} className="report-message">
-                <div className="message-header">
-                  <span className="message-role">{msg.agent_role || msg.role}</span>
-                  <span className="message-time">{fmtTime(msg.created_at || msg.ts || '')}</span>
+              <Card key={i} size="small">
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Tag>{msg.agent_role || msg.role}</Tag>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{fmtTime(msg.created_at || msg.ts || '')}</Text>
                 </div>
-                <div className="message-content">{renderMessageContent(msg.content)}</div>
-              </div>
+                <div>{renderMessageContent(msg.content)}</div>
+              </Card>
             ))}
-          </div>
+          </Space>
         </CollapsibleSection>
       ))}
 
-      {/* 逻辑关系图：主张 → 冲突 → 裁决 */}
+      {/* 逻辑关系图 */}
       {state.conflicts && state.conflicts.length > 0 && (
         <CollapsibleSection title="逻辑关系图（主张→冲突→裁决）">
           <LogicGraph />
         </CollapsibleSection>
       )}
 
-      {/* 最终产出：根据 deliverable_type 展示不同内容 */}
+      {/* 最终产出 */}
       {ext.artifact && (
         <CollapsibleSection title="最终产出" defaultOpen>
-          <div className="report-artifact">
+          <div>
             {ext.artifact.prd && (
-              <div className="artifact-block">
-                <h4>PRD: {ext.artifact.prd.title}</h4>
-                <p>
-                  <strong>目标:</strong> {ext.artifact.prd.goal}
-                </p>
+              <Card size="small" title={`PRD: ${ext.artifact.prd.title}`} style={{ marginBottom: 12 }}>
+                <Paragraph><Text strong>目标: </Text>{ext.artifact.prd.goal}</Paragraph>
                 {ext.artifact.prd.api_endpoints?.length > 0 && (
                   <div>
-                    <strong>API 端点:</strong>
+                    <Text strong>API 端点:</Text>
                     <ul>
                       {ext.artifact.prd.api_endpoints.map((ep: string, i: number) => (
                         <li key={i}>{ep}</li>
@@ -215,219 +222,197 @@ export function ReportViewer() {
                     </ul>
                   </div>
                 )}
-              </div>
+              </Card>
             )}
             {ext.artifact.openapi && (
-              <div className="artifact-block">
-                <h4>OpenAPI</h4>
-                <pre className="code-block">{ext.artifact.openapi}</pre>
-              </div>
+              <Card size="small" title="OpenAPI" style={{ marginBottom: 12 }}>
+                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.openapi}</pre>
+              </Card>
             )}
             {ext.artifact.design_doc && (
-              <div className="artifact-block">
-                <h4>{ext.artifact.design_doc.title}</h4>
-                <pre className="code-block">{JSON.stringify(ext.artifact.design_doc, null, 2)}</pre>
-              </div>
+              <Card size="small" title={ext.artifact.design_doc.title} style={{ marginBottom: 12 }}>
+                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.design_doc, null, 2)}</pre>
+              </Card>
             )}
             {ext.artifact.comprehensive && (
-              <div className="artifact-block">
-                <h4>{ext.artifact.comprehensive.title}</h4>
-                <pre className="code-block">{JSON.stringify(ext.artifact.comprehensive, null, 2)}</pre>
-              </div>
+              <Card size="small" title={ext.artifact.comprehensive.title} style={{ marginBottom: 12 }}>
+                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.comprehensive, null, 2)}</pre>
+              </Card>
             )}
             {ext.artifact.research_report && (
-              <div className="artifact-block">
-                <h4>{ext.artifact.research_report.title}</h4>
-                <pre className="code-block">{JSON.stringify(ext.artifact.research_report, null, 2)}</pre>
-              </div>
+              <Card size="small" title={ext.artifact.research_report.title} style={{ marginBottom: 12 }}>
+                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.research_report, null, 2)}</pre>
+              </Card>
             )}
             {ext.artifact.business_report && (
-              <div className="artifact-block">
-                <h4>{ext.artifact.business_report.title}</h4>
-                <pre className="code-block">{JSON.stringify(ext.artifact.business_report, null, 2)}</pre>
-              </div>
+              <Card size="small" title={ext.artifact.business_report.title} style={{ marginBottom: 12 }}>
+                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.business_report, null, 2)}</pre>
+              </Card>
             )}
             {ext.artifact.code_analysis && (
-              <div className="artifact-block">
-                <h4>{ext.artifact.code_analysis.title}</h4>
-                <p>{ext.artifact.code_analysis.description}</p>
-                <pre className="code-block">{ext.artifact.code_analysis.code}</pre>
+              <Card size="small" title={ext.artifact.code_analysis.title} style={{ marginBottom: 12 }}>
+                <Paragraph>{ext.artifact.code_analysis.description}</Paragraph>
+                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.code_analysis.code}</pre>
                 {ext.artifact.execution && (
-                  <div className="execution-result">
-                    <h5>执行结果 (exit={ext.artifact.execution.exit_code})</h5>
-                    <pre className="code-block">{ext.artifact.execution.stdout}</pre>
+                  <Card size="small" title={`执行结果 (exit=${ext.artifact.execution.exit_code})`} style={{ marginTop: 8 }}>
+                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.execution.stdout}</pre>
                     {ext.artifact.execution.stderr && (
-                      <pre className="code-block error">{ext.artifact.execution.stderr}</pre>
+                      <pre className="code-block" style={{ margin: '8px 0 0', color: '#ff4d4f' }}>{ext.artifact.execution.stderr}</pre>
                     )}
-                  </div>
+                  </Card>
                 )}
-              </div>
+              </Card>
             )}
             {ext.artifact.tested_system && (
-              <div className="artifact-block">
-                <h4>{ext.artifact.tested_system.title}</h4>
-                <p>{ext.artifact.tested_system.description}</p>
-                <h5>主代码</h5>
-                <pre className="code-block">{ext.artifact.tested_system.main_code}</pre>
-                <h5>测试代码</h5>
-                <pre className="code-block">{ext.artifact.tested_system.test_code}</pre>
+              <Card size="small" title={ext.artifact.tested_system.title} style={{ marginBottom: 12 }}>
+                <Paragraph>{ext.artifact.tested_system.description}</Paragraph>
+                <Divider>主代码</Divider>
+                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.tested_system.main_code}</pre>
+                <Divider>测试代码</Divider>
+                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.tested_system.test_code}</pre>
                 {ext.artifact.execution && (
-                  <div className="execution-result">
-                    <h5>测试结果 (exit={ext.artifact.execution.exit_code})</h5>
-                    <pre className="code-block">{ext.artifact.execution.stdout}</pre>
+                  <Card size="small" title={`测试结果 (exit=${ext.artifact.execution.exit_code})`} style={{ marginTop: 8 }}>
+                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.execution.stdout}</pre>
                     {ext.artifact.execution.stderr && (
-                      <pre className="code-block error">{ext.artifact.execution.stderr}</pre>
+                      <pre className="code-block" style={{ margin: '8px 0 0', color: '#ff4d4f' }}>{ext.artifact.execution.stderr}</pre>
                     )}
-                  </div>
+                  </Card>
                 )}
-              </div>
+              </Card>
             )}
             {ext.artifact.deployable_service && (
-              <div className="artifact-block">
-                <h4>{ext.artifact.deployable_service.title || '可部署服务'}</h4>
+              <Card size="small" title={ext.artifact.deployable_service.title || '可部署服务'} style={{ marginBottom: 12 }}>
                 {ext.artifact.deployable_service.description && (
-                  <p>{ext.artifact.deployable_service.description}</p>
+                  <Paragraph>{ext.artifact.deployable_service.description}</Paragraph>
                 )}
 
-                {/* === 服务访问入口 === */}
                 {ext.artifact.deployment && (
-                  <div className={`service-access ${ext.artifact.deployment.ok ? 'service-ok' : 'service-fail'}`}>
-                    <div className="service-access-header">
-                      <span className={`service-status-dot ${ext.artifact.deployment.ok ? 'dot-ok' : 'dot-fail'}`}></span>
-                      <strong>{ext.artifact.deployment.ok ? '服务已启动，可直接访问' : '服务启动失败'}</strong>
-                    </div>
+                  <Card
+                    size="small"
+                    style={{
+                      marginBottom: 12,
+                      borderColor: ext.artifact.deployment.ok ? '#52c41a' : '#ff4d4f',
+                    }}
+                  >
+                    <Space>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: ext.artifact.deployment.ok ? '#52c41a' : '#ff4d4f',
+                        display: 'inline-block',
+                      }} />
+                      <Text strong>{ext.artifact.deployment.ok ? '服务已启动，可直接访问' : '服务启动失败'}</Text>
+                    </Space>
                     {ext.artifact.deployment.ok && ext.artifact.deployment.access_url && (
-                      <div className="service-url-row">
-                        <span className="service-url-label">访问地址:</span>
-                        <a
-                          href={ext.artifact.deployment.access_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="service-url-link"
-                        >
-                          {ext.artifact.deployment.access_url}
-                          <span className="service-url-icon">↗</span>
+                      <div style={{ marginTop: 8 }}>
+                        <Text type="secondary">访问地址: </Text>
+                        <a href={ext.artifact.deployment.access_url} target="_blank" rel="noopener noreferrer">
+                          {ext.artifact.deployment.access_url} ↗
                         </a>
                       </div>
                     )}
                     {ext.artifact.deployment.credentials &&
                       (ext.artifact.deployment.credentials.username || ext.artifact.deployment.credentials.password) && (
-                      <div className="service-credentials">
-                        <span className="cred-label">账号:</span>
-                        <code>{ext.artifact.deployment.credentials.username || '（无，需自行注册）'}</code>
-                        {ext.artifact.deployment.credentials.password && (
-                          <>
-                            <span className="cred-label">密码:</span>
-                            <code>{ext.artifact.deployment.credentials.password}</code>
-                          </>
-                        )}
-                        {ext.artifact.deployment.credentials.note && (
-                          <span className="cred-note">（{ext.artifact.deployment.credentials.note}）</span>
-                        )}
+                      <div style={{ marginTop: 8 }}>
+                        <Space wrap>
+                          <Text type="secondary">账号:</Text>
+                          <Tag>{ext.artifact.deployment.credentials.username || '（无，需自行注册）'}</Tag>
+                          {ext.artifact.deployment.credentials.password && (
+                            <>
+                              <Text type="secondary">密码:</Text>
+                              <Tag>{ext.artifact.deployment.credentials.password}</Tag>
+                            </>
+                          )}
+                          {ext.artifact.deployment.credentials.note && (
+                            <Text type="secondary">({ext.artifact.deployment.credentials.note})</Text>
+                          )}
+                        </Space>
                       </div>
                     )}
                     {ext.artifact.review && (
-                      <div className="service-review-info">
-                        代码审查: {ext.artifact.review.rounds}轮，
-                        <span className={ext.artifact.review.passed ? 'review-ok' : 'review-fail'}>
+                      <div style={{ marginTop: 8 }}>
+                        <Text>代码审查: {ext.artifact.review.rounds}轮，</Text>
+                        <Tag color={ext.artifact.review.passed ? 'green' : 'red'}>
                           {ext.artifact.review.passed ? '通过' : '存在未修复问题'}
-                        </span>
+                        </Tag>
                       </div>
                     )}
                     {!ext.artifact.deployment.ok && ext.artifact.deployment.error && (
-                      <div className="service-error">
-                        错误: {ext.artifact.deployment.error}
+                      <div style={{ marginTop: 8 }}>
+                        <Text type="danger">错误: {ext.artifact.deployment.error}</Text>
                         {ext.artifact.deployment.logs && (
-                          <details>
-                            <summary>查看启动日志</summary>
-                            <pre className="code-block error">{ext.artifact.deployment.logs}</pre>
+                          <details style={{ marginTop: 4 }}>
+                            <summary style={{ cursor: 'pointer' }}>查看启动日志</summary>
+                            <pre className="code-block" style={{ margin: '4px 0 0', color: '#ff4d4f' }}>{ext.artifact.deployment.logs}</pre>
                           </details>
                         )}
                       </div>
                     )}
-                  </div>
+                  </Card>
                 )}
 
-                {/* 评分入口 */}
-                <div className="service-rating">
-                  <span className="rating-label">对本次产出评分:</span>
-                  <div className="rating-stars" data-meeting={state.meeting_id}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        className="rating-star"
-                        data-score={star}
-                        title={`${star}分`}
-                        onClick={(e) => {
-                          const el = e.currentTarget as HTMLElement
-                          const all = el.parentElement?.querySelectorAll('.rating-star')
-                          all?.forEach((s: any, i: number) => {
-                            s.classList.toggle('star-active', i < star)
-                          })
-                          // 存储评分到 localStorage
-                          try {
-                            const ratings = JSON.parse(localStorage.getItem('conclave_ratings') || '{}')
-                            ratings[state.meeting_id] = star
-                            localStorage.setItem('conclave_ratings', JSON.stringify(ratings))
-                          } catch {}
-                        }}
-                      >
-                        ★
-                      </button>
-                    ))}
-                  </div>
-                  <span className="rating-hint">（点击星标评分，帮助系统改进产出质量）</span>
+                <div style={{ marginBottom: 12 }}>
+                  <Space>
+                    <Text>对本次产出评分:</Text>
+                    <Rate
+                      value={rating}
+                      onChange={(val) => {
+                        setRating(val)
+                        try {
+                          const ratings = JSON.parse(localStorage.getItem('conclave_ratings') || '{}')
+                          ratings[state.meeting_id] = val
+                          localStorage.setItem('conclave_ratings', JSON.stringify(ratings))
+                        } catch { /* ignore */ }
+                      }}
+                    />
+                    <Text type="secondary">（帮助系统改进产出质量）</Text>
+                  </Space>
                 </div>
 
-                <h5>应用代码 (app.py)</h5>
-                <pre className="code-block">{ext.artifact.deployable_service.app_code}</pre>
+                <Divider>应用代码 (app.py)</Divider>
+                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.app_code}</pre>
                 {ext.artifact.deployable_service.requirements_txt && (
                   <>
-                    <h5>requirements.txt</h5>
-                    <pre className="code-block">{ext.artifact.deployable_service.requirements_txt}</pre>
+                    <Divider>requirements.txt</Divider>
+                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.requirements_txt}</pre>
                   </>
                 )}
                 {ext.artifact.deployable_service.dockerfile && (
                   <>
-                    <h5>Dockerfile</h5>
-                    <pre className="code-block">{ext.artifact.deployable_service.dockerfile}</pre>
+                    <Divider>Dockerfile</Divider>
+                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.dockerfile}</pre>
                   </>
                 )}
                 {ext.artifact.deployable_service.docker_compose && (
                   <>
-                    <h5>docker-compose.yml</h5>
-                    <pre className="code-block">{ext.artifact.deployable_service.docker_compose}</pre>
+                    <Divider>docker-compose.yml</Divider>
+                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.docker_compose}</pre>
                   </>
                 )}
                 {ext.artifact.execution && (
-                  <div className="execution-result">
-                    <h5>部署结果</h5>
-                    <pre className="code-block">{ext.artifact.execution.stdout}</pre>
+                  <Card size="small" title="部署结果" style={{ marginTop: 8 }}>
+                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.execution.stdout}</pre>
                     {ext.artifact.execution.stderr && (
-                      <pre className="code-block error">{ext.artifact.execution.stderr}</pre>
+                      <pre className="code-block" style={{ margin: '8px 0 0', color: '#ff4d4f' }}>{ext.artifact.execution.stderr}</pre>
                     )}
-                  </div>
+                  </Card>
                 )}
-              </div>
+              </Card>
             )}
             {ext.artifact.attachments && ext.artifact.attachments.length > 0 && (
-              <div className="artifact-block">
-                <h4>附件文件（{ext.artifact.attachments.length}）</h4>
-                <div className="attachment-list">
+              <Card size="small" title={`附件文件（${ext.artifact.attachments.length}）`}>
+                <Space wrap>
                   {ext.artifact.attachments.map((att: any, i: number) => (
                     <a
                       key={i}
-                      className="attachment-link"
                       href={`/api/meetings/${ext.artifact.meeting_id}/attachments/${att.filename}`}
                       download={att.filename}
                       title={`${att.filename}（${(att.size / 1024).toFixed(1)} KB）`}
                     >
-                      {att.filename}
-                      <span className="attachment-meta">.{att.ext} · {(att.size / 1024).toFixed(1)} KB</span>
+                      <Tag>{att.filename} <Text type="secondary">.{att.ext} · {(att.size / 1024).toFixed(1)} KB</Text></Tag>
                     </a>
                   ))}
-                </div>
-              </div>
+                </Space>
+              </Card>
             )}
           </div>
         </CollapsibleSection>

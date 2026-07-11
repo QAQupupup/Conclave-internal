@@ -1,9 +1,13 @@
 // 左侧聊天流：渲染发言卡片列表，新消息时智能自动滚动 + 阶段分隔线
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button, Typography, Divider } from 'antd'
+import { ArrowDownOutlined, MessageOutlined } from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { MessageCard } from './MessageCard.tsx'
 import { STAGE_LABELS } from '../types/events.ts'
 import type { MeetingMessage, Stage } from '../types/events.ts'
+
+const { Text } = Typography
 
 interface ChatPanelProps {
   /** 点击证据 ref 时触发，向上传递以定位右侧证据面板 */
@@ -68,7 +72,10 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
       <div className="panel-title">聊天流</div>
       <div className="chat-list" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && (
-          <div className="empty-hint">暂无发言，创建会议并运行后，agent 发言将在此实时展示。</div>
+          <div className="empty-hint" style={{ textAlign: 'center', padding: '40px 20px' }}>
+            <MessageOutlined style={{ fontSize: 32, color: '#d1d5db', marginBottom: 12 }} />
+            <Text type="secondary">暂无发言，创建会议并运行后，agent 发言将在此实时展示。</Text>
+          </div>
         )}
         {messages.map((m, i) => (
           <MessageItem
@@ -80,9 +87,17 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
         ))}
       </div>
       {showNewMsg && (
-        <button type="button" className="new-msg-btn" onClick={() => scrollToBottom('smooth')}>
-          新消息 ↓
-        </button>
+        <Button
+          type="primary"
+          shape="round"
+          size="small"
+          icon={<ArrowDownOutlined />}
+          className="new-msg-btn"
+          onClick={() => scrollToBottom('smooth')}
+          style={{ position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
+        >
+          新消息
+        </Button>
       )}
     </section>
   )
@@ -103,11 +118,11 @@ function MessageItem({
   return (
     <div className="message-wrap">
       {showSeparator && (
-        <div className="stage-separator">
-          <span className="stage-sep-line" />
-          <span className="stage-sep-label">{STAGE_LABELS[message.stage] ?? message.stage}</span>
-          <span className="stage-sep-line" />
-        </div>
+        <Divider style={{ margin: '12px 0' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {STAGE_LABELS[message.stage] ?? message.stage}
+          </Text>
+        </Divider>
       )}
       <MessageCard message={message} onSelectRef={onSelectRef} />
     </div>

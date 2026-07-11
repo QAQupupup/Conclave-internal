@@ -11,6 +11,7 @@
 //   7) 网格线极淡 #F7F8F9
 //   8) 紧凑/常规模式自适应
 import { useEffect, useRef, useState } from 'react'
+import { Card } from 'antd'
 import * as echarts from 'echarts'
 import type { EChartsType, EChartsOption } from 'echarts'
 import type { MetricPoint } from '../lib/api.ts'
@@ -503,8 +504,8 @@ export function ResourceChart({ type, data, title }: ResourceChartProps) {
   }, [])
 
   return (
-    <div className="resource-chart">
+    <Card size="small" title={title} className="resource-chart">
       <div ref={containerRef} className="chart-container" />
-    </div>
+    </Card>
   )
 }
