@@ -73,3 +73,8 @@ logs/
 .trae-html-share-packages/
 *.dev_token
 .dev_token
+
+# ===== Runtime / Backup =====
+backend/.trash/
+backend/data/
+.secret_key
