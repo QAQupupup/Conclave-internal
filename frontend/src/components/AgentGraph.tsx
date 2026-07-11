@@ -312,6 +312,7 @@ function buildLayout(meeting: MeetingState): LayoutData {
       deliverableType === 'prd' ? 'PRD 文档' :
       deliverableType === 'openapi' ? 'OpenAPI' :
       deliverableType === 'code_analysis' ? '代码分析' :
+      deliverableType === 'data_science' ? '数据科学' :
       deliverableType === 'tested_system' ? '可测系统' :
       deliverableType === 'deployable_service' ? '可部署服务' : '产出物'
     artifactNode = {

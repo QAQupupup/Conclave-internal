@@ -227,7 +227,7 @@ export interface Artifact {
   meeting_id?: string
   prd?: PRD
   openapi?: string
-  /** 产出物类型：prd_openapi / code_analysis / tested_system / deployable_service */
+  /** 产出物类型：prd_openapi / code_analysis / data_science / tested_system / deployable_service */
   deliverable_type?: string
   /** 产出文件附件列表（由 produce 节点扫描工作区生成） */
   attachments?: Array<{

@@ -406,6 +406,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
                 <option value="research_report">调研报告</option>
                 <option value="business_report">商业报告</option>
                 <option value="code_analysis">代码分析</option>
+                <option value="data_science">数据科学</option>
                 <option value="tested_system">测试系统</option>
                 <option value="deployable_service">可部署服务</option>
               </select>

@@ -236,6 +236,43 @@ PRODUCE_CODE_ANALYSIS = """[阶段: Produce]
   }}
 }}"""
 
+# ---------- 产出阶段：证据驱动的数据科学分析 ----------
+PRODUCE_DATA_SCIENCE = """[阶段: Produce / DataScience]
+裁决结果：{decision_record}
+
+{evidence_context}
+
+任务：基于讨论结论和检索到的证据数据，生成完整的数据科学分析代码。
+代码将在数据科学沙箱中执行（pandas / numpy / matplotlib / seaborn / scipy 可用），结果会回填到报告中。
+
+【代码生成要求】
+1. 数据加载：根据上方「可用数据来源与证据上下文」构造分析数据（可使用真实 API、模拟数据或用户上传数据）
+2. 数据清洗：处理缺失值、异常值、类型转换
+3. 分析管道：按裁决结论中的优先级依次计算各指标
+4. 可视化：生成至少 3 个图表（趋势图 + 分布图 + 对比图），使用 matplotlib Agg 后端保存到 /workspace/
+5. 统计检验：对关键结论做假设检验（t-test / chi-square / correlation）
+6. 结论输出：print 格式化的分析结论摘要，包含核心发现和置信区间
+
+输出 JSON:
+{{
+  "prd": {{
+    "title": "分析标题",
+    "goal": "数据分析目标",
+    "scope": "分析范围与方法论",
+    "assumptions": ["数据假设"],
+    "constraints": ["约束条件"],
+    "api_endpoints": [],
+    "open_questions": ["待解决问题"]
+  }},
+  "openapi": "",
+  "code_analysis": {{
+    "title": "分析标题",
+    "description": "分析目的、数据来源和方法论说明",
+    "code": "完整的 Python 数据分析代码（pandas + matplotlib + scipy，可直接执行）",
+    "expected_output": "预期输出：图表文件路径 + 统计结论摘要"
+  }}
+}}"""
+
 # ---------- 产出阶段：测试系统 ----------
 PRODUCE_TESTED_SYSTEM = """[阶段: Produce]
 裁决结果：{decision_record}
@@ -401,6 +438,7 @@ PRODUCE_TEMPLATES = {
     "research_report": PRODUCE_RESEARCH_REPORT,
     "business_report": PRODUCE_BUSINESS_REPORT,
     "code_analysis": PRODUCE_CODE_ANALYSIS,
+    "data_science": PRODUCE_DATA_SCIENCE,
     "tested_system": PRODUCE_TESTED_SYSTEM,
     "deployable_service": PRODUCE_DEPLOYABLE_SERVICE,
 }

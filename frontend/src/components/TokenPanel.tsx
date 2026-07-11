@@ -51,6 +51,7 @@ const STAGE_LABELS: Record<string, string> = {
   arbitrate: '仲裁裁决',
   produce_prd_openapi: '产出PRD',
   produce_code_analysis: '产出代码分析',
+  produce_data_science: '产出数据科学分析',
   produce_tested_system: '产出可测系统',
   produce_deployable_service: '产出可部署服务',
   produce_design_doc: '产出设计文档',

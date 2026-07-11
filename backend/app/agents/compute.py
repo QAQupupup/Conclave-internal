@@ -446,13 +446,23 @@ def build_produce_prompt(
     anchor: str = "",
     template: str | None = None,
     deliverable_type: str = "prd_openapi",
+    evidence_summary: dict | None = None,
 ) -> ThinkRequest:
     if template is None:
         template = PRODUCE
     # 注入代码质量经验库（bug patterns）
     from app.agents.bug_patterns import format_bug_patterns_for_prompt
     bug_patterns = format_bug_patterns_for_prompt()
-    prompt = render(template, decision_record=str(decision_record), bug_patterns=bug_patterns)
+    # 格式化证据上下文（供 data_science / code_analysis 模板使用）
+    evidence_context = ""
+    if evidence_summary and deliverable_type in ("data_science", "code_analysis", "tested_system"):
+        evidence_context = _format_evidence_for_code_gen(evidence_summary)
+    prompt = render(
+        template,
+        decision_record=str(decision_record),
+        bug_patterns=bug_patterns,
+        evidence_context=evidence_context,
+    )
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     # 注入匹配的Skills（UI设计规范、代码规范等，根据deliverable_type动态加载）
     prompt = _inject_skills(prompt, stage="produce", deliverable_type=deliverable_type, role=Role.MODERATOR.value)
@@ -464,6 +474,40 @@ def build_produce_prompt(
         prompt=prompt,
         schema_hint=f"produce_{deliverable_type}",
     )
+
+
+def _format_evidence_for_code_gen(evidence_summary: dict) -> str:
+    """将证据综合结果格式化为 prompt 段落，注入代码生成上下文"""
+    lines = ["【可用数据来源与证据上下文】"]
+    lines.append("以下是讨论和证据对照阶段发现的数据来源和分析方向，请在生成代码时充分利用：\n")
+
+    sources = evidence_summary.get("available_data_sources", [])
+    if sources:
+        lines.append(f"数据来源（共 {len(sources)} 个）:")
+        for i, src in enumerate(sources[:8], 1):
+            lines.append(f"  {i}. {src}")
+        lines.append("")
+
+    samples = evidence_summary.get("evidence_samples", [])
+    if samples:
+        lines.append(f"关键证据摘要（共 {evidence_summary.get('evidence_count', len(samples))} 条，展示前 {len(samples)} 条）:")
+        for s in samples[:10]:
+            support_tag = f"[{s.get('supports', 'neutral')}]" if s.get('supports') else ""
+            lines.append(f"  - {support_tag} {s.get('quote', '')[:150]}  (来源: {s.get('source', '?')})")
+        lines.append("")
+
+    decisions_count = evidence_summary.get("decisions_count", 0)
+    adopted_count = evidence_summary.get("adopted_claims_count", 0)
+    if decisions_count or adopted_count:
+        lines.append(f"仲裁结果: {decisions_count} 项决策, {adopted_count} 条采纳论点")
+        lines.append("")
+
+    lines.append("请在生成代码时：")
+    lines.append("1. 优先使用上述数据来源构造分析管道，避免凭空捏造数据")
+    lines.append("2. 计算与已采纳结论一致的指标，使代码输出能验证裁决方向")
+    lines.append("3. 生成能直观展示关键发现的可视化图表")
+
+    return "\n".join(lines)
 
 
 # ---------- 全局计算实例 ----------

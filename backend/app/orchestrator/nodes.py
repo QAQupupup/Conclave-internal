@@ -1257,6 +1257,10 @@ async def arbitrate_node(state: MeetingState) -> MeetingState:
         "decisions": result.get("decisions", []),
         "adopted_claims": result.get("adopted_claims", []),
     }
+    # [CONVERGENCE] 将松散决策压缩为紧凑 action brief，注入 decision_record
+    state.decision_record["action_brief"] = _compress_decisions_to_brief(
+        state.decision_record, state.claims, state.conflicts, state.evidence_set
+    )
     # 第2层：锁定 arbitrate 结论
     state.conclusion_chain.lock("arbitrate", state.decision_record)
     # 第5层：记录置信度
@@ -1273,6 +1277,120 @@ async def arbitrate_node(state: MeetingState) -> MeetingState:
     return state
 
 
+def _compress_decisions_to_brief(
+    decision_record: dict,
+    claims: list[dict],
+    conflicts: list[dict],
+    evidence_set: list[dict],
+) -> dict[str, Any]:
+    """将松散的仲裁结果压缩为紧凑的 action brief。
+
+    纯确定性提取（不调 LLM），确保低延迟零额外成本。
+    产出结构:
+    - core_decisions: 最重要的 3-5 项决策（一行一条）
+    - evidence_backing: 支撑核心决策的证据方向
+    - rejected_alternatives: 被否决的方向及原因
+    - action_items: 从决策推导的具体行动项
+    """
+    decisions = decision_record.get("decisions", [])
+    adopted = decision_record.get("adopted_claims", [])
+
+    # 核心决策：取前 5 条（LLM 已按重要性排序）
+    core_decisions = []
+    for d in decisions[:5]:
+        if isinstance(d, dict):
+            text = d.get("summary", d.get("verdict", str(d)))
+        else:
+            text = str(d)
+        if text:
+            core_decisions.append(text[:120])
+
+    # 证据方向统计
+    support_counts = {"supports": 0, "refutes": 0, "neutral": 0}
+    for es in evidence_set:
+        for a in es.get("assessments", []):
+            direction = a.get("supports", "neutral")
+            if direction in support_counts:
+                support_counts[direction] += 1
+    evidence_backing = (
+        f"{support_counts['supports']} 条证据支持, "
+        f"{support_counts['refutes']} 条反驳, "
+        f"{support_counts['neutral']} 条中性"
+    ) if evidence_set else "无证据数据"
+
+    # 被否决的方向：从 conflicts 中找出未被采纳的
+    rejected = []
+    adopted_ids = set()
+    for a in adopted:
+        if isinstance(a, dict):
+            adopted_ids.add(a.get("id", a.get("claim_id", "")))
+        elif isinstance(a, str):
+            adopted_ids.add(a)
+    for c in conflicts[:5]:
+        c_id = c.get("id", "")
+        # 如果冲突的某一方未被采纳，记录为 rejected
+        for side in c.get("sides", []):
+            if isinstance(side, dict) and side.get("claim_id", "") not in adopted_ids:
+                reason = side.get("rejection_reason", "证据不足或与共识冲突")
+                rejected.append(f"{side.get('text', '?')[:80]} — {reason[:60]}")
+
+    # 行动项：从 adopted_claims 提取可执行的下一步
+    action_items = []
+    for a in adopted[:5]:
+        if isinstance(a, dict):
+            next_step = a.get("next_step", a.get("action", ""))
+            if next_step:
+                action_items.append(next_step[:100])
+            else:
+                text = a.get("text", a.get("claim", ""))
+                if text:
+                    action_items.append(f"落实: {text[:80]}")
+
+    return {
+        "core_decisions": core_decisions,
+        "evidence_backing": evidence_backing,
+        "rejected_alternatives": rejected[:3],
+        "action_items": action_items,
+    }
+
+
+def _synthesize_evidence_for_produce(state: MeetingState) -> dict[str, Any]:
+    """将 evidence_set + decision_record 综合为结构化数据规格，
+    供代码生成类 deliverable (code_analysis / data_science) 使用。
+
+    返回空 dict 表示无可用证据（非代码类产出不受影响）。
+    """
+    if not state.evidence_set:
+        return {}
+
+    evidence_sources: list[str] = []
+    evidence_quotes: list[dict] = []
+    for es in state.evidence_set:
+        for a in es.get("assessments", []):
+            source = a.get("source", "")
+            quote = a.get("quote", "")
+            if source and source not in evidence_sources:
+                evidence_sources.append(source)
+            if quote:
+                evidence_quotes.append({
+                    "quote": quote[:200],
+                    "source": source,
+                    "supports": a.get("supports", "neutral"),
+                    "conflict_id": es.get("conflict_id", ""),
+                })
+
+    decisions = (state.decision_record or {}).get("decisions", [])
+    adopted = (state.decision_record or {}).get("adopted_claims", [])
+
+    return {
+        "available_data_sources": evidence_sources[:10],
+        "evidence_count": len(evidence_quotes),
+        "evidence_samples": evidence_quotes[:15],
+        "decisions_count": len(decisions),
+        "adopted_claims_count": len(adopted),
+    }
+
+
 async def produce_node(state: MeetingState) -> MeetingState:
     """Produce 阶段：根据 deliverable_type 切换模板，生成对应交付物
 
@@ -1287,6 +1405,15 @@ async def produce_node(state: MeetingState) -> MeetingState:
     from app.agents.prompts import get_produce_template
     template = get_produce_template(state.deliverable_type)
 
+    # [DATA-BRIDGE] 综合证据数据，供代码生成类产出使用
+    evidence_summary = _synthesize_evidence_for_produce(state)
+    if evidence_summary:
+        _lb.info(
+            f"produce: 证据桥接激活 — {evidence_summary['evidence_count']} 条证据, "
+            f"{len(evidence_summary['available_data_sources'])} 个数据来源",
+            logger="orchestrator.nodes.produce",
+        )
+
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
         req = build_produce_prompt(
@@ -1294,6 +1421,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             anchor=anchor,
             template=template,
             deliverable_type=state.deliverable_type,
+            evidence_summary=evidence_summary or None,
         )
         resp = await compute.think(req)
         return resp.result
@@ -1313,7 +1441,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
     }
 
     # 代码执行类产出：调用沙箱执行代码
-    if state.deliverable_type == "code_analysis":
+    if state.deliverable_type in ("code_analysis", "data_science"):
         code_data = result.get("code_analysis") or {}
         code = code_data.get("code", "")
         if code:
@@ -1775,6 +1903,19 @@ def health():
     from app.memory.profile import trigger_extraction
     trigger_extraction(state)
     _lb.info("produce: 记忆提取完成, 准备返回", logger="orchestrator.nodes.produce")
+    # [FEEDBACK] Agent 反馈闭环：评估每个 Agent 的判断质量，写回画像供迭代
+    try:
+        from app.agents.feedback import evaluate_agents
+        evaluations = evaluate_agents(state)
+        if evaluations:
+            _lb.info(
+                f"produce: Agent 评估完成 — {len(evaluations)} 个角色, "
+                f"top={max(evaluations.items(), key=lambda x: x[1]['overall_score'])[0]}",
+                logger="orchestrator.nodes.produce",
+            )
+    except Exception as fb_err:
+        _lb.warning(f"produce: Agent 评估失败（不影响主流程）: {fb_err}",
+                     logger="orchestrator.nodes.produce")
     return state
 
 
@@ -1796,9 +1937,9 @@ NODES: dict[Stage, Node] = {
 _VALID_NEXT_STAGES: dict[Stage, set[Stage]] = {
     Stage.CLARIFY: {Stage.INTRA_TEAM, Stage.PRODUCE},
     Stage.INTRA_TEAM: {Stage.INTRA_TEAM, Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},
-    Stage.CROSS_TEAM: {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},
-    Stage.EVIDENCE_CHECK: {Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},
-    Stage.ARBITRATE: {Stage.ARBITRATE, Stage.PRODUCE},
+    Stage.CROSS_TEAM: {Stage.INTRA_TEAM, Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},  # +回退INTRA_TEAM
+    Stage.EVIDENCE_CHECK: {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},  # +回退CROSS_TEAM
+    Stage.ARBITRATE: {Stage.EVIDENCE_CHECK, Stage.CROSS_TEAM, Stage.ARBITRATE, Stage.PRODUCE},  # +回退EVIDENCE_CHECK/CROSS_TEAM
     Stage.PRODUCE: set(),  # 终态
 }
 
@@ -1910,6 +2051,9 @@ async def decide_next_stage(state: MeetingState) -> Stage:
             f"- 如果核心问题已解决且裁决充分，选择 produce\n"
             f"- 如果仍有未解决的冲突，选择 evidence_check 或 arbitrate\n"
             f"- 如果论点不够充分，可以重复当前阶段（intra_team/cross_team）\n"
+            f"- 如果证据对照发现新冲突或证据不足，可以回退到 cross_team 重新辩论\n"
+            f"- 如果裁决结论不够收敛，可以回退到 evidence_check 补充证据\n"
+            f"- 回退有成本（额外 token + 延迟），仅在必要时使用\n"
             f"- 辩论深度为 {state.debate_depth}，轻量级应尽快结束\n\n"
             f"只输出一个阶段名称（小写英文），不要任何其他内容。"
         )

@@ -135,6 +135,7 @@ export function CreateMeeting() {
               <option value="research_report">调研报告</option>
               <option value="business_report">商业报告</option>
               <option value="code_analysis">代码分析（数据科学沙箱）</option>
+              <option value="data_science">数据科学分析（证据驱动）</option>
               <option value="tested_system">测试系统（代码 + pytest）</option>
               <option value="deployable_service">可部署服务（Docker 镜像）</option>
             </select>
