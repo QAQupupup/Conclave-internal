@@ -437,8 +437,13 @@ class RealLLM:
         except Exception:
             pass
 
-    async def complete(self, prompt: str, schema_hint: str = "") -> dict[str, Any]:
-        """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级"""
+    async def complete(self, prompt: str, schema_hint: str = "",
+                       model_override: str = "", agent_role: str = "") -> dict[str, Any]:
+        """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级
+
+        model_override: per-role 或 per-stage 模型覆盖（格式: "provider_id:model_id" 或 "model_id"）
+        agent_role: 发起调用的 Agent 角色名（用于 trace/cost 记录）
+        """
         # 熔断器检查
         if not _circuit_breaker.can_call():
             logger.warning("熔断器打开，跳过 LLM 调用，直接降级到 Stub")
@@ -471,7 +476,7 @@ class RealLLM:
 
         # [FALLBACK] Provider 回退链：连接失败时尝试下一个 provider
         from app.llm_providers import get_fallback_chain
-        fallback_chain = get_fallback_chain()
+        fallback_chain = get_fallback_chain(model_override=model_override or None)
 
         current_prompt = prompt
         last_error = ""
@@ -486,11 +491,16 @@ class RealLLM:
                     content = await self._call_api(
                         current_prompt, schema_desc, stage, attempt,
                         config_override=(_p_url, _p_key, _p_model),
+                        agent_role=agent_role,
+                        provider_id=_p_id,
                     )
                     # [FALLBACK] 最小输出长度校验：防止 LLM 返回空内容导致管线空转
-                    if len(content.strip()) < 50:
+                    # cross_team / produce / arbitrate 需要生成结构化内容（冲突列表、PRD、裁决），
+                    # 50 字符远远不够；其他阶段（clarify, intra_team 等）保持较低阈值
+                    _min_len = 200 if stage in ("cross_team", "produce", "arbitrate") else 50
+                    if len(content.strip()) < _min_len:
                         raise ValidationError(
-                            f"LLM 返回内容过短 ({len(content.strip())} chars)，"
+                            f"LLM 返回内容过短 ({len(content.strip())} chars < {_min_len})，"
                             f"阶段={stage} 模型={_p_model} 输出质量不足",
                             model_cls or str,
                         )
@@ -601,6 +611,8 @@ class RealLLM:
         stage: str = "",
         attempt: int = 1,
         config_override: tuple[str, str, str] | None = None,
+        agent_role: str = "",
+        provider_id: str = "",
     ) -> str:
         """调用 chat completions，返回 message content 字符串
 
@@ -694,6 +706,8 @@ class RealLLM:
                         input_tokens=0,
                         output_tokens=0,
                         total_tokens=0,
+                        agent_role=agent_role,
+                        provider_id=provider_id,
                         error_detail=f"HTTPStatusError after json_mode fallback: {e2.response.status_code} {e2.response.text[:300]}",
                     )
                     raise
@@ -712,6 +726,8 @@ class RealLLM:
                     input_tokens=0,
                     output_tokens=0,
                     total_tokens=0,
+                    agent_role=agent_role,
+                    provider_id=provider_id,
                     error_detail=f"HTTPStatusError: {e.response.status_code} {e.response.text[:300]}",
                 )
                 raise
@@ -734,6 +750,8 @@ class RealLLM:
                 input_tokens=0,
                 output_tokens=0,
                 total_tokens=0,
+                agent_role=agent_role,
+                provider_id=provider_id,
                 error_detail=f"{type(e).__name__}: {str(e)[:300]}",
             )
             raise
@@ -760,6 +778,8 @@ class RealLLM:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
+            agent_role=agent_role,
+            provider_id=provider_id,
         )
         # 成本可观测性：记录 LLM 调用成本到 CostTracker
         # （estimate_llm_cost 内部会优先查 llm_providers 的多厂商定价表）

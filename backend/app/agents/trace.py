@@ -28,6 +28,8 @@ class LLMCallRecord(BaseModel):
     input_tokens: int = 0          # prompt tokens
     output_tokens: int = 0         # completion tokens
     total_tokens: int = 0          # 总 tokens
+    agent_role: str = ""          # 发起调用的 Agent 角色（如 engineer, moderator）
+    provider_id: str = ""         # 实际使用的 provider（siliconflow, deepseek 等）
     error_detail: str = ""        # 错误详情（HTTP 错误响应体、异常信息等，便于排查）
     request_id: str = ""          # 关联的 HTTP 请求 ID（全链路追踪）
     meeting_id: str = ""          # 关联的会议 ID（全链路追踪）
@@ -71,10 +73,28 @@ class CallTrace(BaseModel):
                 s["latencies"].append(c.latency_ms)
             s["input_tokens"] += c.input_tokens
             s["output_tokens"] += c.output_tokens
-        # 计算各阶段平均延迟
-        for s in stage_stats.values():
-            lats = s.pop("latencies")
-            s["avg_latency_ms"] = sum(lats) / len(lats) if lats else 0
+        # 按角色分组统计
+        role_stats: dict[str, dict[str, Any]] = {}
+        for c in self.calls:
+            role = c.agent_role or "unknown"
+            r = role_stats.setdefault(
+                role,
+                {"calls": 0, "valid": 0, "fallback": 0, "latencies": [], "input_tokens": 0, "output_tokens": 0},
+            )
+            r["calls"] += 1
+            if c.validation_status == "valid":
+                r["valid"] += 1
+            if c.validation_status == "fallback_stub":
+                r["fallback"] += 1
+            if c.latency_ms > 0:
+                r["latencies"].append(c.latency_ms)
+            r["input_tokens"] += c.input_tokens
+            r["output_tokens"] += c.output_tokens
+        # 计算各阶段/角色平均延迟
+        for stats_dict in (stage_stats, role_stats):
+            for s in stats_dict.values():
+                lats = s.pop("latencies")
+                s["avg_latency_ms"] = sum(lats) / len(lats) if lats else 0
         # 收集所有错误详情
         errors = [c.error_detail for c in self.calls if c.error_detail]
         return {
@@ -91,6 +111,7 @@ class CallTrace(BaseModel):
             "total_tokens": total_tokens,
             "avg_tokens_per_call": total_tokens // total if total > 0 else 0,
             "stage_stats": stage_stats,
+            "role_stats": role_stats,
             "errors": errors[:10],  # 最多返回前 10 条错误
         }
 
@@ -126,6 +147,8 @@ def record_call(
     input_tokens: int = 0,
     output_tokens: int = 0,
     total_tokens: int = 0,
+    agent_role: str = "",
+    provider_id: str = "",
 ) -> None:
     """记录一次 LLM 调用到当前 trace（仅 RealLLM._call_api 调用）
 
@@ -153,6 +176,8 @@ def record_call(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
+        agent_role=agent_role,
+        provider_id=provider_id,
         request_id=get_request_id(),
         meeting_id=trace.meeting_id,
         runner_session_id=get_runner_session_id(),

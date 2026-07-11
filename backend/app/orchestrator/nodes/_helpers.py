@@ -165,22 +165,29 @@ def _format_arbitrate_as_text(
 
     lines: list[str] = []
 
-    # 采纳的论点 - 只展示前5条关键论点作为摘要，避免单条消息过长
+    # 采纳的论点 - 只展示前8条关键论点作为摘要，避免单条消息过长
     adopted = decision_record.get("adopted_claims", [])
     if adopted:
         lines.append(f"经审议，共采纳 {len(adopted)} 条核心论点。要点如下：")
-        display_count = min(5, len(adopted))
+        display_count = min(8, len(adopted))
         for i in range(display_count):
             cid = adopted[i]
             claim = claim_map.get(cid, {})
             ctype = claim.get("claim_type", claim.get("type", "assumption"))
             # LLM返回的字段名是"claim"，不是"text"；做多重回退
             text = claim.get("claim", claim.get("text", "")).strip()
+            # 如果通过ID找不到claim（LLM可能直接返回文本而非ID），cid本身就是文本
+            if not text and isinstance(cid, str) and len(cid) > 2:
+                text = cid.strip()
+                ctype = "fact"
             # 截断过长的论点文本
-            if len(text) > 60:
-                text = text[:57] + "…"
+            if len(text) > 70:
+                text = text[:67] + "…"
             if text:
-                lines.append(f"  {i+1}. [{ctype}] {text}")
+                # 有角色信息时显示角色
+                role_val = claim.get("agent_role", "")
+                role_prefix = f"[{role_val}] " if role_val else ""
+                lines.append(f"  {i+1}. [{ctype}] {role_prefix}{text}")
         if len(adopted) > display_count:
             lines.append(f"  …另有 {len(adopted) - display_count} 条论点已纳入最终产出。")
         lines.append("")
@@ -208,6 +215,16 @@ def _format_arbitrate_as_text(
 
 # 置信度等级排序（值越大越差）
 _CONFIDENCE_RANK: dict[str, int] = {"high": 0, "low": 1, "fallback": 2}
+
+
+def _resolve_model_for_call(state: MeetingState, role: str = "", stage: str = "") -> str:
+    """从 resolved_models 快照解析当前 LLM 调用应使用的模型
+
+    优先级：@stage 覆盖 > role 覆盖 > ""（回退到全局默认）
+    空字符串表示不覆盖，由下游 get_fallback_chain 使用 ENV 默认。
+    """
+    from app.llm_providers import resolve_model_from_snapshot
+    return resolve_model_from_snapshot(state.resolved_models, agent_role=role, stage=stage)
 
 
 def _full_anchor(state: MeetingState, stage: str) -> str:

@@ -17,6 +17,7 @@ from ._helpers import (
     _record_drift,
     _run_with_consistency,
     _worst_confidence,
+    _resolve_model_for_call,
 )
 from .borrow import _let_borrowed_agents_speak, _moderator_assess_borrow
 
@@ -70,6 +71,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
     async def _think_one(role: Role, stance: str) -> tuple[dict[str, Any], str]:
         async def call_fn(anchor: str) -> dict[str, Any]:
             req = build_intra_prompt(role, state.clarified_topic or state.topic, stance, anchor=anchor)
+            req.model = _resolve_model_for_call(state, role.value, "intra_team")
             resp = await compute.think(req)
             return resp.result
         return await _run_with_consistency(state, "intra_team", call_fn)
@@ -109,6 +111,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
                 req = build_intra_react_prompt(
                     role, state.clarified_topic or state.topic, stance, prior, anchor=anchor
                 )
+                req.model = _resolve_model_for_call(state, role.value, "intra_team")
                 resp = await compute.think(req)
                 return resp.result
             return await _run_with_consistency(state, "intra_team", call_fn)

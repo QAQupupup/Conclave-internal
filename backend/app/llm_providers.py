@@ -55,7 +55,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         balance_endpoint="/user/balance",
         balance_response_path=("balance_infos", 0, "total_balance"),
         supports_custom_key=True,
-        pricing_note="DeepSeek-V3 输入¥1/百万，输出¥2/百万",
+        pricing_note="DeepSeek-V3 输入¥2/百万，输出¥8/百万",
     ),
     "openai": ProviderConfig(
         id="openai",
@@ -103,15 +103,33 @@ if settings.llm_base_url and settings.llm_api_key:
 _FALLBACK_ORDER: list[str] = ["siliconflow", "deepseek", "openai", "openrouter", "custom"]
 
 
-def get_fallback_chain() -> list[tuple[str, str, str, str]]:
+def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str, str, str]]:
     """返回可用的 provider 回退链: [(base_url, api_key, model, provider_id), ...]
 
     按 _FALLBACK_ORDER 排序，跳过没有 api_key 的 provider。
-    第一个是当前主配置（会议级覆盖优先），后续是备选。
+    第一个是当前主配置（per-role 覆盖 > 会议级覆盖 > 环境变量默认），后续是备选。
     调用方应在主 provider 连接失败时依次尝试后续 provider。
+
+    model_override: 可选，格式为 "provider_id:model_id" 或纯 "model_id"。
+    当提供时，主配置使用指定的模型而非默认模型。
     """
     chain: list[tuple[str, str, str, str]] = []
     seen_urls: set[str] = set()
+
+    # 解析 model_override 格式: "provider_id:model_id" 或 "model_id"
+    override_provider = ""
+    override_model = ""
+    if model_override:
+        if ":" in model_override:
+            prefix = model_override.split(":", 1)[0]
+            if prefix in PROVIDERS:
+                # "siliconflow:deepseek-ai/DeepSeek-V3.2" 或 "openai:gpt-4o" 格式
+                override_provider, override_model = model_override.split(":", 1)
+            else:
+                # ":" 存在但前缀不是已知 provider，视为纯 model_id
+                override_model = model_override
+        else:
+            override_model = model_override
 
     # 首先加入当前主配置
     try:
@@ -119,6 +137,15 @@ def get_fallback_chain() -> list[tuple[str, str, str, str]]:
         mid = get_meeting_id()
         if mid and mid != "-":
             base_url, api_key, model, pid = get_meeting_llm_config(mid)
+            # 如果有 model_override，覆盖模型（和 provider）
+            if override_model:
+                model = override_model
+                if override_provider:
+                    pid = override_provider
+                    p = PROVIDERS.get(pid)
+                    if p:
+                        base_url = p.base_url
+                        api_key = p.api_key or api_key
             if base_url and api_key:
                 chain.append((base_url, api_key, model, pid))
                 seen_urls.add(base_url.rstrip("/"))
@@ -127,7 +154,8 @@ def get_fallback_chain() -> list[tuple[str, str, str, str]]:
 
     # 如果主配置未设置，用全局默认
     if not chain and settings.llm_base_url and settings.llm_api_key:
-        chain.append((settings.llm_base_url, settings.llm_api_key, settings.llm_model, "default"))
+        model = override_model or settings.llm_model
+        chain.append((settings.llm_base_url, settings.llm_api_key, model, "default"))
         seen_urls.add(settings.llm_base_url.rstrip("/"))
 
     # 按回退顺序加入其他 provider
@@ -139,7 +167,7 @@ def get_fallback_chain() -> list[tuple[str, str, str, str]]:
         if url in seen_urls:
             continue
         seen_urls.add(url)
-        # 使用该 provider 的默认模型
+        # 使用该 provider 的默认模型（回退链不使用 override，因为不同 provider 模型名不同）
         model = settings.llm_model  # 统一使用用户配置的模型
         chain.append((p.base_url, p.api_key, model, pid))
 
@@ -195,56 +223,69 @@ def trim_prompt_to_budget(prompt: str, max_tokens: int = 32000) -> str:
 
 
 # ========== 定价表（人民币 元/百万Token） ==========
-# SiliconFlow 定价（2026-07 更新，来源：siliconflow.cn 定价页）
-# 注意：硅基流动部分免费模型有 RPM/TPM 限制
+# SiliconFlow 定价（2026-07-11 更新，来源：siliconflow.cn/pricing 官方价格页）
+# 注意：
+#   - 部分模型有分段定价（如<128k和≥128k价格不同），此处取<128k价格作为主价
+#   - 缓存命中价格暂不单独支持，仅在主价基础上估算
+#   - 免费模型有 RPM/TPM 限制
 MODEL_PRICING: dict[str, dict[str, Any]] = {
     # --- DeepSeek 系列 ---
-    "deepseek-ai/DeepSeek-V3.2": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "deepseek-ai/DeepSeek-V3.1-Terminus": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "deepseek-ai/DeepSeek-R1": {"input": 2.0, "output": 8.0, "currency": "CNY", "tier": "reasoning"},
-    "deepseek-ai/DeepSeek-V4-Pro": {"input": 5.0, "output": 10.0, "currency": "CNY", "tier": "pro"},
-    "deepseek-ai/DeepSeek-V4-Flash": {"input": 0.5, "output": 1.0, "currency": "CNY", "tier": "fast"},
+    "deepseek-ai/DeepSeek-V4-Pro": {"input": 12.0, "output": 24.0, "currency": "CNY", "tier": "pro"},
+    "deepseek-ai/DeepSeek-V4-Flash": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "fast"},
+    "deepseek-ai/DeepSeek-V3.2": {"input": 4.0, "output": 6.0, "currency": "CNY", "tier": "standard"},
+    "deepseek-ai/DeepSeek-V3.1-Terminus": {"input": 4.0, "output": 12.0, "currency": "CNY", "tier": "standard"},
+    "deepseek-ai/DeepSeek-R1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "reasoning"},
     "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
-    # Pro 版（专享，价格更高）
-    "Pro/deepseek-ai/DeepSeek-V3.2": {"input": 2.0, "output": 4.0, "currency": "CNY", "tier": "pro"},
+    # Pro 版（专享，价格与普通版一致但无速率限制）
+    "Pro/deepseek-ai/DeepSeek-V4-Pro": {"input": 12.0, "output": 24.0, "currency": "CNY", "tier": "pro"},
+    "Pro/deepseek-ai/DeepSeek-V4-Flash": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "pro"},
+    "Pro/deepseek-ai/DeepSeek-V3.2": {"input": 4.0, "output": 6.0, "currency": "CNY", "tier": "pro"},
+    "Pro/deepseek-ai/DeepSeek-V3.1-Terminus": {"input": 4.0, "output": 12.0, "currency": "CNY", "tier": "pro"},
     "Pro/deepseek-ai/DeepSeek-R1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "pro"},
     # --- Qwen 系列 ---
     "Qwen/Qwen3-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "Qwen/Qwen3.5-4B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "Qwen/Qwen3.5-9B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
-    "Qwen/Qwen3.5-27B": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "Qwen/Qwen3.5-35B-A3B": {"input": 0.3, "output": 0.6, "currency": "CNY", "tier": "cheap"},
-    "Qwen/Qwen3.5-122B-A10B": {"input": 1.5, "output": 3.0, "currency": "CNY", "tier": "standard"},
-    "Qwen/Qwen3.5-397B-A17B": {"input": 5.0, "output": 10.0, "currency": "CNY", "tier": "pro"},
-    "Qwen/Qwen3.6-27B": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "Qwen/Qwen3.6-35B-A3B": {"input": 0.3, "output": 0.6, "currency": "CNY", "tier": "cheap"},
+    "Qwen/Qwen3.5-27B": {"input": 0.6, "output": 4.8, "currency": "CNY", "tier": "standard"},
+    "Qwen/Qwen3.5-35B-A3B": {"input": 0.4, "output": 3.2, "currency": "CNY", "tier": "cheap"},
+    "Qwen/Qwen3.5-122B-A10B": {"input": 0.8, "output": 6.4, "currency": "CNY", "tier": "standard"},
+    "Qwen/Qwen3.5-397B-A17B": {"input": 1.2, "output": 7.2, "currency": "CNY", "tier": "pro"},
+    "Qwen/Qwen3.6-27B": {"input": 3.0, "output": 18.0, "currency": "CNY", "tier": "standard"},
+    "Qwen/Qwen3.6-35B-A3B": {"input": 1.8, "output": 10.8, "currency": "CNY", "tier": "cheap"},
     # --- GLM 系列 ---
     "THUDM/GLM-Z1-9B-0414": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
-    "zai-org/GLM-5.1": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "zai-org/GLM-5.2": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "Pro/zai-org/GLM-5.1": {"input": 2.0, "output": 4.0, "currency": "CNY", "tier": "pro"},
+    "zai-org/GLM-5.1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard"},
+    "zai-org/GLM-5.2": {"input": 8.0, "output": 28.0, "currency": "CNY", "tier": "standard"},
+    "Pro/zai-org/GLM-5.1": {"input": 6.0, "output": 24.0, "currency": "CNY", "tier": "pro"},
     # --- Kimi 系列 ---
-    "moonshotai/Kimi-K2.6": {"input": 1.5, "output": 3.0, "currency": "CNY", "tier": "standard"},
-    "Pro/moonshotai/Kimi-K2.6": {"input": 3.0, "output": 6.0, "currency": "CNY", "tier": "pro"},
-    "moonshotai/Kimi-K2.7-Code": {"input": 1.5, "output": 3.0, "currency": "CNY", "tier": "standard"},
+    "moonshotai/Kimi-K2.6": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard"},
+    "Pro/moonshotai/Kimi-K2.6": {"input": 6.5, "output": 27.0, "currency": "CNY", "tier": "pro"},
+    "moonshotai/Kimi-K2.7-Code": {"input": 6.5, "output": 27.0, "currency": "CNY", "tier": "standard"},
     # --- MiniMax ---
-    "MiniMaxAI/MiniMax-M2.5": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "Pro/MiniMaxAI/MiniMax-M2.5": {"input": 2.0, "output": 4.0, "currency": "CNY", "tier": "pro"},
+    "MiniMaxAI/MiniMax-M2.5": {"input": 2.1, "output": 8.4, "currency": "CNY", "tier": "standard"},
+    "Pro/MiniMaxAI/MiniMax-M2.5": {"input": 2.1, "output": 8.4, "currency": "CNY", "tier": "pro"},
     # --- 其他 ---
     "tencent/Hunyuan-MT-7B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
-    "meituan-longcat/LongCat-2.0": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    "nex-agi/Nex-N2-Pro": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
-    # Embedding/Reranker（免费）
+    "tencent/Hunyuan-A13B-Instruct": {"input": 1.0, "output": 4.0, "currency": "CNY", "tier": "standard"},
+    "meituan-longcat/LongCat-2.0": {"input": 5.0, "output": 20.0, "currency": "CNY", "tier": "standard"},
+    "nex-agi/Nex-N2-Pro": {"input": 1.75, "output": 7.0, "currency": "CNY", "tier": "standard"},
+    "ByteDance-Seed/Seed-OSS-36B-Instruct": {"input": 1.5, "output": 4.0, "currency": "CNY", "tier": "standard"},
+    "stepfun-ai/Step-3.5-Flash": {"input": 0.7, "output": 2.1, "currency": "CNY", "tier": "fast"},
+    "inclusionAI/Ling-flash-2.0": {"input": 1.0, "output": 4.0, "currency": "CNY", "tier": "standard"},
+    "inclusionAI/Ling-mini-2.0": {"input": 0.5, "output": 2.0, "currency": "CNY", "tier": "cheap"},
+    # Embedding/Reranker（免费版）
     "BAAI/bge-m3": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "BAAI/bge-reranker-v2-m3": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
+    "Pro/BAAI/bge-m3": {"input": 0.07, "output": 0.0, "currency": "CNY", "tier": "pro"},
+    "Pro/BAAI/bge-reranker-v2-m3": {"input": 0.07, "output": 0.0, "currency": "CNY", "tier": "pro"},
     "Qwen/Qwen3-VL-Embedding-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "Qwen/Qwen3-VL-Reranker-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     # --- 兼容别名（cost_tracker旧表兼容） ---
-    "deepseek-chat": {"input": 0.14*7.2, "output": 0.28*7.2, "currency": "CNY", "tier": "standard"},  # $→RMB 近似
-    "deepseek-reasoner": {"input": 0.55*7.2, "output": 2.19*7.2, "currency": "CNY", "tier": "reasoning"},
-    "gpt-4o": {"input": 2.50*7.2, "output": 10.00*7.2, "currency": "CNY", "tier": "pro"},
-    "gpt-4o-mini": {"input": 0.15*7.2, "output": 0.60*7.2, "currency": "CNY", "tier": "cheap"},
-    "_default": {"input": 1.0, "output": 3.0, "currency": "CNY", "tier": "standard"},
+    "deepseek-chat": {"input": 2.0, "output": 8.0, "currency": "CNY", "tier": "standard"},
+    "deepseek-reasoner": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "reasoning"},
+    "gpt-4o": {"input": 18.0, "output": 72.0, "currency": "CNY", "tier": "pro"},
+    "gpt-4o-mini": {"input": 1.08, "output": 4.32, "currency": "CNY", "tier": "cheap"},
+    "_default": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard"},
 }
 
 # 推荐模型列表（会议中常用）
@@ -261,8 +302,10 @@ RECOMMENDED_MODELS = [
 
 
 def get_model_pricing(model_id: str) -> dict[str, Any]:
-    """获取模型定价信息，找不到返回默认值"""
-    return MODEL_PRICING.get(model_id, MODEL_PRICING["_default"])
+    """获取模型定价信息（优先动态抓取，回退到硬编码表）"""
+    # 延迟导入避免循环依赖
+    from .pricing_fetcher import get_model_pricing as _live_pricing
+    return _live_pricing(model_id)
 
 
 def estimate_cost_cny(model_id: str, input_tokens: int, output_tokens: int) -> float:
@@ -374,6 +417,121 @@ def get_meeting_llm_config(meeting_id: str = "") -> tuple[str, str, str, str]:
 def clear_meeting_config(meeting_id: str) -> None:
     """清理会议配置（会议结束时调用）"""
     _meeting_overrides.pop(meeting_id, None)
+
+
+def _is_provider_model_format(s: str) -> bool:
+    """判断字符串是否为 "provider_id:model_id" 格式
+
+    规则：包含 ":" 且 ":" 前面的部分是合法的 provider ID（在 PROVIDERS 中注册）。
+    例如：siliconflow:deepseek-ai/DeepSeek-V3.2 → True
+          openai:gpt-4o → True
+          deepseek-ai/DeepSeek-V3.2 → False（无 ":"）
+    """
+    if ":" not in s:
+        return False
+    prefix = s.split(":", 1)[0]
+    return prefix in PROVIDERS
+
+
+def resolve_models_for_meeting(
+    role_configs: list[dict[str, Any]],
+    meeting_model: str = "",
+    stage_overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """为会议快照所有角色和阶段的最终模型配置。
+
+    在会议启动时调用一次，将结果存入 MeetingState.resolved_models，
+    运行时 LLM 调用直接读取快照，不再动态 resolve，消除中途切模型的不确定性。
+
+    优先级（从高到低）：
+    1. 角色级 model_override（role_configs 中的 model_override 字段）
+    2. 阶段级覆盖（stage_overrides 参数，key 为 @stage_name）
+    3. 会议级 model（meeting_model 参数）
+    4. ENV 默认（settings.llm_model）
+
+    Args:
+        role_configs: 会议角色配置列表，每项可含 model_override 字段
+        meeting_model: 会议级模型（空=用 ENV 默认）
+        stage_overrides: 阶段级模型覆盖，如 {"@arbitrate": "deepseek-ai/DeepSeek-R1"}
+
+    Returns:
+        dict[str, str]: {key: "provider_id:model_id"}
+            key 为角色 id（如 "engineer"）或 @阶段名（如 "@arbitrate"）
+    """
+    default_model = meeting_model or settings.llm_model
+    default_provider = "siliconflow" if "siliconflow" in (settings.llm_base_url or "") else "custom"
+
+    # 解析 meeting_model 中是否已含 provider 前缀（如 "siliconflow:deepseek-ai/DeepSeek-V4-Flash"）
+    if meeting_model and _is_provider_model_format(meeting_model):
+        # meeting_model 已是 "provider:model" 格式，直接作为默认值使用
+        default_resolved = meeting_model
+    elif meeting_model:
+        # meeting_model 是纯 model_id，拼接 provider 前缀
+        default_resolved = f"{default_provider}:{meeting_model}"
+    else:
+        # 无会议级覆盖，使用 ENV 默认
+        default_resolved = f"{default_provider}:{settings.llm_model}"
+
+    resolved: dict[str, str] = {}
+
+    # 1. 解析每个角色的模型
+    for rc in role_configs:
+        role_id = rc.get("id", rc.get("role", ""))
+        if not role_id:
+            continue
+        role_model = rc.get("model_override", "")
+        if role_model:
+            # 角色有自己的模型覆盖
+            if _is_provider_model_format(role_model):
+                resolved[role_id] = role_model  # 已经是 "provider:model" 格式
+            else:
+                resolved[role_id] = f"{default_provider}:{role_model}"
+        else:
+            # 继承会议级模型（已含 provider 前缀）
+            resolved[role_id] = default_resolved
+
+    # 2. 解析阶段级覆盖（@stage_name 格式）
+    default_stages = ["clarify", "intra_team", "cross_team", "evidence_check", "arbitrate", "produce"]
+    for stage in default_stages:
+        key = f"@{stage}"
+        if stage_overrides and key in stage_overrides:
+            stage_model = stage_overrides[key]
+            if _is_provider_model_format(stage_model):
+                resolved[key] = stage_model  # 已是 "provider:model" 格式
+            else:
+                resolved[key] = f"{default_provider}:{stage_model}"
+        # 不设置默认阶段覆盖（角色级即可，阶段覆盖是可选的增强）
+
+    return resolved
+
+
+def resolve_model_from_snapshot(
+    resolved_models: dict[str, str],
+    agent_role: str = "",
+    stage: str = "",
+) -> str:
+    """从快照中解析某次 LLM 调用应使用的模型。
+
+    优先级：阶段覆盖 > 角色覆盖 > 返回空字符串（fallback 到会议级/ENV）
+
+    Args:
+        resolved_models: 会议启动时快照的模型配置
+        agent_role: 当前 Agent 角色（如 "engineer"）
+        stage: 当前阶段名（如 "intra_team"）
+
+    Returns:
+        "provider_id:model_id" 或空字符串（表示用默认）
+    """
+    if not resolved_models:
+        return ""
+    # 优先查阶段覆盖
+    stage_key = f"@{stage}"
+    if stage_key in resolved_models:
+        return resolved_models[stage_key]
+    # 其次查角色覆盖
+    if agent_role and agent_role in resolved_models:
+        return resolved_models[agent_role]
+    return ""
 
 
 # ========== 远程查询：模型列表和余额 ==========

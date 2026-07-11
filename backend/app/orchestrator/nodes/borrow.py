@@ -17,6 +17,7 @@ from ._helpers import (
     _format_claims_as_text,
     _record_message,
     _record_drift,
+    _resolve_model_for_call,
 )
 
 # 角色ID → 中文名称映射（用于借调prompt）
@@ -93,10 +94,12 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
                         prompt=borrow_prompt,
                         temperature=0.3,
                         schema_hint=f"borrow_{stage.value}",  # [AUDIT-FIX P1-2] 补全 schema_hint
+                        model=_resolve_model_for_call(state, matched_role.value, stage.value),
                     )
                 else:
                     # 无特定goal（旧数据兼容），使用通用intra prompt
                     req = build_intra_prompt(matched_role, topic, request_info.get("stance", ""), anchor=anchor)
+                    req.model = _resolve_model_for_call(state, matched_role.value, stage.value)
                 resp = await compute.think(req)
                 claims = resp.result.get("claims", [])
                 claim_ids: list[str] = []
@@ -246,6 +249,7 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
             temperature=0.2,
             seed=42,
             schema_hint=f"borrow_assess_{stage.value}",  # [AUDIT-FIX P1-2] 补全 schema_hint
+            model=_resolve_model_for_call(state, Role.MODERATOR.value, stage.value),
         )
         resp = await compute.think(req)
         result = resp.result

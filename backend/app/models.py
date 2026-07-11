@@ -208,6 +208,13 @@ class MeetingState(BaseModel):
     debate_depth: str = "standard"
     # 动态路由：是否启用元认知 Agent 决定下一阶段（替代固定六阶段顺序）
     dynamic_routing: bool = True
+    # 会议级模型覆盖（创建会议时指定，空=使用 ENV 默认）
+    # 格式: "provider_id:model_id" 或纯 "model_id"
+    model_override: str = ""
+    # 模型快照（会议启动时 resolve，运行时直接读取，不再动态 resolve）
+    # 格式: {role_or_stage: "provider_id:model_id"}
+    # key 可以是角色 id（如 "engineer"）或 @阶段名（如 "@arbitrate"）
+    resolved_models: dict[str, str] = Field(default_factory=dict)
     paused_snapshot: Optional[dict[str, Any]] = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
     reference_meeting_ids: list[str] = Field(default_factory=list)  # 引用的历史会议 ID 列表
@@ -236,6 +243,9 @@ class MeetingState(BaseModel):
     borrow_frozen: bool = False  # 是否冻结借调（用户选择不再允许借调）
     # 借调申请历史（含自动通过和用户审批的所有申请）
     borrow_request_history: list[dict[str, Any]] = Field(default_factory=list)
+    # Agent 反馈评估结果（feedback.py evaluate_agents 写入）
+    # {role: {"adoption_rate": float, "evidence_accuracy": float, "overall_score": float, ...}}
+    agent_evaluations: Optional[dict[str, Any]] = None
     # 流水线优化：cross_team 阶段预检索的证据（evidence_check 优先使用）
     # 格式: {conflict_id: [evidence_chunks]}
     # [UNIQ-07 修复] 原字段名 _prefetched_evidence（下划线前缀）不会被 Pydantic

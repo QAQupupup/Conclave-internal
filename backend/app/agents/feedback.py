@@ -101,11 +101,8 @@ def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
             }
 
         # 将评估结果写入 state（供 API 返回和前端展示）
-        if hasattr(state, "agent_evaluations"):
-            state.agent_evaluations = evaluations
-        else:
-            # MeetingState 可能还没有 agent_evaluations 字段，动态设置
-            setattr(state, "agent_evaluations", evaluations)
+        # agent_evaluations 是 MeetingState 的正式字段（Optional[dict]）
+        state.agent_evaluations = evaluations
 
         # 将评估分数注入记忆系统（供后续会议的画像参考）
         _persist_scores_to_memory(state, evaluations)

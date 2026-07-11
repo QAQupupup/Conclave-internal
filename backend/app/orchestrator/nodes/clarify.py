@@ -10,7 +10,7 @@ from app.models import MeetingState, Role, Stage
 from app.orchestrator.charter import build_charter_from_clarify
 from app.orchestrator.state import next_stage as _next_stage, get_skipped_stages
 
-from ._helpers import _emit_agent_spoke, _record_drift, _run_with_consistency
+from ._helpers import _emit_agent_spoke, _record_drift, _run_with_consistency, _resolve_model_for_call
 
 
 async def clarify_node(state: MeetingState) -> MeetingState:
@@ -22,6 +22,7 @@ async def clarify_node(state: MeetingState) -> MeetingState:
     # 带一致性自检的 LLM 调用：构造 ThinkRequest 并经 compute 接口执行
     async def call_fn(anchor: str) -> dict[str, Any]:
         req = build_clarify_prompt(state.topic, state.doc_summaries, anchor=anchor, reference_context=state.reference_context)
+        req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "clarify")
         resp = await compute.think(req)
         return resp.result
 

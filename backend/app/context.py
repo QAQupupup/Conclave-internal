@@ -24,6 +24,12 @@ _runner_session_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "runner_session_id", default="-"
 )
 
+# agent_role：当前 LLM 调用的 Agent 角色（每次 think/complete 调用前设置）
+# 用于在日志/trace/cost 中标识是哪个角色发出的调用
+_agent_role: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "agent_role", default=""
+)
+
 
 def new_request_id() -> str:
     """生成新的 request_id（短格式 UUID）"""
@@ -80,13 +86,29 @@ def reset_runner_session_id(token: contextvars.Token[str]) -> None:
     _runner_session_id.reset(token)
 
 
+def get_agent_role() -> str:
+    """获取当前 LLM 调用的 Agent 角色"""
+    return _agent_role.get()
+
+
+def set_agent_role(role: str) -> contextvars.Token[str]:
+    """设置当前 LLM 调用的 Agent 角色，返回 token 用于恢复"""
+    return _agent_role.set(role)
+
+
+def reset_agent_role(token: contextvars.Token[str]) -> None:
+    """恢复 agent_role"""
+    _agent_role.reset(token)
+
+
 def get_trace_context() -> dict[str, str]:
     """获取当前追踪上下文快照（用于日志注入）
 
-    返回 {"request_id": "...", "meeting_id": "...", "runner_session_id": "..."}
+    返回 {"request_id": "...", "meeting_id": "...", "runner_session_id": "...", "agent_role": "..."}
     """
     return {
         "request_id": _request_id.get(),
         "meeting_id": _meeting_id.get(),
         "runner_session_id": _runner_session_id.get(),
+        "agent_role": _agent_role.get(),
     }

@@ -95,6 +95,7 @@ class ThinkRequest:
     schema_hint: str = ""
     temperature: float = 0.0
     seed: int = 42
+    model: str = ""               # per-role/stage 模型覆盖（空=继承会议级配置）
     # ReAct 扩展
     available_tools: list[dict[str, Any]] = field(default_factory=list)  # [{name, description, parameters}]
     tool_history: list[ToolResult] = field(default_factory=list)
@@ -151,9 +152,17 @@ class LocalAgentCompute:
 
     async def think(self, req: ThinkRequest) -> ThinkResponse:
         import time
+        from app.context import set_agent_role, reset_agent_role
+        # 设置 agent_role 上下文（trace/cost/logging 自动注入）
+        role_token = set_agent_role(req.agent_role) if req.agent_role else None
         t0 = time.monotonic()
         try:
-            result = await self._llm.complete(req.prompt, schema_hint=req.schema_hint)
+            result = await self._llm.complete(
+                req.prompt,
+                schema_hint=req.schema_hint,
+                model_override=req.model or "",
+                agent_role=req.agent_role or "",
+            )
 
             # ReAct 模式：从 result 中提取 tool_calls 和 need_continue
             tool_calls: list[ToolCall] = []
@@ -185,6 +194,10 @@ class LocalAgentCompute:
                 latency_ms=int((time.monotonic() - t0) * 1000),
                 validation_status="invalid",
             )
+        finally:
+            # 恢复 agent_role 上下文
+            if role_token is not None:
+                reset_agent_role(role_token)
 
     async def think_batch(self, requests: list[ThinkRequest]) -> list[ThinkResponse]:
         """并行执行多个思考请求（asyncio.gather）"""
