@@ -25,7 +25,7 @@ export interface LLMPreferences {
 const DEFAULT_PREFERENCES: LLMPreferences = {
   version: STORAGE_VERSION,
   default_provider_id: 'siliconflow',
-  default_model: 'deepseek-ai/DeepSeek-V3.2',
+  default_model: 'Qwen/Qwen3-8B',
   api_keys: {},
   custom_base_url: '',
   auto_save_model: false,

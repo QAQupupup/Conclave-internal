@@ -38,7 +38,7 @@ export interface ModelSelection {
 
 export const DEFAULT_SELECTION: ModelSelection = {
   provider_id: 'siliconflow',
-  model: 'deepseek-ai/DeepSeek-V3.2',
+  model: 'Qwen/Qwen3-8B',
   api_key: '',
   base_url: '',
 }

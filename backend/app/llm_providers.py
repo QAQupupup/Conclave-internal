@@ -204,10 +204,12 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
     "deepseek-ai/DeepSeek-R1": {"input": 2.0, "output": 8.0, "currency": "CNY", "tier": "reasoning"},
     "deepseek-ai/DeepSeek-V4-Pro": {"input": 5.0, "output": 10.0, "currency": "CNY", "tier": "pro"},
     "deepseek-ai/DeepSeek-V4-Flash": {"input": 0.5, "output": 1.0, "currency": "CNY", "tier": "fast"},
+    "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     # Pro 版（专享，价格更高）
     "Pro/deepseek-ai/DeepSeek-V3.2": {"input": 2.0, "output": 4.0, "currency": "CNY", "tier": "pro"},
     "Pro/deepseek-ai/DeepSeek-R1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "pro"},
     # --- Qwen 系列 ---
+    "Qwen/Qwen3-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "Qwen/Qwen3.5-4B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "Qwen/Qwen3.5-9B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "Qwen/Qwen3.5-27B": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
@@ -217,6 +219,7 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
     "Qwen/Qwen3.6-27B": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
     "Qwen/Qwen3.6-35B-A3B": {"input": 0.3, "output": 0.6, "currency": "CNY", "tier": "cheap"},
     # --- GLM 系列 ---
+    "THUDM/GLM-Z1-9B-0414": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "zai-org/GLM-5.1": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
     "zai-org/GLM-5.2": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
     "Pro/zai-org/GLM-5.1": {"input": 2.0, "output": 4.0, "currency": "CNY", "tier": "pro"},
@@ -228,6 +231,7 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
     "MiniMaxAI/MiniMax-M2.5": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
     "Pro/MiniMaxAI/MiniMax-M2.5": {"input": 2.0, "output": 4.0, "currency": "CNY", "tier": "pro"},
     # --- 其他 ---
+    "tencent/Hunyuan-MT-7B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "meituan-longcat/LongCat-2.0": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
     "nex-agi/Nex-N2-Pro": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "standard"},
     # Embedding/Reranker（免费）
@@ -245,11 +249,13 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
 
 # 推荐模型列表（会议中常用）
 RECOMMENDED_MODELS = [
+    {"id": "Qwen/Qwen3-8B", "name": "Qwen3-8B (免费)", "desc": "8.2B通用模型，完全免费", "recommended_for": "测试/通用任务"},
+    {"id": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B", "name": "DeepSeek-R1-8B (免费)", "desc": "推理模型，免费使用", "recommended_for": "推理/数学/代码"},
+    {"id": "THUDM/GLM-Z1-9B-0414", "name": "GLM-Z1-9B (免费)", "desc": "9B推理模型，免费使用", "recommended_for": "推理/通用任务"},
     {"id": "deepseek-ai/DeepSeek-V3.2", "name": "DeepSeek-V3.2", "desc": "强JSON遵循，性价比高", "recommended_for": "会议讨论/产出"},
     {"id": "deepseek-ai/DeepSeek-V4-Flash", "name": "DeepSeek-V4-Flash", "desc": "快速响应，成本低", "recommended_for": "快速讨论/简单任务"},
     {"id": "Qwen/Qwen3.5-35B-A3B", "name": "Qwen3.5-35B-MoE", "desc": "MoE小模型，免费额度", "recommended_for": "测试/简单任务"},
     {"id": "deepseek-ai/DeepSeek-R1", "name": "DeepSeek-R1", "desc": "推理模型，深度思考", "recommended_for": "复杂推理/代码审查"},
-    {"id": "Qwen/Qwen3.5-4B", "name": "Qwen3.5-4B (免费)", "desc": "小模型完全免费", "recommended_for": "开发调试"},
     {"id": "Pro/deepseek-ai/DeepSeek-V3.2", "name": "DeepSeek-V3.2 Pro", "desc": "专享版，稳定无速率限制", "recommended_for": "生产环境"},
 ]
 
