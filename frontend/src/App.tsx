@@ -179,7 +179,7 @@ function MeetingView({
 /** 工作区视图：文件树 + 编辑器 + 终端 */
 function WorkspaceView({ meetingId, initialFile }: { meetingId?: string; initialFile?: string }) {
   return (
-    <div className="app-layout">
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="workspace-view">
         <WorkspacePanel meetingId={meetingId} initialFile={initialFile} />
       </div>
@@ -353,7 +353,7 @@ function AppShell() {
           ]}
           style={{ padding: '0 24px', flexShrink: 0 }}
         />
-        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {tab === 'meeting' ? (
             <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
           ) : (
