@@ -77,7 +77,7 @@ class DuckDuckGoEngine:
         except ImportError:
             return False
 
-    async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 5, **kwargs: Any) -> list[SearchResult]:
         """执行 DuckDuckGo 搜索，返回 SearchResult 列表
 
         流程：

@@ -65,12 +65,13 @@ class SearchEngine(Protocol):
         """引擎是否可用（健康检查）"""
         ...
 
-    async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 5, **kwargs: Any) -> list[SearchResult]:
         """执行搜索，返回 SearchResult 列表
 
         Args:
             query: 搜索查询
             max_results: 最大结果数
+            **kwargs: 可选参数（time_range, country, language等）
         Returns:
             SearchResult 列表，按可信度排序
         Raises:
@@ -158,8 +159,14 @@ class MultiEngineSearch:
         self,
         query: str,
         max_results: int = 5,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """执行多引擎搜索
+
+        Args:
+            query: 搜索查询
+            max_results: 最大结果数
+            **kwargs: 传递给各引擎的可选参数（time_range, country, language等）
 
         Returns:
             {
@@ -178,7 +185,7 @@ class MultiEngineSearch:
 
             try:
                 results = await asyncio.wait_for(
-                    engine.search(query, max_results),
+                    engine.search(query, max_results, **kwargs),
                     timeout=30.0,
                 )
                 self._health.record_success(engine.name)

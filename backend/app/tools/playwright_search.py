@@ -1,22 +1,30 @@
 # 自建 Web Search：Playwright 无头浏览器方案
 #
 # 架构：
-#   DuckDuckGo HTML 搜索 → Playwright 渲染 Top-K 页面 → 提取正文
+#   Bing 搜索 → Playwright 渲染 Top-K 页面 → 提取正文
 #
-# 反检测原理：
+# 反检测原理（v2 增强）：
 #   1. CDP 注入 ≠ DevTools 面板：page.evaluate() 通过 Chrome DevTools Protocol
-#      直接在 V8 引擎执行 JS，不经过 DevTools UI。页面中基于 debugger 语句、
+#      直接在 V8 引擎执行 JS，不经过 DevTools UI。基于 debugger 语句、
 #      console 时差的反调试手段完全无效。
-#   2. 指纹覆盖：在页面 JS 执行前注入反检测脚本，覆盖 navigator.webdriver
-#      等自动化标记。
-#   3. 行为反爬（Cloudflare/reCAPTCHA）：无法绕过，超时跳过，不崩溃。
-#   4. 异常隔离：每个页面在独立 context 中执行，单页失败不影响其他页面。
+#   2. 指纹覆盖 v2：WebGL/Canvas 指纹随机化、WebRTC 防泄漏、硬件参数伪装、
+#      媒体设备伪装、Battery API 伪装、chrome.runtime 完整模拟、CDP 特征清除。
+#   3. Cookie 持久化：成功访问的页面 Cookie 保存到磁盘，下次访问复用，
+#      模拟真实用户长期会话，大幅降低验证码触发率。
+#   4. CAPTCHA 主动检测：识别 Cloudflare/reCAPTCHA/hCaptcha/极验/腾讯/百度等验证码，
+#      快速跳过（5秒内）而非盲目等待15秒超时；被拦截域名5分钟冷却。
+#   5. 拟人化行为：随机延迟、Accept/Sec-Fetch-* 真实请求头、模拟滚动、
+#      device_scale_factor 匹配高分屏。
+#   6. 行为反爬（Cloudflare/reCAPTCHA）：无法自动破解滑块/点选验证码，
+#      检测到后快速跳过并标记域名冷却，不崩溃。
+#   7. 异常隔离：每个页面在独立 context 中执行，单页失败不影响其他页面。
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import ipaddress
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -82,16 +90,25 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
     return True, "ok"
 
 
-# ---------- 反检测脚本 ----------
+# ---------- 反检测脚本（增强版 v2） ----------
 # 在页面任何 JS 执行前注入（addInitScript），覆盖自动化指纹
+# v2 增强：WebGL/Canvas 指纹随机化、WebRTC 防泄漏、硬件参数伪装、
+#          媒体设备枚举伪装、Battery API 伪装、Touch 事件支持
 _STEALTH_JS = """
-// 1. 覆盖 navigator.webdriver（Playwright 默认为 true）
+// ===== 0. 工具函数 =====
+const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const randChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// 稳定的"指纹"种子（同一 context 内一致，跨 context 随机）
+const fpSeed = Math.floor(Math.random() * 100000);
+
+// ===== 1. 覆盖 navigator.webdriver（Playwright 默认为 true）=====
 Object.defineProperty(navigator, 'webdriver', {
     get: () => undefined,
     configurable: true,
 });
 
-// 2. 模拟真实浏览器插件列表
+// ===== 2. 模拟真实浏览器插件列表 =====
 Object.defineProperty(navigator, 'plugins', {
     get: () => {
         const plugins = [
@@ -106,47 +123,197 @@ Object.defineProperty(navigator, 'plugins', {
             Object.defineProperty(pluginArray, i, { value: plugins[i] });
         }
         Object.defineProperty(pluginArray, 'length', { value: plugins.length });
+        pluginArray.refresh = () => {};
+        pluginArray.item = (i) => plugins[i] || null;
+        pluginArray.namedItem = (name) => plugins.find(p => p.name === name) || null;
         return pluginArray;
     },
     configurable: true,
 });
 
-// 3. 覆盖 navigator.languages
+// ===== 3. 覆盖 navigator.languages =====
 Object.defineProperty(navigator, 'languages', {
     get: () => ['zh-CN', 'zh', 'en-US', 'en'],
     configurable: true,
 });
 
-// 4. 覆盖 navigator.platform（匹配 User-Agent）
+// ===== 4. 覆盖 navigator.platform（匹配 User-Agent）=====
 Object.defineProperty(navigator, 'platform', {
     get: () => 'Win32',
     configurable: true,
 });
 
-// 5. 覆盖 navigator.permissions.query（某些站点检测 Notification 权限）
+// ===== 5. 覆盖 navigator.permissions.query =====
 const originalQuery = window.navigator.permissions.query;
 window.navigator.permissions.query = (parameters) => (
     parameters.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission })
+        ? Promise.resolve({ state: Notification.permission, onchange: null })
         : originalQuery(parameters)
 );
 
-// 6. 遮挡 window.chrome（headless 模式下可能缺失）
+// ===== 6. 遮挡 window.chrome =====
 if (!window.chrome) {
     window.chrome = {
-        runtime: {},
-        loadTimes: function() {},
-        csi: function() {},
-        app: {},
+        runtime: {
+            OnInstalledReason: { INSTALL: 'install', UPDATE: 'update', CHROME_UPDATE: 'chrome_update', SHARED_MODULE_UPDATE: 'shared_module_update' },
+            OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+            PlatformArch: { ARM: 'arm', ARM64: 'arm64', X86_32: 'x86-32', X86_64: 'x86-64', MIPS: 'mips', MIPS64: 'mips64' },
+            PlatformNaclArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64', MIPS: 'mips', MIPS64: 'mips64' },
+            PlatformOs: { MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd' },
+            RequestUpdateCheckStatus: { THROTTLED: 'throttled', NO_UPDATE: 'no_update', UPDATE_AVAILABLE: 'update_available' },
+            connect: () => {},
+            sendMessage: () => {},
+        },
+        loadTimes: function() {
+            return { commitLoadTime: Date.now()/1000, connectionInfo: 'h2', finishDocumentLoadTime: Date.now()/1000, finishLoadTime: Date.now()/1000, firstPaintAfterLoadTime: 0, firstPaintTime: Date.now()/1000, navigationType: 'Other', npnNegotiatedProtocol: 'h2', requestTime: Date.now()/1000, startLoadTime: Date.now()/1000, wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true };
+        },
+        csi: function() {
+            return { onloadT: Date.now(), pageT: 50 + Math.random()*100, startE: Date.now(), tran: 15 };
+        },
+        app: {
+            isInstalled: false,
+            InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+            RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+            getDetails: () => null,
+            getIsInstalled: () => false,
+            installState: () => 'not_installed',
+            runningState: () => 'cannot_run',
+        },
     };
 }
 
-// 7. 覆盖 navigator.connection（部分反爬检测 effectiveType）
+// ===== 7. 覆盖 navigator.connection =====
 if (navigator.connection) {
-    Object.defineProperty(navigator.connection, 'effectiveType', {
-        get: () => '4g',
-        configurable: true,
+    Object.defineProperty(navigator.connection, 'effectiveType', { get: () => '4g', configurable: true });
+    Object.defineProperty(navigator.connection, 'rtt', { get: () => 50, configurable: true });
+    Object.defineProperty(navigator.connection, 'downlink', { get: () => 10, configurable: true });
+    Object.defineProperty(navigator.connection, 'saveData', { get: () => false, configurable: true });
+}
+
+// ===== 8. WebGL 指纹随机化 =====
+const getParameterProxy = (target, key) => {
+    return new Proxy(WebGLRenderingContext.prototype.getParameter, {
+        apply: function(target, thisArg, args) {
+            const param = args[0];
+            // UNMASKED_VENDOR_WEBGL = 0x9245, UNMASKED_RENDERER_WEBGL = 0x9246
+            if (param === 0x9245) return 'Google Inc. (NVIDIA)';
+            if (param === 0x9246) return 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+            // VERSION = 0x1F02, SHADING_LANGUAGE_VERSION = 0x8B8C
+            if (param === 0x1F02) return 'WebGL 1.0 (OpenGL ES 2.0 Chromium)';
+            if (param === 0x8B8C) return 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)';
+            if (param === 0x1F01) return 0x20003; // NUM_EXTENSIONS
+            return target.apply(thisArg, args);
+        }
+    })(key);
+};
+
+// WebGL2
+if (window.WebGL2RenderingContext) {
+    const origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function(param) {
+        if (param === 0x9245) return 'Google Inc. (NVIDIA)';
+        if (param === 0x9246) return 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+        return origGetParam2.apply(this, [param]);
+    };
+}
+// WebGL1
+if (window.WebGLRenderingContext) {
+    const origGetParam = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(param) {
+        if (param === 0x9245) return 'Google Inc. (NVIDIA)';
+        if (param === 0x9246) return 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+        return origGetParam.apply(this, [param]);
+    };
+    const origGetExt = WebGLRenderingContext.prototype.getExtension;
+    WebGLRenderingContext.prototype.getExtension = function(name) {
+        if (name === 'WEBGL_debug_renderer_info') return null;
+        return origGetExt.apply(this, [name]);
+    };
+}
+
+// ===== 9. Canvas 指纹干扰（微小噪声，不影响渲染）=====
+const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+HTMLCanvasElement.prototype.toDataURL = function(type) {
+    if (type === 'image/png' && this.width > 16 && this.height > 16) {
+        const ctx = this.getContext('2d');
+        if (ctx) {
+            const imgData = ctx.getImageData(0, 0, this.width, this.height);
+            for (let i = 0; i < imgData.data.length; i += 4) {
+                // 极微小的噪声（±1），不影响视觉，改变 fingerprint hash
+                imgData.data[i] = imgData.data[i] + (fpSeed % 3) - 1;
+                imgData.data[i+1] = imgData.data[i+1] + (fpSeed % 2);
+                imgData.data[i+2] = imgData.data[i+2] + ((fpSeed+1) % 3) - 1;
+            }
+            ctx.putImageData(imgData, 0, 0);
+        }
+    }
+    return origToDataURL.apply(this, arguments);
+};
+
+// ===== 10. WebRTC 防泄漏（不暴露真实内网 IP）=====
+delete window.RTCPeerConnection;
+delete window.webkitRTCPeerConnection;
+delete window.mozRTCPeerConnection;
+
+// ===== 11. 硬件参数伪装 =====
+Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
+Object.defineProperty(navigator, 'deviceMemory', { get: () => 16, configurable: true });
+Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0, configurable: true });
+
+// ===== 12. Battery API 伪装 =====
+if (navigator.getBattery) {
+    navigator.getBattery = () => Promise.resolve({
+        charging: true,
+        chargingTime: 0,
+        dischargingTime: Infinity,
+        level: 1.0,
+        onchargingchange: null, onchargingtimechange: null,
+        ondischargingtimechange: null, onlevelchange: null,
+        addEventListener: () => {}, removeEventListener: () => {},
+        dispatchEvent: () => true,
     });
+}
+
+// ===== 13. 媒体设备枚举伪装 =====
+if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+    navigator.mediaDevices.enumerateDevices = () => Promise.resolve([
+        { deviceId: 'default', kind: 'audioinput', label: 'Default - Microphone (Realtek Audio)', groupId: 'default' },
+        { deviceId: 'communications', kind: 'audioinput', label: 'Communications - Microphone (Realtek Audio)', groupId: 'default' },
+        { deviceId: 'default', kind: 'audiooutput', label: 'Default - Speakers (Realtek Audio)', groupId: 'default' },
+        { deviceId: 'communications', kind: 'audiooutput', label: 'Communications - Speakers (Realtek Audio)', groupId: 'default' },
+    ]);
+}
+
+// ===== 14. SpeechSynthesis 伪装（headless 下为空）=====
+if (window.speechSynthesis) {
+    const origGetVoices = window.speechSynthesis.getVoices;
+    window.speechSynthesis.getVoices = () => {
+        const voices = origGetVoices.call(window.speechSynthesis);
+        if (voices.length === 0) {
+            return [
+                { voiceURI: 'Microsoft Huihui Desktop - Chinese (Simplified)', name: 'Microsoft Huihui Desktop - Chinese (Simplified)', lang: 'zh-CN', localService: true, default: true },
+                { voiceURI: 'Microsoft Zira Desktop - English (United States)', name: 'Microsoft Zira Desktop - English (United States)', lang: 'en-US', localService: true, default: false },
+            ];
+        }
+        return voices;
+    };
+}
+
+// ===== 15. iframe contentWindow 检测 =====
+const origAttachShadow = Element.prototype.attachShadow;
+Element.prototype.attachShadow = function() { return origAttachShadow.apply(this, arguments); };
+
+// ===== 16. 清除 CDP 特征（RuntimeEnabled 等）=====
+// 某些站点检测 window.cdc_* 或 RuntimeEnabled 特征
+Object.keys(window).forEach(key => {
+    if (key.match(/^cdc_|^chrome-extension/)) {
+        try { delete window[key]; } catch(e) {}
+    }
+});
+
+// ===== 17. Notification 权限伪装 =====
+if (window.Notification) {
+    Object.defineProperty(Notification, 'permission', { get: () => 'default' });
 }
 """
 
@@ -156,6 +323,88 @@ _USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/125.0.0.0 Safari/537.36"
 )
+
+# ---------- CAPTCHA 检测脚本 ----------
+# 识别常见验证码/反爬页面特征，避免盲目等待超时
+_CAPTCHA_DETECT_JS = """
+() => {
+    const url = window.location.href;
+    const title = document.title || '';
+    const bodyText = (document.body && document.body.innerText) ? document.body.innerText.substring(0, 2000) : '';
+    const html = document.documentElement ? document.documentElement.outerHTML.substring(0, 5000) : '';
+
+    const detect = [];
+
+    // 1. Cloudflare 检测
+    if (title.includes('Just a moment') || title.includes('Checking your browser') ||
+        title.includes('Attention Required') || bodyText.includes('Checking your browser before') ||
+        bodyText.includes('cf-browser-verification') || html.includes('cf-challenge') ||
+        html.includes('turnstile') || html.includes('grecaptcha')) {
+        detect.push('cloudflare');
+    }
+
+    // 2. reCAPTCHA 检测
+    if (html.includes('google.com/recaptcha') || html.includes('g-recaptcha') ||
+        html.includes('recaptcha_challenge') || document.querySelector('iframe[src*="recaptcha"]')) {
+        detect.push('recaptcha');
+    }
+
+    // 3. hCaptcha 检测
+    if (html.includes('hcaptcha.com') || html.includes('h-captcha') ||
+        document.querySelector('iframe[src*="hcaptcha"]')) {
+        detect.push('hcaptcha');
+    }
+
+    // 4. 极验(Geetest)滑块检测
+    if (html.includes('gt_') && html.includes('challenge') ||
+        html.includes('geetest') || html.includes('nc_1_n1z') ||
+        html.includes('gee_') || document.querySelector('.geetest_holder, .gt_slider, [class*="geetest"]')) {
+        detect.push('geetest_slider');
+    }
+
+    // 5. 腾讯防水墙检测
+    if (html.includes('tcaptcha') || html.includes('captcha.qq.com') ||
+        document.querySelector('#tcaptcha, iframe[src*="tcaptcha"]')) {
+        detect.push('tencent_captcha');
+    }
+
+    // 6. Bing 人机验证
+    if (url.includes('bing.com') && (
+        bodyText.includes('verify you are human') ||
+        bodyText.includes('我们需要验证') ||
+        bodyText.includes('不是机器人') ||
+        bodyText.includes('Help us protect') ||
+        html.includes('captcha'))) {
+        detect.push('bing_captcha');
+    }
+
+    // 7. 通用验证码关键词
+    if (bodyText.match(/(captcha|verification|verify.{0,20}human|人机验证|验证码|滑块验证|安全验证)/i)) {
+        // 排除误报（如页面正文提到"验证码"这个词但不是验证码页面）
+        if (detect.length === 0) {
+            // 额外检查：是否有 input 或 canvas 等验证码交互元素
+            const hasCaptchaInput = document.querySelector('input[name*="captcha" i], img[src*="captcha" i], canvas[class*="captcha" i]');
+            const shortBody = bodyText.length < 500; // 验证码页面通常内容很少
+            if (hasCaptchaInput || shortBody) {
+                detect.push('generic_captcha');
+            }
+        }
+    }
+
+    // 8. 百度安全验证
+    if (url.includes('baidu.com') && (bodyText.includes('安全验证') || html.includes('wappass'))) {
+        detect.push('baidu_verify');
+    }
+
+    return {
+        detected: detect.length > 0,
+        types: detect,
+        title: title.substring(0, 100),
+        url: url,
+        body_length: bodyText.length,
+    };
+}
+"""
 
 # 页面内容提取 JS：移除噪声元素后提取正文
 _EXTRACT_JS = """
@@ -431,37 +680,103 @@ class PlaywrightWebSearch:
     def __init__(self) -> None:
         self._browser = None
         self._playwright = None
+        self._browser_headed = False  # 标记浏览器当前是否以有头模式运行
         self._semaphore = asyncio.Semaphore(3)  # 并发页面数限制
         self._lock = asyncio.Lock()  # 浏览器初始化锁
+        # Cookie/存储持久化：保存到数据目录，跨重启复用
+        self._storage_state_path = os.path.join(
+            os.environ.get("CONCLAVE_DATA_DIR", "/app/data"),
+            "browser_storage_state.json"
+        )
+        self._captcha_blocked_domains: dict[str, float] = {}  # 域名 → 被阻时间，避免重复尝试
+        logger.info("PlaywrightWebSearch 初始化: storage_state=%s", self._storage_state_path)
 
     async def _ensure_browser(self) -> None:
-        """延迟初始化浏览器（首次搜索时启动，后续复用）"""
+        """延迟初始化浏览器（首次搜索时启动，后续复用）
+
+        值守模式下（guard.guard_mode=True）：
+        - Chromium 以有头模式（headless=False）启动
+        - 输出到 Xvfb 虚拟显示器（DISPLAY=:99）
+        - 同时启动 x11vnc + websockify/noVNC 供用户通过 Web 介入
+        非值守模式：headless=True，不启动 VNC。
+
+        如果值守模式动态切换（headless ↔ headed），会自动重启浏览器。
+        """
+        # 检查当前需要的模式
+        from app.tools.captcha_guard import get_captcha_guard
+        guard = await get_captcha_guard()
+        need_headed = guard.guard_mode
+
+        # 如果浏览器已启动，检查模式是否匹配
         if self._browser is not None:
-            return
+            if self._browser_headed == need_headed:
+                return  # 模式匹配，复用现有浏览器
+            # 模式不匹配，关闭旧浏览器，重新启动
+            logger.info("CAPTCHA 值守模式切换（%s → %s），重启浏览器...",
+                        "有头" if self._browser_headed else "无头",
+                        "有头" if need_headed else "无头")
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+            try:
+                await self._playwright.stop()
+            except Exception:
+                pass
+            self._playwright = None
+
         async with self._lock:
             if self._browser is not None:
                 return
             from playwright.async_api import async_playwright
 
-            logger.info("启动 Playwright Chromium 无头浏览器")
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--disable-extensions",
-                    "--disable-background-networking",
-                    "--disable-sync",
-                    "--no-first-run",
-                    "--disable-default-apps",
-                    "--window-size=1920,1080",
-                ],
-            )
+            headless = True
+            launch_env: dict[str, str] = {}
+            vnc_started = False
 
-    async def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+            if need_headed:
+                # 尝试启动 VNC 环境
+                try:
+                    vnc_started = await guard.start_vnc()
+                    if vnc_started:
+                        headless = False
+                        launch_env["DISPLAY"] = ":99"
+                        logger.info("CAPTCHA 值守模式：以有头模式启动浏览器 (DISPLAY=:99)")
+                    else:
+                        logger.warning("CAPTCHA 值守模式开启但 VNC 环境不可用，仍使用 headless 模式")
+                except Exception as e:
+                    logger.warning("CAPTCHA 值守模式初始化失败: %s", str(e)[:100])
+
+            mode_desc = "有头+VNC" if not headless else "headless"
+            logger.info("启动 Playwright Chromium 浏览器 (%s)", mode_desc)
+            self._playwright = await async_playwright().start()
+            launch_args = [
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-gpu" if headless else "",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--no-first-run",
+                "--disable-default-apps",
+                "--window-size=1280,800" if not headless else "--window-size=1920,1080",
+            ]
+            launch_args = [a for a in launch_args if a]
+
+            if not headless:
+                # 有头模式：添加远程调试端口
+                launch_args.append("--remote-debugging-port=9222")
+
+            self._browser = await self._playwright.chromium.launch(
+                headless=headless,
+                args=launch_args,
+                env=launch_env if launch_env else None,
+            )
+            self._browser_headed = not headless
+
+    async def search(self, query: str, top_k: int = 5, **kwargs: Any) -> list[dict[str, Any]]:
         """搜索流程：Bing 搜索 → Tier 重排 → Playwright 渲染 → Claim 粒度分块提取
 
         Phase 1.5 改进（Claude Sonnet 5 #4 + #5）：
@@ -469,6 +784,15 @@ class PlaywrightWebSearch:
         2. 每块携带 heading_path（h1 > h2 > h3）结构元数据
         3. UGC guard：嵌入评论/社区笔记降级为 C tier（不继承 S/A/B）
         4. 保留 Phase 1 的全部增强：Bing 排除、tier 重排、JSON-LD、signals 袋、staleness
+        5. 新增：支持 language（zh-CN/en-US）、time_range（day/week/month/year）、country 参数
+
+        Args:
+            query: 搜索查询
+            top_k: 最大结果数
+            **kwargs:
+                language: 搜索语言 (zh-CN/en-US，默认 zh-CN)
+                time_range: 时间过滤 (day/week/month/year)
+                country: 国家/地区代码 (CN/US等)
 
         返回格式（chunk-level evidence）：
         [{
@@ -478,35 +802,114 @@ class PlaywrightWebSearch:
             "url": "https://...",
             "domain": "docs.python.org",
             "source_tier": "S",
-            "signals": {
-                "tier_static": "S",
-                "effective_tier": "S",       # UGC chunk 降为 "C"
-                "is_official": true,
-                "fetched_at": "...",
-                "page_last_modified": "...",
-                "jsonld_publisher": "...",
-                "heading_path": "Installation > Prerequisites",
-                "heading_level": 2,
-                "chunk_index": 0,
-                "total_chunks": 3,
-                "is_ugc": false,
-                "page_title": "...",
-                ...
-            }
+            "signals": { ... }
         }]
         """
         fetched_at = datetime.now(timezone.utc).isoformat()
         try:
             return await asyncio.wait_for(
-                self._do_search(query, top_k, fetched_at),
+                self._do_search(query, top_k, fetched_at, **kwargs),
                 timeout=60.0,  # P0-3: 整体超时 60s（Bing 重试 32s + 渲染 28s）
             )
         except asyncio.TimeoutError:
             logger.warning("Web Search 整体超时 60s: query=%s", query[:50])
             return []
 
-    async def _do_search(self, query: str, top_k: int, fetched_at: str) -> list[dict[str, Any]]:
-        """搜索核心逻辑（被 search() 的 wait_for 包裹）"""
+    async def fetch_url(self, url: str, max_chars: int = 5000) -> dict[str, Any]:
+        """直接抓取指定URL的内容，无需搜索
+
+        Args:
+            url: 要抓取的URL
+            max_chars: 最大返回字符数
+
+        Returns:
+            {"url", "title", "content", "chunks", "source_tier", "signals", "error"}
+        """
+        from .domain_registry import tag_url
+        fetched_at = datetime.now(timezone.utc).isoformat()
+
+        # SSRF 校验
+        safe, reason = _is_safe_url(url)
+        if not safe:
+            logger.warning("fetch_url SSRF拦截: url=%s reason=%s", url[:80], reason)
+            return {"url": url, "title": "", "content": "", "chunks": [],
+                    "source_tier": "D", "signals": {}, "error": reason}
+
+        await self._ensure_browser()
+        tier_info = tag_url(url)
+        hostname = urlparse(url).hostname or "unknown"
+
+        try:
+            result = await asyncio.wait_for(
+                self._fetch_and_extract(url, locale="zh-CN"),
+                timeout=20.0,
+            )
+        except asyncio.TimeoutError:
+            return {"url": url, "title": "", "content": "", "chunks": [],
+                    "source_tier": tier_info["source_tier"], "signals": {}, "error": "timeout"}
+        except Exception as e:
+            return {"url": url, "title": "", "content": "", "chunks": [],
+                    "source_tier": tier_info["source_tier"], "signals": {}, "error": str(e)[:200]}
+
+        chunks = result.get("chunks", [])
+        title = result.get("title", "")
+        jsonld = result.get("jsonld", {})
+
+        if not chunks:
+            return {"url": url, "title": title, "content": "", "chunks": [],
+                    "source_tier": tier_info["source_tier"],
+                    "signals": {"page_title": title, "fetched_at": fetched_at},
+                    "error": "no_content"}
+
+        # 组装 content（拼接前几个 chunk 的文本）和 chunks 列表
+        content_parts = []
+        chunk_list = []
+        total_chars = 0
+        for i, chunk in enumerate(chunks):
+            text = chunk.get("text", "")
+            chunk_list.append({
+                "text": text[:max_chars],
+                "heading_path": chunk.get("heading_path", ""),
+                "heading_level": chunk.get("heading_level", 0),
+                "is_ugc": chunk.get("is_ugc", False),
+            })
+            if total_chars < max_chars:
+                content_parts.append(text)
+                total_chars += len(text)
+
+        content = "\n\n".join(content_parts)[:max_chars]
+
+        return {
+            "url": url,
+            "title": title,
+            "content": content,
+            "chunks": chunk_list,
+            "source_tier": tier_info["source_tier"],
+            "signals": {
+                "domain": hostname,
+                "page_title": title,
+                "fetched_at": fetched_at,
+                "jsonld_publisher": jsonld.get("publisher"),
+                "chunk_count": len(chunks),
+                "is_official": tier_info["is_official"],
+            },
+            "error": None,
+        }
+
+    async def _do_search(self, query: str, top_k: int, fetched_at: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """搜索核心逻辑（被 search() 的 wait_for 包裹）
+
+        Args:
+            **kwargs: language, time_range, country
+        """
+        # 解析参数
+        language = kwargs.get("language", "zh-CN")
+        time_range = kwargs.get("time_range")
+        country = kwargs.get("country", "CN" if language.startswith("zh") else "US")
+
+        # locale 映射：zh-CN → 中文搜索，其他默认 en-US
+        locale = language if language in ("zh-CN", "en-US", "zh-TW", "ja-JP") else "en-US"
+
         try:
             # 0. 实体匹配（零开销子串匹配，用于日志记录）
             entity = match_entity(query)
@@ -515,7 +918,7 @@ class PlaywrightWebSearch:
 
             # 1. Bing 搜索获取 URL 列表（请求 3x 结果用于 tier 重排）
             fetch_count = min(top_k * 3, 15)
-            urls = await self._search_ddg(query, fetch_count)
+            urls = await self._search_ddg(query, fetch_count, locale=locale, time_range=time_range, country=country)
             if not urls:
                 logger.warning("Bing 搜索无结果: query=%s", query[:50])
                 return []
@@ -527,7 +930,7 @@ class PlaywrightWebSearch:
             await self._ensure_browser()
 
             # 4. 并行渲染页面（并发限制）
-            tasks = [self._fetch_and_extract(url) for url in ranked_urls]
+            tasks = [self._fetch_and_extract(url, locale=locale) for url in ranked_urls]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # 5. 从 chunks 组装 evidence（每 chunk 一条 evidence）
@@ -623,17 +1026,16 @@ class PlaywrightWebSearch:
             logger.error("Web Search 异常: %s", str(e)[:200])
             return []
 
-    async def _search_ddg(self, query: str, top_k: int) -> list[str]:
+    async def _search_ddg(self, query: str, top_k: int, locale: str = "zh-CN",
+                           time_range: str | None = None, country: str = "CN") -> list[str]:
         """Bing 搜索（含 MultiEngineSearch failover 到 DDG）
 
-        搜索引擎优先级（Phase D）：
-        1. MultiEngineSearch（Bing → DDG 自动 failover）
-        2. 直接 Bing 表单搜索（降级路径）
-
-        关键发现（2026-07 验证）：
-        - httpx 直接请求 Bing 搜索 URL 会返回首页而非结果页（无 cookie/会话）
-        - 必须先访问首页获取 cookie → 在搜索框输入 → 表单提交
-        - Bing 的 h2>a 链接是 ck/a 重定向，真实 URL 在 <cite> 标签中
+        Args:
+            query: 搜索查询
+            top_k: 最大结果数
+            locale: 区域设置 (zh-CN/en-US)
+            time_range: 时间过滤 (day/week/month/year)
+            country: 国家代码
 
         Returns:
             list[str]: URL 列表
@@ -643,7 +1045,12 @@ class PlaywrightWebSearch:
             from app.tools.search_engine import get_multi_engine_search
             multi = get_multi_engine_search()
             if multi._engines:  # 有可用引擎时
-                result = await multi.search(query, max_results=top_k)
+                search_kwargs: dict[str, Any] = {}
+                if time_range:
+                    search_kwargs["time_range"] = time_range
+                if country:
+                    search_kwargs["country"] = country
+                result = await multi.search(query, max_results=top_k, **search_kwargs)
                 if result["results"]:
                     urls = [r.url for r in result["results"]]
                     logger.info("MultiEngineSearch 成功: engine=%s, urls=%d",
@@ -661,7 +1068,8 @@ class PlaywrightWebSearch:
         # 重试机制：Bing 表单搜索偶发返回空结果
         for attempt in range(2):
             try:
-                raw_results = await self._do_bing_search(query, top_k)
+                raw_results = await self._do_bing_search(query, top_k, locale=locale,
+                                                          time_range=time_range, country=country)
                 if raw_results:
                     # _do_bing_search 返回 list[dict{url, title}]，提取 URL
                     return [r["url"] for r in raw_results if "url" in r]
@@ -678,40 +1086,111 @@ class PlaywrightWebSearch:
         logger.warning("Bing 搜索 2 次均无结果: query=%s", query[:50])
         return []
 
-    async def _do_bing_search(self, query: str, top_k: int) -> list[dict[str, str]]:
+    async def _do_bing_search(self, query: str, top_k: int, locale: str = "zh-CN",
+                               time_range: str | None = None, country: str = "CN") -> list[dict[str, str]]:
         """执行单次 Bing 表单搜索
 
         流程：访问首页获取 cookie → 搜索框输入 → 从 cite 标签提取真实 URL
+        支持 locale（zh-CN 中文搜索 / en-US 英文搜索）和时间过滤。
+
+        Args:
+            query: 搜索查询
+            top_k: 最大结果数
+            locale: 区域设置 (zh-CN/en-US)
+            time_range: 时间过滤 (day/week/month/year)
+            country: 国家代码
 
         Returns:
             list[dict]: 每项为 {"url": str, "title": str}
         """
         await self._ensure_browser()
 
+        # Bing 时间过滤参数映射
+        _BING_TIME_FILTERS = {
+            "day": 'interval%3d"7"',
+            "week": 'interval%3d"8"',
+            "month": 'interval%3d"9"',
+            "year": 'interval%3d"10"',
+        }
+
+        # 根据 locale 选择 Bing 域名和 Accept-Language
+        if locale.startswith("zh"):
+            bing_base = "https://cn.bing.com"
+            accept_langs = ["zh-CN", "zh", "en-US", "en"]
+        else:
+            bing_base = "https://www.bing.com"
+            accept_langs = ["en-US", "en"]
+
+        # 加载持久化 Cookie
+        bing_storage = self._storage_state_path if os.path.exists(self._storage_state_path) else None
+
         context = await self._browser.new_context(
             user_agent=_USER_AGENT,
             viewport={"width": 1920, "height": 1080},
-            locale="en-US",
+            locale=locale,
+            storage_state=bing_storage,
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": ",".join(accept_langs),
+                "Accept-Encoding": "gzip, deflate, br",
+                "DNT": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+            },
+            color_scheme="light",
+            device_scale_factor=1.25,
+            has_touch=False,
+            is_mobile=False,
         )
         await context.add_init_script(_STEALTH_JS)
         page = await context.new_page()
+        page.set_default_navigation_timeout(20000)
+        page.set_default_timeout(10000)
 
         try:
             # Step 1: 访问 Bing 首页获取 cookie
-            await page.goto("https://www.bing.com/", wait_until="domcontentloaded", timeout=15000)
-            await page.wait_for_timeout(2000)
+            await page.goto(bing_base + "/", wait_until="domcontentloaded", timeout=15000)
+            await page.wait_for_timeout(1000 + int(500 * (hash(query) % 100) / 100))
 
-            # Step 2: 在搜索框输入并提交（用原始 query，不含 -site: 排除）
+            # Step 2: 在搜索框输入并提交（拟人化输入，而非瞬间 fill）
             search_input = page.locator("textarea[name='q'], input[name='q']").first
             await search_input.wait_for(state="visible", timeout=5000)
-            await search_input.fill(query)
+            # 使用 type 模拟人类逐字输入（比 fill 更难被检测为机器人）
+            await search_input.click()
+            await page.wait_for_timeout(200)
+            await search_input.type(query, delay=50 + (hash(query) % 50))  # 每个字符50-100ms
+            await page.wait_for_timeout(300)
             await page.keyboard.press("Enter")
 
             # Step 3: 等待结果页加载
             await page.wait_for_timeout(4000)
 
+            # Step 3.25: 检测 Bing 验证码
+            try:
+                captcha_result = await page.evaluate(_CAPTCHA_DETECT_JS)
+                if captcha_result and captcha_result.get("detected"):
+                    logger.warning("Bing 搜索遇到 CAPTCHA: types=%s", captcha_result.get("types"))
+                    return []  # Bing 被验证码拦截，返回空，让 failover 到 DDG
+            except Exception:
+                pass
+
+            # Step 3.5: 如果需要时间过滤，导航到带过滤参数的 URL
+            if time_range and time_range in _BING_TIME_FILTERS:
+                current_url = page.url
+                time_param = _BING_TIME_FILTERS[time_range]
+                if "?" in current_url:
+                    filtered_url = current_url + f"&qft={time_param}"
+                else:
+                    filtered_url = current_url + f"?qft={time_param}"
+                try:
+                    await page.goto(filtered_url, wait_until="domcontentloaded", timeout=15000)
+                    await page.wait_for_timeout(3000)
+                except Exception:
+                    pass  # 时间过滤失败不影响主流程
+
             # Step 4: 从 <cite> 标签提取真实 URL
-            # Bing 的 h2>a 是 ck/a 重定向链接，cite 标签包含真实域名路径
             raw_results = await page.evaluate("""
                 () => {
                     const items = [];
@@ -759,13 +1238,19 @@ class PlaywrightWebSearch:
 
             logger.debug("Bing 搜索: query=%s, 获取 %d URLs",
                          query[:50], len(results))
+            # 成功获取结果后保存 Cookie 状态
+            if results:
+                try:
+                    await context.storage_state(path=self._storage_state_path)
+                except Exception:
+                    pass
             return results[:top_k]
 
         finally:
             await page.close()
             await context.close()
 
-    async def _fetch_and_extract(self, url: str) -> dict[str, Any]:
+    async def _fetch_and_extract(self, url: str, locale: str = "zh-CN") -> dict[str, Any]:
         """Playwright 渲染页面并提取 claim 粒度分块 + 结构化元数据
 
         Phase 1.5 改进（Claude Sonnet 5 #4）：
@@ -778,6 +1263,10 @@ class PlaywrightWebSearch:
         - SSRF: 初始 URL 校验 + redirect-hop 后 response.url 校验
         - Response size: 超过 MAX_RESPONSE_BYTES 的页面跳过提取
         - Context cleanup: 使用 async with 保证资源释放
+
+        Args:
+            url: 要抓取的 URL
+            locale: 浏览器区域设置 (zh-CN/en-US)
 
         返回：
         {
@@ -811,20 +1300,63 @@ class PlaywrightWebSearch:
 
         async with self._semaphore:
             try:
+                # 检查域名是否近期被验证码拦截
+                hostname_check = urlparse(url).hostname or ""
+                now = asyncio.get_event_loop().time()
+                if hostname_check in self._captcha_blocked_domains:
+                    blocked_at = self._captcha_blocked_domains[hostname_check]
+                    if now - blocked_at < 300:  # 5分钟内不重试被验证码拦截的域名
+                        logger.debug("域名近期被CAPTCHA拦截，跳过: %s", hostname_check)
+                        return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
+                                "last_modified": None, "fallback": True, "ugc_count": 0,
+                                "captcha": True, "captcha_types": ["cooldown"]}
+
+                # 加载持久化的 Cookie（如果存在）
+                storage_state = None
+                if os.path.exists(self._storage_state_path):
+                    try:
+                        storage_state = self._storage_state_path
+                    except Exception:
+                        storage_state = None
+
                 async with await self._browser.new_context(
                     user_agent=_USER_AGENT,
                     viewport={"width": 1920, "height": 1080},
-                    locale="en-US",
+                    locale=locale,
                     timezone_id="Asia/Shanghai",
                     java_script_enabled=True,
+                    storage_state=storage_state,
+                    # 更真实的浏览器参数
+                    color_scheme="light",
+                    reduced_motion="no-preference",
+                    forced_colors="none",
+                    has_touch=False,
+                    is_mobile=False,
+                    device_scale_factor=1.25,
+                    extra_http_headers={
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8" if locale.startswith("zh") else "en-US,en;q=0.9",
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "DNT": "1",
+                        "Connection": "keep-alive",
+                        "Upgrade-Insecure-Requests": "1",
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "none",
+                        "Sec-Fetch-User": "?1",
+                        "Cache-Control": "max-age=0",
+                    },
                 ) as context:
                     await context.add_init_script(_STEALTH_JS)
                     async with await context.new_page() as page:
+                        # 拟人化：设置默认导航超时
+                        page.set_default_navigation_timeout(20000)
+                        page.set_default_timeout(10000)
+
                         # goto 返回 Response 对象，含 HTTP 头
                         response = await page.goto(url, wait_until="domcontentloaded", timeout=15000)
 
                         # P0-1: redirect-hop SSRF 验证
-                        # page.goto 跟随重定向，检查最终 URL 是否安全
                         if response:
                             final_url = response.url
                             safe_redirect, redirect_reason = _is_safe_url(final_url)
@@ -849,7 +1381,77 @@ class PlaywrightWebSearch:
                             return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
                                     "last_modified": None, "fallback": True, "ugc_count": 0}
 
-                        await page.wait_for_timeout(2000)
+                        # 拟人化等待：随机延迟 500-1500ms（模拟人类阅读页面开始加载）
+                        await page.wait_for_timeout(500 + int(500 * (hash(url) % 100) / 100))
+
+                        # ===== CAPTCHA 快速检测（在等待完整内容前先检测）=====
+                        try:
+                            captcha_result = await page.evaluate(_CAPTCHA_DETECT_JS)
+                            if captcha_result and captcha_result.get("detected"):
+                                captcha_types = captcha_result.get("types", [])
+                                captcha_title = captcha_result.get("title", "")
+                                logger.warning("CAPTCHA 检测: url=%s types=%s title=%s",
+                                             url[:60], captcha_types, captcha_title[:50])
+                                # 记录被拦截的域名
+                                if hostname_check:
+                                    self._captcha_blocked_domains[hostname_check] = now
+
+                                # 值守模式：暂停等待人工介入
+                                try:
+                                    from app.tools.captcha_guard import (
+                                        CaptchaStatus,
+                                        get_captcha_guard,
+                                    )
+                                    guard = await get_captcha_guard()
+                                    if guard.guard_mode:
+                                        status = await guard.intercept_captcha(
+                                            page=page,
+                                            url=url,
+                                            captcha_types=captcha_types,
+                                            page_title=captcha_title,
+                                        )
+                                        if status == CaptchaStatus.RESOLVED:
+                                            # 用户处理完验证码后，重新检测（可能还有第二层验证）
+                                            # 先等页面加载，再重新检查
+                                            await page.wait_for_timeout(2000)
+                                            recheck = await page.evaluate(_CAPTCHA_DETECT_JS)
+                                            if recheck and recheck.get("detected"):
+                                                logger.warning("CAPTCHA 人工处理后仍然存在，跳过: %s",
+                                                             recheck.get("types"))
+                                            else:
+                                                # CAPTCHA 已通过，继续正常提取流程
+                                                pass  # 不 return，继续往下走提取内容
+                                        else:
+                                            # TIMEOUT/SKIPPED：返回空
+                                            return {"chunks": [], "title": captcha_title,
+                                                    "jsonld": {"entry_count": 0},
+                                                    "last_modified": None, "fallback": True,
+                                                    "ugc_count": 0, "captcha": True,
+                                                    "captcha_types": captcha_types}
+                                    else:
+                                        # 非值守模式：直接返回空
+                                        return {"chunks": [], "title": captcha_title,
+                                                "jsonld": {"entry_count": 0},
+                                                "last_modified": None, "fallback": True,
+                                                "ugc_count": 0, "captcha": True,
+                                                "captcha_types": captcha_types}
+                                except ImportError:
+                                    return {"chunks": [], "title": captcha_title,
+                                            "jsonld": {"entry_count": 0},
+                                            "last_modified": None, "fallback": True, "ugc_count": 0,
+                                            "captcha": True, "captcha_types": captcha_types}
+                        except Exception:
+                            pass  # CAPTCHA 检测本身不应该阻断流程
+
+                        # 拟人化：模拟页面滚动
+                        try:
+                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 4)")
+                            await page.wait_for_timeout(200)
+                            await page.evaluate("window.scrollTo(0, 0)")
+                        except Exception:
+                            pass
+
+                        await page.wait_for_timeout(1000)
 
                         # Claim 粒度分块提取（Phase 1.5）
                         chunk_result = await page.evaluate(_CHUNK_EXTRACT_JS)
@@ -872,6 +1474,13 @@ class PlaywrightWebSearch:
                         if response:
                             last_modified = response.headers.get("last-modified")
 
+                        # 成功提取后，保存 Cookie 状态（用于下次访问）
+                        if chunks and not fallback:
+                            try:
+                                await context.storage_state(path=self._storage_state_path)
+                            except Exception:
+                                pass
+
                         return {
                             "chunks": chunks or [],
                             "title": title or "",
@@ -879,6 +1488,7 @@ class PlaywrightWebSearch:
                             "last_modified": last_modified,
                             "fallback": fallback,
                             "ugc_count": ugc_count,
+                            "captcha": False,
                         }
 
             except Exception as e:

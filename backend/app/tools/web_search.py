@@ -4,5 +4,6 @@ from app.tools.__init__ import (  # noqa: F401
     ToolPort,
     StubWebSearch,
     TavilyWebSearch,
+    get_web_fetch,
     get_web_search,
 )
