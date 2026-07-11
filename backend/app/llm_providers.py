@@ -97,6 +97,103 @@ if settings.llm_base_url and settings.llm_api_key:
         PROVIDERS["custom"].api_key = settings.llm_api_key
 
 
+# ========== Provider Fallback Chain ==========
+
+# 默认回退顺序：硅基流动 → DeepSeek → OpenAI → OpenRouter → custom
+_FALLBACK_ORDER: list[str] = ["siliconflow", "deepseek", "openai", "openrouter", "custom"]
+
+
+def get_fallback_chain() -> list[tuple[str, str, str, str]]:
+    """返回可用的 provider 回退链: [(base_url, api_key, model, provider_id), ...]
+
+    按 _FALLBACK_ORDER 排序，跳过没有 api_key 的 provider。
+    第一个是当前主配置（会议级覆盖优先），后续是备选。
+    调用方应在主 provider 连接失败时依次尝试后续 provider。
+    """
+    chain: list[tuple[str, str, str, str]] = []
+    seen_urls: set[str] = set()
+
+    # 首先加入当前主配置
+    try:
+        from app.context import get_meeting_id
+        mid = get_meeting_id()
+        if mid and mid != "-":
+            base_url, api_key, model, pid = get_meeting_llm_config(mid)
+            if base_url and api_key:
+                chain.append((base_url, api_key, model, pid))
+                seen_urls.add(base_url.rstrip("/"))
+    except Exception:
+        pass
+
+    # 如果主配置未设置，用全局默认
+    if not chain and settings.llm_base_url and settings.llm_api_key:
+        chain.append((settings.llm_base_url, settings.llm_api_key, settings.llm_model, "default"))
+        seen_urls.add(settings.llm_base_url.rstrip("/"))
+
+    # 按回退顺序加入其他 provider
+    for pid in _FALLBACK_ORDER:
+        p = PROVIDERS.get(pid)
+        if not p or not p.api_key or not p.base_url:
+            continue
+        url = p.base_url.rstrip("/")
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        # 使用该 provider 的默认模型
+        model = settings.llm_model  # 统一使用用户配置的模型
+        chain.append((p.base_url, p.api_key, model, pid))
+
+    return chain
+
+
+# ========== 上下文窗口管理 ==========
+
+def estimate_tokens(text: str) -> int:
+    """粗略估算文本的 token 数量。
+
+    中文约 2 字符/token，英文约 4 字符/token。
+    """
+    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    other_chars = len(text) - chinese_chars
+    return (chinese_chars // 2) + (other_chars // 4)
+
+
+def trim_prompt_to_budget(prompt: str, max_tokens: int = 32000) -> str:
+    """如果 prompt 超过 token 预算，截断中间部分，保留头部（指令）和尾部（输出格式）。
+
+    策略：保留前 40% 和后 20% 的 token，中间用 [... 内容已截断 ...] 替代。
+    """
+    total = estimate_tokens(prompt)
+    if total <= max_tokens:
+        return prompt
+
+    lines = prompt.split("\n")
+    # 保留头部和尾部
+    head_tokens = int(max_tokens * 0.4)
+    tail_tokens = int(max_tokens * 0.2)
+
+    head_lines: list[str] = []
+    head_count = 0
+    for line in lines:
+        line_tokens = estimate_tokens(line)
+        if head_count + line_tokens > head_tokens:
+            break
+        head_lines.append(line)
+        head_count += line_tokens
+
+    tail_lines: list[str] = []
+    tail_count = 0
+    for line in reversed(lines):
+        line_tokens = estimate_tokens(line)
+        if tail_count + line_tokens > tail_tokens:
+            break
+        tail_lines.insert(0, line)
+        tail_count += line_tokens
+
+    truncated_note = f"\n[... 内容已截断: 原文约 {total} tokens, 预算 {max_tokens} tokens ...]\n"
+    return "\n".join(head_lines) + truncated_note + "\n".join(tail_lines)
+
+
 # ========== 定价表（人民币 元/百万Token） ==========
 # SiliconFlow 定价（2026-07 更新，来源：siliconflow.cn 定价页）
 # 注意：硅基流动部分免费模型有 RPM/TPM 限制

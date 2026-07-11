@@ -457,59 +457,95 @@ class RealLLM:
         # 解析当前生效的模型配置（用于日志记录）
         _log_base, _log_key, _log_model = self._resolve_config()
 
+        # [FALLBACK] 上下文窗口管理：超长 prompt 自动截断
+        from app.llm_providers import trim_prompt_to_budget, estimate_tokens
+        prompt_token_est = estimate_tokens(prompt)
+        if prompt_token_est > 32000:
+            from app.observability.log_bus import log_bus
+            log_bus.warning(
+                f"Prompt 超长 ({prompt_token_est} tokens), 自动截断到 32000",
+                logger="agents.llm",
+                extra={"stage": stage, "original_tokens": prompt_token_est},
+            )
+            prompt = trim_prompt_to_budget(prompt, max_tokens=32000)
+
+        # [FALLBACK] Provider 回退链：连接失败时尝试下一个 provider
+        from app.llm_providers import get_fallback_chain
+        fallback_chain = get_fallback_chain()
+
         current_prompt = prompt
         last_error = ""
-        for attempt in range(1, self.MAX_ATTEMPTS + 1):
-            try:
-                content = await self._call_api(current_prompt, schema_desc, stage, attempt)
-                parsed = self._extract_json(content)
-                if model_cls is not None:
-                    validated: BaseModel = model_cls.model_validate(parsed)
-                    result = validated.model_dump()
-                else:
-                    # schema_hint 未注册时，仅做 JSON 解析兜底返回 dict
-                    result = parsed if isinstance(parsed, dict) else {"result": parsed}
-                # 解析成功：更新最后一条 trace 记录的解析结果和验证状态
-                update_last_record(
-                    parsed_result=result if isinstance(result, dict) else None,
-                    validation_status="valid",
-                )
-                logger.info("阶段=%s attempt=%d 解析成功 (temp=%.1f)", stage, attempt, temp)
-                # 旁路日志：LLM 调用成功
-                from app.observability.log_bus import log_bus
-                log_bus.info(
-                    f"LLM 调用成功: stage={stage}, attempt={attempt}",
-                    logger="agents.llm",
-                    extra={"stage": stage, "attempt": attempt, "model": _log_model, "temp": temp},
-                )
-                # 关键字段非空校验：intra_team 的 claims 空则视为解析失败，强制重试/降级
-                # （修复 claims 静默丢失问题）
-                if schema_hint == "intra_team" and isinstance(result, dict):
-                    claims_val = result.get("claims")
-                    if not claims_val:  # None 或空列表
-                        raise ValidationError(
-                            f"intra_team 阶段 claims 为空，LLM 未输出有效论点",
-                            ClaimListResult,
-                        )
-                _circuit_breaker.record_success()
-                return result
-            except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                # 提取 HTTP 错误的响应体（便于排查 403 余额不足等问题）
-                error_detail = ""
-                if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
-                    error_detail = f" [HTTP {e.response.status_code}: {e.response.text[:200]}]"
-                last_error = f"{type(e).__name__}: {e}{error_detail}"
-                logger.warning("阶段=%s attempt=%d 失败: %s", stage, attempt, last_error[:200])
-                # 更新 trace 记录：本次调用校验失败
-                update_last_record(validation_status="invalid", error_detail=last_error)
-                # 重试层：把校验错误追加进 prompt，引导 LLM 修正
-                current_prompt = (
-                    f"{prompt}\n\n"
-                    f"【上一次输出校验失败（第 {attempt} 次），错误：{last_error}】\n"
-                    f"请严格按给定 JSON Schema 重新输出，仅输出合法 JSON，不要包含注释或围栏。"
-                )
+        provider_idx = 0
 
-        # 3 次都失败：降级到 StubLLM 同阶段数据，保证流程不中断（不报错）
+        while provider_idx < len(fallback_chain):
+            config_override = fallback_chain[provider_idx]
+            _p_url, _p_key, _p_model, _p_id = config_override
+
+            for attempt in range(1, self.MAX_ATTEMPTS + 1):
+                try:
+                    content = await self._call_api(
+                        current_prompt, schema_desc, stage, attempt,
+                        config_override=(_p_url, _p_key, _p_model),
+                    )
+                    parsed = self._extract_json(content)
+                    if model_cls is not None:
+                        validated: BaseModel = model_cls.model_validate(parsed)
+                        result = validated.model_dump()
+                    else:
+                        result = parsed if isinstance(parsed, dict) else {"result": parsed}
+                    update_last_record(
+                        parsed_result=result if isinstance(result, dict) else None,
+                        validation_status="valid",
+                    )
+                    logger.info(
+                        "阶段=%s attempt=%d provider=%s 解析成功 (temp=%.1f)",
+                        stage, attempt, _p_id, temp,
+                    )
+                    from app.observability.log_bus import log_bus
+                    log_bus.info(
+                        f"LLM 调用成功: stage={stage}, attempt={attempt}, provider={_p_id}",
+                        logger="agents.llm",
+                        extra={"stage": stage, "attempt": attempt, "model": _p_model, "provider": _p_id, "temp": temp},
+                    )
+                    if schema_hint == "intra_team" and isinstance(result, dict):
+                        claims_val = result.get("claims")
+                        if not claims_val:
+                            raise ValidationError(
+                                f"intra_team 阶段 claims 为空，LLM 未输出有效论点",
+                                ClaimListResult,
+                            )
+                    _circuit_breaker.record_success()
+                    return result
+                except (httpx.ConnectError, httpx.TimeoutException) as conn_err:
+                    # 连接级错误：切换到下一个 provider
+                    last_error = f"{_p_id}: {type(conn_err).__name__}: {conn_err}"
+                    logger.warning(
+                        "阶段=%s provider=%s 连接失败, 尝试下一个 provider: %s",
+                        stage, _p_id, last_error[:200],
+                    )
+                    from app.observability.log_bus import log_bus
+                    log_bus.warning(
+                        f"Provider {_p_id} 连接失败, 尝试回退",
+                        logger="agents.llm",
+                        extra={"stage": stage, "provider": _p_id, "error": last_error[:300]},
+                    )
+                    break  # 跳出重试循环，尝试下一个 provider
+                except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                    error_detail = ""
+                    if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
+                        error_detail = f" [HTTP {e.response.status_code}: {e.response.text[:200]}]"
+                    last_error = f"{_p_id}: {type(e).__name__}: {e}{error_detail}"
+                    logger.warning("阶段=%s provider=%s attempt=%d 失败: %s", stage, _p_id, attempt, last_error[:200])
+                    update_last_record(validation_status="invalid", error_detail=last_error)
+                    current_prompt = (
+                        f"{prompt}\n\n"
+                        f"【上一次输出校验失败（第 {attempt} 次），错误：{last_error}】\n"
+                        f"请严格按给定 JSON Schema 重新输出，仅输出合法 JSON，不要包含注释或围栏。"
+                    )
+
+            provider_idx += 1
+
+        # 所有 provider 全部失败：降级到 StubLLM
         _circuit_breaker.record_failure()
         logger.error("阶段=%s 三次重试全部失败，降级到 StubLLM。最后错误: %s", stage, last_error[:300])
         # 旁路日志：LLM 降级
@@ -551,7 +587,14 @@ class RealLLM:
         schema = model_cls.model_json_schema()
         return json.dumps(schema, ensure_ascii=False, indent=2)
 
-    async def _call_api(self, user_prompt: str, schema_desc: str, stage: str = "", attempt: int = 1) -> str:
+    async def _call_api(
+        self,
+        user_prompt: str,
+        schema_desc: str,
+        stage: str = "",
+        attempt: int = 1,
+        config_override: tuple[str, str, str] | None = None,
+    ) -> str:
         """调用 chat completions，返回 message content 字符串
 
         第1层确定性约束：
@@ -562,11 +605,16 @@ class RealLLM:
 
         支持会议级模型覆盖：每次调用解析 _resolve_config() 获取当前生效的
         base_url / api_key / model，支持会议运行中切换模型和BYOK。
+
+        config_override: 外部指定的 (base_url, api_key, model)，用于 provider 回退链。
         """
         import time
 
-        # 解析当前生效的 LLM 配置（支持会议级覆盖）
-        base_url, api_key, model = self._resolve_config()
+        # 解析当前生效的 LLM 配置（支持会议级覆盖 + 外部回退覆盖）
+        if config_override:
+            base_url, api_key, model = config_override
+        else:
+            base_url, api_key, model = self._resolve_config()
 
         url = f"{base_url.rstrip('/')}/chat/completions"
         headers = {
