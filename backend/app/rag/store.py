@@ -418,6 +418,26 @@ def get_store(meeting_id: str) -> InMemoryVectorStore:
     return _stores[meeting_id]
 
 
+def clear_store(meeting_id: str) -> bool:
+    """清理某会议的向量库内存缓存，释放chunks和向量内存。
+
+    Returns:
+        bool: 是否真的有缓存被清理。
+    """
+    store = _stores.pop(meeting_id, None)
+    if store is not None:
+        try:
+            # 清空store内部缓存
+            if hasattr(store, "_store"):
+                store._store.clear()
+            if hasattr(store, "_raw_texts"):
+                store._raw_texts.clear()
+        except Exception:
+            pass
+        return True
+    return False
+
+
 def _build_store() -> InMemoryVectorStore:
     """按配置构建向量库：优先 Qdrant，回退内存"""
     qdrant_url = getattr(settings, "qdrant_url", "") or ""

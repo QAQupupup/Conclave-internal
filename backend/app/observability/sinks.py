@@ -111,3 +111,64 @@ class RemoteGRPCSink:
             self._flush()
         except Exception:
             pass
+
+
+class EventBusSink:
+    """事件总线日志 Sink：将结构化日志通过 WebSocket 推送到前端
+
+    仅推送有 meeting_id 上下文的日志（会议运行期间产生的日志），
+    以 log.entry 事件类型发布到事件总线，前端通过 WebSocket 接收。
+    为避免日志量过大，只推送 INFO 及以上级别，且过滤掉高频心跳日志。
+    """
+
+    # 不需要推送到前端的高频/噪声日志
+    _NOISY_LOGGERS = {
+        "app.middleware.trace",
+        "uvicorn.access",
+        "uvicorn.error",
+    }
+    # 只推送到前端的日志级别及以上
+    _MIN_LEVEL = "INFO"
+    _LEVEL_RANK = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+
+    def write(self, event: dict[str, Any]) -> None:
+        try:
+            import asyncio
+            from app.events import bus, make_event
+
+            mid = event.get("meeting_id", "-")
+            if not mid or mid == "-":
+                return  # 无会议上下文的日志不推送
+
+            logger_name = event.get("logger", "")
+            if logger_name in self._NOISY_LOGGERS:
+                return  # 过滤噪声日志
+
+            level = event.get("level", "INFO")
+            if self._LEVEL_RANK.get(level, 0) < self._LEVEL_RANK.get(self._MIN_LEVEL, 1):
+                return  # 过滤 DEBUG 级别
+
+            # 构造精简的日志 payload（避免推送过大的 extra 数据）
+            payload = {
+                "level": level,
+                "logger": logger_name,
+                "message": event.get("message", ""),
+                "timestamp": event.get("timestamp", ""),
+                "agent_role": event.get("agent_role", ""),
+                "stage": (event.get("extra") or {}).get("stage", ""),
+            }
+
+            # 在事件循环中发布（log_bus 可能在非 async 上下文中调用）
+            # 使用 call_soon_threadsafe 确保线程安全
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # 没有运行中的事件循环，无法推送
+                return
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(
+                    bus.publish(make_event("log.entry", mid, payload))
+                )
+            )
+        except Exception:
+            pass  # sink 异常不影响主流程

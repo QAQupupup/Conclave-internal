@@ -27,7 +27,14 @@ class InMemoryEventBus:
 
     事件同时写入内存缓存和 SQLite，重启后从 SQLite 恢复。
     后期换 RedisEventBus / MQ 不改上层调用。
+
+    内存安全：
+    - 单会议事件历史上限 _MAX_HISTORY_PER_MEETING=1000，超过自动裁剪最旧事件
+    - clear() 清理内存历史
+    - unsubscribe 后自动清理空的订阅列表
     """
+
+    _MAX_HISTORY_PER_MEETING = 1000
 
     def __init__(self) -> None:
         # topic -> 订阅者列表
@@ -50,8 +57,13 @@ class InMemoryEventBus:
         # 用 SQLite 的自增 seq 作为全局唯一序列号
         event.seq = db_seq
 
-        # 写入内存历史
-        self._history.setdefault(event.meeting_id, []).append(event)
+        # 写入内存历史，超限裁剪最旧事件
+        history = self._history.setdefault(event.meeting_id, [])
+        history.append(event)
+        if len(history) > self._MAX_HISTORY_PER_MEETING:
+            # 裁剪掉超出上限的最旧事件，保留最近 N 条
+            del history[: len(history) - self._MAX_HISTORY_PER_MEETING]
+
         # 广播给 topic 级订阅者
         for sub in list(self._subs.get(event.meeting_id, [])):
             try:
@@ -71,7 +83,12 @@ class InMemoryEventBus:
 
         def _unsubscribe() -> None:
             try:
-                self._subs[meeting_id].remove(handler)
+                subs = self._subs.get(meeting_id)
+                if subs is not None:
+                    subs.remove(handler)
+                    # 清理空列表，防止字典只增不减
+                    if not subs:
+                        self._subs.pop(meeting_id, None)
             except ValueError:
                 pass
 

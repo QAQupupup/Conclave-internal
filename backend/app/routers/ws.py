@@ -51,6 +51,10 @@ async def _check_ws_event_rate(client_ip: str) -> tuple[bool, str]:
         now = time.monotonic()
         log = _ws_event_log.setdefault(client_ip, [])
         log[:] = [t for t in log if now - t < 60.0]
+        # 清理空列表，防止字典只增不减
+        if not log:
+            _ws_event_log.pop(client_ip, None)
+            log = _ws_event_log.setdefault(client_ip, [])
         if len(log) >= WS_MAX_EVENTS_PER_MIN:
             return False, f"WS 推送超过每分钟 {WS_MAX_EVENTS_PER_MIN} 条"
         log.append(now)
@@ -319,8 +323,8 @@ async def system_ws(ws: WebSocket) -> None:
     queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue()
 
     async def _on_event(event: DomainEvent) -> None:
-        # 只接受 system.* 事件
-        if event.type.startswith("system."):
+        # 接受 system.* 和 captcha.* 事件（captcha 事件用于前端值守弹窗）
+        if event.type.startswith("system.") or event.type.startswith("captcha."):
             await queue.put(event)
 
     # 订阅通配（bus 已实现 * 通配订阅）

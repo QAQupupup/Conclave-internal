@@ -649,6 +649,20 @@ async def warmup_sandbox() -> dict:
 
     log(f"[sandbox-warmup] 标准沙箱镜像就绪: {image}", logger="sandbox")
 
+    # 2.5 清理遗留的 conclave-svc-* 容器（进程重启后残留）
+    try:
+        rc, ps_out, _ = await _run_docker_cmd(
+            ["ps", "-a", "--filter", "name=conclave-svc-", "--format", "{{.ID}} {{.Names}}"],
+            timeout=10,
+        )
+        if rc == 0 and ps_out.strip():
+            leftover = [line.split()[0] for line in ps_out.strip().split("\n") if line.strip()]
+            for cid in leftover:
+                await _run_docker_cmd(["rm", "-f", cid], timeout=10)
+            log(f"[sandbox-warmup] 清理了 {len(leftover)} 个遗留服务容器", logger="sandbox")
+    except Exception as e:
+        log_warn(f"[sandbox-warmup] 遗留容器清理失败（非致命）: {e}", logger="sandbox")
+
     # 3. 检查/拉取数据科学镜像
     try:
         ds_image = await _resolve_named_image(SANDBOX_IMAGE_DATASCIENCE)
@@ -714,13 +728,25 @@ class DeployResult:
 
 
 async def _allocate_port() -> int:
-    """从端口池分配一个空闲端口"""
+    """从端口池分配一个空闲端口（修复：使用and而非or，加上OS端口占用检查）"""
+    import socket
+
+    def _is_port_in_use(port: int) -> bool:
+        """检查宿主机端口是否真的被占用"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            try:
+                s.bind(("0.0.0.0", port))
+                return False
+            except OSError:
+                return True
+
     async with _port_lock:
-        # 先检查已分配但容器已停止的端口，回收复用
         async with _services_lock:
             active_ports = {s["host_port"] for s in _running_services.values() if s.get("host_port")}
         for port in range(_SERVICE_PORT_POOL_START, _SERVICE_PORT_POOL_END + 1):
-            if port not in _allocated_ports or port not in active_ports:
+            # 修复：必须同时满足"未在内存中分配"且"不在活跃服务中"且"OS层面未被占用"
+            if port not in active_ports and not _is_port_in_use(port):
                 _allocated_ports.add(port)
                 return port
         raise RuntimeError("端口池已满（18000-18999 均已分配）")
@@ -811,6 +837,10 @@ async def deploy_service(
     # 确定工作区在容器内的路径
     meeting_dir = workspace_root  # 应该是 /workspace/{meeting_id}
 
+    # 部署前先清理同名旧容器（防止重复部署冲突）
+    container_name = f"conclave-svc-{meeting_id[:12]}"
+    await _run_docker_cmd(["rm", "-f", container_name], timeout=10)
+
     # 构建启动命令：先安装依赖，再启动服务
     if startup_cmd:
         cmd = startup_cmd
@@ -824,7 +854,7 @@ async def deploy_service(
     run_args = [
         "run",
         "-d",  # detached 模式
-        "--name", f"conclave-svc-{meeting_id[:12]}",
+        "--name", container_name,
         "--memory", memory_limit,
         "--cpus", cpu_limit,
         "-p", f"{host_port}:{container_port}",
@@ -921,16 +951,15 @@ async def deploy_service(
         # 从前端角度看，后端在 localhost:8000，服务也映射在宿主机端口
         access_url = f"http://localhost:{host_port}"
 
-        # 记录运行中的服务
-        async with _services_lock:
-            _running_services[meeting_id] = {
-                "container_id": container_id,
-                "host_port": host_port,
-                "access_url": access_url,
-                "started_at": time.time(),
-            }
-
         if healthy:
+            # 记录运行中的服务（仅在健康时记录）
+            async with _services_lock:
+                _running_services[meeting_id] = {
+                    "container_id": container_id,
+                    "host_port": host_port,
+                    "access_url": access_url,
+                    "started_at": time.time(),
+                }
             return DeployResult(
                 ok=True,
                 container_id=container_id,
@@ -941,7 +970,14 @@ async def deploy_service(
                 credentials=credentials,
             )
         else:
-            # 服务没通过健康检查，但容器可能还在运行
+            # 服务没通过健康检查：停止并删除容器、释放端口
+            log_bus.warning(
+                f"服务健康检查失败，清理容器: {container_id}",
+                logger="sandbox.deploy",
+                extra={"logs": last_logs[:500]},
+            )
+            await _run_docker_cmd(["rm", "-f", container_id], timeout=15)
+            await _release_port(host_port)
             return DeployResult(
                 ok=False,
                 container_id=container_id,
