@@ -70,12 +70,19 @@ _PUBLIC_PATHS = {"/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/de
 _WS_PATHS = {"/ws"}
 
 # ---- 速率限制 ----
-# [CON-03 修复] 防止暴力破解 + DoS
-# 默认：每 IP 600 次/分钟（10 req/sec），认证失败 5 次/分钟封禁 60 秒
+# 总速率限制保留（防 DoS），但失败封禁仅在生产模式（设置了 CONCLAVE_API_TOKEN）下启用。
+# 本地开发场景：单用户、localhost 访问，token 过期后刷新页面会瞬间触发多次 401，
+# 失败封禁反而误封开发者。多用户/多租户部署时再启用。
 # 600/min 适配 Conclave 正常使用场景：侧边栏轮询(12/min) + 工作区文件操作 + 会议状态查询
 _RATE_LIMIT_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_PER_MIN", "600"))
 _RATE_LIMIT_FAIL_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_FAIL_PER_MIN", "5"))
 _RATE_BLOCK_SECONDS = int(os.environ.get("CONCLAVE_RATE_BLOCK_SECONDS", "60"))
+
+# 开发模式（未设置 CONCLAVE_API_TOKEN）下完全禁用失败封禁
+_FAIL_BAN_ENABLED = bool(_API_TOKEN)
+
+# localhost 免于封禁的 IP 集合
+_LOCALHOST_IPS = {"127.0.0.1", "::1", "localhost"}
 
 _request_log: dict[str, list[float]] = defaultdict(list)
 _fail_log: dict[str, list[float]] = defaultdict(list)
@@ -93,9 +100,13 @@ def _client_ip(request: Request) -> str:
 
 def _check_rate_limit(ip: str, is_failed_attempt: bool = False) -> tuple[bool, str]:
     """检查 IP 是否被限流。返回 (allowed, reason)。"""
+    # 开发模式下完全跳过失败封禁；localhost 始终跳过失败封禁
+    if is_failed_attempt and (not _FAIL_BAN_ENABLED or ip in _LOCALHOST_IPS):
+        return True, "ok"
+
     now = time.monotonic()
     with _rate_lock:
-        # 1) 已被封禁？
+        # 1) 已被封禁？（仅失败封禁会产生 blocked 记录，localhost 不会进入此分支）
         block_until = _blocked_ips.get(ip)
         if block_until and now < block_until:
             remaining = int(block_until - now)
@@ -136,12 +147,12 @@ def _is_public(path: str) -> bool:
 def setup_auth_middleware(app: FastAPI) -> None:
     """注册 API 认证中间件
 
-    认证策略（[CON-03 修复]）：
-    - CONCLAVE_API_TOKEN 未设置 → 加载/生成 .dev_token（开发模式但仍需认证）
-    - 任何情况都启用认证（除公开路径外）
+    认证策略：
+    - CONCLAVE_API_TOKEN 未设置 → 加载/生成 .dev_token（开发模式）
+    - 开发模式下保留 token 认证但禁用失败封禁（避免误封开发者）
+    - 生产模式（设置了 CONCLAVE_API_TOKEN）启用完整限流 + 失败封禁
     - token 比较用 hmac.compare_digest 防时序攻击
-    - 每 IP 速率限制
-    - 失败 5 次/分钟自动封禁 60 秒
+    - localhost 始终免于失败封禁
     """
 
     @app.middleware("http")
@@ -293,6 +304,7 @@ def get_dev_token_info() -> dict[str, Any]:
     return {
         "auth_enabled": True,
         "token_source": "env" if _API_TOKEN else "dev_file",
+        "fail_ban_enabled": _FAIL_BAN_ENABLED,
         "rate_limit_per_min": _RATE_LIMIT_PER_MIN,
         "rate_limit_fail_per_min": _RATE_LIMIT_FAIL_PER_MIN,
         "rate_block_seconds": _RATE_BLOCK_SECONDS,
