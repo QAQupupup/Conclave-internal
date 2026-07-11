@@ -30,6 +30,7 @@ class CostRecord:
     trace_id: str = ""           # = runner_session_id，贯穿整个会议运行
     meeting_id: str = ""
     request_id: str = ""
+    agent_role: str = ""         # 发起调用的 Agent 角色
     node: str = ""               # pipeline 阶段名（clarify / intra_team / ...）
     tool_name: str = ""          # "llm" | "web_search" | "browser.goto" | "browser.click" | ...
     cost_usd: float = 0.0        # 估算成本（美元）
@@ -47,6 +48,7 @@ class CostRecord:
             "trace_id": self.trace_id,
             "meeting_id": self.meeting_id,
             "request_id": self.request_id,
+            "agent_role": self.agent_role,
             "node": self.node,
             "tool_name": self.tool_name,
             "cost_usd": round(self.cost_usd, 6),
@@ -143,13 +145,16 @@ class CostTracker:
         latency_ms: int,
         status: str = "ok",
         extra: dict[str, Any] | None = None,
+        agent_role: str = "",
     ) -> CostRecord:
         """记录一次 LLM 调用成本"""
+        from app.context import get_agent_role
         cost = estimate_llm_cost(model, input_tokens, output_tokens)
         record = CostRecord(
             trace_id=self._get_trace_id(),
             meeting_id=get_meeting_id(),
             request_id=get_request_id(),
+            agent_role=agent_role or get_agent_role(),
             node=node,
             tool_name="llm",
             cost_usd=cost,
@@ -212,6 +217,22 @@ class CostTracker:
             )
         except Exception:
             pass
+
+        # 异步持久化到数据库（best-effort，不阻塞主流程）
+        try:
+            self._enqueue_db_flush(record)
+        except Exception:
+            pass
+
+    def _enqueue_db_flush(self, record: CostRecord) -> None:
+        """将记录加入异步刷盘队列，后台批量写入数据库"""
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_flush_record_to_db(record))
+        except RuntimeError:
+            pass  # 无事件循环时跳过
 
     def summary(self) -> dict[str, Any]:
         """返回成本汇总（按 node / tool 聚合）"""
@@ -277,3 +298,39 @@ def reset_cost_tracker() -> None:
     if _cost_tracker is not None:
         _cost_tracker.clear()
     _cost_tracker = None
+
+
+# ---------- 异步数据库刷盘 ----------
+
+async def _flush_record_to_db(record: CostRecord) -> None:
+    """将单条成本记录异步写入数据库（best-effort，失败不重试）"""
+    try:
+        from datetime import datetime, timezone
+        from app.db.engine import async_session_factory
+        from app.db.models import CostRecordModel
+
+        async with async_session_factory() as session:
+            # 解析 provider/model 从 extra
+            model = record.extra.get("model", "") if record.extra else ""
+            provider = record.extra.get("provider", "") if record.extra else ""
+
+            db_record = CostRecordModel(
+                meeting_id=record.meeting_id or None,
+                stage=record.node,
+                node="llm" if record.tool_name == "llm" else "tool",
+                role=record.agent_role,
+                provider=provider,
+                model=model,
+                tool_name=record.tool_name,
+                input_tokens=record.input_tokens,
+                output_tokens=record.output_tokens,
+                cost_usd=record.cost_usd,
+                latency_ms=record.latency_ms,
+                status=record.status,
+                error="",
+                created_at=datetime.fromisoformat(record.timestamp) if record.timestamp else datetime.now(timezone.utc),
+            )
+            session.add(db_record)
+            await session.commit()
+    except Exception:
+        pass  # 成本持久化失败不影响主流程

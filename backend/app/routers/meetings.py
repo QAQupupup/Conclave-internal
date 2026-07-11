@@ -61,6 +61,7 @@ class CreateMeetingRequest(BaseModel):
     deliverable_type: str = Field("prd_openapi", description="产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|code_analysis|tested_system")
     role_ids: list[str] = Field(default_factory=list, description="预选角色 ID 列表，为空则自动生成")
     reference_meeting_ids: list[str] = Field(default_factory=list, description="引用的历史会议 ID 列表")
+    model: str = Field("", description="会议级模型覆盖（格式: provider_id:model_id 或纯 model_id），空=继承 ENV 默认")
 
 
 class CreateMeetingResponse(BaseModel):
@@ -148,6 +149,9 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     # 初始化运行态
     state = load_or_create(meeting_id, req.topic)
     state.deliverable_type = req.deliverable_type
+    # 会议级模型覆盖（空=继承 ENV 默认，runner 启动时 resolve 为快照）
+    if req.model:
+        state.model_override = req.model
 
     # 加载角色配置：优先使用传入的 role_ids，否则从库中取所有活跃角色
     if req.role_ids:
@@ -547,8 +551,9 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
             logger="routers.meetings",
             extra={"meeting_id": meeting_id, "action": "soft_delete", "request_id": get_request_id()},
         )
-        # 清理内存态
-        set_state(meeting_id, None)
+        # 清理内存态（统一清理函数：state、events、rag缓存、沙箱服务、浏览器上下文等）
+        from app.orchestrator.runner import cleanup_meeting_resources
+        cleanup_meeting_resources(meeting_id)
         return {"meeting_id": meeting_id, "deleted": True, "mode": "soft"}
 
     elif mode == "hard":
@@ -560,7 +565,9 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
             logger="routers.meetings",
             extra={"meeting_id": meeting_id, "action": "hard_delete", "request_id": get_request_id()},
         )
-        set_state(meeting_id, None)
+        # 清理内存态
+        from app.orchestrator.runner import cleanup_meeting_resources
+        cleanup_meeting_resources(meeting_id)
         return {"meeting_id": meeting_id, "deleted": True, "mode": "hard"}
 
     elif mode == "restore":
@@ -748,6 +755,25 @@ async def _run_meeting_bg(meeting_id: str) -> None:
             )
         finally:
             _running_tasks.pop(meeting_id, None)
+            # 会议结束后立即清理资源密集型对象（不影响用户查看消息/报告）：
+            # - RAG 向量缓存（chunks和向量占用大量内存）
+            # - 浏览器上下文
+            # - 沙箱服务容器（长期运行的容器，不停止会一直占资源）
+            try:
+                from app.rag.store import clear_store
+                clear_store(meeting_id)
+            except Exception:
+                pass
+            try:
+                from app.tools.browser_tool import browser_pool
+                browser_pool.release_meeting(meeting_id)
+            except Exception:
+                pass
+            try:
+                from app.sandbox import stop_service
+                await stop_service(meeting_id)
+            except Exception:
+                pass
 
 
 @router.post("/{meeting_id}/control")
@@ -1111,6 +1137,21 @@ async def get_llm_balance(
     return result
 
 
+@router.get("/llm/pricing-status")
+async def get_pricing_status():
+    """获取定价数据源状态（动态抓取 vs 回退表）"""
+    from app.pricing_fetcher import get_pricing_status
+    return get_pricing_status()
+
+
+@router.post("/llm/pricing/refresh")
+async def refresh_pricing():
+    """强制从硅基流动官网刷新定价数据"""
+    from app.pricing_fetcher import refresh_pricing as _refresh
+    result = await _refresh()
+    return result
+
+
 @router.post("/{meeting_id}/model")
 async def set_meeting_model(meeting_id: str, req: SetModelRequest):
     """设置会议使用的模型和API Key（会议开始前调用）"""
@@ -1125,6 +1166,9 @@ async def set_meeting_model(meeting_id: str, req: SetModelRequest):
     # 不允许已结束的会议修改
     if state.status == MeetingStatus.DONE:
         raise HTTPException(status_code=400, detail="会议已结束，无法切换模型")
+    # 不允许运行中的会议修改模型（模型快照已在启动时锁定）
+    if state.status == MeetingStatus.RUNNING:
+        raise HTTPException(status_code=403, detail="会议正在运行中，无法切换模型。请在创建会议时指定模型")
     cfg = _set_model(
         meeting_id=meeting_id,
         provider_id=req.provider_id,
@@ -1132,6 +1176,20 @@ async def set_meeting_model(meeting_id: str, req: SetModelRequest):
         api_key=req.api_key,
         base_url=req.base_url,
     )
+
+    # 如果用户提供了 API Key，自动持久化到数据库（加密存储）
+    if req.api_key and req.provider_id:
+        try:
+            from app.services.key_store import save_api_key
+            import asyncio
+            asyncio.create_task(save_api_key(
+                provider=req.provider_id,
+                api_key=req.api_key,
+                base_url=req.base_url or "",
+                is_default=True,
+            ))
+        except Exception:
+            pass  # 持久化失败不影响主流程
     from app.observability.log_bus import log_bus
     log_bus.info(
         f"会议模型切换: provider={cfg.provider_id}, model={cfg.model}",
@@ -1163,3 +1221,46 @@ async def get_meeting_model(meeting_id: str):
         "has_custom_key": bool(api_key) and api_key != __import__("app.config", fromlist=["settings"]).settings.llm_api_key,
         "is_running": state.status not in (MeetingStatus.DONE,),
     }
+
+
+# ---------- API Key 持久化管理 ----------
+
+class SaveApiKeyRequest(BaseModel):
+    """保存 API Key 请求"""
+    provider: str = Field(..., description="厂商ID")
+    api_key: str = Field(..., description="API Key 明文")
+    name: str = Field(default="default", description="Key别名")
+    base_url: str = Field(default="", description="自定义Base URL")
+    is_default: bool = Field(default=True, description="是否设为默认")
+
+
+@router.get("/llm/keys")
+async def list_saved_keys():
+    """列出所有已保存的 API Key（脱敏显示）"""
+    from app.services.key_store import list_api_keys
+    keys = await list_api_keys()
+    return {"keys": keys}
+
+
+@router.post("/llm/keys")
+async def save_key(req: SaveApiKeyRequest):
+    """保存 API Key（加密存储到数据库）"""
+    from app.services.key_store import save_api_key
+    result = await save_api_key(
+        provider=req.provider,
+        api_key=req.api_key,
+        name=req.name,
+        base_url=req.base_url,
+        is_default=req.is_default,
+    )
+    return result
+
+
+@router.delete("/llm/keys/{provider}/{name}")
+async def delete_key(provider: str, name: str = "default"):
+    """删除已保存的 API Key"""
+    from app.services.key_store import delete_api_key
+    ok = await delete_api_key(provider, name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Key不存在")
+    return {"deleted": True, "provider": provider, "name": name}

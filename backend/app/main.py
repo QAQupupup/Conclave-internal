@@ -17,6 +17,7 @@ from app.db.base import Base
 from sqlalchemy import text
 from app.net_auth import init_auth_table
 from app.routers import agent_roles as agent_roles_router
+from app.routers import captcha as captcha_router
 from app.routers import documents as documents_router
 from app.routers import meetings as meetings_router
 from app.routers import metrics as metrics_router
@@ -68,11 +69,37 @@ async def lifespan(app: FastAPI):
     import asyncio
     asyncio.create_task(warmup_sandbox())
 
+    # 动态定价抓取：启动时后台加载硅基流动实时定价（优先读磁盘缓存）
+    from app.pricing_fetcher import ensure_pricing_loaded
+    asyncio.create_task(ensure_pricing_loaded())
+
+    # 加载持久化的 BYOK API Key 到内存 Provider 配置
+    from app.services.key_store import load_keys_to_providers
+    asyncio.create_task(load_keys_to_providers())
+
     yield
     # 停止后台指标采集
     await get_metrics_store().stop()
     # 关闭 Redis
     await close_redis(app)
+    # 清理所有沙箱服务容器（防止孤儿容器占用端口和资源）
+    try:
+        from app.sandbox import cleanup_all_services
+        await cleanup_all_services()
+    except Exception:
+        pass
+    # 关闭 LLM 底层 httpx 连接池
+    try:
+        from app.agents.compute import shutdown_compute
+        await shutdown_compute()
+    except Exception:
+        pass
+    # 关闭 Playwright 浏览器
+    try:
+        from app.tools.browser_tool import browser_pool
+        await browser_pool.shutdown()
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:
@@ -103,6 +130,7 @@ def create_app() -> FastAPI:
     setup_trace_middleware(app)
     # 挂载路由
     app.include_router(agent_roles_router.router)
+    app.include_router(captcha_router.router)
     app.include_router(meetings_router.router)
     app.include_router(documents_router.router)
     app.include_router(metrics_router.router)

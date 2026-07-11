@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from sqlalchemy import (
-    String, Text, Integer, Boolean, DateTime, ForeignKey, Index, UniqueConstraint,
+    String, Text, Integer, Boolean, Float, DateTime, ForeignKey, Index, UniqueConstraint,
     func, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -261,4 +261,100 @@ class MeetingAuxModel(Base):
 
     __table_args__ = (
         Index("idx_meeting_aux_meeting", "meeting_id"),
+    )
+
+
+# ============================================================
+# 9. api_keys — BYOK API Key 加密持久化
+# ============================================================
+class ApiKeyModel(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, index=True,
+                                          comment="LLM厂商: siliconflow/deepseek/openai/openrouter/custom")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, default="default",
+                                      comment="Key别名（同一厂商可存多个）")
+    # 密钥使用 Fernet 对称加密存储，key 从 CONCLAVE_SECRET_KEY 派生
+    encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
+    base_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("provider", "name", name="uq_api_key_provider_name"),
+        Index("idx_api_keys_provider", "provider"),
+    )
+
+
+# ============================================================
+# 10. documents — 上传文档元数据
+# ============================================================
+class DocumentModel(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False, default="text/markdown")
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="",
+                                              comment="SHA256 of file content for dedup")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    meeting: Mapped["MeetingModel"] = relationship()
+
+    __table_args__ = (
+        Index("idx_documents_meeting", "meeting_id"),
+    )
+
+
+# ============================================================
+# 11. cost_records — LLM/工具调用成本记录
+# ============================================================
+class CostRecordModel(Base):
+    __tablename__ = "cost_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    meeting_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("meetings.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    stage: Mapped[str] = mapped_column(String(30), nullable=False, default="")
+    node: Mapped[str] = mapped_column(String(50), nullable=False, default="",
+                                      comment="调用节点: llm|tool|sandbox")
+    role: Mapped[str] = mapped_column(String(50), nullable=False, default="")
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, default="")
+    model: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    tool_name: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[float] = mapped_column(default=0.0)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ok")
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("idx_cost_meeting", "meeting_id"),
+        Index("idx_cost_created", "created_at"),
+        Index("idx_cost_node", "node"),
     )
