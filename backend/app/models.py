@@ -284,8 +284,9 @@ class MeetingState(BaseModel):
         aux: dict[str, Any] = {}
 
         # llm_trace: CallTrace Pydantic 模型
+        # 注意：llm_trace 需要持续累积所有 LLM 调用，不能重置为空，
+        # 否则每次 persist 后之前的调用记录会丢失。
         aux["llm_trace"] = self.llm_trace.model_dump(mode="json")
-        self.llm_trace = CallTrace(meeting_id=self.meeting_id)
 
         # evidence_set: list[dict]
         aux["evidence_set"] = list(self.evidence_set)

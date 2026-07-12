@@ -816,7 +816,7 @@ async def deploy_service(
     cpu_limit: str = "2",
     env_vars: dict | None = None,
     credentials: dict | None = None,
-    wait_seconds: int = 90,
+    wait_seconds: int = 300,
 ) -> DeployResult:
     """部署一个长期运行的服务容器
 
@@ -909,7 +909,7 @@ async def deploy_service(
             )
             if rc_inspect != 0 or "true" not in inspect_out:
                 # 容器已停止，获取日志
-                rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "30", container_id], timeout=10)
+                rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "100", container_id], timeout=10)
                 last_logs = logs_out
                 log_bus.warning(
                     f"服务容器已停止: {container_id}",
@@ -946,7 +946,7 @@ async def deploy_service(
                 break
 
         # 获取日志
-        rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "20", container_id], timeout=10)
+        rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "100", container_id], timeout=10)
         last_logs = logs_out if logs_out else last_logs
 
         # 构建访问URL（用户从宿主机浏览器访问）
