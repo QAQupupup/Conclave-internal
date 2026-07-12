@@ -3,7 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
 .Python
+backend/conclave_core/*.c
 *.egg-info/
 .eggs/
 build/
