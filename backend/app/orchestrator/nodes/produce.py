@@ -671,6 +671,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
         readme_content = ds_data.get("readme", "")
         credentials = ds_data.get("credentials") or {}
         service_port = ds_data.get("port", 8000)
+        frontend_files = ds_data.get("frontend_files") or {}
         if app_code:
             from app.config import settings
             ws_root = Path(settings.workspace_root) / state.meeting_id
@@ -850,6 +851,22 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 (ws_root / "Dockerfile").write_text(dockerfile_content, encoding="utf-8")
             if docker_compose_content:
                 (ws_root / "docker-compose.yml").write_text(docker_compose_content, encoding="utf-8")
+            # 写入前端文件
+            if frontend_files:
+                frontend_dir = ws_root / "frontend"
+                frontend_dir.mkdir(parents=True, exist_ok=True)
+                for fname, fcontent in frontend_files.items():
+                    if not isinstance(fcontent, str):
+                        continue
+                    # 安全路径：仅允许 index.html / style.css 等简单文件名
+                    safe_name = Path(fname).name
+                    if safe_name in ("index.html", "style.css", "app.js"):
+                        (frontend_dir / safe_name).write_text(fcontent, encoding="utf-8")
+                _lb.info(
+                    f"produce: 已写入 {len(frontend_files)} 个前端文件到 frontend/",
+                    logger="orchestrator.nodes.produce",
+                    extra={"meeting_id": state.meeting_id, "files": list(frontend_files.keys())},
+                )
             # 写入 README
             if readme_content:
                 (ws_root / "README.md").write_text(readme_content, encoding="utf-8")
@@ -872,6 +889,7 @@ uvicorn app:app --host 0.0.0.0 --port {service_port}
             ds_data["requirements_txt"] = requirements_txt
             ds_data["dockerfile"] = dockerfile_content
             ds_data["docker_compose"] = docker_compose_content
+            ds_data["frontend_files"] = frontend_files
             state.artifact["deployable_service"] = ds_data
             state.artifact["deployment_dir"] = str(ws_root)
             state.artifact["review"] = {

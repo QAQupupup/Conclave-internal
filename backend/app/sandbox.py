@@ -873,15 +873,24 @@ async def deploy_service(
                 normalized,
                 flags=re.MULTILINE,
             )
+            # 兜底：如果工作区存在 frontend/ 目录但 Dockerfile 没有 COPY，自动追加
+            frontend_dir = Path(f"/workspace/{meeting_id}/frontend")
+            if frontend_dir.exists() and "COPY frontend" not in normalized and "frontend/" not in normalized:
+                normalized = normalized.rstrip() + "\n\n# 自动追加前端静态资源复制\nCOPY frontend /app/frontend\n"
+                log_bus.info(
+                    "检测到 frontend/ 目录，已在 Dockerfile 中追加 COPY 指令",
+                    logger="sandbox.deploy",
+                    extra={"meeting_id": meeting_id},
+                )
             if normalized != df_text:
                 dockerfile_path.write_text(normalized, encoding="utf-8")
                 log_bus.info(
-                    "已将 Dockerfile 中的 Docker Hub 基础镜像替换为国内镜像",
+                    "已标准化 Dockerfile（国内镜像源、前端目录复制）",
                     logger="sandbox.deploy",
                     extra={"meeting_id": meeting_id},
                 )
         except Exception as e:
-            log_bus.warning(f"Dockerfile 镜像源替换失败（不影响构建）: {e}", logger="sandbox.deploy")
+            log_bus.warning(f"Dockerfile 标准化失败（不影响构建）: {e}", logger="sandbox.deploy")
 
         build_rc, build_out, build_err = await _run_docker_cmd(
             ["build", "-t", image_tag, "-f", str(dockerfile_path), f"/workspace/{meeting_id}"],
