@@ -120,6 +120,37 @@ async def test_regression_wiki_full_meeting_historical(monkeypatch):
     assert "produce" in final_state.confidence_flags
 
 
+class ConflictStubCompute(HistoricalStubCompute):
+    """在 cross_team 阶段产生冲突，触发 evidence_check 阶段"""
+
+    async def think(self, req: ThinkRequest) -> ThinkResponse:
+        if req.stage == "cross_team":
+            return ThinkResponse(success=True, result={
+                "conflicts": [
+                    {
+                        "id": "conflict-1",
+                        "type": "preference",
+                        "summary": "前端框架选择：React vs Vue",
+                        "sides": [
+                            {"claim_id": "claim-1", "text": "使用 React", "role": "product_architect"},
+                            {"claim_id": "claim-2", "text": "使用 Vue", "role": "engineer"},
+                        ],
+                    }
+                ],
+                "consensus": "",
+            })
+        if req.stage == "evidence_check":
+            return ThinkResponse(success=True, result={
+                "evidence_set": [
+                    {
+                        "claim_id": "claim-1",
+                        "assessments": [{"supports": "supports", "source": "社区活跃度", "summary": "React 社区更大"}],
+                    }
+                ],
+            })
+        return await super().think(req)
+
+
 @pytest.mark.asyncio
 async def test_regression_manager_non_compat_path(monkeypatch):
     """非兼容路径下 Manager.run_stage 也能完成 clarify -> produce"""
@@ -145,3 +176,29 @@ async def test_regression_manager_non_compat_path(monkeypatch):
     state = await manager.run_stage(state, "produce")
     assert state.artifact is not None
     assert "prd" in state.artifact
+
+
+@pytest.mark.asyncio
+async def test_regression_with_conflict_triggers_evidence_check(monkeypatch):
+    """存在冲突时，管线应自动进入 evidence_check 阶段"""
+    from app.orchestrator.manager import MeetingManager
+
+    monkeypatch.setattr(compute_mod, "_compute", ConflictStubCompute())
+
+    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    state = MeetingState(meeting_id="mtg-conflict", topic="个人 Wiki 系统", flow_plan="full")
+
+    state = await manager.run_stage(state, "clarify")
+    state = await manager.run_stage(state, "intra_team")
+    state = await manager.run_stage(state, "cross_team")
+
+    assert len(state.conflicts) > 0
+    assert state.stage.value == "evidence_check"
+
+    state = await manager.run_stage(state, "evidence_check")
+    assert "evidence_check" in state.confidence_flags
+    assert len(state.evidence_set) > 0
+
+    state = await manager.run_stage(state, "arbitrate")
+    state = await manager.run_stage(state, "produce")
+    assert state.artifact is not None
