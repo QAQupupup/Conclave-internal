@@ -11,6 +11,22 @@ FROM docker.m.daocloud.io/library/python:3.12-slim
 # pip 镜像源（清华，国内加速）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
+# apt 镜像源（清华，国内加速；兼容 Debian Bookworm DEB822 格式）
+RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
+    { echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME) $(. /etc/os-release && echo $VERSION_CODENAME)-updates"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+      echo ""; \
+      echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian-security"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME)-security"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+    } > /etc/apt/sources.list.d/tuna.sources && \
+    apt-get update
+
 # 预装数据科学库：
 #   pandas / numpy          数据处理
 #   matplotlib              绘图（后端 Agg，无显示环境）

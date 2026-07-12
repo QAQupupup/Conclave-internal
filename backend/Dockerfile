@@ -57,6 +57,9 @@ RUN apt-get update && \
 # ---------- 阶段 2: playwright（浏览器安装，~600MB，极少变更） ----------
 FROM system-deps AS playwright
 
+# Playwright 浏览器下载使用国内镜像加速
+ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+
 RUN pip install --no-cache-dir playwright && \
     playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/* /tmp/*

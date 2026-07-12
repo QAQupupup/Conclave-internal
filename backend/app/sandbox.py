@@ -46,7 +46,7 @@ from app.observability.log_bus import log_bus
 # ---- 网络分级 ----
 
 # L1: 纯计算，无网络（默认）
-# L2: 限网，仅允许 pypi.org（pip install）
+# L2: 限网，仅允许 pypi（默认走清华镜像 https://pypi.tuna.tsinghua.edu.cn/simple）
 # L3: 全联网，可访问任意外部 API（需明确授权）
 SandboxNetworkLevel = Literal["L1", "L2", "L3"]
 
@@ -72,7 +72,6 @@ SANDBOX_IMAGE_DATASCIENCE = os.environ.get(
 # 备用镜像列表（主镜像拉取失败时依次尝试）
 FALLBACK_IMAGES = [
     "docker.m.daocloud.io/library/python:3.12-slim",
-    "python:3.12-slim",
 ]
 
 # 资源限制
@@ -841,51 +840,128 @@ async def deploy_service(
     container_name = f"conclave-svc-{meeting_id[:12]}"
     await _run_docker_cmd(["rm", "-f", container_name], timeout=10)
 
-    # 构建启动命令：先安装依赖，创建工作目录，再启动服务
-    # 注意：不使用 tail 隐藏 pip 输出，否则部署失败时看不到真实错误
-    if startup_cmd:
-        cmd = startup_cmd
-    else:
-        cmd = (
-            f"pip install --no-cache-dir -r requirements.txt && "
-            f"mkdir -p data uploads && "
-            f"exec uvicorn app:app --host 0.0.0.0 --port {container_port}"
+    # 如果工作区存在 Dockerfile，优先使用它构建镜像并部署
+    # 这样可以支持 LLM 生成的多阶段构建、国内镜像源等优化
+    dockerfile_path = Path(f"/workspace/{meeting_id}/Dockerfile")
+    image_tag = f"conclave-svc:{meeting_id[:12]}"
+    use_built_image = False
+    build_logs = ""
+    if dockerfile_path.exists():
+        log_bus.info(
+            f"检测到 {meeting_id}/Dockerfile，尝试构建镜像部署",
+            logger="sandbox.deploy",
+            extra={"meeting_id": meeting_id},
         )
+        # 兜底：如果 Dockerfile 使用 Docker Hub 官方镜像，自动替换为 DaoCloud 国内镜像
+        try:
+            df_text = dockerfile_path.read_text(encoding="utf-8")
+            normalized = re.sub(
+                r"^FROM\s+python:",
+                "FROM docker.m.daocloud.io/library/python:",
+                df_text,
+                flags=re.MULTILINE,
+            )
+            normalized = re.sub(
+                r"^FROM\s+node:",
+                "FROM docker.m.daocloud.io/library/node:",
+                normalized,
+                flags=re.MULTILINE,
+            )
+            normalized = re.sub(
+                r"^FROM\s+nginx:",
+                "FROM docker.m.daocloud.io/library/nginx:",
+                normalized,
+                flags=re.MULTILINE,
+            )
+            if normalized != df_text:
+                dockerfile_path.write_text(normalized, encoding="utf-8")
+                log_bus.info(
+                    "已将 Dockerfile 中的 Docker Hub 基础镜像替换为国内镜像",
+                    logger="sandbox.deploy",
+                    extra={"meeting_id": meeting_id},
+                )
+        except Exception as e:
+            log_bus.warning(f"Dockerfile 镜像源替换失败（不影响构建）: {e}", logger="sandbox.deploy")
 
-    # 构建 docker run 参数
-    run_args = [
-        "run",
-        "-d",  # detached 模式
-        "--name", container_name,
-        "--memory", memory_limit,
-        "--cpus", cpu_limit,
-        "-p", f"{host_port}:{container_port}",
-        "--network", "bridge",  # 全网络访问（需要pip install）
-        "-v", "conclave_conclave-workspace:/workspace",
-        "-w", f"/workspace/{meeting_id}",
-        # 不使用 --read-only（服务需要写数据库和上传文件）
-        # 不使用 nobody 用户（pip install 需要写权限）
-        "--restart", "no",  # 不自动重启（由Conclave管理生命周期）
-    ]
+        build_rc, build_out, build_err = await _run_docker_cmd(
+            ["build", "-t", image_tag, "-f", str(dockerfile_path), f"/workspace/{meeting_id}"],
+            timeout=300,
+        )
+        build_logs = build_out + "\n" + build_err
+        if build_rc == 0:
+            use_built_image = True
+        else:
+            log_bus.warning(
+                f"Dockerfile 构建失败，回退到标准启动命令：{build_err[:200]}",
+                logger="sandbox.deploy",
+                extra={"meeting_id": meeting_id, "logs": build_logs[:1000]},
+            )
 
-    # 添加环境变量
-    if env_vars:
-        for k, v in env_vars.items():
-            run_args.extend(["-e", f"{k}={v}"])
+    if use_built_image:
+        # 使用构建好的镜像直接运行（镜像内已包含依赖和启动命令）
+        run_args = [
+            "run",
+            "-d",
+            "--name", container_name,
+            "--memory", memory_limit,
+            "--cpus", cpu_limit,
+            "-p", f"{host_port}:{container_port}",
+            "--network", "bridge",
+            "-v", "conclave_conclave-workspace:/workspace",
+            "-w", f"/workspace/{meeting_id}",
+            "--restart", "no",
+        ]
+        if env_vars:
+            for k, v in env_vars.items():
+                run_args.extend(["-e", f"{k}={v}"])
+        run_args.append(image_tag)
+    else:
+        # 标准启动命令：先安装依赖，创建工作目录，再启动服务
+        # 注意：不使用 tail 隐藏 pip 输出，否则部署失败时看不到真实错误
+        if startup_cmd:
+            cmd = startup_cmd
+        else:
+            cmd = (
+                f"pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && "
+                f"pip install --no-cache-dir -r requirements.txt && "
+                f"mkdir -p data uploads && "
+                f"exec uvicorn app:app --host 0.0.0.0 --port {container_port}"
+            )
 
-    # 使用 Python slim 镜像
-    image = SANDBOX_IMAGE
-    run_args.extend([image, "sh", "-c", cmd])
+        run_args = [
+            "run",
+            "-d",  # detached 模式
+            "--name", container_name,
+            "--memory", memory_limit,
+            "--cpus", cpu_limit,
+            "-p", f"{host_port}:{container_port}",
+            "--network", "bridge",  # 全网络访问（需要pip install）
+            "-v", "conclave_conclave-workspace:/workspace",
+            "-w", f"/workspace/{meeting_id}",
+            # 不使用 --read-only（服务需要写数据库和上传文件）
+            # 不使用 nobody 用户（pip install 需要写权限）
+            "--restart", "no",  # 不自动重启（由Conclave管理生命周期）
+        ]
+
+        # 添加环境变量
+        if env_vars:
+            for k, v in env_vars.items():
+                run_args.extend(["-e", f"{k}={v}"])
+
+        # 使用 Python slim 镜像
+        image = SANDBOX_IMAGE
+        run_args.extend([image, "sh", "-c", cmd])
 
     try:
         rc, stdout, stderr = await _run_docker_cmd(run_args, timeout=60)
         if rc != 0:
             await _release_port(host_port)
+            combined_logs = f"{build_logs}\n{stderr}".strip()
             return DeployResult(
                 ok=False,
                 host_port=host_port,
                 error=f"容器启动失败 (exit={rc}): {stderr[:500]}",
-                logs=stderr,
+                logs=combined_logs,
             )
 
         container_id = stdout.strip()[:12]

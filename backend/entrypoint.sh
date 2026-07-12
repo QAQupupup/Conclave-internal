@@ -86,9 +86,9 @@ if [ "$DOCKER_READY" = "1" ]; then
         if su -s /bin/bash "$APP_USER" -c "docker pull '$SANDBOX_IMAGE'" 2>&1; then
             echo "[entrypoint] Sandbox image pulled successfully"
         else
-            echo "[entrypoint] Primary pull failed, trying fallback python:3.12-slim..."
-            su -s /bin/bash "$APP_USER" -c "docker pull python:3.12-slim" 2>&1 || echo "[entrypoint] WARNING: fallback pull also failed"
-        fi
+        echo "[entrypoint] Primary pull failed, trying fallback docker.m.daocloud.io/library/python:3.12-slim..."
+        su -s /bin/bash "$APP_USER" -c "docker pull docker.m.daocloud.io/library/python:3.12-slim" 2>&1 || echo "[entrypoint] WARNING: fallback pull also failed"
+    fi
     fi
 
     # ---- 3. 构建数据科学沙箱镜像 ----
@@ -98,7 +98,7 @@ if [ "$DOCKER_READY" = "1" ]; then
         else
             echo "[entrypoint] Building data-science sandbox image (pandas/numpy/matplotlib/sklearn...)..."
             DS_CONTEXT=$(dirname "$DATASCIENCE_DOCKERFILE")
-            if su -s /bin/bash "$APP_USER" -c "docker build -t '$DATASCIENCE_IMAGE' -f '$DATASCIENCE_DOCKERFILE' '$DS_CONTEXT'" 2>&1 | tail -15; then
+            if su -s /bin/bash "$APP_USER" -c "docker build -t '$DATASCIENCE_IMAGE' -f '$DATASCIENCE_DOCKERFILE' '$DS_CONTEXT'" 2>&1 | tail -50; then
                 echo "[entrypoint] Data-science image built successfully"
             else
                 echo "[entrypoint] WARNING: Failed to build data-science image; analysis features will use standard image"

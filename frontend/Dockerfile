@@ -11,6 +11,11 @@ COPY . .
 RUN npx tsc && npx vite build
 
 FROM docker.m.daocloud.io/library/nginx:alpine
+# Alpine apk 使用阿里云镜像加速
+RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine/|https://mirrors.aliyun.com/alpine/|g' /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache ca-certificates && \
+    rm -rf /var/cache/apk/*
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

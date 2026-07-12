@@ -1,3 +1,20 @@
 # 自定义 Qdrant 镜像：添加 curl 用于 Docker 健康检查
 FROM docker.m.daocloud.io/qdrant/qdrant:latest
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+# apt 镜像源（清华，兼容 Debian DEB822 格式）
+RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
+    { echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME) $(. /etc/os-release && echo $VERSION_CODENAME)-updates"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+      echo ""; \
+      echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian-security"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME)-security"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+    } > /etc/apt/sources.list.d/tuna.sources && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
