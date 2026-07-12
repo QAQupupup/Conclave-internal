@@ -531,17 +531,8 @@ def cleanup_meeting_resources(meeting_id: str) -> None:
     except Exception:
         pass
 
-    # 5. 停止并清理沙箱服务容器
-    try:
-        from app.sandbox import stop_service
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(stop_service(meeting_id))
-        except RuntimeError:
-            pass
-    except Exception:
-        pass
+    # 5. 保留沙箱服务容器，会议结束后用户仍可访问已部署服务
+    # （服务生命周期由 meetings.py 删除会议或 cleanup_all_services 管理）
 
     # 6. 清理会议级模型配置覆盖
     try:

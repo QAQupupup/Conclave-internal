@@ -980,11 +980,11 @@ async def get_token_budget(meeting_id: str) -> dict[str, Any]:
     - 超过 80% 标记 warning
     - 超过 100% 标记 exceeded
     """
-    state = get_state(meeting_id)
-    if state is None:
-        state = load_or_create(meeting_id, "")
-        if state.topic == "":
-            raise HTTPException(status_code=404, detail="会议不存在")
+    # 优先从 DB 重新加载，确保拿到持久化的 llm_trace / cost 等 aux 数据
+    # （内存中的 state 在 persist 后 trace 已被清空）
+    state = load_or_create(meeting_id, "")
+    if state.topic == "":
+        raise HTTPException(status_code=404, detail="会议不存在")
 
     summary = state.llm_trace.summary()
     used = summary.get("total_tokens", 0)
@@ -1030,11 +1030,11 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
     - 成本记录（来自 cost_records 表）
     - 统计摘要
     """
-    state = get_state(meeting_id)
-    if state is None:
-        state = load_or_create(meeting_id, "")
-        if state.topic == "":
-            raise HTTPException(status_code=404, detail="会议不存在")
+    # 优先从 DB 重新加载，确保拿到持久化的 llm_trace / cost 等 aux 数据
+    # （内存中的 state 在 persist 后 trace 已被清空）
+    state = load_or_create(meeting_id, "")
+    if state.topic == "":
+        raise HTTPException(status_code=404, detail="会议不存在")
 
     # 1. LLM trace
     trace_calls = [c.model_dump(mode="json") for c in state.llm_trace.calls]
