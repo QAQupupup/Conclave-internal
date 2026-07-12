@@ -5,12 +5,15 @@ import asyncio
 import os
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
+from app.db.engine import async_session_factory
+from app.db.models import CostRecordModel
 from app.db_legacy import (
     add_meeting_tag,
     batch_delete_meetings,
@@ -1012,6 +1015,112 @@ async def get_token_budget(meeting_id: str) -> dict[str, Any]:
                 "calls": s.get("calls", 0),
             }
             for stage, s in summary.get("stage_stats", {}).items()
+        },
+    }
+
+
+@router.get("/{meeting_id}/audit")
+async def get_full_audit(meeting_id: str) -> dict[str, Any]:
+    """完整审计导出：聚合 trace、events、cost_records、stats、state snapshot
+
+    用于重跑前的全链路回溯，包含：
+    - 会议元数据和当前状态
+    - 每次 LLM 调用的 prompt / raw_response / parsed_result
+    - 所有事件（重点标注 produce.degradation）
+    - 成本记录（来自 cost_records 表）
+    - 统计摘要
+    """
+    state = get_state(meeting_id)
+    if state is None:
+        state = load_or_create(meeting_id, "")
+        if state.topic == "":
+            raise HTTPException(status_code=404, detail="会议不存在")
+
+    # 1. LLM trace
+    trace_calls = [c.model_dump(mode="json") for c in state.llm_trace.calls]
+
+    # 2. 事件历史
+    events = bus.replay(meeting_id, from_seq=0)
+    event_dicts = [e.model_dump(mode="json") for e in events]
+    degradation_events = [
+        e for e in event_dicts
+        if e.get("type") in ("produce.degradation", "meeting.fallback_warning")
+    ]
+
+    # 3. 成本记录（从数据库查）
+    cost_records: list[dict[str, Any]] = []
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(CostRecordModel).where(CostRecordModel.meeting_id == meeting_id)
+                .order_by(CostRecordModel.created_at.asc())
+            )
+            for row in result.scalars().all():
+                cost_records.append({
+                    "id": row.id,
+                    "stage": row.stage,
+                    "node": row.node,
+                    "role": row.role,
+                    "provider": row.provider,
+                    "model": row.model,
+                    "tool_name": row.tool_name,
+                    "input_tokens": row.input_tokens,
+                    "output_tokens": row.output_tokens,
+                    "cost_usd": row.cost_usd,
+                    "latency_ms": row.latency_ms,
+                    "status": row.status,
+                    "error": row.error,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                })
+    except Exception as e:
+        cost_records = [{"error": str(e)}]
+
+    # 4. 统计摘要
+    trace_summary = state.llm_trace.summary()
+    drift_count = sum(1 for d in state.drift_log if d.get("is_drift"))
+
+    # 5. 状态快照
+    state_snapshot = {
+        "meeting_id": state.meeting_id,
+        "topic": state.topic,
+        "stage": state.stage.value if state.stage else None,
+        "status": state.status.value if state.status else None,
+        "deliverable_type": state.deliverable_type,
+        "confidence_flags": dict(state.confidence_flags) if state.confidence_flags else {},
+        "token_budget": getattr(state, "token_budget", 500000),
+        "message_count": len(state.messages),
+        "claim_count": len(state.claims),
+        "conflict_count": len(state.conflicts),
+        "evidence_count": sum(len(es.get("assessments", [])) for es in state.evidence_set),
+        "borrowed_agents": len(state.borrowed_agents) if state.borrowed_agents else 0,
+        "conclusion_chain_length": len(state.conclusion_chain.conclusions),
+        "drift": {
+            "total_checks": len(state.drift_log),
+            "drift_detected": drift_count,
+        },
+    }
+
+    return {
+        "meeting_id": meeting_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "meeting": state_snapshot,
+        "trace": {
+            "summary": trace_summary,
+            "calls": trace_calls,
+        },
+        "events": {
+            "total": len(event_dicts),
+            "degradation_events": degradation_events,
+            "all": event_dicts,
+        },
+        "cost_records": cost_records,
+        "stats": {
+            "total_tokens": trace_summary.get("total_tokens", 0),
+            "total_calls": trace_summary.get("total_calls", 0),
+            "fallback_calls": trace_summary.get("fallback_calls", 0),
+            "inconsistent_calls": trace_summary.get("inconsistent_calls", 0),
+            "avg_latency_ms": trace_summary.get("avg_latency_ms", 0),
+            "total_cost_usd": round(sum(r.get("cost_usd", 0.0) for r in cost_records if "cost_usd" in r), 6),
         },
     }
 
