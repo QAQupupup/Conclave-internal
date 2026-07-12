@@ -78,9 +78,32 @@ async def reduce_evidence_check(
     results: dict[str, Any],
 ) -> MeetingState:
     """evidence_check 阶段归约"""
-    from app.orchestrator.nodes.evidence_check import evidence_check_node
+    from app.orchestrator.stage_runners import run_evidence_check
 
-    return await evidence_check_node(state)
+    conflict_results: list[dict[str, Any]] = []
+    for task_id, task_result in results.items():
+        if not isinstance(task_result, dict):
+            continue
+        payload = task_result.get("payload", {})
+        meta = task_result.get("meta", {})
+        conflict = meta.get("conflict") or payload.get("conflict")
+        if not conflict:
+            # 回退：结果格式不符，委托旧节点
+            from app.orchestrator.nodes.evidence_check import evidence_check_node
+            return await evidence_check_node(state)
+        confidence = task_result.get("confidence", "high")
+        conflict_results.append({
+            "conflict": conflict,
+            "evidence_chunks": [],
+            "result": payload,
+            "confidence": confidence,
+        })
+
+    if not conflict_results:
+        from app.orchestrator.nodes.evidence_check import evidence_check_node
+        return await evidence_check_node(state)
+
+    return await run_evidence_check(state, conflict_results)
 
 
 async def reduce_arbitrate(

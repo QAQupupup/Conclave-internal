@@ -239,3 +239,73 @@ async def run_intra_team(
     nxt = _next_stage(Stage.INTRA_TEAM, state.flow_plan)
     state.stage = nxt or Stage.PRODUCE
     return state
+
+
+async def run_evidence_check(
+    state: MeetingState,
+    conflict_results: list[dict[str, Any]],
+) -> MeetingState:
+    """EvidenceCheck 阶段：聚合每个冲突的 LLM 判断结果，更新 MeetingState。
+
+    conflict_results 每项结构：
+        {
+            "conflict": dict,
+            "evidence_chunks": list[dict],
+            "result": dict,         # LLM 返回的 evidence_assessments
+            "confidence": str,
+        }
+    """
+    from app.orchestrator.nodes.borrow import _let_borrowed_agents_speak
+
+    worst_conf = "high"
+    evidence_set: list[dict[str, Any]] = []
+
+    for cr in conflict_results:
+        conflict = cr.get("conflict", {})
+        result = cr.get("result", {})
+        confidence = cr.get("confidence", "high")
+        cid = conflict.get("id", "c0")
+        worst_conf = worst_confidence(worst_conf, confidence)
+        assessments = result.get("evidence_assessments", [])
+        es = {
+            "conflict_id": result.get("conflict_id", cid),
+            "assessments": assessments,
+        }
+        evidence_set.append(es)
+
+        for a in assessments:
+            await bus.publish(
+                make_event(
+                    "evidence.attached",
+                    state.meeting_id,
+                    {
+                        "meeting_id": state.meeting_id,
+                        "conflict_id": es["conflict_id"],
+                        "quote": a.get("quote", ""),
+                        "source": a.get("source", ""),
+                        "supports": a.get("supports", "neutral"),
+                    },
+                )
+            )
+
+    state.evidence_set = evidence_set
+    state.conclusion_chain.lock("evidence_check", {"evidence_set": evidence_set})
+    state.confidence_flags["evidence_check"] = worst_conf
+
+    total_ev = sum(len(es.get("assessments", [])) for es in evidence_set)
+    supporting = sum(
+        1 for es in evidence_set
+        for a in es.get("assessments", [])
+        if a.get("supports") in ("side_a", "side_b")
+    )
+    neutral = total_ev - supporting
+    summary = (
+        f"证据对照完成：共检索 {total_ev} 条证据，"
+        f"其中 {supporting} 条明确支持某一方观点，{neutral} 条为中性/通用知识。"
+    )
+    await emit_agent_spoke(state, Role.MODERATOR, Stage.EVIDENCE_CHECK, summary)
+
+    await _let_borrowed_agents_speak(state, Stage.EVIDENCE_CHECK)
+    nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan)
+    state.stage = nxt or Stage.PRODUCE
+    return state

@@ -14,12 +14,9 @@ from app.tools.web_search import get_web_search
 
 from ._helpers import (
     _full_anchor,
-    _worst_confidence,
     _run_with_consistency,
     _resolve_model_for_call,
-    _emit_agent_spoke,
 )
-from .borrow import _let_borrowed_agents_speak
 
 
 def _make_common_knowledge_evidence(conflict: dict) -> list[dict]:
@@ -189,53 +186,15 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     )
 
     # ---- Phase 3：串行收集结果 + 发布事件 ----
-    evidence_set: list[dict[str, Any]] = []
-    for result, confidence, conflict, evidence_chunks in think_results:
-        cid = conflict.get("id", "c0")
-        worst_confidence = _worst_confidence(worst_confidence, confidence)
-        assessments = result.get("evidence_assessments", [])
-        es = {
-            "conflict_id": result.get("conflict_id", cid),
-            "assessments": assessments,
+    conflict_results: list[dict[str, Any]] = [
+        {
+            "conflict": conflict,
+            "evidence_chunks": evidence_chunks,
+            "result": result,
+            "confidence": confidence,
         }
-        evidence_set.append(es)
-        # 发布 evidence.attached 事件（逐条证据）
-        for a in assessments:
-            await bus.publish(
-                make_event(
-                    "evidence.attached",
-                    state.meeting_id,
-                    {
-                        "meeting_id": state.meeting_id,
-                        "conflict_id": es["conflict_id"],
-                        "quote": a.get("quote", ""),
-                        "source": a.get("source", ""),
-                        "supports": a.get("supports", "neutral"),
-                    },
-                )
-            )
-    state.evidence_set = evidence_set
-    # 第2层：锁定 evidence_check 结论
-    state.conclusion_chain.lock("evidence_check", {"evidence_set": evidence_set})
-    # 第5层：记录置信度（取最差值）
-    state.confidence_flags["evidence_check"] = worst_confidence
+        for result, confidence, conflict, evidence_chunks in think_results
+    ]
 
-    # 记录证据对照阶段主持人总结
-    total_ev = sum(len(es.get("assessments", [])) for es in evidence_set)
-    supporting = sum(
-        1 for es in evidence_set
-        for a in es.get("assessments", [])
-        if a.get("supports") in ("side_a", "side_b")
-    )
-    neutral = total_ev - supporting
-    summary = (
-        f"证据对照完成：共检索 {total_ev} 条证据，"
-        f"其中 {supporting} 条明确支持某一方观点，{neutral} 条为中性/通用知识。"
-    )
-    await _emit_agent_spoke(state, Role.MODERATOR, Stage.EVIDENCE_CHECK, summary)
-
-    # 改造三：让待发言的借调 agent 在证据对照阶段也发言一次（兜底）
-    await _let_borrowed_agents_speak(state, Stage.EVIDENCE_CHECK)
-    nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan)
-    state.stage = nxt or Stage.PRODUCE
-    return state
+    from app.orchestrator.stage_runners import run_evidence_check
+    return await run_evidence_check(state, conflict_results)
