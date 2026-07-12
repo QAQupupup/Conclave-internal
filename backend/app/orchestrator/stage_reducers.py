@@ -14,9 +14,13 @@ async def reduce_clarify(
     results: dict[str, Any],
 ) -> MeetingState:
     """clarify 阶段归约"""
-    from app.orchestrator.nodes.clarify import clarify_node
+    from app.orchestrator.stage_runners import run_clarify
 
-    return await clarify_node(state)
+    # clarify 是单任务，结果在第一个（也是唯一一个）task result 中
+    task_result = next(iter(results.values()), {}) if results else {}
+    agent_result = task_result.get("payload", {}) if isinstance(task_result, dict) else {}
+    confidence = task_result.get("confidence", "high") if isinstance(task_result, dict) else "high"
+    return await run_clarify(state, agent_result, confidence)
 
 
 async def reduce_intra_team(
