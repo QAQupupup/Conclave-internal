@@ -59,27 +59,34 @@ async def lifespan(app: FastAPI):
     if recovered:
         import logging
         logging.getLogger("lifespan").info("崩溃恢复：%d 个会议标记为 PAUSED", len(recovered))
-    # 启动后台指标采集
-    from app.observability.metrics_store import get_metrics_store
-    get_metrics_store().start()
+    # 启动后台指标采集（测试模式下可禁用，避免事件循环冲突）
+    if os.environ.get("CONCLAVE_DISABLE_METRICS") != "1":
+        from app.observability.metrics_store import get_metrics_store
+        get_metrics_store().start()
 
     # 沙箱预热：启动时检测 Docker 可用性 + 预拉取镜像
     # 不阻塞启动（作为后台任务），镜像拉取可能耗时较长
-    from app.sandbox import warmup_sandbox
-    import asyncio
-    asyncio.create_task(warmup_sandbox())
+    if os.environ.get("CONCLAVE_DISABLE_SANDBOX_WARMUP") != "1":
+        from app.sandbox import warmup_sandbox
+        import asyncio
+        asyncio.create_task(warmup_sandbox())
 
     # 动态定价抓取：启动时后台加载硅基流动实时定价（优先读磁盘缓存）
-    from app.pricing_fetcher import ensure_pricing_loaded
-    asyncio.create_task(ensure_pricing_loaded())
+    if os.environ.get("CONCLAVE_DISABLE_PRICING_LOADER") != "1":
+        from app.pricing_fetcher import ensure_pricing_loaded
+        import asyncio
+        asyncio.create_task(ensure_pricing_loaded())
 
     # 加载持久化的 BYOK API Key 到内存 Provider 配置
-    from app.services.key_store import load_keys_to_providers
-    asyncio.create_task(load_keys_to_providers())
+    if os.environ.get("CONCLAVE_DISABLE_KEY_LOADER") != "1":
+        from app.services.key_store import load_keys_to_providers
+        import asyncio
+        asyncio.create_task(load_keys_to_providers())
 
     yield
     # 停止后台指标采集
-    await get_metrics_store().stop()
+    if os.environ.get("CONCLAVE_DISABLE_METRICS") != "1":
+        await get_metrics_store().stop()
     # 关闭 Redis
     await close_redis(app)
     # 清理所有沙箱服务容器（防止孤儿容器占用端口和资源）
@@ -144,6 +151,7 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, Any]:
         """健康检查：检查关键依赖可用性"""
         checks: dict[str, str] = {}
+        _test_mode = os.environ.get("CONCLAVE_TEST_MODE") == "1"
 
         # SQLite 检查（旧兼容层）
         try:
@@ -167,38 +175,41 @@ def create_app() -> FastAPI:
         except Exception as e:
             checks["postgresql"] = f"error: {e}"
 
-        # Redis 检查
-        try:
-            import redis.asyncio as aioredis
-            r = await aioredis.from_url(settings.redis_url, socket_connect_timeout=3)
-            await r.ping()
-            await r.close()
-            checks["redis"] = "ok"
-        except Exception as e:
-            checks["redis"] = f"error: {type(e).__name__}"
+        # Redis 检查（测试模式跳过，避免依赖本地 Redis）
+        if not _test_mode:
+            try:
+                import redis.asyncio as aioredis
+                r = await aioredis.from_url(settings.redis_url, socket_connect_timeout=3)
+                await r.ping()
+                await r.close()
+                checks["redis"] = "ok"
+            except Exception as e:
+                checks["redis"] = f"error: {type(e).__name__}"
 
-        # Qdrant 检查
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=3) as client:
-                qdrant_url = os.environ.get("CONCLAVE_QDRANT_URL", os.environ.get("QDRANT_URL", "http://qdrant:6333"))
-                resp = await client.get(f"{qdrant_url}/healthz")
-                checks["qdrant"] = "ok" if resp.status_code == 200 else f"error: {resp.status_code}"
-        except Exception as e:
-            checks["qdrant"] = f"error: {type(e).__name__}"
+        # Qdrant 检查（未配置时跳过）
+        if os.environ.get("CONCLAVE_QDRANT_URL") or os.environ.get("QDRANT_URL"):
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=3) as client:
+                    qdrant_url = os.environ.get("CONCLAVE_QDRANT_URL", os.environ.get("QDRANT_URL", "http://qdrant:6333"))
+                    resp = await client.get(f"{qdrant_url}/healthz")
+                    checks["qdrant"] = "ok" if resp.status_code == 200 else f"error: {resp.status_code}"
+            except Exception as e:
+                checks["qdrant"] = f"error: {type(e).__name__}"
 
-        # Docker 检查（async 避免阻塞事件循环）
-        try:
-            import asyncio as _aio
-            proc = await _aio.create_subprocess_exec(
-                "docker", "info",
-                stdout=_aio.subprocess.DEVNULL,
-                stderr=_aio.subprocess.DEVNULL,
-            )
-            await _aio.wait_for(proc.wait(), timeout=3)
-            checks["docker"] = "ok" if proc.returncode == 0 else "error: docker unavailable"
-        except Exception as e:
-            checks["docker"] = f"error: {type(e).__name__}"
+        # Docker 检查（测试模式跳过，避免调用 docker cli）
+        if not _test_mode:
+            try:
+                import asyncio as _aio
+                proc = await _aio.create_subprocess_exec(
+                    "docker", "info",
+                    stdout=_aio.subprocess.DEVNULL,
+                    stderr=_aio.subprocess.DEVNULL,
+                )
+                await _aio.wait_for(proc.wait(), timeout=3)
+                checks["docker"] = "ok" if proc.returncode == 0 else "error: docker unavailable"
+            except Exception as e:
+                checks["docker"] = f"error: {type(e).__name__}"
 
         # LLM 熔断器状态
         try:
@@ -209,7 +220,7 @@ def create_app() -> FastAPI:
             checks["llm_circuit"] = "unknown"
 
         # half_open 表示正在尝试恢复，视为可用
-        _healthy_vals = {"ok", "closed", "half_open"}
+        _healthy_vals = {"ok", "closed", "half_open", "disabled"}
         all_ok = all(v in _healthy_vals for v in checks.values())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
 

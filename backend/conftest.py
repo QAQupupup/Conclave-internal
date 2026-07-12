@@ -16,11 +16,36 @@ os.environ.setdefault(
     "CONCLAVE_DB_PATH", os.path.join(tempfile.gettempdir(), "conclave_test.db")
 )
 
+# 测试用 SQLite 替代 PostgreSQL，避免依赖本地 pg 服务与连接池清理问题
+os.environ.setdefault(
+    "DATABASE_URL",
+    f"sqlite+aiosqlite:///{os.path.join(tempfile.gettempdir(), 'conclave_test_orm.db')}",
+)
+
 # 迭代二：测试时禁用记忆提取，避免历史画像干扰断言
 os.environ.setdefault("CONCLAVE_MEMORY_DISABLED", "1")
 
 # 测试时降低日志级别为 WARNING，减少输出噪声
 os.environ.setdefault("CONCLAVE_LOG_LEVEL", "WARNING")
+
+# 测试用固定 API token，避免依赖 .dev_token 文件生成，同时让中间件进入可预测模式
+os.environ.setdefault("CONCLAVE_API_TOKEN", "test-token-for-ci")
+# 测试中关闭总速率限制与失败封禁，避免高频 fixture 初始化触发 429/封禁
+os.environ.setdefault("CONCLAVE_RATE_LIMIT_PER_MIN", "100000")
+os.environ.setdefault("CONCLAVE_RATE_LIMIT_FAIL_PER_MIN", "100000")
+
+# 测试模式标记
+os.environ.setdefault("CONCLAVE_TEST_MODE", "1")
+
+# 测试模式关闭认证，避免每个 client fixture 都需携带 token
+os.environ.setdefault("CONCLAVE_TEST_DISABLE_AUTH", "1")
+
+# 测试模式下关闭非必要的后台任务与外部依赖，减少资源泄漏与启动耗时
+os.environ.setdefault("CONCLAVE_DISABLE_SANDBOX_WARMUP", "1")
+os.environ.setdefault("CONCLAVE_DISABLE_PRICING_LOADER", "1")
+os.environ.setdefault("CONCLAVE_DISABLE_KEY_LOADER", "1")
+os.environ.setdefault("CONCLAVE_DISABLE_METRICS", "1")
+
 
 import asyncio
 import pytest
@@ -30,6 +55,23 @@ from app.events import bus
 from app.main import create_app
 from app.orchestrator import runner as runner_mod
 from app.routers import meetings as meetings_mod
+
+
+# 每个测试前清空事件表与自增计数器，保证事件 seq 从 0 开始
+@pytest.fixture(autouse=True)
+def _reset_event_bus():
+    from app.db_legacy import _connect
+    try:
+        conn = _connect()
+        conn.execute("DELETE FROM events")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name='events'")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    bus._history.clear()
+    bus._subs.clear()
+    yield
 
 
 # ---------- pytest 标记注册 ----------
@@ -140,8 +182,14 @@ class MockLLM:
         """设置某阶段的返回值"""
         self._responses[schema_hint] = response
 
-    async def complete(self, prompt: str, schema_hint: str = "") -> dict:
-        self.call_log.append((prompt, schema_hint))
+    async def complete(
+        self,
+        prompt: str,
+        schema_hint: str = "",
+        model_override: str = "",
+        agent_role: str = "",
+    ) -> dict:
+        self.call_log.append((prompt, schema_hint, model_override, agent_role))
         if schema_hint in self._responses:
             return self._responses[schema_hint]
         return {"result": "mock"}

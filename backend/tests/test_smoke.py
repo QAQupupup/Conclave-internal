@@ -291,13 +291,13 @@ def test_list_meetings(client):
 # ---------- WebSocket 测试 ----------
 
 def test_websocket_snapshot_and_events(client):
-    """WS：连接回放快照 + 推送事件"""
+    """WS：连接回放快照 + replay.done（完整回放跳过历史事件避免与快照重复）"""
     # 先创建并 run 完一场会议
     resp = client.post("/meetings", json={"topic": "WS 测试会议"})
     meeting_id = resp.json()["meeting_id"]
     _run_to_done(meeting_id)
 
-    # 连接 WS：应回放快照 + 历史事件
+    # 连接 WS：应回放快照 + replay.done
     with client.websocket_connect(f"/ws/meetings/{meeting_id}") as ws:
         # 第一条是快照
         msg = json.loads(ws.receive_text())
@@ -305,7 +305,7 @@ def test_websocket_snapshot_and_events(client):
         assert msg["meeting_id"] == meeting_id
         # 快照里有 artifact（已 run 完）
         assert msg["payload"].get("artifact") is not None
-        # 循环接收历史事件，直到 replay.done
+        # 完整回放不再单独推送历史事件，下一条应为 replay.done
         received_types: set[str] = set()
         for _ in range(50):
             raw = ws.receive_text()
@@ -313,21 +313,18 @@ def test_websocket_snapshot_and_events(client):
             received_types.add(msg.get("type", ""))
             if msg.get("type") == "replay.done":
                 break
-        # 至少覆盖到关键事件类型
-        assert "stage.changed" in received_types or "agent.spoke" in received_types
-        assert "artifact.generated" in received_types
         assert "replay.done" in received_types
 
 
 # ---------- 改造一：run 异步化测试 ----------
 
 def test_run_async_returns_running(client):
-    """run 端点异步化后立即返回 running，不阻塞等待完成"""
+    """run 端点异步化后立即返回 202 Accepted，不阻塞等待完成"""
     resp = client.post("/meetings", json={"topic": "异步运行测试"})
     meeting_id = resp.json()["meeting_id"]
 
     resp = client.post(f"/meetings/{meeting_id}/run")
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     data = resp.json()
     assert data["meeting_id"] == meeting_id
     assert data["status"] == "running"
@@ -360,7 +357,7 @@ def test_run_done_meeting_returns_done(client):
     _run_to_done(meeting_id)
 
     resp = client.post(f"/meetings/{meeting_id}/run")
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert resp.json()["status"] == "done"
 
 

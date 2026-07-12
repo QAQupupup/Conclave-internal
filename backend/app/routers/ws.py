@@ -32,7 +32,11 @@ def _check_ws_token(ws: WebSocket) -> bool:
     HTTP 中间件无法拦截 WebSocket，需在 accept 前手动检查。
     支持 query 参数 ?token=<token>（浏览器 WebSocket API 无法设 header）。
     [CON-03 修复] 用 hmac.compare_digest 防时序攻击。
+    测试模式下关闭认证。
     """
+    if os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
+        return True
+
     import hmac
 
     token = ws.query_params.get("token", "")

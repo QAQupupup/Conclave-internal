@@ -531,7 +531,7 @@ def save_event(
     ts: str,
     trace_id: str | None = None,
 ) -> int:
-    """持久化事件到 SQLite，返回自增 seq"""
+    """持久化事件到 SQLite，返回自增 seq（对外 0 起始）"""
     with _lock:
         conn = _connect()
         try:
@@ -547,7 +547,8 @@ def save_event(
                 ),
             )
             conn.commit()
-            return cursor.lastrowid or 0
+            # SQLite AUTOINCREMENT 从 1 开始；对外统一转换为 0 起始
+            return (cursor.lastrowid or 1) - 1
         finally:
             conn.close()
 
@@ -566,7 +567,7 @@ def load_events(meeting_id: str, from_seq: int = 0) -> list[dict[str, Any]]:
             out = []
             for row in rows:
                 out.append({
-                    "seq": row["seq"],
+                    "seq": row["seq"] - 1,
                     "meeting_id": row["meeting_id"],
                     "type": row["type"],
                     "payload": json.loads(row["payload"]),
@@ -579,7 +580,7 @@ def load_events(meeting_id: str, from_seq: int = 0) -> list[dict[str, Any]]:
 
 
 def last_event_seq(meeting_id: str) -> int:
-    """取某会议最后一条事件的 seq，无事件返回 0"""
+    """取某会议最后一条事件的 seq（对外 0 起始），无事件返回 0"""
     with _lock:
         conn = _connect()
         try:
@@ -587,7 +588,7 @@ def last_event_seq(meeting_id: str) -> int:
                 "SELECT MAX(seq) as max_seq FROM events WHERE meeting_id = ?",
                 (meeting_id,),
             ).fetchone()
-            return row["max_seq"] if row and row["max_seq"] else 0
+            return (row["max_seq"] - 1) if row and row["max_seq"] else 0
         finally:
             conn.close()
 

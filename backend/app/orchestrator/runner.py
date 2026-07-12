@@ -11,7 +11,8 @@ from app.events import bus, make_event
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus, Stage
 from app.observability.log_bus import log_bus
-from app.orchestrator.nodes import NODES, decide_next_stage, _inc_loop_count, _let_borrowed_agents_speak
+from app.orchestrator.manager import MeetingManager
+from app.orchestrator.nodes import decide_next_stage, _inc_loop_count, _let_borrowed_agents_speak
 from app.orchestrator.fast_path import classify_intent_async, run_fast_path
 from app.orchestrator.state import STAGE_ORDER, is_terminal, should_pause
 
@@ -165,6 +166,10 @@ class Runner:
     每个节点内部自行 publish agent.spoke / evidence.attached / artifact.generated。
     """
 
+    def __init__(self, manager: MeetingManager | None = None):
+        # Phase 1 兼容模式：Manager 内部直接调用旧节点函数，保证行为不变
+        self.manager = manager or MeetingManager(compatibility_mode=True)
+
     async def run(self, state: MeetingState) -> MeetingState:
         """从当前阶段跑到底（或被 pause / abort 打断）"""
         # 设置追踪上下文（后续所有日志/事件/LLM 调用自动关联）
@@ -269,15 +274,11 @@ class Runner:
                     return state
 
                 current_stage = state.stage
-                node = NODES.get(current_stage)
-                if node is None:
-                    logger.warning("会议 %s 阶段 %s 无对应节点，终止", state.meeting_id, current_stage.value)
-                    break
 
-                # 执行节点
+                # 执行阶段：由 Manager 负责阶段内调度（Phase 1 兼容模式直接调用旧节点）
                 t0 = time.monotonic()
                 logger.debug("会议 %s 执行阶段: %s", state.meeting_id, current_stage.value)
-                state = await node(state)
+                state = await self.manager.run_stage(state, current_stage.value)
                 elapsed = time.monotonic() - t0
 
                 # 节点执行后，state.stage 已被节点设置为管线中的下一个阶段（默认推进）
@@ -458,6 +459,9 @@ class Runner:
         # 持久化尚未入库的发言（按 id 去重 upsert）
         for msg in state.messages:
             save_message(msg)
+
+        # 恢复 aux 到内存态，保证 Runner 返回的 state 完整且后续阶段可读取结论链
+        state.inject_aux(aux)
 
 
 # 进程级运行态注册表（线程安全）

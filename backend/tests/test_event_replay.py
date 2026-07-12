@@ -179,14 +179,14 @@ def test_ws_incremental_replay(client):
 
 
 def test_ws_full_replay_default(client):
-    """WS 完整回放：不带 from_seq，推 snapshot + 全部事件（验证现有行为不变）"""
+    """WS 完整回放：不带 from_seq，推 snapshot + replay.done（历史事件已聚合在快照中）"""
     resp = client.post("/meetings", json={"topic": "WS 完整回放测试"})
     meeting_id = resp.json()["meeting_id"]
     _run_to_done(meeting_id)
 
     last_seq = bus.last_seq(meeting_id)
 
-    # 不带 from_seq 连接（默认 0），应推 snapshot + 全部历史事件
+    # 不带 from_seq 连接（默认 0），应推 snapshot，随后直接 replay.done
     with client.websocket_connect(f"/ws/meetings/{meeting_id}") as ws:
         messages: list[dict] = []
         for _ in range(100):
@@ -200,12 +200,13 @@ def test_ws_full_replay_default(client):
     assert messages[0]["type"] == "snapshot"
     assert messages[0]["meeting_id"] == meeting_id
 
+    # 完整回放跳过历史事件，避免与快照重复
+    types = [m["type"] for m in messages]
+    assert "stage.changed" not in types
+    assert "agent.spoke" not in types
+
     # replay.done 应包含 from_seq=0 和 last_seq
     replay_done = messages[-1]
     assert replay_done["type"] == "replay.done"
     assert replay_done["from_seq"] == 0
     assert replay_done["last_seq"] == last_seq
-
-    # 应包含历史事件
-    types = [m["type"] for m in messages]
-    assert "stage.changed" in types or "agent.spoke" in types

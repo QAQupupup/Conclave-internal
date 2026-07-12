@@ -33,7 +33,13 @@ class StubLLM:
     保证端到端流程在无 LLM 时也能跑通。
     """
 
-    async def complete(self, prompt: str, schema_hint: str = "") -> dict[str, Any]:
+    async def complete(
+        self,
+        prompt: str,
+        schema_hint: str = "",
+        model_override: str = "",
+        agent_role: str = "",
+    ) -> dict[str, Any]:
         # 根据内容判定阶段，返回对应 schema 的假数据
         if "Clarify" in prompt or schema_hint == "clarify":
             return {
@@ -151,6 +157,29 @@ class StubLLM:
                 ],
             }
         if "Produce" in prompt or schema_hint.startswith("produce"):
+            # 默认 PRD + OpenAPI 交付物
+            if schema_hint == "produce_prd_openapi" or "PRD" in prompt or "OpenAPI" in prompt:
+                return {
+                    "prd": {
+                        "title": "会议决策系统 PRD",
+                        "goal": "构建面向中小团队的会议决策系统",
+                        "scope": "MVP 范围覆盖会议创建、六阶段讨论、结构化产出",
+                        "assumptions": ["团队已具备基本技术能力"],
+                        "constraints": ["单会议串行执行"],
+                        "api_endpoints": ["POST /meetings - 创建会议", "POST /meetings/{id}/run - 运行会议"],
+                        "open_questions": ["是否需要支持分布式部署？"],
+                    },
+                    "openapi": (
+                        "openapi: 3.0.0\n"
+                        "info:\n"
+                        "  title: 会议决策系统 API\n"
+                        "  version: 1.0.0\n"
+                        "paths:\n"
+                        "  /meetings:\n"
+                        "    post:\n"
+                        "      summary: 创建会议\n"
+                    ),
+                }
             # 根据产出模板中的任务描述关键字区分交付物类型
             if "产出架构设计文档" in prompt:
                 return {

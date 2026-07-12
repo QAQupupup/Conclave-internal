@@ -286,9 +286,10 @@ def test_event_seq_monotonic(client):
 
     events = bus.history(meeting_id)
     seqs = [e.seq for e in events]
-    # seq 从 0 开始递增
-    for i, s in enumerate(seqs):
-        assert s == i, f"事件 {i} 的 seq 应为 {i}，实际为 {s}"
+    # seq 单调递增（全局 seq 可能被 system.meetings.changed 等通配事件占用）
+    assert seqs[0] == 0, f"首个事件 seq 应为 0，实际为 {seqs[0]}"
+    for prev, cur in zip(seqs, seqs[1:]):
+        assert cur > prev, f"事件 seq 应单调递增，出现 {prev} -> {cur}"
 
 
 def test_events_endpoint_returns_seq(client):

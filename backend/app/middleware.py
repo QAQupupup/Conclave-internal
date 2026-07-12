@@ -160,6 +160,10 @@ def setup_auth_middleware(app: FastAPI) -> None:
         path = request.url.path
         client_ip = _client_ip(request)
 
+        # 测试模式：完全跳过认证与限流
+        if os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
+            return await call_next(request)
+
         # 公开路径免认证 + 免限流
         if _is_public(path):
             return await call_next(request)
