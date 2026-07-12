@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,20 @@ from app.events import bus, make_event
 from app.models import MeetingState, MeetingStatus, Role, Stage
 
 from ._helpers import _record_drift, _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
+
+
+def _current_src_loc(depth: int = 1) -> dict[str, Any]:
+    """返回当前代码位置（文件路径 + 行号），用于审计日志和降级事件"""
+    import inspect
+    frame = inspect.currentframe()
+    if frame is None:
+        return {"file": "unknown", "line": 0}
+    # depth=1 表示调用 _current_src_loc 的上一层
+    for _ in range(depth):
+        if frame.f_back is None:
+            break
+        frame = frame.f_back
+    return {"file": frame.f_code.co_filename, "line": frame.f_lineno}
 
 
 async def _emit_progress(state: MeetingState, step: str, message: str, percent: int = 0) -> None:
@@ -31,6 +46,80 @@ async def _emit_progress(state: MeetingState, step: str, message: str, percent: 
         )
     except Exception:
         pass  # 进度事件失败不影响主流程
+
+
+async def _emit_degradation_event(
+    state: MeetingState,
+    reason: str,
+    empty_fields: list[str],
+    result: dict[str, Any],
+    confidence_before: str,
+    confidence_after: str,
+    call_record: dict[str, Any] | None = None,
+) -> None:
+    """发布 produce 阶段降级/完整性事件，供审计和重跑分析
+
+    payload 包含：
+    - 触发代码位置（file / line）
+    - 触发条件（condition / empty_fields）
+    - 程序逻辑（logic）
+    - 当前状态（stage / deliverable_type / confidence）
+    - 最近一次 LLM 调用的关键摘要（model / prompt_length / raw_response_length）
+    """
+    loc = _current_src_loc(depth=2)
+    # 从 trace 中取出最近一次 produce 调用作为上下文
+    last_call: dict[str, Any] | None = None
+    if state.llm_trace and state.llm_trace.calls:
+        for c in reversed(state.llm_trace.calls):
+            if c.stage == "produce":
+                last_call = {
+                    "call_id": c.call_id,
+                    "model": c.model,
+                    "provider_id": c.provider_id,
+                    "temperature": c.temperature,
+                    "seed": c.seed,
+                    "attempt": c.attempt,
+                    "latency_ms": c.latency_ms,
+                    "input_tokens": c.input_tokens,
+                    "output_tokens": c.output_tokens,
+                    "total_tokens": c.total_tokens,
+                    "validation_status": c.validation_status,
+                    "consistency_status": c.consistency_status,
+                    "prompt_length": len(c.prompt),
+                    "raw_response_length": len(c.raw_response),
+                    "parsed_result_keys": list(c.parsed_result.keys()) if c.parsed_result else [],
+                }
+                break
+
+    payload = {
+        "meeting_id": state.meeting_id,
+        "stage": state.stage.value if state.stage else "produce",
+        "deliverable_type": state.deliverable_type,
+        "reason": reason,
+        "empty_fields": empty_fields,
+        "confidence_before": confidence_before,
+        "confidence_after": confidence_after,
+        "result_top_keys": list(result.keys()) if isinstance(result, dict) else [],
+        "src_loc": loc,
+        "condition": f"deliverable_type={state.deliverable_type} 且 {empty_fields} 为空",
+        "logic": "produce 节点内容完整性校验：关键字段为空时阻止部署/沙箱执行，并将 confidence 从 high 降级为 low",
+        "state": {
+            "status": state.status.value if state.status else None,
+            "stage": state.stage.value if state.stage else None,
+            "confidence_flags": dict(state.confidence_flags) if state.confidence_flags else {},
+            "message_count": len(state.messages),
+            "claim_count": len(state.claims),
+            "conflict_count": len(state.conflicts),
+            "evidence_count": sum(len(es.get("assessments", [])) for es in state.evidence_set),
+        },
+        "last_call": last_call,
+        "call_record": call_record,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await bus.publish(make_event("produce.degradation", state.meeting_id, payload))
+    except Exception:
+        pass
 
 
 def _detect_network_level(code: str) -> str:
@@ -308,14 +397,37 @@ async def produce_node(state: MeetingState) -> MeetingState:
         if not result.get("prd") and not result.get("openapi"):
             _empty_fields.append("prd/openapi")
     if _empty_fields:
+        _confidence_before = confidence
+        loc = _current_src_loc(depth=1)
         _lb.warning(
-            f"produce: LLM 返回内容不完整 — 空字段: {_empty_fields}",
+            f"produce: LLM 返回内容不完整 — 空字段: {_empty_fields} "
+            f"(触发位置: {loc['file']}:{loc['line']})",
             logger="orchestrator.nodes.produce",
-            extra={"deliverable_type": state.deliverable_type, "empty_fields": _empty_fields},
+            extra={
+                "deliverable_type": state.deliverable_type,
+                "empty_fields": _empty_fields,
+                "src_file": loc["file"],
+                "src_line": loc["line"],
+                "condition": f"deliverable_type={state.deliverable_type} 且 {_empty_fields} 为空",
+                "logic": "produce 节点内容完整性校验：关键字段为空时阻止部署/沙箱执行，并将 confidence 从 high 降级为 low",
+                "current_state": {
+                    "status": state.status.value if state.status else None,
+                    "stage": state.stage.value if state.stage else None,
+                    "confidence_flags": dict(state.confidence_flags) if state.confidence_flags else {},
+                },
+            },
         )
         if confidence == "high":
             confidence = "low"
             state.confidence_flags["produce"] = "low"
+        await _emit_degradation_event(
+            state=state,
+            reason="produce_critical_field_empty",
+            empty_fields=_empty_fields,
+            result=result,
+            confidence_before=_confidence_before,
+            confidence_after=confidence,
+        )
 
     _lb.info("produce: LLM 调用+一致性检查完成", logger="orchestrator.nodes.produce",
              extra={"confidence": confidence, "deliverable_type": state.deliverable_type,
