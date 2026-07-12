@@ -8,7 +8,7 @@ from app.agents.compute import get_compute, build_evidence_prompt
 from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
-from app.orchestrator.state import next_stage as _next_stage
+from conclave_core.state import next_stage as _next_stage
 from app.rag.retriever import retrieve_for_conflict
 from app.tools.web_search import get_web_search
 

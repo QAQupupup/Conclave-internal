@@ -10,7 +10,7 @@ from typing import Callable
 
 from app.agents.task_baseline import TaskBaseline
 from app.models import MeetingState
-from app.orchestrator.scheduler import ExecutionPlan, SubTask
+from conclave_core.scheduler import ExecutionPlan, SubTask
 
 
 def plan_clarify(state: MeetingState, baseline: TaskBaseline) -> ExecutionPlan:

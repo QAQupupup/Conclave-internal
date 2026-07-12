@@ -14,7 +14,7 @@ from app.models import MeetingStatus, Stage
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.nodes import clarify_node
 from app.orchestrator.runner import Runner
-from app.orchestrator.state import apply_signal
+from conclave_core.state import apply_signal
 from app.rag.chunker import chunk_markdown
 from app.rag.store import StubEmbedding, cosine_similarity, InMemoryVectorStore
 from app.routers import meetings as meetings_mod

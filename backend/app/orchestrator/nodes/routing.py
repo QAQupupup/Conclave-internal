@@ -103,7 +103,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
     max_loops = _MAX_LOOP_COUNT.get(current, 1)
     loop_count = _get_loop_count(state, current)
     if loop_count >= max_loops:
-        from app.orchestrator.state import next_stage as _ns
+        from conclave_core.state import next_stage as _ns
         forced_next = _ns(current, state.flow_plan)
         if forced_next and forced_next in valid_next:
             # 推进到管线中的下一个阶段（非PRODUCE），给后续阶段发言机会
@@ -206,7 +206,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
                 return stage
 
         # 回退：按固定顺序前进
-        from app.orchestrator.state import next_stage as _ns
+        from conclave_core.state import next_stage as _ns
         fallback = _ns(current, state.flow_plan)
         if fallback and fallback in valid_next:
             return fallback
@@ -215,5 +215,5 @@ async def decide_next_stage(state: MeetingState) -> Stage:
         pass
 
     # 最终回退
-    from app.orchestrator.state import next_stage as _ns
+    from conclave_core.state import next_stage as _ns
     return _ns(current, state.flow_plan) or Stage.PRODUCE

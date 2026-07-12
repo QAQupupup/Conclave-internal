@@ -14,7 +14,7 @@ from app.observability.log_bus import log_bus
 from app.orchestrator.manager import MeetingManager
 from app.orchestrator.nodes import decide_next_stage, _inc_loop_count, _let_borrowed_agents_speak
 from app.orchestrator.fast_path import classify_intent_async, run_fast_path
-from app.orchestrator.state import STAGE_ORDER, is_terminal, should_pause
+from conclave_core.state import STAGE_ORDER, is_terminal, should_pause
 
 logger = get_logger("orchestrator.runner")
 
@@ -374,7 +374,7 @@ class Runner:
                     # 非动态路由模式：节点内部已通过 _next_stage() 设置了正确的下一阶段，
                     # 无需 runner 重复设置。如果节点未设置（防御性），兜底推进到 PRODUCE。
                     if state.stage == current_stage:
-                        from app.orchestrator.state import next_stage as _ns
+                        from conclave_core.state import next_stage as _ns
                         nxt = _ns(current_stage, state.flow_plan)
                         state.stage = nxt or Stage.PRODUCE
 

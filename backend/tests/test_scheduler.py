@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.orchestrator.scheduler import ExecutionPlan, Scheduler, SubTask
+from conclave_core.scheduler import ExecutionPlan, Scheduler, SubTask
 
 
 async def _dummy_executor(task: SubTask, context: dict) -> dict:

@@ -212,7 +212,7 @@ def test_evidence_check_stage_confidence(client):
 
 def test_charter_drift_detection():
     """宪章漂移检测：check_drift 能识别偏离议题的内容"""
-    from app.orchestrator.charter import build_charter_from_clarify
+    from conclave_core.charter import build_charter_from_clarify
 
     charter = build_charter_from_clarify(
         meeting_id="test-mtg",

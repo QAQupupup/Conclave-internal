@@ -11,7 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.events import DomainEvent, bus, make_event
 from app.orchestrator.runner import get_state, set_state
-from app.orchestrator.state import apply_signal
+from conclave_core.state import apply_signal
 from app.db_legacy import save_meeting
 
 router = APIRouter()

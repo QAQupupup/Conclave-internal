@@ -7,7 +7,7 @@ import pytest
 from app.models import MeetingStatus, MeetingState
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
-from app.orchestrator.state import STAGE_ORDER, next_stage, is_terminal, should_pause
+from conclave_core.state import STAGE_ORDER, next_stage, is_terminal, should_pause
 
 
 # ---------- 状态机辅助函数 ----------
@@ -61,7 +61,7 @@ def test_pause_resume_signal(client):
     # 创建后默认 PAUSED，先设为 RUNNING
     state.status = MeetingStatus.RUNNING
 
-    from app.orchestrator.state import apply_signal
+    from conclave_core.state import apply_signal
     state = apply_signal(state, "pause")
     assert state.status == MeetingStatus.PAUSED
 
@@ -77,7 +77,7 @@ def test_abort_signal(client):
     state = runner_mod.get_state(meeting_id)
     state.status = MeetingStatus.RUNNING
 
-    from app.orchestrator.state import apply_signal
+    from conclave_core.state import apply_signal
     apply_signal(state, "abort")
     assert state.status == MeetingStatus.ABORTED
     assert is_terminal(state)
@@ -91,7 +91,7 @@ def test_inject_signal(client):
     state = runner_mod.get_state(meeting_id)
     initial_count = len(state.injected_messages)
 
-    from app.orchestrator.state import apply_signal
+    from conclave_core.state import apply_signal
     apply_signal(state, "inject", {"role": "product_architect", "content": "额外补充：需要支持移动端"})
     assert len(state.injected_messages) == initial_count + 1
     assert state.injected_messages[-1]["content"] == "额外补充：需要支持移动端"

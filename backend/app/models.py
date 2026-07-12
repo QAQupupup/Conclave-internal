@@ -8,8 +8,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from app.agents.trace import CallTrace
-from app.orchestrator.charter import MeetingCharter
-from app.orchestrator.conclusion_chain import ConclusionChain
+from conclave_core.charter import MeetingCharter
+from conclave_core.conclusion_chain import ConclusionChain
 
 
 # ---------- 枚举 ----------

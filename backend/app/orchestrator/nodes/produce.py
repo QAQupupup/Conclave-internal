@@ -11,7 +11,7 @@ from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 
-from app.orchestrator.stage_common import compress_decisions_to_brief
+from conclave_core.text import compress_decisions_to_brief
 from ._helpers import _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
 
 

@@ -42,7 +42,7 @@ from app.orchestrator.runner import (
     set_state,
     _process_interventions,
 )
-from app.orchestrator.state import apply_signal
+from conclave_core.state import apply_signal
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
