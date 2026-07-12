@@ -332,8 +332,7 @@ class CostRecordModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meeting_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("meetings.id", ondelete="SET NULL"),
-        nullable=True, index=True,
+        String(36), nullable=True, index=True,
     )
     stage: Mapped[str] = mapped_column(String(30), nullable=False, default="")
     node: Mapped[str] = mapped_column(String(50), nullable=False, default="",

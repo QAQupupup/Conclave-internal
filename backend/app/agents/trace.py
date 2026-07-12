@@ -149,6 +149,7 @@ def record_call(
     total_tokens: int = 0,
     agent_role: str = "",
     provider_id: str = "",
+    error_detail: str = "",
 ) -> None:
     """记录一次 LLM 调用到当前 trace（仅 RealLLM._call_api 调用）
 
@@ -182,6 +183,7 @@ def record_call(
         total_tokens=total_tokens,
         agent_role=agent_role,
         provider_id=provider_id,
+        error_detail=error_detail,
         request_id=get_request_id(),
         meeting_id=trace.meeting_id,
         runner_session_id=get_runner_session_id(),

@@ -558,10 +558,9 @@ class RealLLM:
                     # 50 字符远远不够；其他阶段（clarify, intra_team 等）保持较低阈值
                     _min_len = 200 if stage in ("cross_team", "produce", "arbitrate") else 50
                     if len(content.strip()) < _min_len:
-                        raise ValidationError(
+                        raise ValueError(
                             f"LLM 返回内容过短 ({len(content.strip())} chars < {_min_len})，"
-                            f"阶段={stage} 模型={_p_model} 输出质量不足",
-                            model_cls or str,
+                            f"阶段={stage} 模型={_p_model} 输出质量不足"
                         )
                     parsed = self._extract_json(content)
                     if model_cls is not None:
@@ -586,29 +585,25 @@ class RealLLM:
                     if schema_hint == "intra_team" and isinstance(result, dict):
                         claims_val = result.get("claims")
                         if not claims_val:
-                            raise ValidationError(
-                                f"intra_team 阶段 claims 为空，LLM 未输出有效论点",
-                                ClaimListResult,
+                            raise ValueError(
+                                f"intra_team 阶段 claims 为空，LLM 未输出有效论点"
                             )
                     # produce 阶段：校验代码类产出的关键字段非空
                     if schema_hint.startswith("produce") and isinstance(result, dict):
                         _ds = result.get("deployable_service")
                         if isinstance(_ds, dict) and not _ds.get("app_code"):
-                            raise ValidationError(
-                                "deployable_service.app_code 为空，LLM 未生成有效应用代码",
-                                model_cls or ProduceResult,
+                            raise ValueError(
+                                "deployable_service.app_code 为空，LLM 未生成有效应用代码"
                             )
                         _ca = result.get("code_analysis")
                         if isinstance(_ca, dict) and not _ca.get("code"):
-                            raise ValidationError(
-                                "code_analysis.code 为空，LLM 未生成有效代码",
-                                model_cls or ProduceResult,
+                            raise ValueError(
+                                "code_analysis.code 为空，LLM 未生成有效代码"
                             )
                         _ts = result.get("tested_system")
                         if isinstance(_ts, dict) and not _ts.get("main_code") and not _ts.get("test_code"):
-                            raise ValidationError(
-                                "tested_system 主代码和测试代码均为空",
-                                model_cls or ProduceResult,
+                            raise ValueError(
+                                "tested_system 主代码和测试代码均为空"
                             )
                     _circuit_breaker.record_success()
                     return result
