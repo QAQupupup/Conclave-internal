@@ -187,15 +187,22 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 4. **组件交互混乱**：Manager 作为 Storage/EventBus/Sandbox/Agent 之间的统一协议层
 5. **领域扩展困难**：TaskBaseline 按领域定义团队角色、必需产物、质量门
 
+### 已完成（本阶段）
+
+- [x] Runner 统一走 MeetingManager 调度路径，移除 compatibility_mode
+- [x] clarify / intra_team / cross_team / evidence_check / arbitrate 状态写入逻辑下沉到 `stage_runners.py`
+- [x] produce 阶段收尾逻辑（锁定结论、事件发布、漂移检查、终态设置）下沉到 `stage_runners.py`
+- [x] 新增基于历史数据的回归测试 `test_regression_historical.py` 与 produce 专项测试 `test_produce_stage.py`
+
 ### 后续工作
 
-- [ ] Runner 改造成纯阶段状态机
 - [ ] MaterialHub / ArtifactRepo 统一物料与产物
 - [ ] 核心业务迁移到 PostgreSQL
 - [ ] 服务持久化（deployed_services 表 + recover_services）
 - [ ] 前端生成与挂载流水线固化
+- [ ] produce 阶段复杂产物构建（代码审查、沙箱执行、Docker 部署）完全接入 AgentRuntime 产物回写
 
-详细分析见 `docs/issue-reports/conclave-multi-agent-architecture-comparison-20260713/`。
+详细分析见 `.trae/documents/v3-manager-agent-runtime-implementation-plan.md` 与 `.trae/documents/v3-manager-agent-runtime-completion-report.md`。
 
 ---
 

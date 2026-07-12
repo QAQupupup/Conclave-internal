@@ -1,7 +1,6 @@
 # Produce stage node + helpers: _synthesize_evidence_for_produce, _detect_network_level, _scan_artifacts
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,10 +9,10 @@ from typing import Any
 from app.agents.compute import get_compute, build_produce_prompt, ThinkRequest
 from app.agents.trace import set_current_trace
 from app.events import bus, make_event
-from app.models import MeetingState, MeetingStatus, Role, Stage
+from app.models import MeetingState, Role, Stage
 
 from app.orchestrator.stage_common import compress_decisions_to_brief
-from ._helpers import _record_drift, _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
+from ._helpers import _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
 
 
 def _current_src_loc(depth: int = 1) -> dict[str, Any]:
@@ -897,81 +896,6 @@ def health():
             if key in result:
                 state.artifact[key] = result[key]
 
-    # 附件扫描：所有代码/服务类产出都扫描工作区收集产出文件
-    if state.deliverable_type in ("code_analysis", "tested_system", "deployable_service"):
-        # [CON-24 修复] 用持久化工作区
-        from app.config import settings
-        ws_root = Path(settings.workspace_root) / state.meeting_id
-        attachments = _scan_artifacts(ws_root, state.meeting_id)
-        if attachments:
-            state.artifact["attachments"] = attachments
-            _lb.info(f"produce: 扫描到 {len(attachments)} 个附件文件",
-                     logger="orchestrator.nodes.produce",
-                     extra={"attachment_files": [a["filename"] for a in attachments]})
-
-    # 第2层：锁定 produce 结论
-    state.conclusion_chain.lock("produce", state.artifact)
-    # 第5层：记录置信度
-    state.confidence_flags["produce"] = confidence
-    _lb.info("produce: artifact 已构造, 锁定结论完成", logger="orchestrator.nodes.produce",
-             extra={"prd_title": prd.get("title", "?"), "openapi_len": len(openapi),
-                    "deliverable_type": state.deliverable_type})
-    # 发布 artifact.generated 事件
-    await bus.publish(
-        make_event(
-            "artifact.generated",
-            state.meeting_id,
-            {
-                "meeting_id": state.meeting_id,
-                "deliverable_type": state.deliverable_type,
-                "prd": prd,
-                "openapi": openapi,
-            },
-        )
-    )
-    _lb.info("produce: artifact.generated 事件已发布", logger="orchestrator.nodes.produce")
-    # 发送进度：产出完成
-    await _emit_progress(state, "done", "产出物生成完成！", 100)
-    # 产物阶段也做一次漂移检查（针对产出文本）
-    artifact_text = json.dumps(state.artifact, ensure_ascii=False, default=str)
-    _record_drift(state, Role.MODERATOR, Stage.PRODUCE, artifact_text)
-    _lb.info("produce: 漂移检查完成", logger="orchestrator.nodes.produce")
-    # 终态
-    state.stage = Stage.PRODUCE
-    state.status = MeetingStatus.DONE
-    _lb.info("produce: 状态已设为 DONE", logger="orchestrator.nodes.produce")
-
-    # LLM 降级检测：如果有阶段使用了 StubLLM 兜底，发 warning 事件
-    fallback_stages = [s for s, flag in state.confidence_flags.items() if flag == "fallback"]
-    if fallback_stages:
-        await bus.publish(make_event(
-            "meeting.fallback_warning",
-            state.meeting_id,
-            {
-                "fallback_stages": fallback_stages,
-                "message": f"以下阶段使用了降级数据（非真实 LLM 输出）：{', '.join(fallback_stages)}。产出物可能不可靠，请谨慎参考。",
-                "severity": "warning",
-            },
-        ))
-        _lb.warning(
-            f"会议完成但有 {len(fallback_stages)} 个阶段降级：{fallback_stages}",
-            logger="orchestrator.nodes.produce",
-        )
-    # 迭代二：会议结束后触发记忆提取（失败不影响主流程）
-    from app.memory.profile import trigger_extraction
-    trigger_extraction(state)
-    _lb.info("produce: 记忆提取完成, 准备返回", logger="orchestrator.nodes.produce")
-    # [FEEDBACK] Agent 反馈闭环：评估每个 Agent 的判断质量，写回画像供迭代
-    try:
-        from app.agents.feedback import evaluate_agents
-        evaluations = evaluate_agents(state)
-        if evaluations:
-            _lb.info(
-                f"produce: Agent 评估完成 — {len(evaluations)} 个角色, "
-                f"top={max(evaluations.items(), key=lambda x: x[1]['overall_score'])[0]}",
-                logger="orchestrator.nodes.produce",
-            )
-    except Exception as fb_err:
-        _lb.warning(f"produce: Agent 评估失败（不影响主流程）: {fb_err}",
-                     logger="orchestrator.nodes.produce")
-    return state
+    # 统一收尾：锁定结论、发布事件、漂移检查、设置终态
+    from app.orchestrator.stage_runners import run_produce
+    return await run_produce(state, confidence)
