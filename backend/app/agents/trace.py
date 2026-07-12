@@ -157,6 +157,10 @@ def record_call(
     """
     trace = _current_trace.get()
     if trace is None:
+        import logging
+        logging.getLogger("agents.trace").warning(
+            f"record_call 跳过：当前无活跃 trace (stage={stage}, model={model})"
+        )
         return
     # 从追踪上下文取 request_id 和 meeting_id
     from app.context import get_request_id, get_meeting_id, get_runner_session_id

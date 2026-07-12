@@ -374,6 +374,17 @@ async def produce_node(state: MeetingState) -> MeetingState:
         )
         req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "produce")
         resp = await compute.think(req)
+        if not resp.success:
+            _lb.warning(
+                f"produce: compute.think 返回失败 — {resp.error}",
+                logger="orchestrator.nodes.produce",
+                extra={
+                    "deliverable_type": state.deliverable_type,
+                    "error": resp.error,
+                    "latency_ms": resp.latency_ms,
+                    "stage": "produce",
+                },
+            )
         return resp.result
 
     result, confidence = await _run_with_consistency(state, "produce", call_fn)

@@ -68,6 +68,8 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://conclave:conclave_dev@postgres:5432/conclave}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - CONCLAVE_API_TOKEN=${CONCLAVE_API_TOKEN:-}
+      - CONCLAVE_LLM_TIMEOUT=${CONCLAVE_LLM_TIMEOUT:-120.0}
+      - CONCLAVE_PRODUCE_TIMEOUT=${CONCLAVE_PRODUCE_TIMEOUT:-1200.0}
       # [v4] Docker 监控默认启用（entrypoint 会自动配置好权限）
       # 如果在无 Docker 的环境运行，可设 CONCLAVE_DOCKER_DISABLED=true
       - CONCLAVE_DOCKER_DISABLED=${CONCLAVE_DOCKER_DISABLED:-false}

@@ -332,5 +332,10 @@ async def _flush_record_to_db(record: CostRecord) -> None:
             )
             session.add(db_record)
             await session.commit()
-    except Exception:
-        pass  # 成本持久化失败不影响主流程
+    except Exception as exc:
+        import logging
+        logging.getLogger("observability.cost_tracker").warning(
+            f"成本记录写入数据库失败: {exc}",
+            extra={"error": str(exc), "record": record.model_dump(mode="json") if hasattr(record, "model_dump") else str(record)},
+        )
+        # 成本持久化失败不影响主流程

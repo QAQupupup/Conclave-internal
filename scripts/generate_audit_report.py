@@ -29,10 +29,14 @@ DEFAULT_API = "http://localhost:8000"
 DEFAULT_OUT = "docs/audits"
 
 
-def _fetch_audit(api_base: str, meeting_id: str) -> dict[str, Any]:
+def _fetch_audit(api_base: str, meeting_id: str, token: str | None = None) -> dict[str, Any]:
     url = urljoin(api_base.rstrip("/") + "/", f"meetings/{meeting_id}/audit")
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(url, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         raise RuntimeError(f"无法从 {url} 获取审计数据: {e}") from e
@@ -360,10 +364,11 @@ def main() -> int:
     parser.add_argument("meeting_id", help="会议 ID")
     parser.add_argument("--api", default=DEFAULT_API, help=f"后端 API 地址（默认 {DEFAULT_API}）")
     parser.add_argument("--out", default=DEFAULT_OUT, help=f"输出目录（默认 {DEFAULT_OUT}）")
+    parser.add_argument("--token", default="", help="API token（Bearer），留空则尝试无认证访问")
     args = parser.parse_args()
 
     print(f"[audit] 获取会议 {args.meeting_id} 的审计数据...")
-    data = _fetch_audit(args.api, args.meeting_id)
+    data = _fetch_audit(args.api, args.meeting_id, token=args.token or None)
 
     out_dir = Path(args.out) / f"conclave-audit-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{args.meeting_id}"
     out_dir.mkdir(parents=True, exist_ok=True)

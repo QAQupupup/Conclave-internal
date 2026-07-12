@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Any, Protocol
 
@@ -14,6 +15,10 @@ from app.config import settings
 from app.logging_config import get_logger
 
 logger = get_logger("agents.llm")
+
+# 可配置 LLM 超时：produce 阶段默认 1200s，其他阶段默认 120s
+_CONCLAVE_LLM_TIMEOUT = float(os.getenv("CONCLAVE_LLM_TIMEOUT", "120.0"))
+_CONCLAVE_PRODUCE_TIMEOUT = float(os.getenv("CONCLAVE_PRODUCE_TIMEOUT", "1200.0"))
 
 
 class LLMClient(Protocol):
@@ -743,7 +748,7 @@ class RealLLM:
         # produce 阶段生成大量文本（OpenAPI），需要更长超时
         # DeepSeek-V3.2 生成 PRD+OpenAPI 可能需要 200-400s
         # produce_* 子类型同样需要长超时
-        stage_timeout = 600.0 if stage.startswith("produce") else 120.0
+        stage_timeout = _CONCLAVE_PRODUCE_TIMEOUT if stage.startswith("produce") else _CONCLAVE_LLM_TIMEOUT
         t0 = time.monotonic()
         try:
             resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)

@@ -17,6 +17,7 @@ from app.agents.prompts import (
     CROSS_TEAM, EVIDENCE_CHECK, ARBITRATE, PRODUCE, render,
 )
 from app.agents.role_templates import ROLE_LIBRARY
+from app.logging_config import get_logger
 from app.models import Role
 
 # IntraTeam 阶段的角色 → 模板注册表（Registry 模式）
@@ -188,9 +189,20 @@ class LocalAgentCompute:
                 need_continue=need_continue,
             )
         except Exception as e:
+            error_msg = f"{type(e).__name__}: {e}"
+            get_logger("agents.compute").warning(
+                f"compute.think 异常: stage={req.stage}, model={req.model or 'default'}, error={error_msg}",
+                extra={
+                    "stage": req.stage,
+                    "meeting_id": req.meeting_id,
+                    "agent_role": req.agent_role,
+                    "model": req.model,
+                    "error": error_msg,
+                },
+            )
             return ThinkResponse(
                 success=False,
-                error=f"{type(e).__name__}: {e}",
+                error=error_msg,
                 latency_ms=int((time.monotonic() - t0) * 1000),
                 validation_status="invalid",
             )
