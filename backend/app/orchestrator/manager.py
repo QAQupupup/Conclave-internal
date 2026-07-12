@@ -6,8 +6,11 @@ from typing import Any
 
 from app.agents.agent_runtime import AgentContext, AgentResult, AgentRuntime, build_agent_from_baseline
 from app.agents.task_baseline import TaskBaseline, get_baseline
+from app.models import MeetingState
 from app.orchestrator.context_manager import ContextManager, ContextSlice
 from app.orchestrator.scheduler import ExecutionPlan, Scheduler, SubTask
+from app.orchestrator.stage_planners import get_stage_planner
+from app.orchestrator.stage_reducers import reduce_stage_results
 
 
 class MeetingManager:
@@ -42,19 +45,24 @@ class MeetingManager:
     ) -> Any:
         """运行单个阶段
 
-        Phase 1 兼容模式：直接调用旧节点函数，返回 MeetingState。
-        非兼容模式：通过 Scheduler 展开 SubTask DAG，返回任务结果字典。
+        Phase 1/2 兼容模式：直接调用旧节点函数，返回 MeetingState。
+        非兼容模式：Planner -> Scheduler -> Reducer，返回更新后的 MeetingState。
         """
         if self.compatibility_mode:
             return await self._run_stage_compat(state, stage)
 
-        baseline = baseline or get_baseline(state.topic if hasattr(state, "topic") else "")
+        baseline = baseline or self.select_baseline(
+            state.topic if hasattr(state, "topic") else "",
+            state.domain_hint if hasattr(state, "domain_hint") else "",
+        )
         if self.scheduler is None:
             self.scheduler = Scheduler(self._execute_subtask, max_recursion_depth=self.max_recursion_depth)
 
-        plan = Scheduler.stage_plan(stage, baseline.team_roles)
+        planner = get_stage_planner(stage)
+        plan = planner(state, baseline)
         shared_state = {"state": state, "baseline": baseline}
-        return await self.scheduler.run_plan(plan, shared_state)
+        results = await self.scheduler.run_plan(plan, shared_state)
+        return await reduce_stage_results(state, stage, results)
 
     async def _run_stage_compat(self, state: Any, stage: str) -> Any:
         """兼容模式：直接调用旧节点函数"""

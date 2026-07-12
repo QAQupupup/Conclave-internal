@@ -7,24 +7,14 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
 from app.agents import compute as compute_mod
 from app.agents.compute import ThinkRequest, ThinkResponse
+from app.models import MeetingState
 from app.orchestrator.manager import MeetingManager
-
-
-@dataclass
-class FakeState:
-    meeting_id: str = "mtg-e2e"
-    topic: str = ""
-    charter: dict[str, Any] = field(default_factory=dict)
-    conclusion_chain: list[dict[str, Any]] = field(default_factory=list)
-    evidence: list[dict[str, Any]] = field(default_factory=list)
-    messages: list[dict[str, Any]] = field(default_factory=list)
 
 
 class WikiStubCompute:
@@ -34,14 +24,30 @@ class WikiStubCompute:
         stage = req.stage
         if stage == "clarify":
             return ThinkResponse(success=True, result={
-                "clarified_topic": req.prompt[-80:],
-                "key_questions": ["Q1", "Q2"],
-                "team_config": [{"role": "product_architect"}, {"role": "engineer"}],
+                "clarified_topic": "基于 FastAPI 和 React 的个人 Wiki 系统",
+                "key_questions": ["如何支持 Markdown？", "权限模型是什么？"],
+                "team_config": [
+                    {"role": "product_architect", "stance": "重业务价值"},
+                    {"role": "engineer", "stance": "重可行性"},
+                ],
                 "complexity": "full",
             })
         if stage == "intra_team":
             return ThinkResponse(success=True, result={
                 "claims": [{"claim": "需要 Markdown 编辑", "type": "constraint"}],
+            })
+        if stage == "cross_team":
+            return ThinkResponse(success=True, result={
+                "conflicts": [],
+                "consensus": "一致通过",
+            })
+        if stage == "evidence_check":
+            return ThinkResponse(success=True, result={"evidence_set": []})
+        if stage == "arbitrate":
+            return ThinkResponse(success=True, result={
+                "decisions": [],
+                "adopted_claims": [],
+                "action_brief": "无需仲裁",
             })
         if stage == "produce":
             return ThinkResponse(success=True, result={
@@ -65,20 +71,24 @@ def reset_compute():
 async def test_e2e_wiki_meeting_runs_without_real_llm(monkeypatch, sample_wiki_topic):
     monkeypatch.setattr(compute_mod, "_compute", WikiStubCompute())
 
-    manager = MeetingManager(max_recursion_depth=0)
-    state = FakeState(topic=sample_wiki_topic)
+    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    state = MeetingState(meeting_id="mtg-e2e", topic=sample_wiki_topic)
 
-    # clarify 阶段
-    clarify_results = await manager.run_stage(state, "clarify")
-    assert any("clarified_topic" in r.get("payload", {}) for r in clarify_results.values())
+    # clarify 阶段：应返回 MeetingState 并设置 charter
+    state = await manager.run_stage(state, "clarify")
+    assert isinstance(state, MeetingState)
+    assert state.clarified_topic is not None
+    assert state.charter is not None
 
-    # intra_team 阶段
-    intra_results = await manager.run_stage(state, "intra_team")
-    assert any("claims" in r.get("payload", {}) for r in intra_results.values())
+    # intra_team 阶段：应产生 claims
+    state = await manager.run_stage(state, "intra_team")
+    assert len(state.claims) > 0
+    assert len(state.messages) > 0
 
-    # produce 阶段
-    produce_results = await manager.run_stage(state, "produce")
-    assert any("prd" in r.get("payload", {}) for r in produce_results.values())
+    # produce 阶段：应生成 artifact
+    state = await manager.run_stage(state, "produce")
+    assert state.artifact is not None
+    assert "prd" in state.artifact
 
 
 @pytest.mark.asyncio
