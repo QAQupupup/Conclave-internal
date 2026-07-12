@@ -163,6 +163,42 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 
 ---
 
+## V3 重构方向（Manager + 统一 Agent 运行时）
+
+> 分支：`refactor/v3-manager-agent-runtime`（基于 `feature/v3-enhancement`）
+
+针对市面多智能体系统对比分析中发现的结构性缺口，V3 正在引入以下新组件：
+
+### 新增核心组件
+
+| 组件 | 文件 | 职责 |
+|---|---|---|
+| **MeetingManager** | `backend/app/orchestrator/manager.py` | 系统级调度与治理中枢，统一交互层 |
+| **Scheduler** | `backend/app/orchestrator/scheduler.py` | 显式 DAG 任务调度器，支持递归子任务 |
+| **ContextManager** | `backend/app/orchestrator/context_manager.py` | 上下文治理：窗口监控、分层选择、摘要压缩 |
+| **AgentRuntime** | `backend/app/agents/agent_runtime.py` | 统一 Agent 运行时，差异通过配置表达 |
+| **TaskBaseline** | `backend/app/agents/task_baseline.py` | 领域基线模板（软件系统、股票分析等） |
+
+### 解决的核心问题
+
+1. **上下文溢出**：ContextManager 显式预算 + 优先级分层 + 自动裁剪
+2. **缺少显式 DAG**：Scheduler 把阶段/子任务建模为可拓扑排序的有向图
+3. **Agent 抽象不统一**：AgentRuntime 让所有 Agent 共享同一执行接口
+4. **组件交互混乱**：Manager 作为 Storage/EventBus/Sandbox/Agent 之间的统一协议层
+5. **领域扩展困难**：TaskBaseline 按领域定义团队角色、必需产物、质量门
+
+### 后续工作
+
+- [ ] Runner 改造成纯阶段状态机
+- [ ] MaterialHub / ArtifactRepo 统一物料与产物
+- [ ] 核心业务迁移到 PostgreSQL
+- [ ] 服务持久化（deployed_services 表 + recover_services）
+- [ ] 前端生成与挂载流水线固化
+
+详细分析见 `docs/issue-reports/conclave-multi-agent-architecture-comparison-20260713/`。
+
+---
+
 ## 项目结构
 
 ```
@@ -178,6 +214,9 @@ Conclave/
 │   │   ├── orchestrator/              # 编排核心
 │   │   │   ├── runner.py              # 主循环 + 崩溃恢复 + 资源清理
 │   │   │   ├── state.py               # 阶段流转 + 控制信号
+│   │   │   ├── manager.py             # V3：MeetingManager 统一交互层
+│   │   │   ├── scheduler.py           # V3：DAG 任务调度器
+│   │   │   ├── context_manager.py     # V3：上下文治理
 │   │   │   ├── nodes/                 # 六阶段节点实现
 │   │   │   │   ├── clarify.py         # 澄清阶段
 │   │   │   │   ├── intra_team.py      # 队内讨论
@@ -193,6 +232,8 @@ Conclave/
 │   │   │   └── refine_loop.py         # 代码自修复循环
 │   │   ├── agents/                    # Agent计算层
 │   │   │   ├── compute.py             # LLM调用 + 多模型路由
+│   │   │   ├── agent_runtime.py       # V3：统一 Agent 运行时
+│   │   │   ├── task_baseline.py       # V3：领域任务基线
 │   │   │   ├── prompts/               # Prompt模板
 │   │   │   └── trace.py               # LLM调用追踪
 │   │   ├── routers/                   # API路由
@@ -364,3 +405,26 @@ npm run dev
 - 部署后自动化功能冒烟测试
 - Chunk Graph知识图谱检索升级
 - 数据分析结果的前端图表渲染
+
+---
+
+## 测试
+
+### 运行新增重构测试（无需真实 LLM）
+
+```bash
+cd backend
+python -m pytest tests/test_scheduler.py tests/test_context_manager.py tests/test_manager.py tests/test_e2e_refactor.py -v
+```
+
+这些测试：
+- 使用 stub/mock compute，不调用真实大模型 API
+- 基于历史会议议题（Wiki 系统、股票分析）作为端到端输入
+- 验证 Manager、Scheduler、ContextManager、AgentRuntime、TaskBaseline 的协同工作
+
+### 避免测试调用真实 LLM
+
+如果希望完全避免真实 LLM 调用，请：
+- 不要运行 `tests/test_real_llm_e2e.py`
+- 确保未设置 `CONCLAVE_LLM_API_KEY`，或将其留空以走 StubLLM 模式
+- 新增测试已通过 monkeypatch 替换 `app.agents.compute._compute`，不依赖外部配置
