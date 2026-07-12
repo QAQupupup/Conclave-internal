@@ -816,7 +816,7 @@ async def deploy_service(
     cpu_limit: str = "2",
     env_vars: dict | None = None,
     credentials: dict | None = None,
-    wait_seconds: int = 30,
+    wait_seconds: int = 90,
 ) -> DeployResult:
     """部署一个长期运行的服务容器
 
@@ -841,12 +841,14 @@ async def deploy_service(
     container_name = f"conclave-svc-{meeting_id[:12]}"
     await _run_docker_cmd(["rm", "-f", container_name], timeout=10)
 
-    # 构建启动命令：先安装依赖，再启动服务
+    # 构建启动命令：先安装依赖，创建工作目录，再启动服务
+    # 注意：不使用 tail 隐藏 pip 输出，否则部署失败时看不到真实错误
     if startup_cmd:
         cmd = startup_cmd
     else:
         cmd = (
-            f"pip install --no-cache-dir -r requirements.txt 2>&1 | tail -5 && "
+            f"pip install --no-cache-dir -r requirements.txt && "
+            f"mkdir -p data uploads && "
             f"exec uvicorn app:app --host 0.0.0.0 --port {container_port}"
         )
 

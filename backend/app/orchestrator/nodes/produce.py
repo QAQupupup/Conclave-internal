@@ -905,7 +905,7 @@ def health():
                     workspace_root=settings.workspace_root,
                     container_port=service_port,
                     health_path="/health",
-                    wait_seconds=45,
+                    wait_seconds=90,
                     credentials=credentials if credentials else None,
                     env_vars={"SECRET_KEY": "dev-conclave-secret-change-me"},
                 )
