@@ -11,7 +11,9 @@ from app.orchestrator.charter import build_charter_from_clarify
 from app.orchestrator.state import next_stage as _next_stage, get_skipped_stages
 
 from .stage_common import (
+    compress_decisions_to_brief,
     emit_agent_spoke,
+    format_arbitrate_as_text,
     record_drift,
 )
 
@@ -56,4 +58,35 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
 
     nxt = _next_stage(Stage.CLARIFY, state.flow_plan)
     state.stage = nxt or Stage.INTRA_TEAM
+    return state
+
+
+async def run_arbitrate(state: MeetingState, result: dict[str, Any], confidence: str = "high") -> MeetingState:
+    """Arbitrate 阶段：把 LLM 返回结果写回 MeetingState"""
+    decisions = result.get("decisions", [])
+    adopted_claims = result.get("adopted_claims", [])
+
+    # 无冲突时自动采纳所有 claims
+    if not state.conflicts and not adopted_claims and state.claims:
+        adopted_claims = [c.get("id", "") for c in state.claims if c.get("id")]
+
+    state.decision_record = {
+        "decisions": decisions,
+        "adopted_claims": adopted_claims,
+        "action_brief": compress_decisions_to_brief(
+            {"decisions": decisions, "adopted_claims": adopted_claims},
+            state.claims,
+            state.conflicts,
+            state.evidence_set,
+        ),
+    }
+    state.conclusion_chain.lock("arbitrate", state.decision_record)
+    state.confidence_flags["arbitrate"] = confidence
+
+    content = format_arbitrate_as_text(state.decision_record, state.claims, state.conflicts)
+    await emit_agent_spoke(state, Role.MODERATOR, Stage.ARBITRATE, content)
+    record_drift(state, Role.MODERATOR, Stage.ARBITRATE, content)
+
+    nxt = _next_stage(Stage.ARBITRATE, state.flow_plan)
+    state.stage = nxt or Stage.PRODUCE
     return state

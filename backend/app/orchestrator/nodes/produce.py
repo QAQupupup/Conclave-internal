@@ -1,4 +1,4 @@
-# Produce stage node + helpers: _compress_decisions_to_brief, _synthesize_evidence_for_produce, _detect_network_level, _scan_artifacts
+# Produce stage node + helpers: _synthesize_evidence_for_produce, _detect_network_level, _scan_artifacts
 from __future__ import annotations
 
 import json
@@ -12,6 +12,7 @@ from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, MeetingStatus, Role, Stage
 
+from app.orchestrator.stage_common import compress_decisions_to_brief
 from ._helpers import _record_drift, _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
 
 
@@ -221,83 +222,6 @@ def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
             "meeting_id": meeting_id,
         })
     return attachments
-
-
-def _compress_decisions_to_brief(
-    decision_record: dict,
-    claims: list[dict],
-    conflicts: list[dict],
-    evidence_set: list[dict],
-) -> dict[str, Any]:
-    """将松散的仲裁结果压缩为紧凑的 action brief。
-
-    纯确定性提取（不调 LLM），确保低延迟零额外成本。
-    产出结构:
-    - core_decisions: 最重要的 3-5 项决策（一行一条）
-    - evidence_backing: 支撑核心决策的证据方向
-    - rejected_alternatives: 被否决的方向及原因
-    - action_items: 从决策推导的具体行动项
-    """
-    decisions = decision_record.get("decisions", [])
-    adopted = decision_record.get("adopted_claims", [])
-
-    # 核心决策：取前 5 条（LLM 已按重要性排序）
-    core_decisions = []
-    for d in decisions[:5]:
-        if isinstance(d, dict):
-            text = d.get("summary", d.get("verdict", str(d)))
-        else:
-            text = str(d)
-        if text:
-            core_decisions.append(text[:120])
-
-    # 证据方向统计
-    support_counts = {"supports": 0, "refutes": 0, "neutral": 0}
-    for es in evidence_set:
-        for a in es.get("assessments", []):
-            direction = a.get("supports", "neutral")
-            if direction in support_counts:
-                support_counts[direction] += 1
-    evidence_backing = (
-        f"{support_counts['supports']} 条证据支持, "
-        f"{support_counts['refutes']} 条反驳, "
-        f"{support_counts['neutral']} 条中性"
-    ) if evidence_set else "无证据数据"
-
-    # 被否决的方向：从 conflicts 中找出未被采纳的
-    rejected = []
-    adopted_ids = set()
-    for a in adopted:
-        if isinstance(a, dict):
-            adopted_ids.add(a.get("id", a.get("claim_id", "")))
-        elif isinstance(a, str):
-            adopted_ids.add(a)
-    for c in conflicts[:5]:
-        c_id = c.get("id", "")
-        # 如果冲突的某一方未被采纳，记录为 rejected
-        for side in c.get("sides", []):
-            if isinstance(side, dict) and side.get("claim_id", "") not in adopted_ids:
-                reason = side.get("rejection_reason", "证据不足或与共识冲突")
-                rejected.append(f"{side.get('text', '?')[:80]} — {reason[:60]}")
-
-    # 行动项：从 adopted_claims 提取可执行的下一步
-    action_items = []
-    for a in adopted[:5]:
-        if isinstance(a, dict):
-            next_step = a.get("next_step", a.get("action", ""))
-            if next_step:
-                action_items.append(next_step[:100])
-            else:
-                text = a.get("text", a.get("claim", ""))
-                if text:
-                    action_items.append(f"落实: {text[:80]}")
-
-    return {
-        "core_decisions": core_decisions,
-        "evidence_backing": evidence_backing,
-        "rejected_alternatives": rejected[:3],
-        "action_items": action_items,
-    }
 
 
 def _synthesize_evidence_for_produce(state: MeetingState) -> dict[str, Any]:

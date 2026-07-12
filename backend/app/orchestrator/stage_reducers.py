@@ -62,9 +62,12 @@ async def reduce_arbitrate(
     results: dict[str, Any],
 ) -> MeetingState:
     """arbitrate 阶段归约"""
-    from app.orchestrator.nodes.arbitrate import arbitrate_node
+    from app.orchestrator.stage_runners import run_arbitrate
 
-    return await arbitrate_node(state)
+    task_result = next(iter(results.values()), {}) if results else {}
+    agent_result = task_result.get("payload", {}) if isinstance(task_result, dict) else {}
+    confidence = task_result.get("confidence", "high") if isinstance(task_result, dict) else "high"
+    return await run_arbitrate(state, agent_result, confidence)
 
 
 async def reduce_produce(

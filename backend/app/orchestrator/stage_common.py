@@ -148,6 +148,78 @@ def format_claims_as_text(claims: list[dict[str, Any]], role_label: str = "") ->
     return "\n".join(lines)
 
 
+def compress_decisions_to_brief(
+    decision_record: dict,
+    claims: list[dict],
+    conflicts: list[dict],
+    evidence_set: list[dict],
+) -> dict[str, Any]:
+    """将松散的仲裁结果压缩为紧凑的 action brief。
+
+    纯确定性提取（不调 LLM），确保低延迟零额外成本。
+    产出结构:
+    - core_decisions: 最重要的 3-5 项决策（一行一条）
+    - evidence_backing: 支撑核心决策的证据方向
+    - rejected_alternatives: 被否决的方向及原因
+    - action_items: 从决策推导的具体行动项
+    """
+    decisions = decision_record.get("decisions", [])
+    adopted = decision_record.get("adopted_claims", [])
+
+    core_decisions = []
+    for d in decisions[:5]:
+        if isinstance(d, dict):
+            text = d.get("summary", d.get("verdict", str(d)))
+        else:
+            text = str(d)
+        if text:
+            core_decisions.append(text[:120])
+
+    support_counts = {"supports": 0, "refutes": 0, "neutral": 0}
+    for es in evidence_set:
+        for a in es.get("assessments", []):
+            direction = a.get("supports", "neutral")
+            if direction in support_counts:
+                support_counts[direction] += 1
+    evidence_backing = (
+        f"{support_counts['supports']} 条证据支持, "
+        f"{support_counts['refutes']} 条反驳, "
+        f"{support_counts['neutral']} 条中性"
+    ) if evidence_set else "无证据数据"
+
+    rejected = []
+    adopted_ids = set()
+    for a in adopted:
+        if isinstance(a, dict):
+            adopted_ids.add(a.get("id", a.get("claim_id", "")))
+        elif isinstance(a, str):
+            adopted_ids.add(a)
+    for c in conflicts[:5]:
+        c_id = c.get("id", "")
+        for side in c.get("sides", []):
+            if isinstance(side, dict) and side.get("claim_id", "") not in adopted_ids:
+                reason = side.get("rejection_reason", "证据不足或与共识冲突")
+                rejected.append(f"{side.get('text', '?')[:80]} — {reason[:60]}")
+
+    action_items = []
+    for a in adopted[:5]:
+        if isinstance(a, dict):
+            next_step = a.get("next_step", a.get("action", ""))
+            if next_step:
+                action_items.append(next_step[:100])
+            else:
+                text = a.get("text", a.get("claim", ""))
+                if text:
+                    action_items.append(f"落实: {text[:80]}")
+
+    return {
+        "core_decisions": core_decisions,
+        "evidence_backing": evidence_backing,
+        "rejected_alternatives": rejected[:3],
+        "action_items": action_items,
+    }
+
+
 def format_arbitrate_as_text(
     decision_record: dict[str, Any],
     claims: list[dict[str, Any]],
