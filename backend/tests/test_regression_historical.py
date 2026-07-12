@@ -158,7 +158,7 @@ async def test_regression_manager_non_compat_path(monkeypatch):
 
     monkeypatch.setattr(compute_mod, "_compute", HistoricalStubCompute())
 
-    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    manager = MeetingManager(max_recursion_depth=0)
     state = MeetingState(meeting_id="mtg-regression-noncompat", topic="个人 Wiki 系统")
 
     state = await manager.run_stage(state, "clarify")
@@ -185,7 +185,7 @@ async def test_regression_with_conflict_triggers_evidence_check(monkeypatch):
 
     monkeypatch.setattr(compute_mod, "_compute", ConflictStubCompute())
 
-    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    manager = MeetingManager(max_recursion_depth=0)
     state = MeetingState(meeting_id="mtg-conflict", topic="个人 Wiki 系统", flow_plan="full")
 
     state = await manager.run_stage(state, "clarify")

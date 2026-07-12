@@ -79,11 +79,11 @@ def fresh_state(sample_wiki_topic) -> MeetingState:
 
 
 @pytest.mark.asyncio
-async def test_run_stage_non_compat_returns_meeting_state(monkeypatch, fresh_state):
-    """非兼容模式下 run_stage 应返回更新后的 MeetingState"""
+async def test_run_stage_returns_meeting_state(monkeypatch, fresh_state):
+    """run_stage 应返回更新后的 MeetingState"""
     monkeypatch.setattr(compute_mod, "_compute", StageAwareStubCompute())
 
-    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    manager = MeetingManager(max_recursion_depth=0)
     state = await manager.run_stage(fresh_state, "clarify")
 
     assert isinstance(state, MeetingState)
@@ -93,12 +93,12 @@ async def test_run_stage_non_compat_returns_meeting_state(monkeypatch, fresh_sta
 
 
 @pytest.mark.asyncio
-async def test_run_stage_intra_team_non_compat(monkeypatch, fresh_state):
-    """非兼容模式下 intra_team 应产生 claims 与 messages"""
+async def test_run_stage_intra_team(monkeypatch, fresh_state):
+    """intra_team 应产生 claims 与 messages"""
     monkeypatch.setattr(compute_mod, "_compute", StageAwareStubCompute())
 
     # 先运行 clarify 拿到 team_config
-    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    manager = MeetingManager(max_recursion_depth=0)
     state = await manager.run_stage(fresh_state, "clarify")
     assert state.team_config
 
@@ -110,24 +110,11 @@ async def test_run_stage_intra_team_non_compat(monkeypatch, fresh_state):
 
 
 @pytest.mark.asyncio
-async def test_run_stage_compat_still_works(monkeypatch, fresh_state):
-    """兼容模式继续直接调用旧节点，行为不退化"""
+async def test_run_stage_full_pipeline(monkeypatch, fresh_state):
+    """依次跑 clarify -> intra_team -> cross_team -> produce"""
     monkeypatch.setattr(compute_mod, "_compute", StageAwareStubCompute())
 
-    manager = MeetingManager(compatibility_mode=True)
-    state = await manager.run_stage(fresh_state, "clarify")
-
-    assert isinstance(state, MeetingState)
-    assert state.clarified_topic is not None
-    assert state.charter is not None
-
-
-@pytest.mark.asyncio
-async def test_run_stage_full_pipeline_non_compat(monkeypatch, fresh_state):
-    """非兼容模式下依次跑 clarify -> intra_team -> cross_team -> produce"""
-    monkeypatch.setattr(compute_mod, "_compute", StageAwareStubCompute())
-
-    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    manager = MeetingManager(max_recursion_depth=0)
     state = fresh_state
 
     state = await manager.run_stage(state, "clarify")

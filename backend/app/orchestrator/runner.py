@@ -167,8 +167,8 @@ class Runner:
     """
 
     def __init__(self, manager: MeetingManager | None = None):
-        # Phase 1 兼容模式：Manager 内部直接调用旧节点函数，保证行为不变
-        self.manager = manager or MeetingManager(compatibility_mode=True)
+        # Phase 3：统一通过 MeetingManager 调度，遗留节点由 Reducer 调用
+        self.manager = manager or MeetingManager()
 
     async def run(self, state: MeetingState) -> MeetingState:
         """从当前阶段跑到底（或被 pause / abort 打断）"""

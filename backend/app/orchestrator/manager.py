@@ -29,13 +29,10 @@ class MeetingManager:
         context_manager: ContextManager | None = None,
         scheduler: Scheduler | None = None,
         max_recursion_depth: int = 2,
-        compatibility_mode: bool = False,
     ):
         self.context_manager = context_manager or ContextManager()
         self.scheduler = scheduler
         self.max_recursion_depth = max_recursion_depth
-        # Phase 1 兼容模式：直接调用旧节点函数，保证 Runner 行为不变
-        self.compatibility_mode = compatibility_mode
 
     async def run_stage(
         self,
@@ -45,12 +42,9 @@ class MeetingManager:
     ) -> Any:
         """运行单个阶段
 
-        Phase 1/2 兼容模式：直接调用旧节点函数，返回 MeetingState。
-        非兼容模式：Planner -> Scheduler -> Reducer，返回更新后的 MeetingState。
+        统一路径：Planner -> Scheduler -> Reducer，返回更新后的 MeetingState。
+        遗留节点（如 produce）仍通过 Reducer 调用，后续逐步迁移到 stage_runners。
         """
-        if self.compatibility_mode:
-            return await self._run_stage_compat(state, stage)
-
         baseline = baseline or self.select_baseline(
             state.topic if hasattr(state, "topic") else "",
             state.domain_hint if hasattr(state, "domain_hint") else "",
@@ -63,22 +57,6 @@ class MeetingManager:
         shared_state = {"state": state, "baseline": baseline}
         results = await self.scheduler.run_plan(plan, shared_state)
         return await reduce_stage_results(state, stage, results)
-
-    async def _run_stage_compat(self, state: Any, stage: str) -> Any:
-        """兼容模式：直接调用旧节点函数"""
-        from app.models import Stage
-        from app.orchestrator.nodes import NODES
-
-        try:
-            stage_enum = Stage(stage)
-        except ValueError as exc:
-            raise ValueError(f"无效阶段: {stage}") from exc
-
-        node = NODES.get(stage_enum)
-        if node is None:
-            raise ValueError(f"阶段 {stage} 无对应节点")
-
-        return await node(state)
 
     async def _execute_subtask(self, task: SubTask, context: dict[str, Any]) -> dict[str, Any]:
         shared = context.get("shared_state", {})

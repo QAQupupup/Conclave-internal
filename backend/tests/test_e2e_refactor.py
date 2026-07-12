@@ -71,7 +71,7 @@ def reset_compute():
 async def test_e2e_wiki_meeting_runs_without_real_llm(monkeypatch, sample_wiki_topic):
     monkeypatch.setattr(compute_mod, "_compute", WikiStubCompute())
 
-    manager = MeetingManager(max_recursion_depth=0, compatibility_mode=False)
+    manager = MeetingManager(max_recursion_depth=0)
     state = MeetingState(meeting_id="mtg-e2e", topic=sample_wiki_topic)
 
     # clarify 阶段：应返回 MeetingState 并设置 charter
