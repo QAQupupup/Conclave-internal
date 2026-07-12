@@ -122,15 +122,28 @@ _current_trace: contextvars.ContextVar[CallTrace | None] = contextvars.ContextVa
     "conclave_current_trace", default=None
 )
 
+# 会议级 trace 注册表：兜底机制，防止 contextvar 在跨 task/gather 时丢失
+# key = meeting_id, value = CallTrace（应与 state.llm_trace 是同一对象）
+_trace_registry: dict[str, CallTrace] = {}
+
 
 def set_current_trace(trace: CallTrace | None) -> None:
     """设置当前活跃的 CallTrace（nodes.py 在每个节点开始时调用）"""
     _current_trace.set(trace)
+    if trace is not None and trace.meeting_id:
+        _trace_registry[trace.meeting_id] = trace
 
 
 def get_current_trace() -> CallTrace | None:
     """获取当前活跃的 CallTrace"""
     return _current_trace.get()
+
+
+def _get_trace_fallback(meeting_id: str | None) -> CallTrace | None:
+    """按 meeting_id 从注册表取 trace，作为 contextvar 丢失时的兜底"""
+    if meeting_id and meeting_id in _trace_registry:
+        return _trace_registry[meeting_id]
+    return None
 
 
 def record_call(
@@ -156,15 +169,20 @@ def record_call(
     如果当前没有活跃的 trace（如 stub 模式或单元测试），静默跳过。
     自动注入 request_id 和 meeting_id 实现全链路追踪。
     """
+    # 从追踪上下文取 request_id 和 meeting_id
+    from app.context import get_request_id, get_meeting_id, get_runner_session_id
+
+    meeting_id = get_meeting_id()
     trace = _current_trace.get()
+    if trace is None:
+        # contextvar 可能在跨 task/gather 时丢失，按 meeting_id 兜底
+        trace = _get_trace_fallback(meeting_id)
     if trace is None:
         import logging
         logging.getLogger("agents.trace").warning(
-            f"record_call 跳过：当前无活跃 trace (stage={stage}, model={model})"
+            f"record_call 跳过：当前无活跃 trace (stage={stage}, model={model}, meeting_id={meeting_id})"
         )
         return
-    # 从追踪上下文取 request_id 和 meeting_id
-    from app.context import get_request_id, get_meeting_id, get_runner_session_id
     record = LLMCallRecord(
         call_id=f"call-{uuid.uuid4().hex[:12]}",
         timestamp=datetime.now(timezone.utc).isoformat(),
@@ -185,7 +203,7 @@ def record_call(
         provider_id=provider_id,
         error_detail=error_detail,
         request_id=get_request_id(),
-        meeting_id=trace.meeting_id,
+        meeting_id=trace.meeting_id or meeting_id,
         runner_session_id=get_runner_session_id(),
     )
     trace.add_call(record)
@@ -193,7 +211,12 @@ def record_call(
 
 def update_last_record(**kwargs: Any) -> None:
     """更新当前 trace 中最后一条记录的字段（如解析后更新 validation_status / parsed_result）"""
+    from app.context import get_meeting_id
+
+    meeting_id = get_meeting_id()
     trace = _current_trace.get()
+    if trace is None:
+        trace = _get_trace_fallback(meeting_id)
     if trace is None or not trace.calls:
         return
     last = trace.calls[-1]

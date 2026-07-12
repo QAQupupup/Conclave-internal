@@ -761,7 +761,7 @@ async def _run_meeting_bg(meeting_id: str) -> None:
             # 会议结束后立即清理资源密集型对象（不影响用户查看消息/报告）：
             # - RAG 向量缓存（chunks和向量占用大量内存）
             # - 浏览器上下文
-            # - 沙箱服务容器（长期运行的容器，不停止会一直占资源）
+            # 注意：保留沙箱服务容器，会议结束后用户仍可访问已部署服务
             try:
                 from app.rag.store import clear_store
                 clear_store(meeting_id)
@@ -772,11 +772,8 @@ async def _run_meeting_bg(meeting_id: str) -> None:
                 browser_pool.release_meeting(meeting_id)
             except Exception:
                 pass
-            try:
-                from app.sandbox import stop_service
-                await stop_service(meeting_id)
-            except Exception:
-                pass
+            # 保留沙箱服务容器，会议结束后用户仍可访问已部署服务
+            # （服务生命周期由删除会议或 cleanup_all_services 管理）
 
 
 @router.post("/{meeting_id}/control")

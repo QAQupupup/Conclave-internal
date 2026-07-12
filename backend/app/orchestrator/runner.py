@@ -548,6 +548,13 @@ def cleanup_meeting_resources(meeting_id: str) -> None:
     except Exception:
         pass
 
+    # 8. 清理 trace 注册表（避免内存泄漏）
+    try:
+        from app.agents.trace import _trace_registry
+        _trace_registry.pop(meeting_id, None)
+    except Exception:
+        pass
+
 
 def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
     """创建新的会议运行态"""
