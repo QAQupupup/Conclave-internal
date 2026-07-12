@@ -40,9 +40,12 @@ async def reduce_cross_team(
     results: dict[str, Any],
 ) -> MeetingState:
     """cross_team 阶段归约"""
-    from app.orchestrator.nodes.cross_team import cross_team_node
+    from app.orchestrator.stage_runners import run_cross_team
 
-    return await cross_team_node(state)
+    task_result = next(iter(results.values()), {}) if results else {}
+    agent_result = task_result.get("payload", {}) if isinstance(task_result, dict) else {}
+    confidence = task_result.get("confidence", "high") if isinstance(task_result, dict) else "high"
+    return await run_cross_team(state, agent_result, confidence)
 
 
 async def reduce_evidence_check(
