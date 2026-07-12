@@ -33,21 +33,35 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
 
     优先使用 state.team_config（clarify 阶段由 LLM 生成），
     若为空则回退到 baseline.team_roles（测试/默认场景）。
+
+    Phase 3：保留原节点的混合模式——前 N-1 个角色并行独立思考，
+    最后一个角色依赖前序角色，基于其结论做反应性思考。
     """
     team_roles = state.team_config if state.team_config else baseline.team_roles
     tasks: list[SubTask] = []
+    task_ids: list[str] = []
     for idx, role_def in enumerate(team_roles):
         role = role_def.get("role", "agent")
         stance = role_def.get("stance", "")
+        task_id = f"intra-{role}-{idx}"
+        task_ids.append(task_id)
         tasks.append(
             SubTask(
-                id=f"intra-{role}-{idx}",
+                id=task_id,
                 stage="intra_team",
                 role=role,
                 description=f"从 {role} 视角发表队内观点与 claims",
-                payload={"role": role, "stance": stance},
+                payload={"role": role, "stance": stance, "react": False},
             )
         )
+
+    if len(tasks) > 1:
+        # 最后一个角色依赖前 N-1 个角色，做反应性思考
+        last_task = tasks[-1]
+        last_task.dependencies = task_ids[:-1]
+        last_task.payload["react"] = True
+        last_task.description = f"{last_task.role} 基于前序角色结论做反应性思考"
+
     # 兜底：至少保证一个任务，避免 Scheduler 空跑
     if not tasks:
         tasks.append(
@@ -56,6 +70,7 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
                 stage="intra_team",
                 role="moderator",
                 description="主持人兜底队内观点收集",
+                payload={"react": False},
             )
         )
     return ExecutionPlan(tasks=tasks)

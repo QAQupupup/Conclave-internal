@@ -29,9 +29,33 @@ async def reduce_intra_team(
     results: dict[str, Any],
 ) -> MeetingState:
     """intra_team 阶段归约"""
-    from app.orchestrator.nodes.intra_team import intra_team_node
+    from app.orchestrator.stage_runners import run_intra_team
 
-    return await intra_team_node(state)
+    role_results: list[dict[str, Any]] = []
+    for task_id, task_result in results.items():
+        if not isinstance(task_result, dict):
+            continue
+        payload = task_result.get("payload", {})
+        meta = task_result.get("meta", {})  # Manager._execute_subtask 注入的 task 元信息
+        role = meta.get("role") or payload.get("role", "agent")
+        stance = meta.get("stance") or payload.get("stance", "")
+        react = meta.get("react") or payload.get("react", False)
+        confidence = task_result.get("confidence", "high")
+        claims = payload.get("claims", []) if isinstance(payload, dict) else []
+        role_results.append({
+            "role": role,
+            "stance": stance,
+            "claims": claims,
+            "confidence": confidence,
+            "react": react,
+        })
+
+    if not role_results:
+        # 兜底：若 Scheduler 未产生可用结果，回退到旧节点（兼容层保险）
+        from app.orchestrator.nodes.intra_team import intra_team_node
+        return await intra_team_node(state)
+
+    return await run_intra_team(state, role_results)
 
 
 async def reduce_cross_team(

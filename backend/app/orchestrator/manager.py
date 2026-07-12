@@ -111,6 +111,13 @@ class MeetingManager:
             "latency_ms": result.latency_ms,
             "error": result.error,
             "sub_tasks": result.sub_tasks,
+            "task_id": task.id,
+            "meta": {
+                "role": task.role,
+                "stage": task.stage,
+                "description": task.description,
+                **task.payload,
+            },
         }
 
     def select_baseline(self, topic: str, domain_hint: str = "") -> TaskBaseline:

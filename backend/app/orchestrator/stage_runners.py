@@ -14,7 +14,10 @@ from .stage_common import (
     compress_decisions_to_brief,
     emit_agent_spoke,
     format_arbitrate_as_text,
+    format_claims_as_text,
+    match_role,
     record_drift,
+    worst_confidence,
 )
 
 
@@ -170,5 +173,69 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
 
     await _moderator_assess_borrow(state, Stage.CROSS_TEAM)
     await _let_borrowed_agents_speak(state, Stage.CROSS_TEAM)
+    state.stage = nxt or Stage.PRODUCE
+    return state
+
+
+async def run_intra_team(
+    state: MeetingState,
+    role_results: list[dict[str, Any]],
+) -> MeetingState:
+    """IntraTeam 阶段：聚合每个角色的 claims，更新 MeetingState。
+
+    role_results 每项结构：
+        {"role": str, "stance": str, "claims": list[dict], "confidence": str, "react": bool}
+    """
+    from app.orchestrator.nodes.borrow import _let_borrowed_agents_speak, _moderator_assess_borrow
+    import uuid
+
+    if not state.team_config:
+        state.team_config = [
+            {"role": "product_architect", "stance": "重价值与边界"},
+            {"role": "engineer", "stance": "重可行性与风险"},
+        ]
+
+    # 按原始顺序整理成员，未匹配角色跳过
+    members: list[tuple[Role, str]] = []
+    seen_roles: set[Role] = set()
+    for member in state.team_config:
+        role_str = member.get("role", "")
+        stance = member.get("stance", "")
+        matched = match_role(role_str)
+        if matched is not None and matched not in seen_roles:
+            seen_roles.add(matched)
+            members.append((matched, stance))
+    if not members:
+        members = [(Role.PRODUCT_ARCHITECT, "重价值与边界"), (Role.ENGINEER, "重可行性与风险")]
+
+    conclusions: list[dict[str, Any]] = []
+    worst_conf = "high"
+
+    # 保证按 members 顺序处理结果，与 role_results 顺序一致（Scheduler 拓扑层保证）
+    for (role, stance), rr in zip(members, role_results):
+        conf = rr.get("confidence", "high")
+        worst_conf = worst_confidence(worst_conf, conf)
+        claims = rr.get("claims", [])
+        claim_ids: list[str] = []
+        for c in claims:
+            cid = f"claim-{uuid.uuid4().hex[:8]}"
+            c["id"] = cid
+            c["agent_role"] = role.value
+            state.claims.append(c)
+            claim_ids.append(cid)
+        conclusion = {"role": role.value, "stance": stance, "claims": claims}
+        conclusions.append(conclusion)
+        content = format_claims_as_text(claims, role.value)
+        await emit_agent_spoke(state, role, Stage.INTRA_TEAM, content, claim_refs=claim_ids)
+        record_drift(state, role, Stage.INTRA_TEAM, content)
+
+    state.team_conclusions = conclusions
+    state.conclusion_chain.lock("intra_team", {"claims": state.claims, "team_conclusions": conclusions})
+    state.confidence_flags["intra_team"] = worst_conf
+
+    await _moderator_assess_borrow(state, Stage.INTRA_TEAM)
+    await _let_borrowed_agents_speak(state, Stage.INTRA_TEAM)
+
+    nxt = _next_stage(Stage.INTRA_TEAM, state.flow_plan)
     state.stage = nxt or Stage.PRODUCE
     return state
