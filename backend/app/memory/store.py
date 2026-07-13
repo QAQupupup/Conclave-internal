@@ -16,7 +16,6 @@ from typing import Any
 from sqlalchemy import select, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.config import settings
 from app.memory.models import FeatureMemory, ProfileMemory, RawMemory
 
 logger = logging.getLogger(__name__)

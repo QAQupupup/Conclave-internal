@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, AsyncIterator
 
-from app.config import settings
 
 logger = logging.getLogger("db.factory")
 
