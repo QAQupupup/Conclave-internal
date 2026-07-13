@@ -487,7 +487,12 @@ def main() -> int:
     if manifest.get("build_core", True) and not args.skip_core_build:
         core_binaries = _build_core_extensions(dev_repo, args.dry_run, docker_build=args.docker_build)
     elif args.skip_core_build:
-        _log("跳过核心编译")
+        _log("跳过核心编译，收集已有二进制扩展...")
+        # CI 场景：Docker 容器已编译完成，直接收集产物
+        core_dir = dev_repo / "backend" / "conclave_core"
+        for ext in (".pyd", ".so"):
+            core_binaries.extend(core_dir.glob(f"*{ext}"))
+        _log(f"收集到 {len(core_binaries)} 个已有二进制扩展")
 
     # 2. 增量同步文件
     all_copied: list[str] = []
