@@ -5,6 +5,8 @@ on:
     workflows: ["CI"]
     types: [completed]
     branches: [main, refactor/v3-manager-agent-runtime]
+  # 允许手动触发，方便首次验证或紧急同步
+  workflow_dispatch:
 
 concurrency:
   group: release-oss
@@ -23,7 +25,8 @@ jobs:
         with:
           # workflow_run 触发时，默认 checkout 的是默认分支（main）。
           # 但实际代码在触发 CI 的分支上，因此显式切到该分支。
-          ref: ${{ github.event.workflow_run.head_branch }}
+          # workflow_dispatch 手动触发时回退到当前分支。
+          ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
           fetch-depth: 0
 
       - name: Set up Python
