@@ -104,8 +104,12 @@ def _save_manifest(path: Path, manifest: dict[str, Any]) -> None:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
 
-def _build_core_extensions(dev_repo: Path, dry_run: bool) -> list[Path]:
-    """在 dev_repo/backend 中编译 conclave_core，返回生成的二进制文件路径。"""
+def _build_core_extensions(dev_repo: Path, dry_run: bool, docker_build: bool = False) -> list[Path]:
+    """在 dev_repo/backend 中编译 conclave_core，返回生成的二进制文件路径。
+
+    当 docker_build=True 时，使用 Docker 容器编译，避免宿主机环境污染。
+    容器使用 Python 3.12（与 CI / OSS 运行时一致），国内镜像源加速。
+    """
     backend = dev_repo / "backend"
     setup_py = backend / "conclave_core" / "setup.py"
     if not setup_py.exists():
@@ -117,12 +121,17 @@ def _build_core_extensions(dev_repo: Path, dry_run: bool) -> list[Path]:
         return []
 
     core_dir = backend / "conclave_core"
-    # 清理历史编译产物，避免把其他平台/旧版本的二进制打包进开源仓库
+
+    if docker_build:
+        return _build_core_in_docker(dev_repo, backend, core_dir)
+
+    # 宿主机编译（保留兼容，不推荐）
+    # 清理历史编译产物
     for ext in (".pyd", ".so"):
         for old_binary in core_dir.glob(f"*{ext}"):
             old_binary.unlink()
 
-    _log("正在编译 conclave_core ...")
+    _log("正在编译 conclave_core（宿主机模式）...")
     try:
         subprocess.run(
             [sys.executable, str(setup_py), "build_ext", "--inplace"],
@@ -139,11 +148,65 @@ def _build_core_extensions(dev_repo: Path, dry_run: bool) -> list[Path]:
     for ext in (".pyd", ".so"):
         binaries.extend(core_dir.glob(f"*{ext}"))
 
-    # 清理中间生成的 .c 文件，保持工作区干净
+    # 清理中间生成的 .c 文件
     for c_file in core_dir.glob("*.c"):
         c_file.unlink()
 
     _log(f"核心编译完成，生成 {len(binaries)} 个二进制扩展")
+    return binaries
+
+
+def _build_core_in_docker(dev_repo: Path, backend: Path, core_dir: Path) -> list[Path]:
+    """在 Docker 容器内编译 conclave_core，使用 Python 3.12 + 国内镜像源。"""
+    dockerfile = backend / "Dockerfile.cython-build"
+    if not dockerfile.exists():
+        _error(f"Docker 编译镜像 Dockerfile 不存在: {dockerfile}")
+
+    image_tag = "conclave-cython-build:latest"
+
+    _log("正在构建 Cython 编译 Docker 镜像（国内镜像源）...")
+    try:
+        subprocess.run(
+            ["docker", "build", "-t", image_tag, "-f", str(dockerfile), str(backend)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        _error(f"Docker 镜像构建失败:\n{exc.output}")
+
+    # 清理历史编译产物
+    for ext in (".pyd", ".so"):
+        for old_binary in core_dir.glob(f"*{ext}"):
+            old_binary.unlink()
+
+    _log("正在 Docker 容器内编译 conclave_core ...")
+    try:
+        subprocess.run(
+            [
+                "docker", "run", "--rm",
+                "-v", f"{backend.resolve()}:/app",
+                image_tag,
+                "python", "conclave_core/setup.py", "build_ext", "--inplace",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        _error(f"Docker 容器内编译失败:\n{exc.output}")
+
+    # 清理中间生成的 .c 文件
+    for c_file in core_dir.glob("*.c"):
+        c_file.unlink()
+
+    binaries: list[Path] = []
+    for ext in (".pyd", ".so"):
+        binaries.extend(core_dir.glob(f"*{ext}"))
+
+    _log(f"Docker 容器内编译完成，生成 {len(binaries)} 个二进制扩展")
     return binaries
 
 
@@ -245,7 +308,11 @@ def _remove_protected_sources(dst_root: Path, manifest: dict[str, Any], dry_run:
         return removed
 
     # 这些模块因包含 Pydantic BaseModel 不编译，需保留源码供导入
-    keep_sources = {"__init__.py"}
+    keep_sources = {
+        "__init__.py",
+        "charter.py",           # Pydantic BaseModel，不编译，需保留源码
+        "conclusion_chain.py",  # Pydantic BaseModel，不编译，需保留源码
+    }
 
     for py_file in core_dst.rglob("*.py"):
         if py_file.name in keep_sources:
@@ -388,6 +455,7 @@ def main() -> int:
     parser.add_argument("--prune", action="store_true", help="删除目标仓库中已从清单移除的文件")
     parser.add_argument("--dry-run", action="store_true", help="干跑，不实际修改文件")
     parser.add_argument("--skip-core-build", action="store_true", help="跳过 conclave_core 编译（用于测试同步流程）")
+    parser.add_argument("--docker-build", action="store_true", help="在 Docker 容器内编译 conclave_core（推荐，避免宿主机环境污染）")
     args = parser.parse_args()
 
     dev_repo = Path(args.dev_repo).resolve()
@@ -417,7 +485,7 @@ def main() -> int:
     # 1. 编译核心扩展
     core_binaries: list[Path] = []
     if manifest.get("build_core", True) and not args.skip_core_build:
-        core_binaries = _build_core_extensions(dev_repo, args.dry_run)
+        core_binaries = _build_core_extensions(dev_repo, args.dry_run, docker_build=args.docker_build)
     elif args.skip_core_build:
         _log("跳过核心编译")
 

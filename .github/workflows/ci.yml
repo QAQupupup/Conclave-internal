@@ -120,3 +120,12 @@ jobs:
       - name: Tear down test stack
         if: always()
         run: docker compose -f docker-compose.test.yml down --volumes
+
+  # ============================================================
+  # 开源同步：全部 CI 检查通过后，自动编译并发布到 Conclave 开源仓库
+  # ============================================================
+  publish-oss:
+    needs: [backend-checks, frontend-checks, frontend-tests, compose-check, backend-integration-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/refactor/v3-manager-agent-runtime'
+    uses: ./.github/workflows/release-oss.yml
+    secrets: inherit
