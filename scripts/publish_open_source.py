@@ -362,8 +362,8 @@ def _git_commit_and_push(repo: Path, version: str, branch: str | None, dry_run: 
         subprocess.run(["git", "commit", "-m", msg], cwd=repo, check=True)
         if branch:
             # auto-sync 分支允许 force push，因为它完全由本脚本重新生成。
-            subprocess.run(["git", "push", "--force-with-lease", "origin", branch], cwd=repo, check=True)
-            _log(f"已提交并推送分支 {branch}: {msg}")
+            subprocess.run(["git", "push", "--force", "origin", branch], cwd=repo, check=True)
+            _log(f"已提交并强制推送分支 {branch}: {msg}")
         else:
             subprocess.run(["git", "push"], cwd=repo, check=True)
             _log(f"已提交并推送: {msg}")
