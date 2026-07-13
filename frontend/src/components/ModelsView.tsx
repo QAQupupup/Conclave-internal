@@ -497,7 +497,7 @@ export function ModelsView() {
                 background: 'var(--bg-secondary, #f8f9fb)',
                 border: '1px solid var(--border, #e5e7eb)',
               }}>
-                {currentProvider.supports_custom_key && (
+                {currentProvider && (
                   <div style={{ flex: '1 1 400px', minWidth: 280, maxWidth: 560 }}>
                     <Input.Password
                       placeholder={currentProvider.has_key ? '留空使用系统默认 Key' : '输入 API Key（sk-...）'}
@@ -507,7 +507,13 @@ export function ModelsView() {
                       prefix={<KeyOutlined style={{ color: '#8c8c8c' }} />}
                       size="large"
                       style={{ borderRadius: 6 }}
+                      disabled={!currentProvider.supports_custom_key}
                     />
+                    {!currentProvider.supports_custom_key && (
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                        该厂商后端未开放自定义 Key，输入框仅供预览
+                      </Text>
+                    )}
                   </div>
                 )}
                 {currentProvider.supports_balance && (

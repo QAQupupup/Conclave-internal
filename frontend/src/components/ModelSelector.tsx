@@ -361,19 +361,26 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
         </div>
       )}
 
-      {/* 自定义 API Key */}
-      {currentProvider?.supports_custom_key && (
+      {/* 自定义 API Key：始终展示输入框，方便用户配置；仅当后端声明 supports_custom_key=false 时禁用输入 */}
+      {sel.provider_id && (
         <div style={{ marginBottom: 12 }}>
-          <Text strong style={{ display: 'block', marginBottom: 4 }}>API Key（可选）</Text>
+          <Text strong style={{ display: 'block', marginBottom: 4 }}>
+            API Key（可选）
+            {currentProvider && !currentProvider.supports_custom_key && (
+              <Tag color="orange" style={{ marginInlineStart: 8, fontSize: 11 }}>该厂商不建议自定义</Tag>
+            )}
+          </Text>
           <Input.Password
-            placeholder={currentProvider.has_key ? '留空使用系统默认Key' : '输入你的 API Key（sk-...）'}
+            placeholder={currentProvider?.has_key ? '留空使用系统默认Key' : '输入你的 API Key（sk-...）'}
             value={sel.api_key}
             onChange={(e) => updateSel({ api_key: e.target.value })}
-            disabled={disabled}
+            disabled={disabled || (!!currentProvider && !currentProvider.supports_custom_key)}
             autoComplete="off"
           />
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-            {currentProvider.has_key ? '填入你自己的Key可单独计费，不消耗系统额度' : '此厂商需要提供你自己的API Key'}
+            {currentProvider?.has_key
+              ? '填入你自己的Key可单独计费，不消耗系统额度'
+              : '此厂商需要提供你自己的API Key；留空则尝试使用系统默认Key'}
           </Text>
         </div>
       )}

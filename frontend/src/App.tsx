@@ -1,6 +1,6 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { ConfigProvider, Tabs, Button, Tooltip, Typography } from 'antd'
 import {
   TeamOutlined,
@@ -19,6 +19,8 @@ import {
   DollarOutlined,
   AppstoreOutlined,
   MessageOutlined,
+  SafetyOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { ThemeProvider, useTheme } from './store/ThemeContext.tsx'
@@ -378,22 +380,95 @@ function AntdThemeWrapper({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** CAPTCHA 守卫挂载点：仅在非首页显示，保持 WS 连接跨视图存活 */
+/** CAPTCHA 守卫挂载点：仅在非首页显示，保持 WS 连接跨视图存活
+ *  吸边隐藏设计：
+ *    - 收起态：右侧边缘只露出浅蓝色小盾牌，鼠标移入展开
+ *    - 展开态：显示完整值守开关 + 状态标签
+ *    - 鼠标移出 800ms 后自动收起
+ */
 function CaptchaGuardLayer() {
   const { path } = useRouter()
+  const [expanded, setExpanded] = useState(false)
+  const [guardStatus, setGuardStatus] = useState<{ guardMode: boolean; hasPending: boolean }>({ guardMode: false, hasPending: false })
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   if (path === '/') return null
+
+  const handleMouseEnter = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    setExpanded(true)
+  }
+
+  const handleMouseLeave = () => {
+    timerRef.current = setTimeout(() => setExpanded(false), 800)
+  }
+
+  const active = guardStatus.guardMode
+  const pending = guardStatus.hasPending
+  // 无论值守是否开启，入口盾牌都使用浅蓝色系，保持视觉识别度
+  const shieldColor = pending ? '#ff4d4f' : active ? '#0958d9' : '#1677ff'
+  const shieldBg = pending ? '#fff2f0' : active ? '#e6f4ff' : '#f0f7ff'
+
   return (
-    <div style={{
-      position: 'fixed', top: 8, right: 200, zIndex: 1100,
-      display: 'flex', alignItems: 'center', gap: 8,
-      padding: '4px 10px',
-      background: 'var(--bg, #fff)',
-      border: '1px solid var(--border, #e5e7eb)',
-      borderRadius: 6,
-      boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-      fontSize: 12,
-    }}>
-      <CaptchaGuard compact />
+    <div
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      style={{
+        position: 'fixed',
+        top: 56,
+        right: 0,
+        zIndex: 1100,
+        display: 'flex',
+        alignItems: 'center',
+        gap: expanded ? 8 : 0,
+        padding: expanded ? '6px 12px' : '6px 4px 6px 8px',
+        background: 'var(--bg, #fff)',
+        border: '1px solid var(--border, #e5e7eb)',
+        borderRight: 'none',
+        borderRadius: '8px 0 0 8px',
+        boxShadow: expanded ? '0 2px 8px rgba(0,0,0,0.08)' : '-2px 0 6px rgba(0,0,0,0.04)',
+        fontSize: 12,
+        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+        cursor: 'pointer',
+      }}
+    >
+      {/* 收起态：浅蓝色小盾牌 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          background: shieldBg,
+          color: shieldColor,
+          flexShrink: 0,
+          transition: 'all 0.25s ease',
+        }}
+        title={active ? (pending ? '值守中 · 有待处理验证码' : '值守中') : '值守已关闭'}
+      >
+        {active ? <SafetyCertificateOutlined style={{ fontSize: 13 }} /> : <SafetyOutlined style={{ fontSize: 13 }} />}
+      </div>
+
+      {/* 展开态：完整值守控制 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          maxWidth: expanded ? 260 : 0,
+          opacity: expanded ? 1 : 0,
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        <CaptchaGuard compact onStatusChange={setGuardStatus} />
+      </div>
     </div>
   )
 }

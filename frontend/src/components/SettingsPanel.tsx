@@ -46,9 +46,12 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
       default_provider_id: sel.provider_id,
       default_model: sel.model,
       custom_base_url: sel.provider_id === 'custom' ? sel.base_url : prefs.custom_base_url,
+      api_keys: { ...prefs.api_keys },
     }
     if (sel.api_key) {
-      newPrefs.api_keys = { ...prefs.api_keys, [sel.provider_id]: sel.api_key }
+      newPrefs.api_keys[sel.provider_id] = sel.api_key
+    } else {
+      delete newPrefs.api_keys[sel.provider_id]
     }
     savePreferences(newPrefs)
     setPrefs(newPrefs)
