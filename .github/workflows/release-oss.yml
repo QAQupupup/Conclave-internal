@@ -45,7 +45,7 @@ jobs:
         env:
           OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
         run: |
-          REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave-OSS.git}"
+          REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave.git}"
           git clone --depth 1 "$REPO" ../Conclave-OSS
 
       - name: Publish to OSS auto-sync branch
@@ -64,5 +64,5 @@ jobs:
         env:
           OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
         run: |
-          REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave-OSS.git}"
+          REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave.git}"
           echo "OSS auto-sync branch updated: $REPO/tree/auto-sync"

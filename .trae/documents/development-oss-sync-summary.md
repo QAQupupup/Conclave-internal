@@ -70,8 +70,8 @@
 
 | 仓库 | 可见性 | 关键分支 | 用途 |
 |------|--------|---------|------|
-| `Conclave` | private | `main` / `refactor/v3-manager-agent-runtime` | 日常开发、敏感算法、内部文档 |
-| `Conclave-OSS` | public | `auto-sync` / `release` / `main` | 开源发布、可审计代码 |
+| `Conclave-internal` | private | `main` / `refactor/v3-manager-agent-runtime` | 日常开发、敏感算法、内部文档 |
+| `Conclave` | public | `auto-sync` / `release` / `main` | 开源发布、可审计代码 |
 
 ### 3.2 分支流转规则
 
@@ -82,7 +82,7 @@
    CI 卡点通过
         │
         ▼
-  自动同步到 Conclave-OSS:auto-sync
+  自动同步到 Conclave:auto-sync
         │
         ▼
   人工决定：创建 PR auto-sync → release
@@ -140,7 +140,7 @@
 | Secret | 说明 |
 |--------|------|
 | `OSS_DEPLOY_KEY` | 能写开源仓库的 SSH 私钥 |
-| `OSS_REPO_URL` | 开源仓库 SSH 地址，例如 `git@github.com:QAQupupup/Conclave-OSS.git` |
+| `OSS_REPO_URL` | 开源仓库 SSH 地址，例如 `git@github.com:QAQupupup/Conclave.git` |
 
 开源仓库需配置对应的 Deploy Key 公钥，并勾选 **Write access**。
 

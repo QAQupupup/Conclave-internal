@@ -7,7 +7,7 @@
 | 仓库 | 可见性 | 用途 | 关键分支 |
 |---|---|---|---|
 | `Conclave-internal` | private | 日常开发、敏感算法、内部文档 | `main` / `refactor/v3-manager-agent-runtime` |
-| `Conclave-OSS` | public | 开源发布、可审计的代码 | `auto-sync`（自动同步） / `release`（发布候选） / `main`（正式发布） |
+| `Conclave` | public | 开源发布、可审计的代码 | `auto-sync`（自动同步） / `release`（发布候选） / `main`（正式发布） |
 
 ### 分支策略
 
@@ -127,7 +127,7 @@ CI 中默认推送到 `auto-sync` 分支。
 1. 把 `.github/workflows/ci.yml` 和 `.github/workflows/release-oss.yml` 提交到开发版仓库。
 2. 在 GitHub 设置中添加 Secrets：
    - `OSS_DEPLOY_KEY`：用于写开源仓库的 SSH 私钥。
-   - `OSS_REPO_URL`（可选）：开源仓库 SSH 地址，默认 `git@github.com:QAQupupup/Conclave-OSS.git`。
+   - `OSS_REPO_URL`（可选）：开源仓库 SSH 地址，默认 `git@github.com:QAQupupup/Conclave.git`。
 
 ### 4.2 开源版仓库配置
 
@@ -144,7 +144,7 @@ CI 中默认推送到 `auto-sync` 分支。
    CI 卡点通过
         │
         ▼
-  自动同步到 Conclave-OSS:auto-sync
+  自动同步到 Conclave:auto-sync
         │
         ▼
   你决定发布时创建 PR:
