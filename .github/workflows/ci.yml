@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main, refactor/v3-manager-agent-runtime]
+  pull_request:
+    branches: [main, refactor/v3-manager-agent-runtime]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff>=0.4
+          ruff check app conclave_core tests scripts
+          ruff format --check app conclave_core tests scripts
+
+      - name: Type check with mypy
+        run: |
+          pip install mypy>=1.10
+          mypy app conclave_core || true
+
+      - name: Test with pytest
+        run: |
+          pip install pytest-asyncio>=0.23
+          pytest -q --tb=short
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint with ESLint
+        run: npm run lint -- --max-warnings=0
+        continue-on-error: true
+
+      - name: Type check with tsc
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  compose-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate dev Docker Compose
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Validate OSS Docker Compose
+        run: docker compose -f docker-compose.oss.yml config --quiet

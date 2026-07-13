@@ -1,0 +1,69 @@
+# Conclave 本地提交卡点配置
+# 安装：pip install pre-commit && pre-commit install
+# 手动运行：pre-commit run --all-files
+#
+# 卡点说明：
+# - 提交前会自动运行 backend lint/format、frontend type check / lint、compose 配置校验。
+# - 任何一项失败都会阻止 git commit，确保问题在本地暴露。
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        name: Backend lint (ruff)
+        files: ^(backend/app|backend/conclave_core|backend/tests|backend/scripts)/.*\.py$
+        args: [--fix, --exit-non-fix-on-fix]
+      - id: ruff-format
+        name: Backend format (ruff)
+        files: ^(backend/app|backend/conclave_core|backend/tests|backend/scripts)/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: backend-pytest-smoke
+        name: Backend smoke tests
+        entry: bash -c 'cd backend && pytest -q --tb=short -x'
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+      - id: frontend-tsc
+        name: Frontend type check (tsc)
+        entry: bash -c 'cd frontend && npx tsc --noEmit'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+        stages: [commit]
+
+      - id: frontend-build
+        name: Frontend production build
+        entry: bash -c 'cd frontend && npm run build'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|css|html)$
+        pass_filenames: false
+        stages: [push]
+
+      - id: compose-validate-dev
+        name: Validate dev Docker Compose
+        entry: bash -c 'docker compose -f docker-compose.yml config --quiet'
+        language: system
+        files: ^docker-compose\.yml$
+        pass_filenames: false
+        stages: [commit]
+
+      - id: compose-validate-oss
+        name: Validate OSS Docker Compose
+        entry: bash -c 'docker compose -f docker-compose.oss.yml config --quiet'
+        language: system
+        files: ^docker-compose\.oss\.yml$
+        pass_filenames: false
+        stages: [commit]
+
+      - id: oss-manifest-validate
+        name: Validate OSS manifest JSON
+        entry: python -m json.tool scripts/oss_manifest.json
+        language: system
+        files: ^scripts/oss_manifest\.json$
+        pass_filenames: false
+        stages: [commit]
