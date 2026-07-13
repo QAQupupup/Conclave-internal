@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from app.models import MeetingState, MeetingStatus, Stage
+from conclave_core.charter_logic import is_already_borrowed, register_borrow
 
 
 # ---------- 控制信号 ----------
@@ -85,7 +86,7 @@ def _handle_loan(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
         return state
 
     # 1. 防重复借调：已借调过该角色则 reject
-    if charter.is_already_borrowed(target_role):
+    if is_already_borrowed(charter, target_role):
         verdict = "reject"
         reason = f"角色 {target_role} 已借调过，拒绝重复借调"
     # 2. 借调数量上限：单次会议最多 2 个借调 agent
@@ -96,7 +97,7 @@ def _handle_loan(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
         # 3. 登记借调：register_borrow 记入 borrow_history，临时批准
         verdict = "approve_temporary"
         reason = f"角色 {target_role} 借调批准（临时加入，待发言）"
-        charter.register_borrow(target_role, verdict)
+        register_borrow(charter, target_role, verdict)
         # 4. 追加到 borrowed_agents，标记为待发言（不立即加入 frozen scope）
         state.borrowed_agents.append(
             {
@@ -212,7 +213,7 @@ def _handle_approve_borrow(state: MeetingState, payload: dict[str, Any]) -> Meet
     charter = state.charter
     if charter is None:
         raise ControlError("会议宪章尚未建立，无法借调")
-    if charter.is_already_borrowed(target_role):
+    if is_already_borrowed(charter, target_role):
         state.pending_borrow_request = None
         state.injected_messages.append({
             "signal": "approve_borrow",
@@ -236,7 +237,7 @@ def _handle_approve_borrow(state: MeetingState, payload: dict[str, Any]) -> Meet
         return state
 
     # 批准借调
-    charter.register_borrow(target_role, "approve_temporary")
+    register_borrow(charter, target_role, "approve_temporary")
     state.borrowed_agents.append({
         "role": target_role,
         "verdict": "approve_temporary",

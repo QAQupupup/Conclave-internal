@@ -213,6 +213,7 @@ def test_evidence_check_stage_confidence(client):
 def test_charter_drift_detection():
     """宪章漂移检测：check_drift 能识别偏离议题的内容"""
     from conclave_core.charter import build_charter_from_clarify
+    from conclave_core.charter_logic import check_drift
 
     charter = build_charter_from_clarify(
         meeting_id="test-mtg",
@@ -222,14 +223,14 @@ def test_charter_drift_detection():
     )
 
     # 议题相关内容不应触发漂移
-    result1 = charter.check_drift("待办事项的 CRUD 操作设计")
+    result1 = check_drift(charter, "待办事项的 CRUD 操作设计")
     # 漂移检测基于 forbidden_topics 和 scope 检查
     # 由于 forbidden_topics 为空，scope 为 clarified_topic，通常不会触发
     assert isinstance(result1.is_drift, bool)
 
     # forbidden_topics 中添加测试项（子串匹配）
     charter.forbidden_topics = ["政治", "宗教"]
-    result2 = charter.check_drift("我们需要考虑政治因素对系统的影响")
+    result2 = check_drift(charter, "我们需要考虑政治因素对系统的影响")
     assert result2.is_drift is True
     assert "政治" in result2.reason or result2.severity != "none"
 

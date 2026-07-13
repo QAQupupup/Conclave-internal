@@ -8,10 +8,22 @@ from conclave_core.charter import (
     MeetingCharter,
     build_charter_from_clarify,
 )
+from conclave_core.charter_logic import (
+    check_drift,
+    is_already_borrowed,
+    register_borrow,
+    to_prompt_anchor,
+)
 from conclave_core.conclusion_chain import (
     ConclusionChain,
     ConsistencyResult,
     LockedConclusion,
+)
+from conclave_core.conclusion_logic import (
+    check_consistency,
+    get_chain_summary,
+    get_locked_context,
+    lock_conclusion,
 )
 from conclave_core.confidence import worst_confidence
 from conclave_core.scheduler import ExecutionPlan, Scheduler, SubTask
@@ -59,10 +71,20 @@ __all__ = [
     "DriftCheck",
     "MeetingCharter",
     "build_charter_from_clarify",
+    # charter_logic
+    "to_prompt_anchor",
+    "check_drift",
+    "is_already_borrowed",
+    "register_borrow",
     # conclusion_chain
     "ConclusionChain",
     "ConsistencyResult",
     "LockedConclusion",
+    # conclusion_logic
+    "lock_conclusion",
+    "get_locked_context",
+    "check_consistency",
+    "get_chain_summary",
     # scheduler
     "ExecutionPlan",
     "Scheduler",

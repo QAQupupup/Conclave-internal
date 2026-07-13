@@ -10,6 +10,7 @@ from app.agents.role_templates import get_borrow_prompt
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 from app.observability.log_bus import log_bus
+from conclave_core.charter_logic import is_already_borrowed, register_borrow
 
 from ._helpers import (
     _match_role,
@@ -263,7 +264,7 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
         if valid_role is None:
             return
         # 防止重复借调
-        if state.charter.is_already_borrowed(target_role):
+        if is_already_borrowed(state.charter, target_role):
             return
 
         request_id = f"breq-{uuid.uuid4().hex[:8]}"
@@ -281,7 +282,7 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
         # 判断是自动通过还是需要用户审批
         if state.auto_borrow_count < AUTO_BORROW_THRESHOLD:
             # 主持人自动审批通过
-            state.charter.register_borrow(target_role, "approve_temporary")
+            register_borrow(state.charter, target_role, "approve_temporary")
             state.borrowed_agents.append({
                 "role": target_role,
                 "verdict": "approve_temporary",

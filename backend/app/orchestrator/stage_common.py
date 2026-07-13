@@ -10,6 +10,8 @@ from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 
 from conclave_core.anchor import get_charter_anchor, get_full_anchor
+from conclave_core.charter_logic import check_drift
+from conclave_core.conclusion_logic import check_consistency
 from conclave_core.confidence import worst_confidence
 from conclave_core.roles import _ROLE_KEYWORDS, match_role
 from conclave_core.text import (
@@ -91,7 +93,7 @@ def record_drift(state: MeetingState, role: Role | str, stage: Stage, content: s
     """对发言做宪章漂移检查并记录到 drift_log（非阻塞）"""
     if state.charter is None or not content:
         return
-    result = state.charter.check_drift(content)
+    result = check_drift(state.charter, content)
     role_value = role.value if isinstance(role, Role) else str(role)
     state.drift_log.append(
         {
@@ -135,7 +137,7 @@ async def run_with_consistency(
     start_pos = len(state.llm_trace.calls)
 
     result = await call_fn(base_anchor)
-    consistency = chain.check_consistency(result, stage)
+    consistency = check_consistency(chain, result, stage)
 
     retries = 0
     while not consistency.is_consistent and retries < 2:
@@ -147,7 +149,7 @@ async def run_with_consistency(
             f"请基于已确认结论重新输出，不得与之矛盾。"
         )
         result = await call_fn(augmented_anchor)
-        consistency = chain.check_consistency(result, stage)
+        consistency = check_consistency(chain, result, stage)
 
     if not consistency.is_consistent:
         _update_trace_consistency(state, start_pos, "low_confidence")

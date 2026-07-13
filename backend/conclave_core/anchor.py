@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 from app.models import MeetingState
+from conclave_core.charter_logic import to_prompt_anchor
+from conclave_core.conclusion_logic import get_locked_context
 
 
 def get_charter_anchor(state: MeetingState) -> str:
     """取会议宪章锚点文本，charter 不存在时返回空串"""
     if state.charter is None:
         return ""
-    return state.charter.to_prompt_anchor()
+    return to_prompt_anchor(state.charter)
 
 
 def get_full_anchor(state: MeetingState, stage: str) -> str:
@@ -17,7 +19,7 @@ def get_full_anchor(state: MeetingState, stage: str) -> str:
     charter_anchor = get_charter_anchor(state)
     if charter_anchor:
         parts.append(charter_anchor)
-    locked_context = state.conclusion_chain.get_locked_context(stage)
+    locked_context = get_locked_context(state.conclusion_chain, stage)
     if locked_context:
         parts.append(locked_context)
     if state.reference_context:

@@ -22,11 +22,8 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = PACKAGE_DIR.parent
 
 
-EXCLUDED_MODULES = {
-    # Pydantic BaseModel 子类在 Cython 编译后会被误识别为未注解字段，
-    # 因此这些纯数据模型保持源码形式发布。
-    "conclave_core.charter",
-    "conclave_core.conclusion_chain",
+EXCLUDED_MODULES: set[str] = {
+    # 纯 Pydantic 数据模型保持源码形式发布，业务逻辑已迁移到 *_logic 模块进行编译保护。
 }
 
 

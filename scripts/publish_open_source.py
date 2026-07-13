@@ -239,7 +239,7 @@ def _remove_protected_sources(dst_root: Path, manifest: dict[str, Any], dry_run:
         return removed
 
     # 这些模块因包含 Pydantic BaseModel 不编译，需保留源码供导入
-    keep_sources = {"__init__.py", "charter.py", "conclusion_chain.py"}
+    keep_sources = {"__init__.py"}
 
     for py_file in core_dst.rglob("*.py"):
         if py_file.name in keep_sources:

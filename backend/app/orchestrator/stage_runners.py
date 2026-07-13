@@ -9,6 +9,7 @@ from app.events import bus, make_event
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus, Role, Stage
 from conclave_core.charter import build_charter_from_clarify
+from conclave_core.conclusion_logic import lock_conclusion
 from conclave_core.confidence import worst_confidence
 from conclave_core.roles import match_role
 from conclave_core.state import get_skipped_stages, next_stage as _next_stage
@@ -34,7 +35,7 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
         clarified_topic=state.clarified_topic,
         key_questions=state.key_questions,
     )
-    state.conclusion_chain.lock("clarify", result)
+    lock_conclusion(state.conclusion_chain, "clarify", result)
     state.confidence_flags["clarify"] = confidence
 
     topic_text = state.clarified_topic.rstrip("。.！!？?")
@@ -85,7 +86,7 @@ async def run_arbitrate(state: MeetingState, result: dict[str, Any], confidence:
             state.evidence_set,
         ),
     }
-    state.conclusion_chain.lock("arbitrate", state.decision_record)
+    lock_conclusion(state.conclusion_chain, "arbitrate", state.decision_record)
     state.confidence_flags["arbitrate"] = confidence
 
     content = format_arbitrate_as_text(state.decision_record, state.claims, state.conflicts)
@@ -107,7 +108,7 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
         if "conflict_type" not in c and "type" in c:
             c["conflict_type"] = c.pop("type")
     state.conflicts = conflicts
-    state.conclusion_chain.lock("cross_team", {"conflicts": conflicts})
+    lock_conclusion(state.conclusion_chain, "cross_team", {"conflicts": conflicts})
     state.confidence_flags["cross_team"] = confidence
 
     if conflicts:
@@ -232,7 +233,7 @@ async def run_intra_team(
         record_drift(state, role, Stage.INTRA_TEAM, content)
 
     state.team_conclusions = conclusions
-    state.conclusion_chain.lock("intra_team", {"claims": state.claims, "team_conclusions": conclusions})
+    lock_conclusion(state.conclusion_chain, "intra_team", {"claims": state.claims, "team_conclusions": conclusions})
     state.confidence_flags["intra_team"] = worst_conf
 
     await _moderator_assess_borrow(state, Stage.INTRA_TEAM)
@@ -291,7 +292,7 @@ async def run_evidence_check(
             )
 
     state.evidence_set = evidence_set
-    state.conclusion_chain.lock("evidence_check", {"evidence_set": evidence_set})
+    lock_conclusion(state.conclusion_chain, "evidence_check", {"evidence_set": evidence_set})
     state.confidence_flags["evidence_check"] = worst_conf
 
     total_ev = sum(len(es.get("assessments", [])) for es in evidence_set)
@@ -343,7 +344,7 @@ async def run_produce(
             _logger.warning(f"produce: 附件扫描失败（不影响主流程）: {e}")
 
     # 锁定 produce 结论
-    state.conclusion_chain.lock("produce", state.artifact)
+    lock_conclusion(state.conclusion_chain, "produce", state.artifact)
     state.confidence_flags["produce"] = confidence
 
     prd = state.artifact.get("prd", {})
