@@ -1,11 +1,9 @@
 # 网络授权审批系统测试
 # 验证：网络错误检测、申请创建、自动通过、手动批复、超时降级
 import asyncio
-import os
 import uuid
 from datetime import datetime, timezone, timedelta
 
-import pytest
 
 from app.net_auth import (
     init_auth_table,
@@ -20,8 +18,6 @@ from app.net_auth_manager import (
     detect_network_failure,
     determine_needed_level,
     request_network_access,
-    AUTO_APPROVE,
-    AUTH_TIMEOUT_SECONDS,
 )
 
 

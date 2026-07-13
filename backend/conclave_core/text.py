@@ -74,7 +74,7 @@ def compress_decisions_to_brief(
         elif isinstance(a, str):
             adopted_ids.add(a)
     for c in conflicts[:5]:
-        c_id = c.get("id", "")
+        c.get("id", "")
         for side in c.get("sides", []):
             if isinstance(side, dict) and side.get("claim_id", "") not in adopted_ids:
                 reason = side.get("rejection_reason", "证据不足或与共识冲突")

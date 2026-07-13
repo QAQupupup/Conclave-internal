@@ -11,7 +11,6 @@ from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 
-from conclave_core.text import compress_decisions_to_brief
 from ._helpers import _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
 
 
@@ -443,7 +442,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
         if code:
             from app.sandbox import run_python, SANDBOX_IMAGE_DATASCIENCE
             from app.orchestrator.refine_loop import refine_python_code, _summarize_task
-            ws_env = os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
+            os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
             # [CON-24 修复] 用 config.settings.workspace_root 作为持久化工作区根
             from app.config import settings
             ws_root = Path(settings.workspace_root) / state.meeting_id

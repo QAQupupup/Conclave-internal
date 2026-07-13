@@ -595,7 +595,7 @@ class BrowserTool:
 
         async def _do_goto(page: Any) -> dict[str, Any]:
             # 反验证码检测（N1）
-            response = await page.goto(url, wait_until=wait_until, timeout=timeout)
+            await page.goto(url, wait_until=wait_until, timeout=timeout)
             await page.wait_for_timeout(1000)
 
             # 重定向后校验（N5）

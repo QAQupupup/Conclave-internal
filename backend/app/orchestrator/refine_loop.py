@@ -7,7 +7,6 @@
 # - 目标锚定：每轮 prompt 带原始任务 + 当前状态
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from app.agents.llm import get_llm

@@ -1,9 +1,6 @@
 ﻿# 网络授权审批：沙箱执行因网络限制失败时，生成申请单供用户批复
 from __future__ import annotations
 
-import json
-import sqlite3
-import threading
 from datetime import datetime, timezone
 from typing import Any
 

@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.events import DomainEvent, bus, make_event
+from app.middleware import _DEV_TOKEN, _check_rate_limit
 from app.orchestrator.runner import get_state, set_state
 from conclave_core.state import apply_signal
 from app.db_legacy import save_meeting
@@ -18,7 +19,6 @@ router = APIRouter()
 
 # API 认证 token（与 middleware.py 共用同一环境变量）
 # [CON-03/CON-08 修复] 改为共享 dev token（不再单独读取 env）
-from app.middleware import _DEV_TOKEN, _check_rate_limit, _client_ip
 
 # WS 推送配额：每连接每分钟最多 N 条事件，防止恶意/异常客户端撑爆带宽
 WS_MAX_EVENTS_PER_MIN = int(os.environ.get("CONCLAVE_WS_RATE_LIMIT", "600"))

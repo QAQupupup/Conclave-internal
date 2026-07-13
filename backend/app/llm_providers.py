@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -458,7 +458,6 @@ def resolve_models_for_meeting(
         dict[str, str]: {key: "provider_id:model_id"}
             key 为角色 id（如 "engineer"）或 @阶段名（如 "@arbitrate"）
     """
-    default_model = meeting_model or settings.llm_model
     default_provider = "siliconflow" if "siliconflow" in (settings.llm_base_url or "") else "custom"
 
     # 解析 meeting_model 中是否已含 provider 前缀（如 "siliconflow:deepseek-ai/DeepSeek-V4-Flash"）

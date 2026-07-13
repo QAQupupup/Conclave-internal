@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, func, delete, update, text, and_
+from sqlalchemy import select, func, delete, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -24,7 +24,7 @@ from app.db.mapper import (
     message_row_to_dict, message_to_orm_values,
     event_row_to_dict,
     agent_role_row_to_dict, agent_role_to_orm_values,
-    tag_row_to_dict, preference_row_to_dict, net_auth_row_to_dict,
+    net_auth_row_to_dict,
     CURRENT_SCHEMA_VERSION,
 )
 from app.db.repository import (

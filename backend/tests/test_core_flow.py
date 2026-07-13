@@ -2,9 +2,8 @@
 # 使用 StubLLM（不烧 token），验证状态机和数据流正确性
 import asyncio
 
-import pytest
 
-from app.models import MeetingStatus, MeetingState
+from app.models import MeetingStatus
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
 from conclave_core.state import STAGE_ORDER, next_stage, is_terminal, should_pause

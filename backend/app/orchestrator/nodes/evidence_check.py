@@ -6,9 +6,7 @@ from typing import Any
 
 from app.agents.compute import get_compute, build_evidence_prompt
 from app.agents.trace import set_current_trace
-from app.events import bus, make_event
-from app.models import MeetingState, Role, Stage
-from conclave_core.state import next_stage as _next_stage
+from app.models import MeetingState, Role
 from app.rag.retriever import retrieve_for_conflict
 from app.tools.web_search import get_web_search
 
@@ -107,7 +105,6 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
     compute = get_compute()
-    worst_confidence = "high"
 
     # ---- Phase 0：准备工具注册表（如果可用）----
     tool_registry = None

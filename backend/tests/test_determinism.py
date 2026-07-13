@@ -187,7 +187,7 @@ def test_evidence_source_grading_with_docs(client):
         for a in es.get("assessments", []):
             all_sources.append(a.get("source", ""))
     # 至少有一条来自文档（doc: 前缀）或来自 web（web: 前缀，感知层补充）
-    has_doc_or_web = any(s.startswith("doc:") or s.startswith("web:") for s in all_sources)
+    any(s.startswith("doc:") or s.startswith("web:") for s in all_sources)
     # 如果 StubLLM 的证据匹配不够，可能仍然走 common_knowledge 兜底
     # 这里只验证来源标注格式正确（有前缀分类）
     for s in all_sources:

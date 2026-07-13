@@ -25,12 +25,10 @@ import hashlib
 import ipaddress
 import logging
 import os
-import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup
 
 from .domain_registry import (
     match_entity,
@@ -1063,7 +1061,7 @@ class PlaywrightWebSearch:
             logger.warning("MultiEngineSearch 异常，降级到直接 Bing 搜索: %s", str(e)[:100])
 
         # 降级路径：直接 Bing 表单搜索（原有逻辑）
-        entity = match_entity(query)
+        match_entity(query)
 
         # 重试机制：Bing 表单搜索偶发返回空结果
         for attempt in range(2):

@@ -252,7 +252,7 @@ class GRPCAgentCompute:
 
             # 当前降级到本地
             return await self._fallback.think(req)
-        except Exception as e:
+        except Exception:
             # gRPC 调用失败，降级到本地
             return await self._fallback.think(req)
 

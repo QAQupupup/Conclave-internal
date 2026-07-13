@@ -834,7 +834,6 @@ async def deploy_service(
     host_port = await _allocate_port()
 
     # 确定工作区在容器内的路径
-    meeting_dir = workspace_root  # 应该是 /workspace/{meeting_id}
 
     # 部署前先清理同名旧容器（防止重复部署冲突）
     container_name = f"conclave-svc-{meeting_id[:12]}"

@@ -1,7 +1,6 @@
 # 角色模糊匹配测试 + 真实 LLM 回归防护
 # 防止 StubLLM 盲区：测试中文角色名、混合角色名、未知角色名等各种情况
 
-import pytest
 
 from app.models import Role
 

@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.middleware import is_dangerous_command
 from app.observability.log_bus import log_bus
 from app.sandbox import run_command, run_python, get_status as sandbox_status
 
@@ -30,8 +31,7 @@ CODE_TIMEOUT = int(os.environ.get("CONCLAVE_CODE_TIMEOUT", "15"))
 # 输出最大字节数（防止超大输出撑爆前端）
 MAX_OUTPUT = int(os.environ.get("CONCLAVE_MAX_OUTPUT", str(512 * 1024)))
 
-# 禁止执行的命令模式（安全检查）
-from app.middleware import is_dangerous_command
+# 禁止执行的命令模式（安全检查）由 app.middleware.is_dangerous_command 提供。
 
 
 def _resolve_path(rel_path: str, meeting_id: str | None = None) -> Path:

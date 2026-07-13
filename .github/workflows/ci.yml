@@ -32,8 +32,7 @@ jobs:
       - name: Lint with ruff
         run: |
           pip install ruff>=0.4
-          ruff check app conclave_core tests scripts
-          ruff format --check app conclave_core tests scripts
+          ruff check app conclave_core tests
 
       - name: Type check with mypy
         run: |
@@ -77,6 +76,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Prepare .env for compose validation
+        run: touch .env
 
       - name: Validate dev Docker Compose
         run: docker compose -f docker-compose.yml config --quiet

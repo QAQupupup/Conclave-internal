@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 from app.db_legacy import (
     delete_agent_role,
     get_agent_role,
-    get_agent_roles_by_ids,
     list_agent_roles,
     save_agent_role,
 )

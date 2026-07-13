@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import math
-import re
-from collections import Counter
 from typing import Protocol
 
 import httpx

@@ -4,11 +4,8 @@
 
 import argparse
 import asyncio
-import json
-import logging
 
-from app.agents.compute import ThinkRequest, ThinkResponse, LocalAgentCompute
-from app.config import settings
+from app.agents.compute import LocalAgentCompute
 from app.logging_config import setup_logging, get_logger
 
 setup_logging()
@@ -54,7 +51,7 @@ async def serve(port: int = 50051) -> None:
 
     # 当前 stub：直接运行本地计算，验证接口
     logger.info("Worker stub 模式：使用 LocalAgentCompute")
-    compute = LocalAgentCompute()
+    LocalAgentCompute()
     logger.info("Worker 就绪（stub），按 Ctrl+C 退出")
     try:
         await asyncio.Event().wait()  # 永久等待

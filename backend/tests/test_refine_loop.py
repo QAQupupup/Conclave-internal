@@ -1,9 +1,7 @@
 # RefineLoop 代码自修复循环测试
 # 验证：成功路径、失败修正、重复检测终止、网络授权触发
-import asyncio
 from unittest.mock import MagicMock
 
-import pytest
 
 from app.orchestrator.refine_loop import refine_python_code, _summarize_task
 

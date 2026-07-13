@@ -202,7 +202,6 @@ function MeetingDataProviderOuter({ meetingId, children }: { meetingId: string; 
         dispatch({ type: 'hydrate', payload: detail as unknown as MeetingState })
       } catch (e) {
         if (cancelled) return
-        // eslint-disable-next-line no-console
         console.error('[MeetingContext] hydrate failed:', e)
       }
     })()

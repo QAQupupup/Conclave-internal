@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 from app.agents.compute import get_compute, build_intra_prompt, ThinkRequest
 from app.agents.role_templates import get_borrow_prompt

@@ -126,7 +126,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
     fetchPreferences()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 同步 theme-mode 到后端（debounce）

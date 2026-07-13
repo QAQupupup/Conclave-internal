@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 
 # ---------- stats 端点测试 ----------
@@ -67,7 +66,7 @@ def test_stats_evidence_source_distribution(client):
 
     # 运行会议
     from app.orchestrator import runner as runner_mod
-    from app.models import MeetingStatus, MeetingState, Stage
+    from app.models import MeetingStatus
     from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)

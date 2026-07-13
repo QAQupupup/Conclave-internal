@@ -12,7 +12,6 @@
 # - ReactLoop：LLM 自主决定"下一步调用什么工具"，工具执行后 LLM 观察结果再决策
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import Any, Awaitable, Callable
@@ -309,7 +308,7 @@ class ReactLoop:
             # 3. 循环检测
             if _is_loop_detected(response.tool_calls, tool_history):
                 log_bus.warning(
-                    f"ReAct 循环检测: 连续两次相同工具调用，终止",
+                    "ReAct 循环检测: 连续两次相同工具调用，终止",
                     logger="orchestrator.react_loop",
                     extra={
                         "iteration": iteration,
@@ -328,7 +327,7 @@ class ReactLoop:
                     # 所有工具都可能需要 meeting_id（用于文件隔离、浏览器上下文等）
                     args.setdefault("meeting_id", self._meeting_id)
                 # 记录工具调用成本
-                t0 = time.monotonic()
+                time.monotonic()
                 result = await self._tools.execute(call.tool_name, args)
                 result.iteration = iteration
                 tool_history.append(result)

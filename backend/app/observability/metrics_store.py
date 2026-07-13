@@ -6,7 +6,7 @@ import asyncio
 import os
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 # 缓冲区大小：360 点 × 10 秒 = 60 分钟

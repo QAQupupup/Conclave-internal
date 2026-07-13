@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from datetime import datetime, timezone
 from typing import Any, TextIO
 
 
@@ -103,7 +102,7 @@ class RemoteGRPCSink:
         # stub = LogServiceStub(channel)
         # for event in self._buffer:
         #     stub.SendLog(LogEvent(**event))
-        buffer_count = len(self._buffer)
+        len(self._buffer)
         self._buffer.clear()
 
     def close(self) -> None:

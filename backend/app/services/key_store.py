@@ -88,7 +88,7 @@ async def save_api_key(
     is_default: bool = False,
 ) -> dict[str, Any]:
     """保存或更新 API Key（加密后存入数据库）"""
-    from sqlalchemy import select, delete
+    from sqlalchemy import select
 
     encrypted = encrypt_key(api_key)
 

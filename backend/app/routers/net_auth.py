@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import os
-import uuid
-from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -11,7 +9,6 @@ from pydantic import BaseModel
 
 from app.events import bus, make_event
 from app.net_auth import (
-    create_auth_request,
     expire_pending_requests,
     get_auth_request,
     get_pending_for_meeting,

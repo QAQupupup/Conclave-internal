@@ -11,11 +11,9 @@
 # - DDG 的 result URL 是重定向链接，需要解析出真实 URL
 from __future__ import annotations
 
-import asyncio
 import logging
-import re
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import urlparse
 
 from app.tools.search_engine import SearchResult, SearchEngineError
 

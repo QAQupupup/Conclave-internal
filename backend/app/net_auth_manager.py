@@ -11,7 +11,6 @@ from app.events import bus, make_event
 from app.net_auth import (
     create_auth_request,
     get_auth_request,
-    get_pending_for_meeting,
 )
 from app.observability.log_bus import log_bus
 

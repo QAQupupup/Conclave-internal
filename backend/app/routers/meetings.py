@@ -24,8 +24,6 @@ from app.db_legacy import (
     hard_delete_meeting,
     list_all_tags,
     list_agent_roles,
-    list_messages,
-    list_meetings,
     query_meetings,
     remove_meeting_tag,
     restore_meeting,
@@ -33,7 +31,7 @@ from app.db_legacy import (
     soft_delete_meeting,
 )
 from app.events import bus, make_event
-from app.models import MeetingStatus, Stage
+from app.models import MeetingStatus
 from app.orchestrator.runner import (
     Runner,
     clear_state,
@@ -111,7 +109,7 @@ def _build_reference_context(ref_meetings: list[dict[str, Any]]) -> str:
     for i, m in enumerate(ref_meetings, 1):
         topic = m.get("clarified_topic", m.get("topic", ""))
         artifact_summary = m.get("artifact_summary", "无产出")
-        flow = m.get("flow_plan", "full")
+        m.get("flow_plan", "full")
         decisions = m.get("decision_record", {})
         decisions_text = ""
         if isinstance(decisions, dict) and decisions.get("decisions"):
@@ -353,7 +351,6 @@ async def intervene_meeting(meeting_id: str, req: InterventionRequest) -> dict[s
     对话历史独立于 Agent 之间的聊天流，仅用户和主持人可见。
     """
     from app.observability.log_bus import log_bus
-    from app.context import get_request_id
 
     state = get_state(meeting_id)
     if state is None:
@@ -422,7 +419,6 @@ async def inject_meeting_reference(meeting_id: str, req: InjectReferenceRequest)
     使下一轮 LLM 调用能感知到新引用的历史会议。
     """
     from app.observability.log_bus import log_bus
-    from app.context import get_request_id
 
     state = get_state(meeting_id)
     if state is None:

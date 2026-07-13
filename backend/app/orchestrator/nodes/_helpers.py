@@ -2,9 +2,9 @@
 # 兼容层：纯算法实现已迁移到 conclave_core/，副作用函数保留在 app.orchestrator.stage_common。
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
-from app.models import MeetingState, Role, Stage
+from app.models import MeetingState
 from app.orchestrator.stage_common import (
     emit_agent_spoke as _emit_agent_spoke,
     record_drift as _record_drift,

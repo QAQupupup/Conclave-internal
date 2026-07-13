@@ -23,7 +23,7 @@ def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
         claims = getattr(state, "claims", []) or []
         decision_record = getattr(state, "decision_record", None) or {}
         evidence_set = getattr(state, "evidence_set", []) or []
-        messages = getattr(state, "messages", []) or []
+        getattr(state, "messages", []) or []
 
         # 构建已采纳论点 ID 集合
         adopted_raw = decision_record.get("adopted_claims", []) or []

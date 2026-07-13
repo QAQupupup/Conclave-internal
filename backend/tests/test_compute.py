@@ -1,5 +1,4 @@
 # Agent 计算解耦层测试
-import asyncio
 import pytest
 
 from app.agents.compute import (
@@ -60,7 +59,7 @@ async def test_local_compute_batch_parallel():
     responses = await compute.think_batch(requests)
     assert len(responses) == 3
     # 验证并行执行（总耗时 < 串行耗时之和的 2 倍）
-    total_latency = sum(r.latency_ms for r in responses)
+    sum(r.latency_ms for r in responses)
     # stub 模式下 latency 为 0，只验证数量
     assert all(r.success for r in responses)
 

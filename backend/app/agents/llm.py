@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 from typing import Any, Protocol
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.agents.schemas import SCHEMA_MAP, ClaimListResult, ProduceResult
+from app.agents.schemas import SCHEMA_MAP
 from app.agents.trace import record_call, update_last_record
 from app.config import settings
 from app.logging_config import get_logger
@@ -615,7 +614,7 @@ class RealLLM:
                         claims_val = result.get("claims")
                         if not claims_val:
                             raise ValueError(
-                                f"intra_team 阶段 claims 为空，LLM 未输出有效论点"
+                                "intra_team 阶段 claims 为空，LLM 未输出有效论点"
                             )
                     # produce 阶段：校验代码类产出的关键字段非空
                     if schema_hint.startswith("produce") and isinstance(result, dict):

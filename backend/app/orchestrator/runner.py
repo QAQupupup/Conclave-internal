@@ -4,9 +4,8 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import Any
 
-from app.db_legacy import list_messages, save_meeting, save_message
+from app.db_legacy import save_meeting, save_message
 from app.events import bus, make_event
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus, Stage

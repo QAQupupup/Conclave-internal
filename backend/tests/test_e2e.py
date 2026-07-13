@@ -8,7 +8,6 @@ import json
 import logging
 import time
 
-import pytest
 
 logger = logging.getLogger("app.tests.e2e")
 

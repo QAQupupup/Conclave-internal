@@ -1,7 +1,6 @@
 # 检索 + 重排：查询改写多路召回 + 混合检索 + bge-reranker-v2-m3 重排
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import httpx

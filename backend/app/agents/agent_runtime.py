@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel
 
 from app.agents.compute import ThinkRequest, get_compute
 from app.agents.task_baseline import RequiredArtifact, TaskBaseline
@@ -119,7 +118,7 @@ class AgentRuntime:
             f"## 议题\n{ctx.topic}",
         ]
         if ctx.parent_constraints:
-            parts.append(f"## 父级约束\n" + "\n".join(f"- {c}" for c in ctx.parent_constraints))
+            parts.append("## 父级约束\n" + "\n".join(f"- {c}" for c in ctx.parent_constraints))
         if ctx.locked_conclusions:
             parts.append("## 已锁定结论\n" + "\n".join(
                 f"- [{c.get('stage')}] {c.get('summary', '')}" for c in ctx.locked_conclusions

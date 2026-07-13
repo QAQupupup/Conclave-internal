@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import re as _re
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -22,7 +24,6 @@ _REGRESSION_DIR: Path = Path(__file__).resolve().parents[2] / "data" / "regressi
 # 旧版 _load_baseline 用 Path / f"{baseline_id}.json"，若 baseline_id 含 "../"
 # 可逃出 _REGRESSION_DIR 目录读取任意 JSON（如其他用户的数据）。
 # 限定 baseline_id 仅由 [a-zA-Z0-9-_] 构成，与创建时的 uuid4().hex[:8] 前缀一致。
-import re as _re
 _BASELINE_ID_PATTERN = _re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 

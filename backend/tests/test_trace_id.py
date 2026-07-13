@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from app.context import (
     get_meeting_id,
@@ -47,7 +46,7 @@ def test_new_request_id_format():
 def test_trace_context_snapshot():
     """get_trace_context 返回完整快照"""
     tok1 = set_request_id("req-abc")
-    tok2 = set_meeting_id("mtg-xyz")
+    set_meeting_id("mtg-xyz")
     ctx = get_trace_context()
     assert ctx["request_id"] == "req-abc"
     assert ctx["meeting_id"] == "mtg-xyz"
@@ -140,7 +139,7 @@ def test_event_has_trace_id(client):
     meeting_id = resp.json()["meeting_id"]
 
     # 获取创建会议的 request_id
-    create_rid = resp.headers.get("x-request-id", resp.headers.get("X-Request-Id", ""))
+    resp.headers.get("x-request-id", resp.headers.get("X-Request-Id", ""))
 
     # 运行会议
     from app.orchestrator import runner as runner_mod

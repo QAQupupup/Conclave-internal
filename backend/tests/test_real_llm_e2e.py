@@ -19,7 +19,7 @@ _REAL_LLM_ENABLED = os.environ.get("CONCLAVE_TEST_REAL_LLM") == "1"
 # 必须在导入 app.config 之前检查，因为 conftest 可能已设置空 key
 # 但当 CONCLAVE_TEST_REAL_LLM=1 时，conftest 不会设置空 key，.env 会加载真实 key
 
-from app.config import settings
+from app.config import settings  # noqa: E402
 
 # 真实 LLM 是否可用（key 已从 .env 加载）
 _REAL_LLM_AVAILABLE = _REAL_LLM_ENABLED and settings.use_real_llm
@@ -132,7 +132,7 @@ async def test_real_llm_full_meeting():
 
     # 输出摘要（-s 模式可见）
     print(f"\n{'=' * 60}")
-    print(f"真实 LLM 端到端测试通过！")
+    print("真实 LLM 端到端测试通过！")
     print(f"  模型: {settings.llm_model}")
     print(f"  LLM 调用: {summary['total_calls']} 次 (100% 成功)")
     print(f"  claims: {len(state.claims)}")

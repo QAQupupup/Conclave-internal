@@ -237,7 +237,6 @@ _TIER_MAP: dict[str, DomainTier] = {
     "developer.chrome.com": DomainTier.A,
     "webkit.org": DomainTier.A,
     "developer.apple.com": DomainTier.A,  # 非 Swift 通用文档也是权威
-    "learn.microsoft.com": DomainTier.A,  # 已在上面设为 S，这里不重复
 
     # ---- B tier: 优质社区 ----
     "github.com": DomainTier.B,

@@ -6,14 +6,10 @@
 from __future__ import annotations
 
 import asyncio
-import functools
-import json
 import sqlite3
-import threading
-from typing import Any, Callable, TypeVar
+from typing import Callable, TypeVar
 
-from app.config import settings
-from app.db_legacy import _connect, _lock  # 复用连接工厂与锁
+from app.db_legacy import _connect  # 复用连接工厂与锁
 
 T = TypeVar("T")
 

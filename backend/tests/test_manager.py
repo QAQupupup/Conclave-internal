@@ -4,13 +4,11 @@
 """
 from __future__ import annotations
 
-from typing import Any
 
 import pytest
 
 from app.agents import compute as compute_mod
 from app.agents.compute import ThinkRequest, ThinkResponse
-from app.agents.task_baseline import SOFTWARE_DEV_BASELINE
 from app.models import MeetingState, Stage
 from app.orchestrator.manager import MeetingManager
 

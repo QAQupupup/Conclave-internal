@@ -67,7 +67,7 @@ class CaptchaSession:
             "meeting_id": self.meeting_id,
             "status": self.status.value,
             "resolved_at": self.resolved_at,
-            "vnc_url": f"/vnc/vnc.html?autoconnect=true&resize=scale",
+            "vnc_url": "/vnc/vnc.html?autoconnect=true&resize=scale",
             "vnc_port": self.vnc_port,
             "timeout": self.timeout,
             "elapsed": round(time.time() - self.created_at, 1),
@@ -116,7 +116,6 @@ class CaptchaGuard:
                 return True
 
             try:
-                import subprocess
 
                 # 检查必要的二进制是否存在
                 for cmd in ["Xvfb", "x11vnc", "websockify"]:
@@ -134,7 +133,7 @@ class CaptchaGuard:
                 os.environ["DISPLAY"] = ":99"
 
                 # 启动 Xvfb（虚拟 X 服务器）
-                xvfb_proc = await asyncio.create_subprocess_exec(
+                await asyncio.create_subprocess_exec(
                     "Xvfb", ":99", "-screen", "0", "1280x800x24", "-ac",
                     "-nolisten", "tcp",
                     stdout=asyncio.subprocess.DEVNULL,
@@ -143,7 +142,7 @@ class CaptchaGuard:
                 await asyncio.sleep(1)  # 等待 Xvfb 启动
 
                 # 启动 x11vnc（VNC 服务器）
-                x11vnc_proc = await asyncio.create_subprocess_exec(
+                await asyncio.create_subprocess_exec(
                     "x11vnc", "-display", ":99", "-forever", "-nopw",
                     "-rfbport", "5900", "-shared", "-noxdamage",
                     "-wait", "50", "-bg",
@@ -162,7 +161,7 @@ class CaptchaGuard:
                         novnc_web_dir = candidate
                         break
 
-                websockify_proc = await asyncio.create_subprocess_exec(
+                await asyncio.create_subprocess_exec(
                     "websockify", "6080", "localhost:5900",
                     "--web", novnc_web_dir,
                     stdout=asyncio.subprocess.DEVNULL,

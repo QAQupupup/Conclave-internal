@@ -379,7 +379,7 @@ def _parse_flight_data(html: str) -> dict[str, dict[str, Any]]:
 
         # 如果同一模型名已经有记录，且旧数据更完整，保留旧数据
         if model_name in pricing:
-            existing = pricing[model_name]
+            pricing[model_name]
             # 如果新数据的output_price是0但旧数据不是，可能是embedding的误判，保留新的
             # 否则如果output_price明显不合理（如小于input_price很多），保留旧数据
             if output_price == 0 and input_price > 0 and sub_type not in ("embedding", "reranker"):

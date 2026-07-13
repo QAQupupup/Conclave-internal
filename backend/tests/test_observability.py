@@ -3,14 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import tempfile
 
-from app.observability.log_bus import LogBus, log_bus
+from app.observability.log_bus import LogBus
 from app.observability.sinks import ConsoleSink, JSONFileSink, RemoteGRPCSink
 from app.context import (
-    get_runner_session_id,
     set_request_id,
     set_meeting_id,
     set_runner_session_id,

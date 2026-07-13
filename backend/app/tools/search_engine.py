@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from app.tools.domain_registry import tag_url, get_domain_tier
+from app.tools.domain_registry import tag_url
 
 
 @dataclass
