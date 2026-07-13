@@ -98,8 +98,7 @@ describe('ModelSelector', () => {
 
     render(<ModelSelector disabled />)
 
-    await waitFor(() => expect(screen.getByTestId('api-key-input')).toBeInTheDocument())
-    expect(screen.getByTestId('api-key-input')).toBeDisabled()
+    await waitFor(() => expect(screen.getByTestId('api-key-input')).toBeDisabled())
   })
 
   it('disables API key input when provider does not support custom key', async () => {
@@ -135,7 +134,6 @@ describe('ModelSelector', () => {
       />
     )
 
-    await waitFor(() => expect(screen.getByTestId('api-key-input')).toBeInTheDocument())
-    expect(screen.getByTestId('api-key-input')).toBeDisabled()
+    await waitFor(() => expect(screen.getByTestId('api-key-input')).toBeDisabled())
   })
 })
