@@ -232,13 +232,17 @@ def _iter_files(src: Path):
 
 
 def _remove_protected_sources(dst_root: Path, manifest: dict[str, Any], dry_run: bool) -> list[str]:
-    """删除开源仓库中残留的 conclave_core 源码文件，只保留 __init__.py 和二进制扩展。"""
+    """删除开源仓库中残留的 conclave_core 算法源码文件，只保留 __init__.py、二进制扩展和未编译的模型源码。"""
     removed: list[str] = []
     core_dst = dst_root / "backend" / "conclave_core"
     if not core_dst.exists():
         return removed
+
+    # 这些模块因包含 Pydantic BaseModel 不编译，需保留源码供导入
+    keep_sources = {"__init__.py", "charter.py", "conclusion_chain.py"}
+
     for py_file in core_dst.rglob("*.py"):
-        if py_file.name == "__init__.py":
+        if py_file.name in keep_sources:
             continue
         if not dry_run:
             py_file.unlink()

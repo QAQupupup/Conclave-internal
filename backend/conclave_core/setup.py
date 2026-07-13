@@ -22,14 +22,24 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = PACKAGE_DIR.parent
 
 
+EXCLUDED_MODULES = {
+    # Pydantic BaseModel 子类在 Cython 编译后会被误识别为未注解字段，
+    # 因此这些纯数据模型保持源码形式发布。
+    "conclave_core.charter",
+    "conclave_core.conclusion_chain",
+}
+
+
 def _collect_modules(package_dir: Path) -> list[str]:
-    """收集包内需要编译为 Cython 扩展的 .py 模块（排除 __init__.py 与 setup.py）。"""
+    """收集包内需要编译为 Cython 扩展的 .py 模块（排除 __init__.py、setup.py 与 Pydantic 模型）。"""
     modules: list[str] = []
     for py_file in sorted(package_dir.rglob("*.py")):
         if py_file.name in {"__init__.py", "setup.py"}:
             continue
         rel = py_file.relative_to(BACKEND_DIR)
         module_name = str(rel.with_suffix("")).replace(os.sep, ".")
+        if module_name in EXCLUDED_MODULES:
+            continue
         modules.append(module_name)
     return modules
 

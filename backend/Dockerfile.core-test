@@ -1,0 +1,50 @@
+# ===== Conclave 核心扩展编译与一致性验证 Dockerfile =====
+# 用途：验证 conclave_core 经过 Cython 编译后，全量测试是否仍能通过。
+# 后续可作为 CI 阶段或发布脚本的前置校验。
+#
+# 构建并运行：
+#   docker build -f Dockerfile.core-test -t conclave-core-test .
+#   docker run --rm conclave-core-test
+
+FROM docker.m.daocloud.io/library/python:3.12-slim
+
+# 国内镜像源
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 替换 apt 源并安装编译工具
+RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
+    { echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME) $(. /etc/os-release && echo $VERSION_CODENAME)-updates"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+      echo ""; \
+      echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian-security"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME)-security"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+    } > /etc/apt/sources.list.d/tuna.sources && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gcc libc6-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 先装依赖（利用缓存层）
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 安装 Cython 与构建工具
+RUN pip install --no-cache-dir Cython setuptools wheel
+
+# 复制源码
+COPY . .
+
+# 编译 conclave_core 为 C 扩展
+RUN python conclave_core/setup.py build_ext --inplace && \
+    find conclave_core -name "*.c" -delete
+
+# 运行全量测试，验证编译后行为一致
+CMD ["python", "-m", "pytest", "tests", "-q"]

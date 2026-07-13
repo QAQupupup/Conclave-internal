@@ -17,6 +17,14 @@
       "dst": "backend/conclave_core/__init__.py"
     },
     {
+      "src": "backend/conclave_core/charter.py",
+      "dst": "backend/conclave_core/charter.py"
+    },
+    {
+      "src": "backend/conclave_core/conclusion_chain.py",
+      "dst": "backend/conclave_core/conclusion_chain.py"
+    },
+    {
       "src": "backend/data",
       "dst": "backend/data"
     },
