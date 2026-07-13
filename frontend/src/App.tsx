@@ -1,6 +1,6 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { ConfigProvider, Tabs, Button, Tooltip, Typography } from 'antd'
 import {
   TeamOutlined,
@@ -381,10 +381,10 @@ function AntdThemeWrapper({ children }: { children: React.ReactNode }) {
 }
 
 /** CAPTCHA 守卫挂载点：仅在非首页显示，保持 WS 连接跨视图存活
- *  吸边隐藏设计：
- *    - 收起态：右侧边缘只露出浅蓝色小盾牌，鼠标移入展开
- *    - 展开态：显示完整值守开关 + 状态标签
- *    - 鼠标移出 800ms 后自动收起
+ *  右侧吸边隐藏设计：
+ *    - 常态：只露出浅蓝色小盾牌图标，贴紧右边缘，尽量少的遮挡内容
+ *    - 悬停：向右展开为完整值守开关 + 状态标签
+ *    - 鼠标移出 800ms 后自动收回为小盾牌
  */
 function CaptchaGuardLayer() {
   const { path } = useRouter()
@@ -394,11 +394,15 @@ function CaptchaGuardLayer() {
 
   if (path === '/') return null
 
-  const handleMouseEnter = () => {
+  const clearTimer = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
+  }
+
+  const handleMouseEnter = () => {
+    clearTimer()
     setExpanded(true)
   }
 
@@ -406,9 +410,12 @@ function CaptchaGuardLayer() {
     timerRef.current = setTimeout(() => setExpanded(false), 800)
   }
 
+  useEffect(() => {
+    return () => { clearTimer() }
+  }, [])
+
   const active = guardStatus.guardMode
   const pending = guardStatus.hasPending
-  // 无论值守是否开启，入口盾牌都使用浅蓝色系，保持视觉识别度
   const shieldColor = pending ? '#ff4d4f' : active ? '#0958d9' : '#1677ff'
   const shieldBg = pending ? '#fff2f0' : active ? '#e6f4ff' : '#f0f7ff'
 
@@ -423,26 +430,28 @@ function CaptchaGuardLayer() {
         zIndex: 1100,
         display: 'flex',
         alignItems: 'center',
-        gap: expanded ? 8 : 0,
-        padding: expanded ? '6px 12px' : '6px 4px 6px 8px',
+        width: expanded ? 260 : 28,
+        height: 28,
+        padding: expanded ? '5px 10px' : '5px 0 5px 5px',
         background: 'var(--bg, #fff)',
         border: '1px solid var(--border, #e5e7eb)',
         borderRight: 'none',
-        borderRadius: '8px 0 0 8px',
+        borderRadius: '6px 0 0 6px',
         boxShadow: expanded ? '0 2px 8px rgba(0,0,0,0.08)' : '-2px 0 6px rgba(0,0,0,0.04)',
-        fontSize: 12,
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
         transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
         cursor: 'pointer',
       }}
     >
-      {/* 收起态：浅蓝色小盾牌 */}
+      {/* 小盾牌（常态与展开态均显示，作为视觉锚点） */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 22,
-          height: 22,
+          width: 18,
+          height: 18,
           borderRadius: '50%',
           background: shieldBg,
           color: shieldColor,
@@ -451,20 +460,18 @@ function CaptchaGuardLayer() {
         }}
         title={active ? (pending ? '值守中 · 有待处理验证码' : '值守中') : '值守已关闭'}
       >
-        {active ? <SafetyCertificateOutlined style={{ fontSize: 13 }} /> : <SafetyOutlined style={{ fontSize: 13 }} />}
+        {active ? <SafetyCertificateOutlined style={{ fontSize: 11 }} /> : <SafetyOutlined style={{ fontSize: 11 }} />}
       </div>
 
-      {/* 展开态：完整值守控制 */}
+      {/* 展开面板 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          maxWidth: expanded ? 260 : 0,
+          marginLeft: 8,
           opacity: expanded ? 1 : 0,
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+          transition: 'opacity 0.2s ease',
         }}
       >
         <CaptchaGuard compact onStatusChange={setGuardStatus} />

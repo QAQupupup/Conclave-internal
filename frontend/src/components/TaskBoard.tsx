@@ -171,27 +171,26 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
 
   const columns: ColumnsType<MeetingListItem> = [
     {
-      title: '状态', dataIndex: 'status', width: 100,
+      title: '状态', dataIndex: 'status', width: 100, align: 'center',
       render: (status: string) => (
         <Tag color={STATUS_COLOR[status] ?? 'default'}>{STATUS_LABEL[status] ?? status}</Tag>
       ),
     },
     {
-      title: '议题', dataIndex: 'topic', ellipsis: true,
+      title: '议题', dataIndex: 'topic', ellipsis: true, align: 'left',
       render: (topic: string, record: MeetingListItem) => (
-        <div>
-          <Text>{topic || '(无议题)'}</Text>
-          <br />
+        <div style={{ display: 'inline-flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.45, verticalAlign: 'middle' }}>
+          <Text style={{ fontWeight: 500 }}>{topic || '(无议题)'}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>{record.meeting_id.slice(-8)}</Text>
         </div>
       ),
     },
     {
-      title: '阶段', dataIndex: 'stage', width: 120,
+      title: '阶段', dataIndex: 'stage', width: 120, align: 'center',
       render: (stage: string) => <Tag>{STAGE_LABELS[stage] || stage}</Tag>,
     },
     {
-      title: '标签', dataIndex: 'tags', width: 200,
+      title: '标签', dataIndex: 'tags', width: 220, align: 'left',
       render: (tags: string[] | undefined, record: MeetingListItem) => (
         <Space wrap size={[4, 4]}>
           {(tags || []).map(tag => (
@@ -218,7 +217,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
       ),
     },
     {
-      title: '创建时间', dataIndex: 'created_at', width: 160,
+      title: '创建时间', dataIndex: 'created_at', width: 160, align: 'center',
       render: (ts: string) => formatTime(ts),
     },
     {

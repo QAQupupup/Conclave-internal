@@ -457,33 +457,37 @@ export function ModelsView() {
           <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
         ) : (
           <>
-            {/* 厂商卡片横向排列 */}
+            {/* 厂商卡片横向排列：统一高度与内部对齐 */}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
               {providers.map(p => {
                 const isActive = p.id === selectedProvider
                 return (
-                  <Card key={p.id} hoverable size="small"
+                  <Card key={p.id} hoverable size="small" className="models-provider-card"
                     style={{
-                      width: 180, cursor: 'pointer', borderRadius: 8,
+                      width: 180, height: 96, cursor: 'pointer', borderRadius: 8,
                       borderColor: isActive ? 'var(--accent-color, #4f46e5)' : 'var(--border, #e5e7eb)',
                       borderWidth: isActive ? 2 : 1,
                       background: isActive ? 'var(--accent-bg, #eef2ff)' : 'var(--bg, #fff)',
                       transition: 'all 0.2s',
                     }}
-                    styles={{ body: { padding: '10px 14px' } }}
+                    styles={{ body: { padding: '10px 14px', height: '100%', boxSizing: 'border-box' } }}
                     onClick={() => { setSelectedProvider(p.id); setApiKey(getApiKey(p.id)); setBalance(null) }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span style={{ fontSize: 18, color: isActive ? 'var(--accent-color, #4f46e5)' : '#888' }}>
-                        {PROVIDER_ICONS[p.id] || <CloudServerOutlined />}
-                      </span>
-                      <Text strong style={{ fontSize: 13 }}>{p.name}</Text>
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 22 }}>
+                        <span style={{ fontSize: 18, lineHeight: 1, color: isActive ? 'var(--accent-color, #4f46e5)' : '#888' }}>
+                          {PROVIDER_ICONS[p.id] || <CloudServerOutlined />}
+                        </span>
+                        <Text strong style={{ fontSize: 13, lineHeight: 1.3 }}>{p.name}</Text>
+                      </div>
+                      <Space size={4} wrap style={{ minHeight: 22, alignItems: 'flex-end' }}>
+                        {p.has_key && <Tag color="green" style={{ fontSize: 10, margin: 0 }}>已配置</Tag>}
+                        {p.supports_balance && <Tag color="cyan" style={{ fontSize: 10, margin: 0 }}>余额查询</Tag>}
+                        {p.supports_custom_key && <Tag style={{ fontSize: 10, margin: 0 }}>自定义Key</Tag>}
+                      </Space>
                     </div>
-                    <Space size={4} wrap>
-                      {p.has_key && <Tag color="green" style={{ fontSize: 10, margin: 0 }}>已配置</Tag>}
-                      {p.supports_balance && <Tag color="cyan" style={{ fontSize: 10, margin: 0 }}>余额查询</Tag>}
-                      {p.supports_custom_key && <Tag style={{ fontSize: 10, margin: 0 }}>自定义Key</Tag>}
-                    </Space>
                   </Card>
                 )
               })}

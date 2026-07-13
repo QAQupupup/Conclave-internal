@@ -4792,3 +4792,18 @@ code {
   margin-left: auto;
 }
 .token-model-balance.low { color: var(--warn-fg); }
+
+/* ---------- 会议看板表格行垂直居中对齐 ---------- */
+.task-board .ant-table-tbody > tr > td {
+  vertical-align: middle;
+}
+.task-board .ant-table-tbody > tr > td .ant-tag {
+  margin: 0;
+}
+
+/* ---------- 模型管理厂商卡片底部标签对齐 ---------- */
+.models-provider-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
