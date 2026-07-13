@@ -131,6 +131,11 @@ def _build_core_extensions(dev_repo: Path, dry_run: bool) -> list[Path]:
 
     binaries: list[Path] = []
     core_dir = backend / "conclave_core"
+    # 清理历史编译产物，避免把其他平台/旧版本的二进制打包进开源仓库
+    for ext in (".pyd", ".so"):
+        for old_binary in core_dir.glob(f"*{ext}"):
+            old_binary.unlink()
+    # 重新编译后收集当前平台产物
     for ext in (".pyd", ".so"):
         binaries.extend(core_dir.glob(f"*{ext}"))
     # 清理中间生成的 .c 文件，保持工作区干净
