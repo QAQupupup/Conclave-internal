@@ -277,24 +277,6 @@ def _delete_patterns(dst_root: Path, patterns: list[str], dry_run: bool) -> list
     return deleted
 
 
-def _patch_requirements(dst_root: Path, dry_run: bool) -> bool:
-    """在开源仓库 requirements.txt 中增加 conclave_core wheel 本地安装入口。"""
-    req_path = dst_root / "backend" / "requirements.txt"
-    if not req_path.exists():
-        return False
-    try:
-        text = req_path.read_text(encoding="utf-8")
-    except Exception:
-        return False
-    marker = "# conclave_core prebuilt extension (auto-injected by publish_open_source.py)"
-    if marker in text:
-        return False
-    patch = f"\n{marker}\n--find-links wheels/\nconclave_core\n"
-    if not dry_run:
-        req_path.write_text(text + patch, encoding="utf-8")
-    return True
-
-
 def _generate_audit_report(
     dst_root: Path,
     manifest: dict[str, Any],
@@ -365,7 +347,7 @@ def _generate_audit_report(
     return report_path
 
 
-def _git_commit_and_push(repo: Path, version: str, dry_run: bool) -> None:
+def _git_commit_and_push(repo: Path, version: str, branch: str | None, dry_run: bool) -> None:
     if dry_run:
         _log("[dry-run] 跳过 git 提交与推送")
         return
@@ -375,8 +357,13 @@ def _git_commit_and_push(repo: Path, version: str, dry_run: bool) -> None:
     try:
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-m", msg], cwd=repo, check=True)
-        subprocess.run(["git", "push"], cwd=repo, check=True)
-        _log(f"已提交并推送: {msg}")
+        if branch:
+            subprocess.run(["git", "checkout", "-B", branch], cwd=repo, check=True)
+            subprocess.run(["git", "push", "origin", branch], cwd=repo, check=True)
+            _log(f"已提交并推送分支 {branch}: {msg}")
+        else:
+            subprocess.run(["git", "push"], cwd=repo, check=True)
+            _log(f"已提交并推送: {msg}")
     except subprocess.CalledProcessError as exc:
         _error(f"git 操作失败: {exc}")
 
@@ -388,6 +375,7 @@ def main() -> int:
     parser.add_argument("--manifest", default=DEFAULT_MANIFEST, help="同步清单路径（相对于开发仓库）")
     parser.add_argument("--version", default="", help="发布版本号")
     parser.add_argument("--push", action="store_true", help="同步后自动提交并推送开源仓库")
+    parser.add_argument("--branch", default="auto-sync", help="推送到的开源仓库分支（默认 auto-sync）")
     parser.add_argument("--prune", action="store_true", help="删除目标仓库中已从清单移除的文件")
     parser.add_argument("--dry-run", action="store_true", help="干跑，不实际修改文件")
     parser.add_argument("--skip-core-build", action="store_true", help="跳过 conclave_core 编译（用于测试同步流程）")
@@ -452,12 +440,7 @@ def main() -> int:
     # 5. 删除敏感文档
     deleted = _delete_patterns(oss_repo, manifest.get("delete_patterns", []), args.dry_run)
 
-    # 6. 修补 requirements.txt
-    patched_req = _patch_requirements(oss_repo, args.dry_run)
-    if patched_req:
-        all_replaced.append("backend/requirements.txt")
-
-    # 7. 可选 prune：删除已从清单中消失的目标文件
+    # 6. 可选 prune：删除已从清单中消失的目标文件
     if args.prune:
         current_keys = set()
         for entry in manifest.get("copy", []):
@@ -498,7 +481,7 @@ def main() -> int:
 
     # 9. 提交推送
     if args.push:
-        _git_commit_and_push(oss_repo, args.version, args.dry_run)
+        _git_commit_and_push(oss_repo, args.version, args.branch, args.dry_run)
 
     _log("发布完成")
     return 0

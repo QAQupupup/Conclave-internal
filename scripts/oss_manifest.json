@@ -45,11 +45,19 @@
       "dst": "backend/alembic.ini"
     },
     {
+      "src": "backend/workspace",
+      "dst": "backend/workspace"
+    },
+    {
       "src": "frontend",
       "dst": "frontend"
     },
     {
-      "src": "docker-compose.yml",
+      "src": "docker",
+      "dst": "docker"
+    },
+    {
+      "src": "docker-compose.oss.yml",
       "dst": "docker-compose.yml"
     },
     {
@@ -80,7 +88,6 @@
     "frontend/node_modules",
     ".idea",
     ".venv",
-    ".env",
     "conclave.db"
   ],
   "protected_paths": [
@@ -156,14 +163,14 @@
     "backend/app/orchestrator/react_loop.py": "390dd240676418f7c31d8f1f787463e32a8ee39b0b61be6abef4dd30932a2a9e",
     "backend/app/orchestrator/refine_loop.py": "a338dd8cce87b547dcca9c49b11557d394742526a62b57d3867f09c8cb845e9b",
     "backend/app/orchestrator/runner.py": "88c53cde60da330be4c3cd17cc6fb8fe06587a9f9d2b32892040185218d7635c",
-    "backend/app/orchestrator/stage_common.py": "485a6ec0587b9e2835ad1386fd4b0137bcaf29822a3e3006c572ee5574e91db6",
+    "backend/app/orchestrator/stage_common.py": "f420498019a78d6f3ce0df0039187152ea810c3f161ac03dcc8aa45343152340",
     "backend/app/orchestrator/stage_planners.py": "a93f1bed90a540daf7d7d5363d87dfe9bbc0c02e2b449b40850ec45bd5a6bd39",
     "backend/app/orchestrator/stage_reducers.py": "09a8baba8db503cbb91145c17ac8b0499e5f359c0b2f04ba3a1c86b00212a688",
-    "backend/app/orchestrator/stage_runners.py": "078bc7df3e701222726d9b441f0299a9ab56326821e9f850375c913e7b900afb",
+    "backend/app/orchestrator/stage_runners.py": "8b425d6d50f9a896367503757e92cd4182a929e047e6eed8d3354cb77ac6c2c2",
     "backend/app/orchestrator/task_graph.py": "0c44010fe01127e67300e15adafa1f40032a2d470f9a7c61ce56b67b0e8871ee",
     "backend/app/orchestrator/__init__.py": "d1949e00d76c94d246e7bcff95078f03769aabdf3dcf46ce02ae8613c9d0d9dd",
     "backend/app/orchestrator/nodes/arbitrate.py": "40c6e6c1f06db71744236f32fcafeb05d859648b085e674954cf797036804616",
-    "backend/app/orchestrator/nodes/borrow.py": "550e0fe7a81e80c1d2a3b902379042958f22058d94b108a38fe21260eaf9f0fa",
+    "backend/app/orchestrator/nodes/borrow.py": "e414468e8f7c28ae57fc44d2967f447999a8549de8908018ce16d079f2c20f2e",
     "backend/app/orchestrator/nodes/clarify.py": "3a8df4a3ec6f99d4129f7d081d250e27c1ff900c075d3ffa4633b6459823aae2",
     "backend/app/orchestrator/nodes/cross_team.py": "665d5404b8ca51d9145ff3453ebaad5cff714a02545f60242fa8eefa2f496f2e",
     "backend/app/orchestrator/nodes/evidence_check.py": "dffd6914cc717bed08977b20e85d4a890c6185f0813f6d29e6e1eec0123f29cb",
@@ -214,7 +221,7 @@
     "backend/alembic/versions/0002_add_aux_api_keys_docs_cost.py": "8cd0484df94b5f891c6d9e9ad19271ec5198aaf1bef5e04b4d50f10b4f0f0044",
     "backend/alembic/versions/0003_drop_cost_records_fk.py": "fdcc7b87b73832860faa0f5bcec91eab78eabab5c944eb209464beb019a91b41",
     "backend/alembic/versions/__init__.py": "aceaf656bb2e23ef554b4da708a2495ea72f815ba420b238975d728cb577e5e3",
-    "backend/conclave_core/__init__.py": "b4a7d0e97adf5afb65c47d7d7a834afbd43bd709bd49ad521fd22a46d657cd79",
+    "backend/conclave_core/__init__.py": "222f9c546d5ef0575090923e81af61dc415c2d4f69490aaa622c525cc35494d3",
     "backend/data/sf_pricing_cache.json": "acbf6536db39e5e607415eb4b2710e7f3f2d09f3746c35b6cfce295afc93f968",
     "backend/docker/sandbox-datascience/Dockerfile": "721a022aa99438d12eb2b25d9135fbdc2fb5baf75b7d0308d8cf50ac8483e55c",
     "backend/Dockerfile": "4947617b484a4aab6720047664128701b58f413fe61adb588f3c102476116296",
@@ -233,9 +240,9 @@
     "frontend/tsconfig.json": "d7f97fee8b4c551aeeee943b2580dce39ab7423a5868aa1971fda0bf137d14bc",
     "frontend/vite.config.ts": "8bb8dfdc5baa53a9ea9178988a06efabb7074aad8b937a872d7e9da81cbff127",
     "frontend/public/favicon.svg": "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66",
-    "frontend/src/App.tsx": "3156b4645a9d87ae1660c0d3bd7e61477973146e0cc3dd5a9fc77f4376df1876",
+    "frontend/src/App.tsx": "1267b597fbdf369eeb1e6817fbc98a36d243a28f8701dea31f0a67765f729eb0",
     "frontend/src/constants.ts": "0277f67e8f010f74040dedf61793d1aa0ee4ccfb5ed1024f64e4bde43f9cd3a7",
-    "frontend/src/index.css": "c21261317af5240bcf7363b277d28ae947e5f485e579765e4c84a6bec32be58c",
+    "frontend/src/index.css": "c306c14980664436f83f7cac08afcb35f82e7027d962572d9a7eca8744354ace",
     "frontend/src/main.tsx": "11a5677d51c7e12dbdb6f829975b8a25759c20616d0d3293af3ca8358ac1ac75",
     "frontend/src/components/AgentGraph.tsx": "18b1412ccc88550db0b4a47b65156b82cc1b25962883575b373c39978c093121",
     "frontend/src/components/ArtifactPanel.tsx": "e78391abcbfea74a9c25b771e51125443de1da5c187520f32999dda2e6477601",
@@ -264,13 +271,13 @@
     "frontend/src/components/MessageCard.tsx": "5db66929f9edeb3c2b70637b454473aff5343da8fc42afd81a1951fbaad833fe",
     "frontend/src/components/MessageContent.tsx": "6bfa4f6e3ee8eb2567728d47768f7d6972972f2e20c784630ae7c0474d13142a",
     "frontend/src/components/MetricCard.tsx": "b48a27e3ef038e0293553fc0f1e6c141d6b546014b99118c85aa0bb8f8811cf2",
-    "frontend/src/components/ModelSelector.tsx": "f9476bbdaf102a7f353c23aeb63b06a3c828ed92dc8dcf3f54a84a3726889ce3",
-    "frontend/src/components/ModelsView.tsx": "718bbfd3c020e0bd769470e09234c686d9b6efac1fdd494cbae16d19d2633c36",
+    "frontend/src/components/ModelSelector.tsx": "98afbdc5804fb36fb5864a2e73911e658c871a44cf0379aeb099d10a43003269",
+    "frontend/src/components/ModelsView.tsx": "f7811e6c442fb64038c30a0e3c3b64e9f0eb1edf2ebec49ac8d8b14a1072cfd1",
     "frontend/src/components/ReportViewer.tsx": "9fd5a5bfcb927077dc09d59a0861532228838dc4e3a1a335817357f6dfb2af03",
     "frontend/src/components/ResourceChart.tsx": "2b8a2347781668207b7ddda56258e9531d646d3cef927d8bdb9960e75b64186e",
-    "frontend/src/components/SettingsPanel.tsx": "71e484425a9da543e92432a1881e1a47139426c8a63e7a7351ea0062d56e9ba0",
+    "frontend/src/components/SettingsPanel.tsx": "642dc451c90ea59a2b0857f95085d3bcc80427956caef435fbda5a799d807237",
     "frontend/src/components/StageIndicator.tsx": "81dd1e0ea117c742be61080ffcfff6734a076a966567d79ca2e9276a472561b1",
-    "frontend/src/components/TaskBoard.tsx": "3d8a097c6f4648f9c29d00239f60047c8718b90a65d09eacbd6ee4119d8c7de3",
+    "frontend/src/components/TaskBoard.tsx": "3cc48d5c884ddf39ea0c3557790a87bba9c5f428bcfbb6f3991e5a20f9b8c5a2",
     "frontend/src/components/ThemeSettings.tsx": "f6ae4a9aba962ab5d23366dd4eb5d0a5abb8996b7eb036fb8578a6ac3b93376c",
     "frontend/src/components/TokenPanel.tsx": "1f8772927963bde831351e73eeb230d80b727155e9b95c9802215c8549409b28",
     "frontend/src/components/TopicPanel.tsx": "1bbc478de1c47b06fbc3d80801182042a08f5c606655bae4c743d76e62c649bf",
@@ -291,8 +298,12 @@
     "frontend/src/theme/antdTheme.ts": "03e1a01e8d2be589d5c0c6bd70da701fdf9993347f7c8abfad38f18702d2bb5c",
     "frontend/src/types/events.ts": "252995ccc5f0a80ae93bbdd0f682e6f322b9f04152ed71bb7a9893032270621d",
     "frontend/src/types/graph.ts": "c59eba4a54404dc22fe6f824d162ae12d0e3133b7c15a76fe5390ebe030f732a",
-    "docker-compose.yml": "a3e584336c6995dcc2b676ac1b96c9c2bf7d80e7536cb9178ecac7358a4555d3",
+    "docker-compose.yml": "eabfea7bdcf7e59b0afa698d7d281c48bc9fe3ea53cb76e0d0171c7179c9aa15",
     ".env.example": "7d2798357fdbb44c2bc999c8f5db4b4a37a3ccecb3919eb22ff52c100ec5ea35",
-    "README.md": "c1574bfa8f0225aa8468c8cbe30597561b68cc26570d8b205686d3d764606aa3"
+    "README.md": "c1574bfa8f0225aa8468c8cbe30597561b68cc26570d8b205686d3d764606aa3",
+    "backend/workspace/constraints.yaml": "31b569c252bfaf03d07f3698752a2c05d6a879fb15c1926d16dbbf3f0481ee7d",
+    "docker/Dockerfile.postgres": "9fee92af5069a063462120246900c830c35bf1d7f0374d4f0fbfac4834fe43a6",
+    "docker/Dockerfile.qdrant": "af6ae81198ec007f64ad344f693896969b14e8041c248cb3f7c44590d8e3eef5",
+    "docker-compose.oss.yml": "ff7533c989488ff0d65f9f43d7273dc7b8e5a397c6a6afbd3bd9409712ef5a50"
   }
 }

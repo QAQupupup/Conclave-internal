@@ -1,12 +1,12 @@
-﻿# ===== Conclave Docker Compose =====
+# ===== Conclave OSS Docker Compose =====
 # 完整部署：前端(nginx) + 后端(FastAPI) + 自动沙箱准备
 #
 # 启动: docker compose up -d
 # 日志: docker compose logs -f backend
 # 停止: docker compose down
 #
-# 项目命名空间：开发版固定为 conclave-dev，避免与开源版(conclave-oss)冲突
-name: conclave-dev
+# 项目命名空间：开源版固定为 conclave-oss，避免与开发版(conclave-dev)冲突
+name: conclave-oss
 #
 # 沙箱架构（Sibling Containers）:
 #   后端容器以 root 启动 entrypoint.sh → 自动配置 Docker socket 权限
@@ -26,10 +26,10 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: conclave-dev-backend
+    container_name: conclave-oss-backend
     ports:
-      - "8000:8000"
-      - "6080:6080"   # noVNC Web 远程操作端口（CAPTCHA 值守模式）
+      - "8001:8000"
+      - "6081:6080"   # noVNC Web 远程操作端口（CAPTCHA 值守模式）
     # [v4 安全加固] entrypoint 以 root 启动完成特权操作后降权到 uid 1000
     # 不再在 compose 中写死 user: "1000:1000"，而是由 entrypoint.sh 处理：
     #   1. root: 配置 docker.sock 权限、预拉取镜像、chown 目录
@@ -53,9 +53,9 @@ services:
       # entrypoint.sh 启动时自动配置权限，使 uid 1000 能访问
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # 工作区命名卷：后端和沙箱容器共享
-      - conclave-dev-workspace:/workspace
+      - conclave-oss-workspace:/workspace
       # 数据库持久化
-      - conclave-dev-data:/app/data
+      - conclave-oss-data:/app/data
       # 挂载数据科学沙箱 Dockerfile（entrypoint 构建镜像需要）
       - ./backend/docker/sandbox-datascience:/app/docker/sandbox-datascience:ro
     tmpfs:
@@ -106,9 +106,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: conclave-dev-frontend
+    container_name: conclave-oss-frontend
     ports:
-      - "5173:80"
+      - "5174:80"
     cap_drop:
       - ALL
     cap_add:
@@ -140,13 +140,13 @@ services:
     build:
       context: ./docker
       dockerfile: Dockerfile.qdrant
-    container_name: conclave-dev-qdrant
+    container_name: conclave-oss-qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "6335:6333"
+      - "6336:6334"
     volumes:
-      - conclave-dev-qdrant-data:/qdrant/storage
+      - conclave-oss-qdrant-data:/qdrant/storage
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
       interval: 15s
@@ -159,16 +159,16 @@ services:
   # ============================================================
   postgres:
     image: docker.m.daocloud.io/pgvector/pgvector:pg16
-    container_name: conclave-dev-postgres
+    container_name: conclave-oss-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_DB: conclave
       POSTGRES_USER: conclave
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-conclave_dev}
     volumes:
-      - conclave-dev-pg-data:/var/lib/postgresql/data
+      - conclave-oss-pg-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U conclave -d conclave || exit 1"]
       interval: 10s
@@ -181,13 +181,13 @@ services:
   # ============================================================
   redis:
     image: docker.m.daocloud.io/library/redis:7-alpine
-    container_name: conclave-dev-redis
+    container_name: conclave-oss-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     command: redis-server --save 60 1 --loglevel warning
     volumes:
-      - conclave-dev-redis-data:/data
+      - conclave-oss-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -196,14 +196,13 @@ services:
       start_period: 5s
 
 volumes:
-  conclave-dev-workspace:
+  conclave-oss-workspace:
     driver: local
-  conclave-dev-data:
+  conclave-oss-data:
     driver: local
-  conclave-dev-qdrant-data:
+  conclave-oss-qdrant-data:
     driver: local
-  conclave-dev-pg-data:
+  conclave-oss-pg-data:
     driver: local
-  conclave-dev-redis-data:
+  conclave-oss-redis-data:
     driver: local
-
