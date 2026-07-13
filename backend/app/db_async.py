@@ -1,15 +1,16 @@
-"""异步数据库访问包装器：把同步 SQLite 操作丢到线程池执行，避免阻塞事件循环。
+"""异步数据库访问包装器：把同步 PostgreSQL 操作丢到线程池执行，避免阻塞事件循环。
 
-[CON-01 修复] 旧版 router/orchestrator 直接 await 同步 SQLite 函数，阻塞 FastAPI 事件循环。
+[CON-01 修复] 旧版 router/orchestrator 直接 await 同步数据库函数，阻塞 FastAPI 事件循环。
 本模块提供同名 async 函数，签名兼容，内部用 asyncio.to_thread 把同步操作交给线程池。
 """
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from typing import Callable, TypeVar
 
-from app.db_legacy import _connect  # 复用连接工厂与锁
+import psycopg2
+
+from app.db_legacy import _connect, _putconn  # 复用连接工厂与锁
 
 T = TypeVar("T")
 
@@ -147,11 +148,14 @@ async def check_db_health_async() -> bool:
     def _check() -> bool:
         conn = _connect()
         try:
-            conn.execute("SELECT 1").fetchone()
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            cur.close()
             return True
-        except sqlite3.Error:
+        except psycopg2.Error:
             return False
         finally:
-            conn.close()
+            _putconn(conn)
 
     return await to_thread(_check)

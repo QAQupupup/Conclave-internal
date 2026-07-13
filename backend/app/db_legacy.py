@@ -1,125 +1,181 @@
-# SQLite 持久化：meetings 与 messages 两张表，用标准库 sqlite3，无需 ORM
+# PostgreSQL 持久化：meetings / messages / events 等表，使用 psycopg2 连接池
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 from datetime import datetime
-from pathlib import Path
 from typing import Any
+
+import psycopg2
+import psycopg2.pool
+from psycopg2.extras import RealDictCursor
 
 from app.config import settings
 
-# 线程锁，保证 SQLite 写入安全（SQLite 默认串行化）
-_lock = threading.Lock()
+# 线程锁，保留以兼容旧的串行化语义
+_lock = threading.RLock()
+
+_pool: psycopg2.pool.ThreadedConnectionPool | None = None
 
 
-def _connect() -> sqlite3.Connection:
-    """建立 SQLite 连接，开启外键与 WAL"""
-    conn = sqlite3.connect(settings.sqlite_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    return conn
+def _pg_dsn() -> str:
+    """把 asyncpg 风格的 URL 转换为 psycopg2 可识别的 DSN。"""
+    url = settings.database_url
+    if url.startswith("postgresql+asyncpg://"):
+        return url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return url
+
+
+def _connect() -> psycopg2.extensions.connection:
+    """从线程连接池获取一个 PostgreSQL 连接（RealDictCursor）。"""
+    global _pool
+    if _pool is None:
+        with _lock:
+            if _pool is None:
+                _pool = psycopg2.pool.ThreadedConnectionPool(
+                    1,
+                    20,
+                    _pg_dsn(),
+                    cursor_factory=RealDictCursor,
+                )
+    return _pool.getconn()
+
+
+def close_db_pool() -> None:
+    """关闭连接池，主要用于测试清理。"""
+    global _pool
+    with _lock:
+        if _pool is not None:
+            _pool.closeall()
+            _pool = None
+
+
+def _putconn(conn: psycopg2.extensions.connection) -> None:
+    """将连接归还到池；池已关闭时则真正关闭连接。"""
+    global _pool
+    with _lock:
+        if _pool is not None:
+            try:
+                _pool.putconn(conn)
+                return
+            except Exception:
+                pass
+    try:
+        _putconn(conn)
+    except Exception:
+        pass
+
+
+def _exec(
+    conn: psycopg2.extensions.connection,
+    sql: str,
+    params: tuple[Any, ...] | list[Any] | None = None,
+) -> psycopg2.extensions.cursor:
+    """创建游标并执行 SQL，返回游标供 fetch。"""
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    return cur
 
 
 def init_db() -> None:
-    """初始化两张表"""
-    Path(settings.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+    """初始化所有 legacy 表。"""
+    ddl_statements = [
+        """
+        CREATE TABLE IF NOT EXISTS meetings (
+            id TEXT PRIMARY KEY,
+            topic TEXT NOT NULL,
+            status TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            meeting_id TEXT NOT NULL,
+            agent_role TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            content TEXT NOT NULL,
+            claim_refs TEXT NOT NULL,
+            evidence_refs TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_messages_meeting ON messages(meeting_id)",
+        """
+        CREATE TABLE IF NOT EXISTS events (
+            seq SERIAL PRIMARY KEY,
+            meeting_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            trace_id TEXT
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_events_meeting ON events(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_events_meeting_seq ON events(meeting_id, seq)",
+        """
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id TEXT NOT NULL DEFAULT 'default',
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, key)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS meeting_tags (
+            id SERIAL PRIMARY KEY,
+            meeting_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(meeting_id, tag),
+            FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_meeting_tags_meeting ON meeting_tags(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_tags_tag ON meeting_tags(tag)",
+        """
+        CREATE TABLE IF NOT EXISTS agent_roles (
+            id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            perspective TEXT NOT NULL DEFAULT '',
+            expertise_domains TEXT NOT NULL DEFAULT '[]',
+            risk_appetite TEXT NOT NULL DEFAULT 'balanced',
+            default_stance TEXT NOT NULL DEFAULT '',
+            evidence_preference TEXT NOT NULL DEFAULT 'balanced',
+            model_override TEXT NOT NULL DEFAULT '',
+            background_brief TEXT NOT NULL DEFAULT '',
+            prompt_template TEXT NOT NULL DEFAULT '',
+            is_builtin INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active)",
+        """
+        CREATE TABLE IF NOT EXISTS meeting_aux (
+            meeting_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (meeting_id, key),
+            FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_meeting_aux_meeting ON meeting_aux(meeting_id)",
+    ]
     with _lock:
         conn = _connect()
         try:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS meetings (
-                    id TEXT PRIMARY KEY,
-                    topic TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    stage TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS messages (
-                    id TEXT PRIMARY KEY,
-                    meeting_id TEXT NOT NULL,
-                    agent_role TEXT NOT NULL,
-                    stage TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    claim_refs TEXT NOT NULL,
-                    evidence_refs TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (meeting_id) REFERENCES meetings(id)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_messages_meeting ON messages(meeting_id);
-
-                CREATE TABLE IF NOT EXISTS events (
-                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-                    meeting_id TEXT NOT NULL,
-                    type TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    ts TEXT NOT NULL,
-                    trace_id TEXT
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_events_meeting ON events(meeting_id);
-                CREATE INDEX IF NOT EXISTS idx_events_meeting_seq ON events(meeting_id, seq);
-
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    user_id TEXT NOT NULL DEFAULT 'default',
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY (user_id, key)
-                );
-
-                CREATE TABLE IF NOT EXISTS meeting_tags (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    meeting_id TEXT NOT NULL,
-                    tag TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    UNIQUE(meeting_id, tag),
-                    FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_meeting_tags_meeting ON meeting_tags(meeting_id);
-                CREATE INDEX IF NOT EXISTS idx_meeting_tags_tag ON meeting_tags(tag);
-
-                CREATE TABLE IF NOT EXISTS agent_roles (
-                    id TEXT PRIMARY KEY,
-                    display_name TEXT NOT NULL,
-                    perspective TEXT NOT NULL DEFAULT '',
-                    expertise_domains TEXT NOT NULL DEFAULT '[]',
-                    risk_appetite TEXT NOT NULL DEFAULT 'balanced',
-                    default_stance TEXT NOT NULL DEFAULT '',
-                    evidence_preference TEXT NOT NULL DEFAULT 'balanced',
-                    model_override TEXT NOT NULL DEFAULT '',
-                    background_brief TEXT NOT NULL DEFAULT '',
-                    prompt_template TEXT NOT NULL DEFAULT '',
-                    is_builtin INTEGER NOT NULL DEFAULT 0,
-                    is_active INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active);
-
-                CREATE TABLE IF NOT EXISTS meeting_aux (
-                    meeting_id TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    value_json TEXT NOT NULL DEFAULT '{}',
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY (meeting_id, key),
-                    FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_meeting_aux_meeting ON meeting_aux(meeting_id);
-                """
-            )
+            for stmt in ddl_statements:
+                _exec(conn, stmt)
             conn.commit()
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def save_meeting(
@@ -134,10 +190,10 @@ def save_meeting(
     with _lock:
         conn = _connect()
         try:
-            conn.execute(
+            _exec(conn, 
                 """
                 INSERT INTO meetings (id, topic, status, stage, created_at, payload)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT(id) DO UPDATE SET
                     topic=excluded.topic,
                     status=excluded.status,
@@ -155,7 +211,7 @@ def save_meeting(
             )
             conn.commit()
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def get_meeting(meeting_id: str) -> dict[str, Any] | None:
@@ -163,8 +219,8 @@ def get_meeting(meeting_id: str) -> dict[str, Any] | None:
     with _lock:
         conn = _connect()
         try:
-            row = conn.execute(
-                "SELECT * FROM meetings WHERE id = ?", (meeting_id,)
+            row = _exec(conn, 
+                "SELECT * FROM meetings WHERE id = %s", (meeting_id,)
             ).fetchone()
             if row is None:
                 return None
@@ -172,7 +228,7 @@ def get_meeting(meeting_id: str) -> dict[str, Any] | None:
             d["payload"] = json.loads(d["payload"])
             return d
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 # ---------- meeting_aux 辅助大字段持久化 ----------
@@ -185,7 +241,7 @@ def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
     """将 aux 大字段单独持久化到 meeting_aux 表。
 
     每个 aux key 对应一行，value_json 存 JSON 序列化后的值。
-    使用 INSERT OR REPLACE 实现 upsert。
+    使用 INSERT ... ON CONFLICT DO UPDATE 实现 upsert。
 
     Args:
         meeting_id: 会议 ID
@@ -198,10 +254,13 @@ def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
         conn = _connect()
         try:
             for key, value in aux.items():
-                conn.execute(
+                _exec(conn, 
                     """
-                    INSERT OR REPLACE INTO meeting_aux (meeting_id, key, value_json, updated_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT(meeting_id, key) DO UPDATE SET
+                        value_json=excluded.value_json,
+                        updated_at=excluded.updated_at
                     """,
                     (
                         meeting_id,
@@ -212,7 +271,7 @@ def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
                 )
             conn.commit()
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def get_meeting_aux(meeting_id: str) -> dict[str, Any]:
@@ -230,8 +289,8 @@ def get_meeting_aux(meeting_id: str) -> dict[str, Any]:
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
-                "SELECT key, value_json FROM meeting_aux WHERE meeting_id = ?",
+            rows = _exec(conn, 
+                "SELECT key, value_json FROM meeting_aux WHERE meeting_id = %s",
                 (meeting_id,),
             ).fetchall()
             for row in rows:
@@ -243,7 +302,7 @@ def get_meeting_aux(meeting_id: str) -> dict[str, Any]:
             # 表可能不存在（旧数据库），静默返回空 dict
             pass
         finally:
-            conn.close()
+            _putconn(conn)
     return aux
 
 
@@ -272,11 +331,11 @@ def list_meetings(include_deleted: bool = False) -> list[dict[str, Any]]:
         conn = _connect()
         try:
             if include_deleted:
-                rows = conn.execute(
+                rows = _exec(conn, 
                     "SELECT * FROM meetings ORDER BY created_at DESC"
                 ).fetchall()
             else:
-                rows = conn.execute(
+                rows = _exec(conn, 
                     "SELECT * FROM meetings WHERE status != 'deleted' ORDER BY created_at DESC"
                 ).fetchall()
             out = []
@@ -286,7 +345,7 @@ def list_meetings(include_deleted: bool = False) -> list[dict[str, Any]]:
                 out.append(d)
             return out
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def query_meetings(
@@ -312,16 +371,16 @@ def query_meetings(
                 conditions.append("m.status != 'deleted'")
 
             if q:
-                conditions.append("m.topic LIKE ?")
+                conditions.append("m.topic LIKE %s")
                 params.append(f"%{q}%")
 
             if tags:
                 # 交集过滤：会议需同时拥有所有指定标签
-                placeholders = ",".join("?" for _ in tags)
+                placeholders = ",".join("%s" for _ in tags)
                 conditions.append(
                     f"m.id IN (SELECT meeting_id FROM meeting_tags "
                     f"WHERE tag IN ({placeholders}) "
-                    f"GROUP BY meeting_id HAVING COUNT(DISTINCT tag) = ?)"
+                    f"GROUP BY meeting_id HAVING COUNT(DISTINCT tag) = %s)"
                 )
                 params.extend(tags)
                 params.append(len(tags))
@@ -329,15 +388,15 @@ def query_meetings(
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
             # 总数
-            total_row = conn.execute(
+            total_row = _exec(conn, 
                 f"SELECT COUNT(*) as cnt FROM meetings m {where_clause}", params
             ).fetchone()
             total = total_row["cnt"] if total_row else 0
 
             # 分页查询
-            rows = conn.execute(
+            rows = _exec(conn, 
                 f"SELECT m.* FROM meetings m {where_clause} "
-                f"ORDER BY m.created_at DESC LIMIT ? OFFSET ?",
+                f"ORDER BY m.created_at DESC LIMIT %s OFFSET %s",
                 [*params, limit, offset],
             ).fetchall()
 
@@ -346,8 +405,8 @@ def query_meetings(
                 d = dict(row)
                 d["payload"] = json.loads(d["payload"])
                 # 查询该会议的标签
-                tag_rows = conn.execute(
-                    "SELECT tag FROM meeting_tags WHERE meeting_id = ? ORDER BY tag",
+                tag_rows = _exec(conn, 
+                    "SELECT tag FROM meeting_tags WHERE meeting_id = %s ORDER BY tag",
                     (d["id"],),
                 ).fetchall()
                 d["tags"] = [r["tag"] for r in tag_rows]
@@ -355,7 +414,7 @@ def query_meetings(
 
             return {"items": items, "total": total}
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def get_meetings_by_ids(meeting_ids: list[str]) -> list[dict[str, Any]]:
@@ -369,8 +428,8 @@ def get_meetings_by_ids(meeting_ids: list[str]) -> list[dict[str, Any]]:
     with _lock:
         conn = _connect()
         try:
-            placeholders = ",".join("?" for _ in meeting_ids)
-            rows = conn.execute(
+            placeholders = ",".join("%s" for _ in meeting_ids)
+            rows = _exec(conn, 
                 f"SELECT id, topic, status, stage, created_at, payload "
                 f"FROM meetings WHERE id IN ({placeholders}) "
                 f"AND status NOT IN ('deleted', 'running') "
@@ -394,7 +453,7 @@ def get_meetings_by_ids(meeting_ids: list[str]) -> list[dict[str, Any]]:
                 out.append(d)
             return out
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def _extract_artifact_summary(artifact: dict[str, Any] | None) -> str:
@@ -436,7 +495,7 @@ def list_all_tags() -> list[dict[str, Any]]:
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
+            rows = _exec(conn, 
                 """SELECT tag, COUNT(*) as cnt, MAX(created_at) as last_used
                 FROM meeting_tags
                 GROUP BY tag
@@ -444,7 +503,7 @@ def list_all_tags() -> list[dict[str, Any]]:
             ).fetchall()
             return [{"tag": r["tag"], "count": r["cnt"], "last_used": r["last_used"]} for r in rows]
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def get_meeting_tags(meeting_id: str) -> list[str]:
@@ -452,13 +511,13 @@ def get_meeting_tags(meeting_id: str) -> list[str]:
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
-                "SELECT tag FROM meeting_tags WHERE meeting_id = ? ORDER BY tag",
+            rows = _exec(conn, 
+                "SELECT tag FROM meeting_tags WHERE meeting_id = %s ORDER BY tag",
                 (meeting_id,),
             ).fetchall()
             return [r["tag"] for r in rows]
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def add_meeting_tag(meeting_id: str, tag: str) -> bool:
@@ -466,14 +525,16 @@ def add_meeting_tag(meeting_id: str, tag: str) -> bool:
     with _lock:
         conn = _connect()
         try:
-            cursor = conn.execute(
-                "INSERT OR IGNORE INTO meeting_tags (meeting_id, tag, created_at) VALUES (?, ?, ?)",
+            cursor = _exec(conn, 
+                """INSERT INTO meeting_tags (meeting_id, tag, created_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT(meeting_id, tag) DO NOTHING""",
                 (meeting_id, tag, datetime.now().isoformat()),
             )
             conn.commit()
             return cursor.rowcount > 0
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def remove_meeting_tag(meeting_id: str, tag: str) -> bool:
@@ -481,14 +542,14 @@ def remove_meeting_tag(meeting_id: str, tag: str) -> bool:
     with _lock:
         conn = _connect()
         try:
-            cursor = conn.execute(
-                "DELETE FROM meeting_tags WHERE meeting_id = ? AND tag = ?",
+            cursor = _exec(conn, 
+                "DELETE FROM meeting_tags WHERE meeting_id = %s AND tag = %s",
                 (meeting_id, tag),
             )
             conn.commit()
             return cursor.rowcount > 0
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 # ---------- 批量删除 ----------
@@ -524,6 +585,7 @@ def batch_delete_meetings(
 
 # ---------- 事件持久化 ----------
 
+
 def save_event(
     meeting_id: str,
     event_type: str,
@@ -531,13 +593,14 @@ def save_event(
     ts: str,
     trace_id: str | None = None,
 ) -> int:
-    """持久化事件到 SQLite，返回自增 seq（对外 0 起始）"""
+    """持久化事件到 PostgreSQL，返回自增 seq（对外 0 起始）"""
     with _lock:
         conn = _connect()
         try:
-            cursor = conn.execute(
+            cursor = _exec(conn, 
                 """INSERT INTO events (meeting_id, type, payload, ts, trace_id)
-                VALUES (?, ?, ?, ?, ?)""",
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING seq""",
                 (
                     meeting_id,
                     event_type,
@@ -546,21 +609,23 @@ def save_event(
                     trace_id,
                 ),
             )
+            row = cursor.fetchone()
             conn.commit()
-            # SQLite AUTOINCREMENT 从 1 开始；对外统一转换为 0 起始
-            return (cursor.lastrowid or 1) - 1
+            # PostgreSQL SERIAL 从 1 开始；对外统一转换为 0 起始
+            seq = row["seq"] if row else 1
+            return seq - 1
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def load_events(meeting_id: str, from_seq: int = 0) -> list[dict[str, Any]]:
-    """从 SQLite 加载事件，支持增量回放"""
+    """从 PostgreSQL 加载事件，支持增量回放"""
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
+            rows = _exec(conn, 
                 """SELECT seq, meeting_id, type, payload, ts, trace_id
-                FROM events WHERE meeting_id = ? AND seq > ?
+                FROM events WHERE meeting_id = %s AND seq > %s
                 ORDER BY seq ASC""",
                 (meeting_id, from_seq),
             ).fetchall()
@@ -576,7 +641,7 @@ def load_events(meeting_id: str, from_seq: int = 0) -> list[dict[str, Any]]:
                 })
             return out
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def last_event_seq(meeting_id: str) -> int:
@@ -584,13 +649,13 @@ def last_event_seq(meeting_id: str) -> int:
     with _lock:
         conn = _connect()
         try:
-            row = conn.execute(
-                "SELECT MAX(seq) as max_seq FROM events WHERE meeting_id = ?",
+            row = _exec(conn, 
+                "SELECT MAX(seq) as max_seq FROM events WHERE meeting_id = %s",
                 (meeting_id,),
             ).fetchone()
             return (row["max_seq"] - 1) if row and row["max_seq"] else 0
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def recover_running_meetings() -> list[dict[str, Any]]:
@@ -598,12 +663,12 @@ def recover_running_meetings() -> list[dict[str, Any]]:
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
+            rows = _exec(conn, 
                 "SELECT * FROM meetings WHERE status = 'running'"
             ).fetchall()
             return [dict(row) for row in rows]
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def save_message(msg: dict[str, Any]) -> None:
@@ -611,11 +676,19 @@ def save_message(msg: dict[str, Any]) -> None:
     with _lock:
         conn = _connect()
         try:
-            conn.execute(
+            _exec(conn, 
                 """
-                INSERT OR REPLACE INTO messages
+                INSERT INTO messages
                 (id, meeting_id, agent_role, stage, content, claim_refs, evidence_refs, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT(id) DO UPDATE SET
+                    meeting_id=excluded.meeting_id,
+                    agent_role=excluded.agent_role,
+                    stage=excluded.stage,
+                    content=excluded.content,
+                    claim_refs=excluded.claim_refs,
+                    evidence_refs=excluded.evidence_refs,
+                    created_at=excluded.created_at
                 """,
                 (
                     msg["id"],
@@ -630,7 +703,7 @@ def save_message(msg: dict[str, Any]) -> None:
             )
             conn.commit()
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def list_messages(meeting_id: str) -> list[dict[str, Any]]:
@@ -638,8 +711,8 @@ def list_messages(meeting_id: str) -> list[dict[str, Any]]:
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
-                "SELECT * FROM messages WHERE meeting_id = ? ORDER BY created_at ASC",
+            rows = _exec(conn, 
+                "SELECT * FROM messages WHERE meeting_id = %s ORDER BY created_at ASC",
                 (meeting_id,),
             ).fetchall()
             out = []
@@ -650,7 +723,7 @@ def list_messages(meeting_id: str) -> list[dict[str, Any]]:
                 out.append(d)
             return out
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 # ---------- 会议删除 ----------
@@ -663,21 +736,21 @@ def soft_delete_meeting(meeting_id: str) -> bool:
         conn = _connect()
         try:
             # 先读取当前 payload
-            row = conn.execute(
-                "SELECT payload FROM meetings WHERE id = ?", (meeting_id,)
+            row = _exec(conn, 
+                "SELECT payload FROM meetings WHERE id = %s", (meeting_id,)
             ).fetchone()
             if row is None:
                 return False
             payload = json.loads(row["payload"])
             payload["_deleted_at"] = datetime.now().isoformat()
-            conn.execute(
-                "UPDATE meetings SET status = 'deleted', payload = ? WHERE id = ?",
+            _exec(conn, 
+                "UPDATE meetings SET status = 'deleted', payload = %s WHERE id = %s",
                 (json.dumps(payload, ensure_ascii=False, default=str), meeting_id),
             )
             conn.commit()
             return True
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def hard_delete_meeting(meeting_id: str) -> bool:
@@ -687,20 +760,20 @@ def hard_delete_meeting(meeting_id: str) -> bool:
         conn = _connect()
         try:
             # 先检查主记录是否存在
-            row = conn.execute(
-                "SELECT id FROM meetings WHERE id = ?", (meeting_id,)
+            row = _exec(conn, 
+                "SELECT id FROM meetings WHERE id = %s", (meeting_id,)
             ).fetchone()
             if row is None:
                 return False
             # 按依赖顺序删除：先 meeting_tags、messages（有外键），再 events，最后 meetings
-            conn.execute("DELETE FROM meeting_tags WHERE meeting_id = ?", (meeting_id,))
-            conn.execute("DELETE FROM messages WHERE meeting_id = ?", (meeting_id,))
-            conn.execute("DELETE FROM events WHERE meeting_id = ?", (meeting_id,))
-            conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+            _exec(conn, "DELETE FROM meeting_tags WHERE meeting_id = %s", (meeting_id,))
+            _exec(conn, "DELETE FROM messages WHERE meeting_id = %s", (meeting_id,))
+            _exec(conn, "DELETE FROM events WHERE meeting_id = %s", (meeting_id,))
+            _exec(conn, "DELETE FROM meetings WHERE id = %s", (meeting_id,))
             conn.commit()
             return True
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def restore_meeting(meeting_id: str) -> bool:
@@ -709,22 +782,22 @@ def restore_meeting(meeting_id: str) -> bool:
     with _lock:
         conn = _connect()
         try:
-            row = conn.execute(
-                "SELECT payload FROM meetings WHERE id = ? AND status = 'deleted'",
+            row = _exec(conn, 
+                "SELECT payload FROM meetings WHERE id = %s AND status = 'deleted'",
                 (meeting_id,),
             ).fetchone()
             if row is None:
                 return False
             payload = json.loads(row["payload"])
             payload.pop("_deleted_at", None)
-            conn.execute(
-                "UPDATE meetings SET status = 'aborted', payload = ? WHERE id = ?",
+            _exec(conn, 
+                "UPDATE meetings SET status = 'aborted', payload = %s WHERE id = %s",
                 (json.dumps(payload, ensure_ascii=False, default=str), meeting_id),
             )
             conn.commit()
             return True
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 # ---------- 用户偏好持久化 ----------
@@ -735,13 +808,13 @@ def get_preference(user_id: str, key: str) -> str | None:
     with _lock:
         conn = _connect()
         try:
-            row = conn.execute(
-                "SELECT value FROM user_preferences WHERE user_id = ? AND key = ?",
+            row = _exec(conn, 
+                "SELECT value FROM user_preferences WHERE user_id = %s AND key = %s",
                 (user_id, key),
             ).fetchone()
             return row["value"] if row else None
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def set_preference(user_id: str, key: str, value: str) -> str:
@@ -750,10 +823,10 @@ def set_preference(user_id: str, key: str, value: str) -> str:
     with _lock:
         conn = _connect()
         try:
-            conn.execute(
+            _exec(conn, 
                 """
                 INSERT INTO user_preferences (user_id, key, value, updated_at)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT(user_id, key) DO UPDATE SET
                     value=excluded.value,
                     updated_at=excluded.updated_at
@@ -763,7 +836,7 @@ def set_preference(user_id: str, key: str, value: str) -> str:
             conn.commit()
             return updated_at
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def get_all_preferences(user_id: str) -> dict[str, str]:
@@ -771,13 +844,13 @@ def get_all_preferences(user_id: str) -> dict[str, str]:
     with _lock:
         conn = _connect()
         try:
-            rows = conn.execute(
-                "SELECT key, value FROM user_preferences WHERE user_id = ?",
+            rows = _exec(conn, 
+                "SELECT key, value FROM user_preferences WHERE user_id = %s",
                 (user_id,),
             ).fetchall()
             return {row["key"]: row["value"] for row in rows}
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def delete_preference(user_id: str, key: str) -> bool:
@@ -785,14 +858,14 @@ def delete_preference(user_id: str, key: str) -> bool:
     with _lock:
         conn = _connect()
         try:
-            cursor = conn.execute(
-                "DELETE FROM user_preferences WHERE user_id = ? AND key = ?",
+            cursor = _exec(conn, 
+                "DELETE FROM user_preferences WHERE user_id = %s AND key = %s",
                 (user_id, key),
             )
             conn.commit()
             return cursor.rowcount > 0
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 # ---------- Agent 角色 CRUD ----------
@@ -804,16 +877,16 @@ def list_agent_roles(active_only: bool = False) -> list[dict[str, Any]]:
         conn = _connect()
         try:
             if active_only:
-                rows = conn.execute(
+                rows = _exec(conn, 
                     "SELECT * FROM agent_roles WHERE is_active = 1 ORDER BY is_builtin DESC, display_name ASC"
                 ).fetchall()
             else:
-                rows = conn.execute(
+                rows = _exec(conn, 
                     "SELECT * FROM agent_roles ORDER BY is_builtin DESC, display_name ASC"
                 ).fetchall()
             return [_row_to_role_dict(r) for r in rows]
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def get_agent_role(role_id: str) -> dict[str, Any] | None:
@@ -821,14 +894,14 @@ def get_agent_role(role_id: str) -> dict[str, Any] | None:
     with _lock:
         conn = _connect()
         try:
-            row = conn.execute(
-                "SELECT * FROM agent_roles WHERE id = ?", (role_id,)
+            row = _exec(conn, 
+                "SELECT * FROM agent_roles WHERE id = %s", (role_id,)
             ).fetchone()
             if row is None:
                 return None
             return _row_to_role_dict(row)
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def save_agent_role(role: dict[str, Any]) -> None:
@@ -836,14 +909,14 @@ def save_agent_role(role: dict[str, Any]) -> None:
     with _lock:
         conn = _connect()
         try:
-            conn.execute(
+            _exec(conn, 
                 """
                 INSERT INTO agent_roles (
                     id, display_name, perspective, expertise_domains,
                     risk_appetite, default_stance, evidence_preference,
                     model_override, background_brief, prompt_template,
                     is_builtin, is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(id) DO UPDATE SET
                     display_name=excluded.display_name,
                     perspective=excluded.perspective,
@@ -876,7 +949,7 @@ def save_agent_role(role: dict[str, Any]) -> None:
             )
             conn.commit()
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def delete_agent_role(role_id: str) -> bool:
@@ -884,38 +957,40 @@ def delete_agent_role(role_id: str) -> bool:
     with _lock:
         conn = _connect()
         try:
-            row = conn.execute(
-                "SELECT is_builtin FROM agent_roles WHERE id = ?", (role_id,)
+            row = _exec(conn, 
+                "SELECT is_builtin FROM agent_roles WHERE id = %s", (role_id,)
             ).fetchone()
             if row is None:
                 return False
             if row["is_builtin"]:
                 return False
-            conn.execute("DELETE FROM agent_roles WHERE id = ?", (role_id,))
+            _exec(conn, "DELETE FROM agent_roles WHERE id = %s", (role_id,))
             conn.commit()
             return True
         finally:
-            conn.close()
+            _putconn(conn)
 
 
 def get_agent_roles_by_ids(role_ids: list[str]) -> list[dict[str, Any]]:
     """批量取角色，按输入顺序返回"""
+    if not role_ids:
+        return []
     with _lock:
         conn = _connect()
         try:
-            placeholders = ",".join("?" for _ in role_ids)
-            rows = conn.execute(
+            placeholders = ",".join("%s" for _ in role_ids)
+            rows = _exec(conn, 
                 f"SELECT * FROM agent_roles WHERE id IN ({placeholders}) AND is_active = 1",
                 role_ids,
             ).fetchall()
             role_map = {r["id"]: _row_to_role_dict(r) for r in rows}
             return [role_map[rid] for rid in role_ids if rid in role_map]
         finally:
-            conn.close()
+            _putconn(conn)
 
 
-def _row_to_role_dict(row: sqlite3.Row) -> dict[str, Any]:
-    """将 SQLite 行转为字典，解析 JSON 字段"""
+def _row_to_role_dict(row: RealDictCursor) -> dict[str, Any]:
+    """将 PostgreSQL RealDictRow 转为字典，解析 JSON 字段"""
     d = dict(row)
     d["expertise_domains"] = json.loads(d["expertise_domains"])
     return d

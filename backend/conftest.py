@@ -1,7 +1,6 @@
 # 测试全局配置 + 公共夹具
 # 必须在导入 app 之前设置环境变量
 import os
-import tempfile
 
 # CONCLAVE_TEST_REAL_LLM=1 时加载 .env 使用真实 LLM；默认走 StubLLM
 # 用法：CONCLAVE_TEST_REAL_LLM=1 python -m pytest -m real_llm
@@ -11,16 +10,42 @@ if os.environ.get("CONCLAVE_TEST_REAL_LLM") != "1":
     os.environ.setdefault("CONCLAVE_RERANK_API_KEY", "")
 # 真实 LLM 模式下不设置空值，让 config.py 的 _load_dotenv() 从 .env 加载真实 key
 
-# SQLite 路径指向临时目录，避免污染工作目录
-os.environ.setdefault(
-    "CONCLAVE_DB_PATH", os.path.join(tempfile.gettempdir(), "conclave_test.db")
-)
-
-# 测试用 SQLite 替代 PostgreSQL，避免依赖本地 pg 服务与连接池清理问题
+# 测试使用 PostgreSQL；Docker 内由 compose 注入 DATABASE_URL，本地开发默认连 5433
 os.environ.setdefault(
     "DATABASE_URL",
-    f"sqlite+aiosqlite:///{os.path.join(tempfile.gettempdir(), 'conclave_test_orm.db')}",
+    "postgresql+asyncpg://conclave:conclave_dev@localhost:5433/conclave_test",
 )
+
+
+def _ensure_test_database() -> None:
+    """在导入 app 前确保测试数据库存在（连到默认 postgres 库创建）。"""
+    import psycopg2
+    from psycopg2.sql import Identifier, SQL
+    from urllib.parse import urlparse
+
+    raw_url = os.environ.get("DATABASE_URL", "")
+    # asyncpg 风格的 URL 需要转换成 psycopg2 可识别的形式
+    pg_url = raw_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    parsed = urlparse(pg_url)
+    dbname = parsed.path.lstrip("/") or "conclave_test"
+    # 连接到默认 postgres 数据库进行管理
+    admin_parts = parsed._replace(path="/postgres")
+    admin_url = admin_parts.geturl()
+    try:
+        conn = psycopg2.connect(admin_url)
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
+        if not cur.fetchone():
+            cur.execute(SQL("CREATE DATABASE {}").format(Identifier(dbname)))
+        cur.close()
+        conn.close()
+    except Exception:
+        # 无权限或数据库已存在时忽略，让应用启动逻辑自行处理
+        pass
+
+
+_ensure_test_database()
 
 # 迭代二：测试时禁用记忆提取，避免历史画像干扰断言
 os.environ.setdefault("CONCLAVE_MEMORY_DISABLED", "1")
@@ -57,16 +82,19 @@ from app.orchestrator import runner as runner_mod
 from app.routers import meetings as meetings_mod
 
 
-# 每个测试前清空事件表与自增计数器，保证事件 seq 从 0 开始
+# 每个测试前清空事件表并重置序列，保证事件 seq 从 0 开始
 @pytest.fixture(autouse=True)
 def _reset_event_bus():
-    from app.db_legacy import _connect
+    from app.db_legacy import _connect, _putconn
     try:
         conn = _connect()
-        conn.execute("DELETE FROM events")
-        conn.execute("DELETE FROM sqlite_sequence WHERE name='events'")
-        conn.commit()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("TRUNCATE TABLE events RESTART IDENTITY CASCADE")
+            conn.commit()
+            cur.close()
+        finally:
+            _putconn(conn)
     except Exception:
         pass
     bus._history.clear()
@@ -76,15 +104,17 @@ def _reset_event_bus():
 
 # ---------- pytest 标记注册 ----------
 
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_llm: 需要真实 LLM API key 的集成测试")
 
 
 # ---------- 公共 fixture：TestClient ----------
 
-@pytest.fixture()
+
+@pytest.fixture(scope="function")
 def client():
-    """FastAPI 测试客户端（带 lifespan 初始化）"""
+    """FastAPI 测试客户端（带 lifespan 初始化，函数级隔离）"""
     app = create_app()
     with TestClient(app) as c:
         yield c
@@ -92,9 +122,10 @@ def client():
 
 # ---------- 公共 fixture：状态重置（autouse） ----------
 
+
 @pytest.fixture(autouse=True)
 def _reset_state():
-    """每个测试前后清理进程级状态（runner / event bus / vector store）
+    """每个测试前后清理进程级状态（runner / event bus / vector store / 数据库连接池）
 
     确保测试间无状态泄漏：
     - runner_mod._states：会议运行态
@@ -102,6 +133,7 @@ def _reset_state():
     - bus._subs / bus._history：事件订阅和历史
     - store_mod._stores：RAG 向量库
     - memory_store：三层记忆
+    - 异步/同步数据库连接池
     """
     runner_mod._states.clear()
     meetings_mod._running_tasks.clear()
@@ -137,9 +169,18 @@ def _reset_state():
     except Exception:
         pass
     reset_compute()
+    # 释放异步引擎与同步连接池，避免跨测试连接泄漏
+    try:
+        from app.db.engine import dispose_async_engine
+        from app.db_legacy import close_db_pool
+        dispose_async_engine()
+        close_db_pool()
+    except Exception:
+        pass
 
 
 # ---------- 公共 fixture：同步运行会议到完成 ----------
+
 
 def run_to_done(meeting_id: str):
     """同步运行会议到完成（供非 fixture 测试函数使用）
@@ -164,6 +205,7 @@ def run_meeting():
 
 
 # ---------- 公共 fixture：Mock LLM（用于测试 RealLLM 逻辑） ----------
+
 
 class MockLLM:
     """可控 Mock LLM：按预设返回值模拟 RealLLM 行为

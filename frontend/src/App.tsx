@@ -1,6 +1,6 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { ConfigProvider, Tabs, Button, Tooltip, Typography } from 'antd'
 import {
   TeamOutlined,
@@ -19,8 +19,6 @@ import {
   DollarOutlined,
   AppstoreOutlined,
   MessageOutlined,
-  SafetyOutlined,
-  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { ThemeProvider, useTheme } from './store/ThemeContext.tsx'
@@ -53,7 +51,7 @@ import { DashboardView } from './components/DashboardView.tsx'
 import { ModelsView } from './components/ModelsView.tsx'
 import { PanelErrorBoundary } from './components/ErrorBoundary.tsx'
 import { LogPanel } from './components/LogPanel.tsx'
-import { CaptchaGuard } from './components/CaptchaGuard.tsx'
+import { GuardButton } from './components/GuardButton.tsx'
 import type { BadgeItem } from './components/FloatingBadges.tsx'
 
 /** 全局视图切换：会议 / 工作区 */
@@ -380,104 +378,9 @@ function AntdThemeWrapper({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** CAPTCHA 守卫挂载点：仅在非首页显示，保持 WS 连接跨视图存活
- *  右侧吸边隐藏设计：
- *    - 常态：只露出浅蓝色小盾牌图标，贴紧右边缘，尽量少的遮挡内容
- *    - 悬停：向右展开为完整值守开关 + 状态标签
- *    - 鼠标移出 800ms 后自动收回为小盾牌
- */
 function CaptchaGuardLayer() {
   const { path } = useRouter()
-  const [expanded, setExpanded] = useState(false)
-  const [guardStatus, setGuardStatus] = useState<{ guardMode: boolean; hasPending: boolean }>({ guardMode: false, hasPending: false })
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  if (path === '/') return null
-
-  const clearTimer = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-  }
-
-  const handleMouseEnter = () => {
-    clearTimer()
-    setExpanded(true)
-  }
-
-  const handleMouseLeave = () => {
-    timerRef.current = setTimeout(() => setExpanded(false), 800)
-  }
-
-  useEffect(() => {
-    return () => { clearTimer() }
-  }, [])
-
-  const active = guardStatus.guardMode
-  const pending = guardStatus.hasPending
-  const shieldColor = pending ? '#ff4d4f' : active ? '#0958d9' : '#1677ff'
-  const shieldBg = pending ? '#fff2f0' : active ? '#e6f4ff' : '#f0f7ff'
-
-  return (
-    <div
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      style={{
-        position: 'fixed',
-        top: 56,
-        right: 0,
-        zIndex: 1100,
-        display: 'flex',
-        alignItems: 'center',
-        width: expanded ? 260 : 28,
-        height: 28,
-        padding: expanded ? '5px 10px' : '5px 0 5px 5px',
-        background: 'var(--bg, #fff)',
-        border: '1px solid var(--border, #e5e7eb)',
-        borderRight: 'none',
-        borderRadius: '6px 0 0 6px',
-        boxShadow: expanded ? '0 2px 8px rgba(0,0,0,0.08)' : '-2px 0 6px rgba(0,0,0,0.04)',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
-        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-        cursor: 'pointer',
-      }}
-    >
-      {/* 小盾牌（常态与展开态均显示，作为视觉锚点） */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 18,
-          height: 18,
-          borderRadius: '50%',
-          background: shieldBg,
-          color: shieldColor,
-          flexShrink: 0,
-          transition: 'all 0.25s ease',
-        }}
-        title={active ? (pending ? '值守中 · 有待处理验证码' : '值守中') : '值守已关闭'}
-      >
-        {active ? <SafetyCertificateOutlined style={{ fontSize: 11 }} /> : <SafetyOutlined style={{ fontSize: 11 }} />}
-      </div>
-
-      {/* 展开面板 */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginLeft: 8,
-          opacity: expanded ? 1 : 0,
-          transition: 'opacity 0.2s ease',
-        }}
-      >
-        <CaptchaGuard compact onStatusChange={setGuardStatus} />
-      </div>
-    </div>
-  )
+  return <GuardButton path={path} />
 }
 
 export default function App() {

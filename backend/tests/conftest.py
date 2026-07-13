@@ -18,3 +18,16 @@ def sample_wiki_topic() -> str:
 @pytest.fixture
 def sample_stock_topic() -> str:
     return "分析苹果公司（AAPL）股票未来三个月走势，包含技术面、基本面和舆情风险"
+
+
+@pytest.fixture(autouse=True)
+def _dispose_db_resources_after_test():
+    """每个测试结束后释放数据库连接资源，避免跨测试泄漏。"""
+    yield
+    try:
+        from app.db.engine import dispose_async_engine
+        from app.db_legacy import close_db_pool
+        dispose_async_engine()
+        close_db_pool()
+    except Exception:
+        pass

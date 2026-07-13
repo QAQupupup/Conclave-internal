@@ -10,6 +10,9 @@ concurrency:
   group: release-oss
   cancel-in-progress: true
 
+env:
+  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+
 jobs:
   publish-oss:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
@@ -27,8 +30,8 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install Cython>=3.0
+          python -m pip install --upgrade pip --index-url ${{ env.PIP_INDEX_URL }}
+          pip install Cython>=3.0 --index-url ${{ env.PIP_INDEX_URL }}
 
       - name: Setup SSH for OSS repo
         uses: webfactory/ssh-agent@v0.9.0
@@ -41,12 +44,13 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      # [FIX] 明确克隆 public/main 分支作为 auto-sync 的基线，避免 default branch 异常时被带到其他分支。
       - name: Clone OSS repository
         env:
           OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
         run: |
           REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave.git}"
-          git clone --depth 1 "$REPO" ../Conclave-OSS
+          git clone --branch main --depth 1 "$REPO" ../Conclave-OSS
 
       - name: Publish to OSS auto-sync branch
         env:

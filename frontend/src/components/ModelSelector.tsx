@@ -371,6 +371,7 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
             )}
           </Text>
           <Input.Password
+            data-testid="api-key-input"
             placeholder={currentProvider?.has_key ? '留空使用系统默认Key' : '输入你的 API Key（sk-...）'}
             value={sel.api_key}
             onChange={(e) => updateSel({ api_key: e.target.value })}

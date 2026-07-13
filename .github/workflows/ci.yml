@@ -10,6 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+  NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
@@ -26,7 +30,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip --index-url ${{ env.PIP_INDEX_URL }}
           pip install -r requirements.txt
 
       - name: Lint with ruff
@@ -38,11 +42,6 @@ jobs:
         run: |
           pip install mypy>=1.10
           mypy app conclave_core || true
-
-      - name: Test with pytest
-        run: |
-          pip install pytest-asyncio>=0.23
-          pytest -q --tb=short
 
   frontend-checks:
     runs-on: ubuntu-latest
@@ -64,13 +63,33 @@ jobs:
 
       - name: Lint with ESLint
         run: npm run lint -- --max-warnings=0
-        continue-on-error: true
 
       - name: Type check with tsc
         run: npx tsc --noEmit
 
       - name: Build
         run: npm run build
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run frontend unit tests
+        run: npm run test
 
   compose-check:
     runs-on: ubuntu-latest
@@ -85,3 +104,19 @@ jobs:
 
       - name: Validate OSS Docker Compose
         run: docker compose -f docker-compose.oss.yml config --quiet
+
+  backend-integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and run backend tests in Docker Compose
+        run: |
+          docker compose -f docker-compose.test.yml up --build --exit-code-from backend-test
+
+      - name: Tear down test stack
+        if: always()
+        run: docker compose -f docker-compose.test.yml down --volumes

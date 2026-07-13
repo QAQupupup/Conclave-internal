@@ -153,13 +153,18 @@ def create_app() -> FastAPI:
         checks: dict[str, str] = {}
         _test_mode = os.environ.get("CONCLAVE_TEST_MODE") == "1"
 
-        # SQLite 检查（旧兼容层）
+        # 同步 PostgreSQL 兼容层检查
         try:
-            from app.db_legacy import _connect
+            from app.db_legacy import _connect, _putconn
             conn = _connect()
-            conn.execute("SELECT 1")
-            conn.close()
-            checks["sqlite"] = "ok"
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchone()
+                cur.close()
+                checks["sqlite"] = "ok"
+            finally:
+                _putconn(conn)
         except Exception as e:
             checks["sqlite"] = f"error: {e}"
 
