@@ -24,6 +24,8 @@ BACKEND_DIR = PACKAGE_DIR.parent
 
 EXCLUDED_MODULES: set[str] = {
     # 纯 Pydantic 数据模型保持源码形式发布，业务逻辑已迁移到 *_logic 模块进行编译保护。
+    "conclave_core.charter",
+    "conclave_core.conclusion_chain",
 }
 
 

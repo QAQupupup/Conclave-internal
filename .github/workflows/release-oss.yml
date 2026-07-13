@@ -47,13 +47,14 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      # [FIX] 明确克隆 public/main 分支作为 auto-sync 的基线，避免 default branch 异常时被带到其他分支。
+      # public 仓库当前没有 main 分支，默认分支为 refactor/v3-manager-agent-runtime。
+      # 不指定 --branch，让 git clone 使用远程默认分支，避免 clone 失败。
       - name: Clone OSS repository
         env:
           OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
         run: |
           REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave.git}"
-          git clone --branch main --depth 1 "$REPO" ../Conclave-OSS
+          git clone --depth 1 "$REPO" ../Conclave-OSS
 
       - name: Publish to OSS auto-sync branch
         env:
