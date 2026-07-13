@@ -38,17 +38,21 @@ async def lifespan(app: FastAPI):
     init_db()
     init_auth_table()
 
-    # 新 PostgreSQL 表结构初始化（SQLAlchemy ORM）
+    # PostgreSQL 表结构初始化（SQLAlchemy ORM，含记忆子系统表）
     from app.config import settings
     if settings.db_mode == "postgresql":
         async with async_session_factory() as session:
             async with session.bind.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
+    # 记忆子系统初始化（从 PG 恢复画像/特征/原始发言到内存）
+    from app.memory.store import memory_store
+    await memory_store.init()
+
     # 日志：当前持久化后端
     import logging as _logging
     _logger = _logging.getLogger("lifespan")
-    _logger.info("db_backend=%s | db_mode=%s", settings.db_backend, settings.db_mode)
+    _logger.info("db_mode=%s", settings.db_mode)
 
     # Redis 初始化（不可用时降级，不阻塞启动）
     await init_redis(app)

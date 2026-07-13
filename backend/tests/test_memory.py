@@ -10,11 +10,11 @@ from app.memory.store import memory_store
 # ---------- fixtures ----------
 
 @pytest.fixture(autouse=True)
-def _clear_memory():
+async def _clear_memory():
     """每个测试前清空进程级记忆单例，保证隔离"""
-    memory_store.clear()
+    await memory_store.clear()
     yield
-    memory_store.clear()
+    await memory_store.clear()
 
 
 def _enable_memory():
@@ -22,7 +22,6 @@ def _enable_memory():
     from app.config import settings
 
     original = settings.memory_enabled
-    # frozen dataclass 用 object.__setattr__ 绕过冻结限制
     object.__setattr__(settings, "memory_enabled", True)
     return original
 
@@ -93,9 +92,10 @@ def test_profile_memory_defaults():
 
 # ---------- record_raw 测试 ----------
 
-def test_record_raw_and_query():
+@pytest.mark.asyncio
+async def test_record_raw_and_query():
     """测试 record_raw + 查询"""
-    mem = memory_store.record_raw(
+    mem = await memory_store.record_raw(
         meeting_id="m1",
         agent_role="engineer",
         stage="intra_team",
@@ -120,10 +120,11 @@ def test_record_raw_and_query():
     assert memory_store.get_raw("nonexistent") == []
 
 
-def test_record_raw_multiple():
+@pytest.mark.asyncio
+async def test_record_raw_multiple():
     """测试多条 RawMemory 记录"""
     for i in range(3):
-        memory_store.record_raw(
+        await memory_store.record_raw(
             meeting_id="m1",
             agent_role="product_architect",
             stage="intra_team",
@@ -135,7 +136,8 @@ def test_record_raw_multiple():
 
 # ---------- extract_features 测试 ----------
 
-def test_extract_features_stub_rules():
+@pytest.mark.asyncio
+async def test_extract_features_stub_rules():
     """测试 extract_features（stub 模式规则提炼）"""
     messages = [
         {
@@ -153,43 +155,41 @@ def test_extract_features_stub_rules():
             "claim_refs": [],
         },
     ]
-    features = memory_store.extract_features(
+    features = await memory_store.extract_features(
         meeting_id="m1",
         agent_role="engineer",
         messages=messages,
     )
-    # 应产出 4 个维度的特征
     assert len(features) == 4
     feature_types = {f.feature_type for f in features}
     assert feature_types == {"stance_style", "evidence_dependency", "risk_appetite", "collaboration"}
 
-    # 风险关键词多 -> stance_style 应为 conservative
     stance = next(f for f in features if f.feature_type == "stance_style")
     assert stance.feature_value == "conservative"
 
-    # 证据引用密度高 -> evidence_dependency 应为 high
     ev_dep = next(f for f in features if f.feature_type == "evidence_dependency")
     assert ev_dep.feature_value == "high"
 
-    # sample_count 应等于消息数
     for f in features:
         assert f.sample_count == 2
         assert f.confidence > 0
 
 
-def test_extract_features_empty_messages():
+@pytest.mark.asyncio
+async def test_extract_features_empty_messages():
     """空消息列表不产出特征"""
-    features = memory_store.extract_features("m1", "engineer", [])
+    features = await memory_store.extract_features("m1", "engineer", [])
     assert features == []
 
 
-def test_extract_features_evidence_low():
+@pytest.mark.asyncio
+async def test_extract_features_evidence_low():
     """无证据引用 -> evidence_dependency = low"""
     messages = [
         {"content": "普通发言", "evidence_refs": []},
         {"content": "另一个普通发言", "evidence_refs": []},
     ]
-    features = memory_store.extract_features("m1", "engineer", messages)
+    features = await memory_store.extract_features("m1", "engineer", messages)
     ev_dep = next(f for f in features if f.feature_type == "evidence_dependency")
     assert ev_dep.feature_value == "low"
 
@@ -217,7 +217,8 @@ def test_get_or_create_profile_idempotent():
 
 # ---------- update_profile 测试 ----------
 
-def test_update_profile_merges_features():
+@pytest.mark.asyncio
+async def test_update_profile_merges_features():
     """测试 update_profile 更新画像"""
     features = [
         FeatureMemory(
@@ -241,25 +242,25 @@ def test_update_profile_merges_features():
             source_meeting_ids=["m1"],
         ),
     ]
-    profile = memory_store.update_profile("engineer", features)
+    profile = await memory_store.update_profile("engineer", features)
     assert profile.default_stance_style == "conservative"
     assert profile.evidence_dependency_level == "high"
     assert profile.collaboration_preference == "bridging"
-    # conservative -> ambiguity_tolerance 降低，escalation_threshold 降低
     assert profile.ambiguity_tolerance == 0.3
     assert profile.escalation_threshold == 0.4
-    # version 应递增
     assert profile.version >= 2
 
 
-def test_update_profile_empty_features():
+@pytest.mark.asyncio
+async def test_update_profile_empty_features():
     """空特征列表不更新画像"""
-    profile = memory_store.update_profile("engineer", [])
+    profile = await memory_store.update_profile("engineer", [])
     assert profile.default_stance_style == "balanced"
     assert profile.version == 1
 
 
-def test_update_profile_low_confidence_ignored():
+@pytest.mark.asyncio
+async def test_update_profile_low_confidence_ignored():
     """低置信度特征不更新画像"""
     features = [
         FeatureMemory(
@@ -268,8 +269,7 @@ def test_update_profile_low_confidence_ignored():
             source_meeting_ids=["m1"],
         ),
     ]
-    profile = memory_store.update_profile("engineer", features)
-    # confidence < 0.4，不更新
+    profile = await memory_store.update_profile("engineer", features)
     assert profile.default_stance_style == "balanced"
 
 
@@ -286,7 +286,8 @@ def test_get_profile_anchor_empty_for_default_profile():
     assert memory_store.get_profile_anchor("engineer") == ""
 
 
-def test_get_profile_anchor_returns_text_after_update():
+@pytest.mark.asyncio
+async def test_get_profile_anchor_returns_text_after_update():
     """更新画像后返回注入文本"""
     features = [
         FeatureMemory(
@@ -310,7 +311,7 @@ def test_get_profile_anchor_returns_text_after_update():
             source_meeting_ids=["m1"],
         ),
     ]
-    memory_store.update_profile("engineer", features)
+    await memory_store.update_profile("engineer", features)
     anchor = memory_store.get_profile_anchor("engineer")
     assert anchor != ""
     assert "决策偏置" in anchor
@@ -320,7 +321,8 @@ def test_get_profile_anchor_returns_text_after_update():
 
 # ---------- inject_profile 测试 ----------
 
-def test_inject_profile_with_anchor():
+@pytest.mark.asyncio
+async def test_inject_profile_with_anchor():
     """inject_profile 在有画像时拼到 prompt 前"""
     from app.memory.profile import inject_profile
 
@@ -346,11 +348,10 @@ def test_inject_profile_with_anchor():
             source_meeting_ids=["m1"],
         ),
     ]
-    memory_store.update_profile("engineer", features)
+    await memory_store.update_profile("engineer", features)
     result = inject_profile("原始prompt", "engineer")
     assert "决策偏置" in result
     assert "原始prompt" in result
-    # 画像在 prompt 之前
     assert result.index("决策偏置") < result.index("原始prompt")
 
 
@@ -364,7 +365,8 @@ def test_inject_profile_without_anchor():
 
 # ---------- trigger_extraction 测试 ----------
 
-def test_trigger_extraction_from_state():
+@pytest.mark.asyncio
+async def test_trigger_extraction_from_state():
     """测试 trigger_extraction 从 MeetingState 提炼"""
     from app.memory.profile import trigger_extraction
     from app.models import MeetingState
@@ -389,30 +391,24 @@ def test_trigger_extraction_from_state():
             "adopted_claims": ["c1"],
         }
 
-        trigger_extraction(state)
+        await trigger_extraction(state)
 
-        # 1. 原始发言已记录
         raw = memory_store.get_raw("engineer")
         assert len(raw) == 1
-        assert raw[0].adopted is True  # c1 在 adopted_claims 中
+        assert raw[0].adopted is True
 
-        # 2. 特征已提炼
         features = memory_store.get_features("engineer")
         assert len(features) == 4
 
-        # 3. 画像已更新
         anchor = memory_store.get_profile_anchor("engineer")
         assert anchor != ""
     finally:
         _restore_memory(original)
 
 
-def test_trigger_extraction_borrowed_role_no_profile():
-    """测试借调角色发言记录但不沉淀画像
-
-    security_expert 现在是正式 Role 枚举成员，改用 financial_advisor
-    作为不在 Role 枚举中的借调角色示例。
-    """
+@pytest.mark.asyncio
+async def test_trigger_extraction_borrowed_role_no_profile():
+    """测试借调角色发言记录但不沉淀画像"""
     from app.memory.profile import trigger_extraction
     from app.models import MeetingState
 
@@ -433,14 +429,12 @@ def test_trigger_extraction_borrowed_role_no_profile():
         ]
         state.decision_record = {"decisions": [], "adopted_claims": []}
 
-        trigger_extraction(state)
+        await trigger_extraction(state)
 
-        # 借调角色发言被记录到 RawMemory
         raw = memory_store.get_raw("financial_advisor")
         assert len(raw) == 1
         assert raw[0].content == "预算超支风险高，认证模块有隐患"
 
-        # 但不沉淀画像（无特征、无画像锚点）
         features = memory_store.get_features("financial_advisor")
         assert len(features) == 0
 
@@ -452,11 +446,11 @@ def test_trigger_extraction_borrowed_role_no_profile():
 
 def test_trigger_extraction_disabled():
     """memory_enabled=False 时 trigger_extraction 直接返回"""
+    import asyncio
     from app.config import settings
     from app.memory.profile import trigger_extraction
     from app.models import MeetingState
 
-    # conftest 已禁用，确保是 False
     assert settings.memory_enabled is False
 
     state = MeetingState(meeting_id="m3", topic="禁用测试")
@@ -469,18 +463,14 @@ def test_trigger_extraction_disabled():
             "claim_refs": [],
         },
     ]
-    trigger_extraction(state)
+    asyncio.run(trigger_extraction(state))
 
-    # 禁用时不应记录任何记忆
     assert memory_store.get_raw("engineer") == []
 
 
-def test_trigger_extraction_mixed_roles():
-    """正式角色与借调角色混合：正式角色沉淀画像，借调角色只记录
-
-    data_engineer 现在是正式 Role 枚举成员，改用 legal_counsel
-    作为不在 Role 枚举中的借调角色示例。
-    """
+@pytest.mark.asyncio
+async def test_trigger_extraction_mixed_roles():
+    """正式角色与借调角色混合：正式角色沉淀画像，借调角色只记录"""
     from app.memory.profile import trigger_extraction
     from app.models import MeetingState
 
@@ -505,14 +495,12 @@ def test_trigger_extraction_mixed_roles():
         ]
         state.decision_record = {"decisions": [], "adopted_claims": []}
 
-        trigger_extraction(state)
+        await trigger_extraction(state)
 
-        # 正式角色 engineer：记录 + 沉淀画像
         assert len(memory_store.get_raw("engineer")) == 1
         assert len(memory_store.get_features("engineer")) == 4
         assert memory_store.get_profile_anchor("engineer") != ""
 
-        # 借调角色 legal_counsel：只记录，不沉淀
         assert len(memory_store.get_raw("legal_counsel")) == 1
         assert len(memory_store.get_features("legal_counsel")) == 0
         assert memory_store.get_profile_anchor("legal_counsel") == ""
@@ -522,12 +510,12 @@ def test_trigger_extraction_mixed_roles():
 
 def test_trigger_extraction_exception_safe():
     """trigger_extraction 异常时不影响主流程"""
+    import asyncio
     from app.memory.profile import trigger_extraction
 
     original = _enable_memory()
     try:
-        # 传入非法对象，trigger_extraction 应捕获异常不抛出
-        trigger_extraction(None)  # type: ignore
-        trigger_extraction("not a state")  # type: ignore
+        asyncio.run(trigger_extraction(None))  # type: ignore
+        asyncio.run(trigger_extraction("not a state"))  # type: ignore
     finally:
         _restore_memory(original)

@@ -24,7 +24,7 @@ def inject_profile(prompt: str, agent_role: str) -> str:
         return prompt
 
 
-def trigger_extraction(state: Any) -> None:
+async def trigger_extraction(state: Any) -> None:
     """会议结束后触发记忆提取
 
     遍历 state.messages，按 agent_role 分组：
@@ -65,9 +65,8 @@ def trigger_extraction(state: Any) -> None:
             for msg in msgs:
                 claim_refs = msg.get("claim_refs", []) or []
                 evidence_refs = msg.get("evidence_refs", []) or []
-                # 判断该发言的论点是否被裁决采纳
                 adopted = any(c in adopted_claims for c in claim_refs)
-                memory_store.record_raw(
+                await memory_store.record_raw(
                     meeting_id=meeting_id,
                     agent_role=agent_role,
                     stage=msg.get("stage", ""),
@@ -81,13 +80,13 @@ def trigger_extraction(state: Any) -> None:
                 logger.debug("借调角色 %s 发言已记录但不沉淀画像", agent_role)
                 continue
 
-            features = memory_store.extract_features(
+            features = await memory_store.extract_features(
                 meeting_id=meeting_id,
                 agent_role=agent_role,
                 messages=msgs,
                 decision_record=decision_record,
             )
             if features:
-                memory_store.update_profile(agent_role, features)
+                await memory_store.update_profile(agent_role, features)
     except Exception as e:  # noqa: BLE001
         logger.warning("trigger_extraction 失败，不影响主流程: %s", e)

@@ -7,7 +7,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
+async def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
     """评估每个 Agent 在本次会议中的判断质量。
 
     计算维度:
@@ -105,7 +105,7 @@ def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
         state.agent_evaluations = evaluations
 
         # 将评估分数注入记忆系统（供后续会议的画像参考）
-        _persist_scores_to_memory(state, evaluations)
+        await _persist_scores_to_memory(state, evaluations)
 
         logger.info(
             "Agent 评估完成: %d 个角色, 平均得分 %.2f",
@@ -119,7 +119,7 @@ def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
         return {}
 
 
-def _persist_scores_to_memory(state: Any, evaluations: dict[str, dict]) -> None:
+async def _persist_scores_to_memory(state: Any, evaluations: dict[str, dict]) -> None:
     """将评估分数注入记忆系统的 Feature 层，供后续画像更新参考。
 
     与 trigger_extraction 互补：trigger_extraction 记录发言和提取特征，
@@ -135,7 +135,7 @@ def _persist_scores_to_memory(state: Any, evaluations: dict[str, dict]) -> None:
 
         for role, scores in evaluations.items():
             # 将分数作为特殊 feature 写入记忆
-            memory_store.record_raw(
+            await memory_store.record_raw(
                 meeting_id=meeting_id,
                 agent_role=role,
                 stage="_evaluation",

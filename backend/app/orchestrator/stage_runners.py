@@ -405,7 +405,7 @@ async def run_produce(
     # 记忆提取
     try:
         from app.memory.profile import trigger_extraction
-        trigger_extraction(state)
+        await trigger_extraction(state)
         _logger.info("produce: 记忆提取完成")
     except Exception as e:
         _logger.warning(f"produce: 记忆提取失败（不影响主流程）: {e}")
@@ -413,7 +413,7 @@ async def run_produce(
     # Agent 反馈闭环
     try:
         from app.agents.feedback import evaluate_agents
-        evaluations = evaluate_agents(state)
+        evaluations = await evaluate_agents(state)
         if evaluations:
             _logger.info(
                 f"produce: Agent 评估完成 — {len(evaluations)} 个角色, "

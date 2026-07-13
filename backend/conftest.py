@@ -135,6 +135,7 @@ def _reset_state():
     - memory_store：三层记忆
     - 异步/同步数据库连接池
     """
+    import asyncio
     runner_mod._states.clear()
     meetings_mod._running_tasks.clear()
     bus._subs.clear()
@@ -148,6 +149,9 @@ def _reset_state():
     # 清理 Agent 计算单例（确保 get_compute 每次测试重建，避免 mock/配置泄漏）
     from app.agents.compute import reset_compute
     reset_compute()
+    # 清理三层记忆（内存 + PG 表）
+    from app.memory.store import memory_store
+    asyncio.run(memory_store.clear())
     yield
     runner_mod._states.clear()
     meetings_mod._running_tasks.clear()

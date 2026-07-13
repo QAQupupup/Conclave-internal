@@ -1,4 +1,4 @@
-"""Repository 工厂：根据 settings.db_backend 返回对应的持久化实现。
+"""Repository 工厂：返回 SQLAlchemy ORM Repository bundle。"""
 
 Usage::
 
@@ -200,31 +200,19 @@ class LegacyRepoBundle:
 
 @asynccontextmanager
 async def get_repos() -> AsyncIterator[Any]:
-    """异步上下文管理器：根据 db_backend 设置返回 Repository bundle。
+    """异步上下文管理器：返回 Repository bundle（SQLAlchemy ORM）。"""
+    from app.db.engine import async_session_factory
+    from app.db.sqlalchemy_repo import RepositoryFactory
 
-    Usage::
-
-        async with get_repos() as repos:
-            meeting = await repos.meetings.get("some-id")
-
-    - "legacy" → LegacyRepoBundle（同步 sqlite3 包装为 async）
-    - "orm"    → RepositoryFactory（SQLAlchemy async session 自动提交/回滚）
-    """
-    if settings.db_backend == "orm":
-        from app.db.engine import async_session_factory
-        from app.db.sqlalchemy_repo import RepositoryFactory
-
-        async with async_session_factory() as session:
-            try:
-                yield RepositoryFactory(session)
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-    else:
-        yield LegacyRepoBundle()
+    async with async_session_factory() as session:
+        try:
+            yield RepositoryFactory(session)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 def get_backend_name() -> str:
     """返回当前配置的后端名称，用于日志/健康检查。"""
-    return settings.db_backend
+    return "orm"
