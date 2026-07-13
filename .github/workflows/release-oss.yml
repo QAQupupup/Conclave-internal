@@ -21,6 +21,9 @@ jobs:
       - name: Checkout dev repo
         uses: actions/checkout@v4
         with:
+          # workflow_run 触发时，默认 checkout 的是默认分支（main）。
+          # 但实际代码在触发 CI 的分支上，因此显式切到该分支。
+          ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
 
       - name: Set up Python
