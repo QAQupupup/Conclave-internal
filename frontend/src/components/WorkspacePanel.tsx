@@ -395,6 +395,8 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
   // 旧版只渲染顶层，内嵌项目无法展示。
   // 新版：递归组件 TreeNodeView 接收 nodes 数组 + depth 缩进，依次渲染
   // 目录点击 → toggleExpand；文件点击 → openFile
+  // [BUG FIX] 从 pathMap 读取最新的节点状态（expanded/children/loading），
+  // 而非使用 tree 中的陈旧引用。toggleExpand 只更新 pathMap，不更新 tree。
   const renderTreeNodes = (nodes: TreeNode[], depth: number = 0): React.ReactElement => {
     if (nodes.length === 0) {
       return <div className="ws-tree-empty">空目录</div>
@@ -402,36 +404,38 @@ export function WorkspacePanel({ meetingId, initialFile }: WorkspacePanelProps) 
     return (
       <>
         {nodes.map((node) => {
-          const isDir = node.type === 'directory'
-          const expanded = node.expanded ?? false
-          const childCount = node.child_count ?? 0
-          const isActive = filePath === node.path
+          // 从 pathMap 获取最新状态，fallback 到原始 node
+          const current = pathMap.get(node.path) ?? node
+          const isDir = current.type === 'directory'
+          const expanded = current.expanded ?? false
+          const childCount = current.child_count ?? 0
+          const isActive = filePath === current.path
           return (
-            <div key={node.path} className="ws-tree-entry">
+            <div key={current.path} className="ws-tree-entry">
               <div
-                className={`ws-tree-item ${node.type} ${isActive ? 'active' : ''}`}
+                className={`ws-tree-item ${current.type} ${isActive ? 'active' : ''}`}
                 style={{ paddingLeft: `${depth * 14 + 8}px` }}
                 onClick={() => {
                   if (isDir) {
-                    toggleExpand(node.path)
+                    toggleExpand(current.path)
                   } else {
-                    openFile(node.path)
+                    openFile(current.path)
                   }
                 }}
               >
                 <span className="ws-icon">
                   {isDir ? (expanded ? '📂' : '📁') : '📄'}
                 </span>
-                <span className="ws-name">{node.name}</span>
+                <span className="ws-name">{current.name}</span>
                 {isDir && childCount > 0 && !expanded && (
                   <span className="ws-count">({childCount})</span>
                 )}
-                {isDir && node.loading && <span className="ws-spin">…</span>}
+                {isDir && current.loading && <span className="ws-spin">…</span>}
               </div>
               {/* 递归渲染子节点：仅当目录已展开且有 children */}
-              {isDir && expanded && node.children && (
+              {isDir && expanded && current.children && (
                 <div className="ws-tree-children">
-                  {renderTreeNodes(node.children, depth + 1)}
+                  {renderTreeNodes(current.children, depth + 1)}
                 </div>
               )}
             </div>
