@@ -10,6 +10,7 @@ qdrant-client>=1.7
 websockets>=12.0
 playwright>=1.40
 beautifulsoup4>=4.12
+pyyaml>=6.0
 psutil>=5.9
 
 # [CON-26 修复] 中文分词
