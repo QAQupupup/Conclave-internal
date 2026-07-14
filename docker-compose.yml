@@ -201,9 +201,11 @@ services:
   # Qdrant 向量数据库（用于 RAG 文档检索）
   # ============================================================
   qdrant:
+    image: conclave-dev-qdrant:latest
     build:
       context: ./docker
       dockerfile: Dockerfile.qdrant
+      pull: false
     container_name: conclave-dev-qdrant
     restart: unless-stopped
     ports:

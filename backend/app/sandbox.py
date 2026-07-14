@@ -861,25 +861,17 @@ async def deploy_service(
             logger="sandbox.deploy",
             extra={"meeting_id": meeting_id},
         )
-        # 兜底：如果 Dockerfile 使用 Docker Hub 官方镜像，自动替换为 DaoCloud 国内镜像
+        # 兜底：如果 Dockerfile 使用 Docker Hub 官方镜像，自动替换为华为云国内镜像
+        # 同时处理 docker.io/library/xxx 和 xxx 两种写法
         try:
             df_text = dockerfile_path.read_text(encoding="utf-8")
+            _HWC = "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io"
+            # 匹配 FROM python: / FROM node: / FROM nginx: / FROM alpine: / FROM ubuntu: 等
+            # 也匹配 FROM docker.io/library/python: 等带前缀写法
             normalized = re.sub(
-                r"^FROM\s+python:",
-                "FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:",
+                r"^FROM\s+(?:docker\.io/library/)?(python|node|nginx|alpine|ubuntu|postgres|redis|busybox|golang|java|openjdk|mcr\.microsoft\.com/):",
+                rf"FROM {_HWC}/\1:",
                 df_text,
-                flags=re.MULTILINE,
-            )
-            normalized = re.sub(
-                r"^FROM\s+node:",
-                "FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:",
-                normalized,
-                flags=re.MULTILINE,
-            )
-            normalized = re.sub(
-                r"^FROM\s+nginx:",
-                "FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/nginx:",
-                normalized,
                 flags=re.MULTILINE,
             )
             # 兜底：如果工作区存在 frontend/ 目录但 Dockerfile 没有 COPY，自动追加
