@@ -336,7 +336,7 @@ async def run_produce(
     if state.deliverable_type in ("code_analysis", "tested_system", "deployable_service"):
         ws_root = Path(settings.workspace_root) / state.meeting_id
         try:
-            from app.orchestrator.nodes.produce import _scan_artifacts
+            from app.orchestrator.produce_helpers import _scan_artifacts
             attachments = _scan_artifacts(ws_root, state.meeting_id)
             if attachments:
                 state.artifact["attachments"] = attachments
@@ -378,7 +378,7 @@ async def run_produce(
 
     # 发送进度：产出完成
     try:
-        from app.orchestrator.nodes.produce import _emit_progress
+        from app.orchestrator.produce_helpers import _emit_progress
         await _emit_progress(state, "done", "产出物生成完成！", 100)
     except Exception as e:
         _logger.warning(f"produce: 进度事件发送失败（不影响主流程）: {e}")
