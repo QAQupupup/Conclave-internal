@@ -5,6 +5,7 @@ import asyncio
 import threading
 import time
 
+from app.config import settings
 from app.db_legacy import save_meeting, save_message
 from app.events import bus, make_event
 from app.logging_config import get_logger
@@ -108,7 +109,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
                     stage="intervention",
                     prompt=prompt,
                     temperature=0.3,
-                    seed=42,
+                    seed=settings.llm_seed,
                 ))
 
                 reply_text = str(resp.result).strip() if resp.result else "收到，我会在后续流程中处理。"

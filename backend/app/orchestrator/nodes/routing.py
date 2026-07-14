@@ -1,6 +1,7 @@
 # Meta-cognitive routing: decide_next_stage + loop tracking
 from __future__ import annotations
 
+from app.config import settings
 from app.models import MeetingState, Stage
 from ._helpers import _resolve_model_for_call
 
@@ -192,7 +193,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
             prompt=prompt,
             schema_hint="meta_next_stage",
             temperature=0,
-            seed=42,
+            seed=settings.llm_seed,
             model=_resolve_model_for_routing(state),
         ))
 

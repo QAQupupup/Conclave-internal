@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from app.agents.compute import execute_think, build_intra_prompt, ThinkRequest
 from app.agents.role_templates import get_borrow_prompt
+from app.config import settings
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 from app.observability.log_bus import log_bus
@@ -245,7 +246,7 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
             stage=stage.value,
             prompt=assess_prompt,
             temperature=0.2,
-            seed=42,
+            seed=settings.llm_seed,
             schema_hint=f"borrow_assess_{stage.value}",  # [AUDIT-FIX P1-2] 补全 schema_hint
             model=_resolve_model_for_call(state, Role.MODERATOR.value, stage.value),
         )
