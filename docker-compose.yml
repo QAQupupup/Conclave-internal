@@ -8,20 +8,78 @@
 # 项目命名空间：开发版固定为 conclave-dev，避免与开源版(conclave-oss)冲突
 name: conclave-dev
 #
-# 沙箱架构（Sibling Containers）:
-#   后端容器以 root 启动 entrypoint.sh → 自动配置 Docker socket 权限
-#   → 预拉取标准沙箱镜像 + 构建数据科学镜像
-#   → 降级为 uid 1000 运行 uvicorn
-#   → 运行时通过 /var/run/docker.sock 创建临时 sibling 容器执行用户代码
+# 沙箱架构（Sibling Containers + Socket Proxy）:
+#   docker-socket-proxy 代理 Docker API，仅暴露 containers/images 端点
+#   后端通过 DOCKER_HOST=tcp://docker-socket-proxy:2375 连接（不直挂 socket）
+#   运行时通过代理创建临时 sibling 容器执行用户代码
 #   工作区通过 named volume 在后端和沙箱容器间共享
 #
-# 沙箱自动准备：
-#   1. entrypoint.sh 检测 Docker socket 权限，自动将 app 用户加入宿主 docker 组
-#   2. 自动拉取 python:3.12-slim 沙箱基础镜像（使用国内镜像源）
-#   3. 自动构建 conclave-python-datascience 镜像（预装 pandas/numpy/sklearn 等）
-#   4. 后端启动后 sandbox.py 检测 Docker 可用性，沙箱自动就绪
+# 网络隔离:
+#   conclave-sandbox-l2: 自定义网络 + DNS 代理(dnsmasq)，仅解析白名单域名
+#   L1 沙箱: --network none（无网络）
+#   L2 沙箱: --network conclave-sandbox-l2（DNS 过滤）
+#   L3 沙箱: --network bridge（全联网，需用户授权）
 
 services:
+  # ============================================================
+  # Docker Socket Proxy — 限制 Docker API 暴露面
+  # ============================================================
+  docker-socket-proxy:
+    image: docker.m.daocloud.io/tecnativa/docker-socket-proxy:0.3
+    container_name: conclave-dev-socket-proxy
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # 仅开放沙箱需要的端点
+      CONTAINERS: 1
+      IMAGES: 1
+      INFO: 1
+      VERSION: 1
+      # 禁用所有危险端点
+      EXEC: 0
+      SERVICES: 0
+      TASKS: 0
+      SECRETS: 0
+      PLUGINS: 0
+      NETWORKS: 0
+      NODES: 0
+      SWARM: 0
+      DISTRIBUTION: 0
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      VOLUMES: 0
+      SESSION: 0
+      SYSTEM: 0
+      EVENTS: 0
+    networks:
+      - conclave-internal
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:2375/version"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ============================================================
+  # DNS 代理 — L2 网络隔离的域名白名单解析
+  # ============================================================
+  sandbox-dns:
+    image: docker.m.daocloud.io/jpillora/dnsmasq:latest
+    container_name: conclave-dev-sandbox-dns
+    restart: unless-stopped
+    command: --no-resolv --log-facility=- \
+      --address=/pypi.org/151.101.0.223 \
+      --address=/files.pythonhosted.org/151.101.0.223 \
+      --address=/pypi.python.org/151.101.0.223 \
+      --address=/mirrors.tuna.tsinghua.edu.cn/101.6.15.130 \
+      --address=/docker.m.daocloud.io/0.0.0.0 \
+      --server=8.8.8.8
+    networks:
+      conclave-sandbox-l2:
+        ipv4_address: 10.20.0.10
+
   backend:
     build:
       context: ./backend
@@ -49,9 +107,7 @@ services:
       - seccomp:unconfined  # docker CLI + Playwright + Xvfb 需要 fork/exec 权限
     shm_size: "1g"  # Chromium + Xvfb 需要较大共享内存
     volumes:
-      # Docker socket：让后端能创建沙箱 sibling 容器
-      # entrypoint.sh 启动时自动配置权限，使 uid 1000 能访问
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker socket 不再直挂，通过 docker-socket-proxy 代理
       # 工作区命名卷：后端和沙箱容器共享
       - conclave-dev-workspace:/workspace
       # 数据库持久化
@@ -77,9 +133,14 @@ services:
       # [v4] Docker 监控默认启用（entrypoint 会自动配置好权限）
       # 如果在无 Docker 的环境运行，可设 CONCLAVE_DOCKER_DISABLED=true
       - CONCLAVE_DOCKER_DISABLED=${CONCLAVE_DOCKER_DISABLED:-false}
+      # Docker socket proxy: 通过代理连接 Docker API（不直挂 socket）
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     dns:
       - 8.8.8.8
       - 223.5.5.5
+    networks:
+      - conclave-internal
+      - conclave-sandbox-l2
     deploy:
       resources:
         limits:
@@ -89,6 +150,8 @@ services:
           cpus: "0.5"
           memory: 512M
     depends_on:
+      docker-socket-proxy:
+        condition: service_healthy
       qdrant:
         condition: service_healthy
       postgres:
@@ -207,4 +270,16 @@ volumes:
     driver: local
   conclave-dev-redis-data:
     driver: local
+
+networks:
+  # 内部网络：backend ↔ socket-proxy ↔ 其他服务
+  conclave-internal:
+    driver: bridge
+  # L2 沙箱网络：DNS 过滤限制出站域名
+  conclave-sandbox-l2:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.0.0/16
+          gateway: 10.20.0.1
 

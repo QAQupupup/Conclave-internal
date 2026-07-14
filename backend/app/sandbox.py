@@ -50,9 +50,15 @@ from app.observability.log_bus import log_bus
 # L3: 全联网，可访问任意外部 API（需明确授权）
 SandboxNetworkLevel = Literal["L1", "L2", "L3"]
 
-# L2 限网：允许的域名白名单（通过 DNS 解析后的 IP 做 iptables 限制）
-# Docker 不支持域名级网络限制，L2 用 bridge 网络 + 出站白名单实现
+# L2 限网：允许的域名白名单
+# 通过自定义 Docker 网络 + DNS 代理(dnsmasq)实现域名级过滤
+# dnsmasq 容器仅解析白名单域名，其他域名返回 NXDOMAIN
 L2_ALLOWED_DOMAINS = ["pypi.org", "files.pythonhosted.org", "pypi.python.org"]
+
+# L2 沙箱使用的自定义网络名（在 docker-compose.yml 中定义）
+L2_NETWORK_NAME = os.environ.get("CONCLAVE_L2_NETWORK", "conclave-dev_conclave-sandbox-l2")
+# L2 沙箱使用的 DNS 服务器（dnsmasq 容器 IP）
+L2_DNS_SERVER = os.environ.get("CONCLAVE_L2_DNS", "10.20.0.10")
 
 # ---- 配置 ----
 
@@ -345,10 +351,14 @@ def _build_security_args(
     if network_level == "L1":
         args.append("--network")
         args.append("none")
-    # L2/L3 使用默认 bridge 网络（有网络访问）
-    # L2 的域名限制由 produce_node 在代码层约束（LLM prompt 指导 + 审计日志）
-    # Docker 原生不支持域名级出站过滤，L2 和 L3 在容器层都是 bridge 网络
-    # 区别在于：L2 需要明确声明用途，L3 需要用户授权
+    elif network_level == "L2":
+        # L2: 使用自定义网络 + DNS 代理实现域名级过滤
+        # dnsmasq 容器仅解析白名单域名，其他域名返回 NXDOMAIN
+        args.append("--network")
+        args.append(L2_NETWORK_NAME)
+        args.append("--dns")
+        args.append(L2_DNS_SERVER)
+    # L3: 使用默认 bridge 网络（全联网，需用户授权）
 
     return args
 
