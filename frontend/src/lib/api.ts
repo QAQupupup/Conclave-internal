@@ -154,6 +154,7 @@ export interface MeetingListItem {
   created_at?: string
   is_running?: boolean
   tags?: string[]
+  flow_plan?: string
 }
 
 /** 列出会议（支持搜索、分页、标签过滤）
@@ -779,5 +780,24 @@ export async function resolveCaptcha(sessionId: string): Promise<{ ok: boolean; 
   return request('/api/captcha/resolve', {
     method: 'POST',
     body: JSON.stringify({ session_id: sessionId }),
+  })
+}
+
+// ========== Preferences ==========
+
+/** 获取所有偏好：GET /preferences */
+export async function getPreferences(): Promise<Record<string, string>> {
+  return request('/preferences')
+}
+
+/** 设置单个偏好：PUT /preferences/{key} */
+export async function setPreference(
+  key: string,
+  value: string,
+): Promise<{ key: string; value: string }> {
+  return request(`/preferences/${key}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value }),
   })
 }

@@ -200,6 +200,8 @@ class MeetingState(BaseModel):
     deliverable_type: str = "prd_openapi"
     # 议题路由计划：clarify 阶段 LLM 输出，Runner 据此裁剪后续阶段
     # "full" = 完整六阶段 / "standard" = 无冲突时跳过 evidence_check / "simple" = 跳过中间三阶段
+    # "plan" = 先制定计划再逐步执行（Planner → 按计划分步执行）
+    # "fast" = 快速路径（单次 LLM 直接回答，跳过六阶段）
     flow_plan: str = "full"
     # 辩论深度：轻量(light) / 标准(standard) / 深度(deep)
     # - light: 2-3 Agents, 1 轮队内发言, 跳过跨队辩论和证据核验

@@ -1515,7 +1515,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  z-index: 10;
+  z-index: 1001;
 }
 .floating-badge {
   position: relative;
@@ -3035,6 +3035,7 @@
 .meeting-sidebar-item-title { max-width: 140px; font-size: 13px; }
 .meeting-sidebar-item-desc { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .meeting-sidebar-status-tag { margin: 0; font-size: 11px; line-height: 18px; }
+.meeting-sidebar-flow-tag { margin: 0; font-size: 10px; line-height: 16px; padding: 0 4px; }
 .meeting-sidebar-time-text { font-size: 11px; }
 .meeting-sidebar-delete-confirm { padding: 8px; background: var(--bg-secondary, #fafafa); border-radius: 4px; margin-top: 8px; width: 100%; }
 .meeting-sidebar-delete-confirm-text { font-size: 12px; }
@@ -3251,6 +3252,43 @@
 }
 .chat-panel-divider-text {
   font-size: 12px;
+}
+
+/* Fast Path 结果卡片 */
+.chat-panel-fast-path {
+  padding: 16px;
+}
+.fast-path-card {
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+.fast-path-card .ant-card-head {
+  border-bottom: 1px solid #f0f0f0;
+  min-height: 44px;
+}
+.fast-path-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.fast-path-icon {
+  color: #1677ff;
+  font-size: 16px;
+}
+.fast-path-card-extra {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fast-path-answer {
+  margin-bottom: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* === DashboardView === */

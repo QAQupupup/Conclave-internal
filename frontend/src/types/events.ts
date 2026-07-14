@@ -237,6 +237,19 @@ export interface Artifact {
     ext?: string
     meeting_id?: string
   }>
+  /** Fast Path 快速回答标题 */
+  title?: string
+  /** Fast Path 快速回答正文 */
+  answer?: string
+  /** 执行路径：fast_path / deep_think */
+  flow?: string
+  /** Fast Path 耗时 (ms) */
+  latency_ms?: number
+  /** Plan 模式执行计划（由 Planner 在 clarify 前生成） */
+  execution_plan?: {
+    steps: string[]
+    rationale?: string
+  }
 }
 
 // ---------- 领域事件信封 ----------

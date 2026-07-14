@@ -369,6 +369,7 @@ _FLOW_SKIP_MAP: dict[str, set[Stage]] = {
     "simple": {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK},
     "standard": set(),
     "full": set(),
+    "plan": set(),  # plan 模式：完整六阶段，但 clarify 前先调用 Planner 生成执行计划
 }
 
 

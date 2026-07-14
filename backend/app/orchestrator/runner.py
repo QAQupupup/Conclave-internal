@@ -230,8 +230,9 @@ class Runner:
         )
 
         # --- Fast Path 分流 ---
-        # 如果 state 已标记 flow_plan="fast"（例如 API 层预设），或议题被分类为简单查询，
+        # 如果 state 已标记 flow_plan="fast"（例如 API 层预设），或议题被 LLM 分类为简单查询，
         # 跳过六阶段管线，直接单次 LLM 调用完成后返回。
+        # 注意：plan 模式不走 fast_path，而是进入六阶段管线配合 Planner 逐步执行。
         use_fast_path = False
         if state.flow_plan == "fast":
             use_fast_path = True
@@ -242,6 +243,16 @@ class Runner:
                 use_fast_path = True
                 state.flow_plan = "fast"
                 logger.info("会议 %s 意图分流为 fast_path", state.meeting_id)
+            elif intent == "plan":
+                state.flow_plan = "plan"
+                logger.info("会议 %s 意图分流为 plan（先计划后执行）", state.meeting_id)
+            elif intent == "simple":
+                state.flow_plan = "simple"
+                logger.info("会议 %s 意图分流为 simple（简化路由）", state.meeting_id)
+            else:
+                # deep_think 或其他：保持默认 full
+                state.flow_plan = "full"
+                logger.info("会议 %s 意图分流为 deep_think（完整六阶段）", state.meeting_id)
 
         if use_fast_path:
             try:

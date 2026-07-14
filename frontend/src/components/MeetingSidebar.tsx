@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Button, List, Badge, Tag, Typography, Radio, Space, Empty, Tooltip, Input } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  SearchOutlined,
+  SearchOutlined, ThunderboltOutlined, ScheduleOutlined,
 } from '@ant-design/icons'
 import { listMeetings, deleteMeeting } from '../lib/api.ts'
 import { useMeeting } from '../store/MeetingContext.tsx'
@@ -20,6 +20,7 @@ interface MeetingListItem {
   status: string
   created_at?: string
   is_running?: boolean
+  flow_plan?: string
 }
 
 interface MeetingSidebarProps {
@@ -201,6 +202,16 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
                           <Tag color={sl.cls === 'ok' ? 'green' : sl.cls === 'running' ? 'blue' : 'default'} className="meeting-sidebar-status-tag">
                             {sl.text}
                           </Tag>
+                          {m.flow_plan === 'fast' && (
+                            <Tag color="blue" className="meeting-sidebar-flow-tag">
+                              <ThunderboltOutlined /> Fast
+                            </Tag>
+                          )}
+                          {m.flow_plan === 'plan' && (
+                            <Tag color="purple" className="meeting-sidebar-flow-tag">
+                              <ScheduleOutlined /> Plan
+                            </Tag>
+                          )}
                           <Text type="secondary" className="meeting-sidebar-time-text">{relativeTime(m.created_at)}</Text>
                         </div>
                       }

@@ -1,13 +1,14 @@
 // 左侧聊天流：渲染发言卡片列表，新消息时智能自动滚动 + 阶段分隔线
+// 当会议走 Fast Path（无 agent 发言但有直接答案）时，展示答案卡片
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Typography, Divider, Progress } from 'antd'
-import { ArrowDownOutlined, MessageOutlined, LoadingOutlined } from '@ant-design/icons'
+import { Button, Typography, Divider, Progress, Card, Tag } from 'antd'
+import { ArrowDownOutlined, MessageOutlined, LoadingOutlined, ThunderboltOutlined, ClockCircleOutlined } from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import { MessageCard } from './MessageCard.tsx'
 import { STAGE_LABELS } from '../types/events.ts'
 import type { MeetingMessage, Stage } from '../types/events.ts'
 
-const { Text } = Typography
+const { Text, Paragraph } = Typography
 
 interface ChatPanelProps {
   /** 点击证据 ref 时触发，向上传递以定位右侧证据面板 */
@@ -21,10 +22,14 @@ const RAPID_INTERVAL = 300
 
 export function ChatPanel({ onSelectRef }: ChatPanelProps) {
   const { store } = useMeeting()
-  const messages = store.meeting?.messages ?? []
-  const stage = store.meeting?.stage
-  const status = store.meeting?.status
-  const produceProgress = store.meeting?.produce_progress
+  const meeting = store.meeting
+  const messages = meeting?.messages ?? []
+  const stage = meeting?.stage
+  const status = meeting?.status
+  const artifact = meeting?.artifact
+  const produceProgress = meeting?.produce_progress
+  // Fast Path：无 agent 发言，但有直接答案
+  const isFastPath = artifact?.flow === 'fast_path' && !!artifact?.answer && messages.length === 0
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [showNewMsg, setShowNewMsg] = useState(false)
@@ -74,10 +79,37 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
     <section className="panel chat-panel">
       <div className="panel-title">聊天流</div>
       <div className="chat-list" ref={scrollRef} onScroll={handleScroll}>
-        {messages.length === 0 && (
+        {messages.length === 0 && !isFastPath && (
           <div className="empty-hint chat-panel-empty-hint">
             <MessageOutlined className="chat-panel-empty-icon" />
             <Text type="secondary">暂无发言，创建会议并运行后，agent 发言将在此实时展示。</Text>
+          </div>
+        )}
+        {isFastPath && artifact && (
+          <div className="chat-panel-fast-path">
+            <Card
+              className="fast-path-card"
+              title={
+                <div className="fast-path-card-header">
+                  <ThunderboltOutlined className="fast-path-icon" />
+                  <span>{artifact.title || '快速回答'}</span>
+                </div>
+              }
+              extra={
+                <div className="fast-path-card-extra">
+                  <Tag color="blue" icon={<ThunderboltOutlined />}>Fast Path</Tag>
+                  {artifact.latency_ms != null && (
+                    <Tag icon={<ClockCircleOutlined />}>
+                      {(artifact.latency_ms / 1000).toFixed(1)}s
+                    </Tag>
+                  )}
+                </div>
+              }
+            >
+              <Paragraph className="fast-path-answer">
+                {artifact.answer}
+              </Paragraph>
+            </Card>
           </div>
         )}
         {messages.map((m, i) => (
