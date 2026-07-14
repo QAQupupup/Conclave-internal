@@ -1,4 +1,4 @@
-﻿# 编排运行器：按序跑节点，每步 publish 阶段切换事件
+# 编排运行器：按序跑节点，每步 publish 阶段切换事件
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +29,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
     - intervention_messages 列表被并发修改
     [CON-22 修复] 用户内容在喂给 LLM 前做 prompt 注入检测与隔离包装
     """
-    from app.agents.compute import get_compute, ThinkRequest
+    from app.agents.compute import execute_think, ThinkRequest
     from datetime import datetime
     import uuid as _uuid
     from app.prompt_injection import sanitize_user_input, wrap_user_content
@@ -52,8 +52,6 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
         ]
         if not unprocessed:
             return state
-
-        compute = get_compute()
         for inj in unprocessed:
             try:
                 # 构建主持人回复的 prompt
@@ -105,7 +103,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
                     f"只输出回复内容，不要任何格式化。"
                 )
 
-                resp = await compute.think(ThinkRequest(
+                resp = await execute_think(ThinkRequest(
                     agent_role="moderator",
                     stage="intervention",
                     prompt=prompt,

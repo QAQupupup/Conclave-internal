@@ -156,8 +156,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
 
     # 调用 LLM 做元认知决策
     try:
-        from app.agents.compute import get_compute, ThinkRequest
-        compute = get_compute()
+        from app.agents.compute import execute_think, ThinkRequest
         summary = _build_state_summary(state)
         valid_stages_str = ", ".join(s.value for s in valid_next)
 
@@ -187,7 +186,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
             f"只输出一个阶段名称（小写英文），不要任何其他内容。"
         )
 
-        resp = await compute.think(ThinkRequest(
+        resp = await execute_think(ThinkRequest(
             agent_role="meta_cognition",
             stage="meta",
             prompt=prompt,

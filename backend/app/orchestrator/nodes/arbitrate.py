@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.compute import get_compute, build_arbitrate_prompt
+from app.agents.compute import execute_think, build_arbitrate_prompt
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
 
@@ -15,12 +15,11 @@ from ._helpers import _run_with_consistency, _resolve_model_for_call
 async def arbitrate_node(state: MeetingState) -> MeetingState:
     """Arbitrate 阶段：仲裁者裁决，形成结论"""
     set_current_trace(state.llm_trace)
-    compute = get_compute()
 
     async def call_fn(anchor: str) -> dict[str, Any]:
         req = build_arbitrate_prompt(state.evidence_set, anchor=anchor)
         req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "arbitrate")
-        resp = await compute.think(req)
+        resp = await execute_think(req)
         return resp.result
 
     result, confidence = await _run_with_consistency(state, "arbitrate", call_fn)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.agents.compute import get_compute, build_intra_prompt, build_intra_react_prompt
+from app.agents.compute import execute_think, build_intra_prompt, build_intra_react_prompt
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
 
@@ -20,7 +20,6 @@ from ._helpers import (
 async def intra_team_node(state: MeetingState) -> MeetingState:
     """IntraTeam 阶段：混合模式思考（前 N-1 并行 + 最后 1 反应）"""
     set_current_trace(state.llm_trace)
-    compute = get_compute()
 
     if not state.team_config:
         state.team_config = [
@@ -47,7 +46,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         async def call_fn(anchor: str) -> dict[str, Any]:
             req = build_intra_prompt(role, state.clarified_topic or state.topic, stance, anchor=anchor)
             req.model = _resolve_model_for_call(state, role.value, "intra_team")
-            resp = await compute.think(req)
+            resp = await execute_think(req)
             return resp.result
         result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
         return {"role": role.value, "stance": stance, "claims": result.get("claims", []), "confidence": confidence, "react": False}
@@ -71,7 +70,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             async def call_fn(anchor: str) -> dict[str, Any]:
                 req = build_intra_react_prompt(role, state.clarified_topic or state.topic, stance, prior, anchor=anchor)
                 req.model = _resolve_model_for_call(state, role.value, "intra_team")
-                resp = await compute.think(req)
+                resp = await execute_think(req)
                 return resp.result
             result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
             return {"role": role.value, "stance": stance, "claims": result.get("claims", []), "confidence": confidence, "react": True}

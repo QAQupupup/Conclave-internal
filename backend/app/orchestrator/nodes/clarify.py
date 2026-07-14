@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.compute import get_compute, build_clarify_prompt
+from app.agents.compute import execute_think, build_clarify_prompt
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
 
@@ -15,7 +15,6 @@ from app.orchestrator.stage_runners import run_clarify
 async def clarify_node(state: MeetingState) -> MeetingState:
     """Clarify 阶段：主持人澄清议题，确认团队组成，构造会议宪章"""
     set_current_trace(state.llm_trace)
-    compute = get_compute()
 
     async def call_fn(anchor: str) -> dict[str, Any]:
         req = build_clarify_prompt(
@@ -25,7 +24,7 @@ async def clarify_node(state: MeetingState) -> MeetingState:
             reference_context=state.reference_context,
         )
         req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "clarify")
-        resp = await compute.think(req)
+        resp = await execute_think(req)
         return resp.result
 
     result, confidence = await _run_with_consistency(state, "clarify", call_fn)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from app.agents.compute import get_compute, build_intra_prompt, ThinkRequest
+from app.agents.compute import execute_think, build_intra_prompt, ThinkRequest
 from app.agents.role_templates import get_borrow_prompt
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
@@ -52,7 +52,6 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
     if not state.borrowed_agents:
         return
     topic = state.clarified_topic or state.topic
-    compute = get_compute()
     for agent_info in state.borrowed_agents:
         if agent_info.get("spoken"):
             continue
@@ -100,7 +99,7 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
                     # 无特定goal（旧数据兼容），使用通用intra prompt
                     req = build_intra_prompt(matched_role, topic, request_info.get("stance", ""), anchor=anchor)
                     req.model = _resolve_model_for_call(state, matched_role.value, stage.value)
-                resp = await compute.think(req)
+                resp = await execute_think(req)
                 claims = resp.result.get("claims", [])
                 claim_ids: list[str] = []
                 for c in claims:
@@ -240,7 +239,6 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
 }}"""
 
     try:
-        compute = get_compute()
         req = ThinkRequest(
             meeting_id=state.meeting_id,
             agent_role=Role.MODERATOR.value,
@@ -251,7 +249,7 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
             schema_hint=f"borrow_assess_{stage.value}",  # [AUDIT-FIX P1-2] 补全 schema_hint
             model=_resolve_model_for_call(state, Role.MODERATOR.value, stage.value),
         )
-        resp = await compute.think(req)
+        resp = await execute_think(req)
         result = resp.result
         need_borrow = result.get("need_borrow", False)
         target_role = str(result.get("target_role", "")).strip()

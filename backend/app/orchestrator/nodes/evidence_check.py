@@ -1,10 +1,10 @@
-﻿# Evidence check stage node + evidence retrieval helpers
+# Evidence check stage node + evidence retrieval helpers
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-from app.agents.compute import get_compute, build_evidence_prompt
+from app.agents.compute import execute_think, build_evidence_prompt
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
 from app.rag.retriever import retrieve_for_conflict
@@ -104,7 +104,6 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
     """
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
-    compute = get_compute()
 
     # ---- Phase 0：准备工具注册表（如果可用）----
     tool_registry = None
@@ -171,7 +170,7 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
         async def call_fn(anchor: str, _conflict=conflict, _chunks=evidence_chunks) -> dict[str, Any]:
             req = build_evidence_prompt(_conflict, _chunks, anchor=anchor)
             req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "evidence_check")
-            resp = await compute.think(req)
+            resp = await execute_think(req)
             return resp.result
 
         result, confidence = await _run_with_consistency(state, "evidence_check", call_fn)

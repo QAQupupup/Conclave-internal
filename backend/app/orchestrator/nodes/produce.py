@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.agents.compute import get_compute, build_produce_prompt, ThinkRequest
+from app.agents.compute import execute_think, build_produce_prompt, ThinkRequest
 from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
@@ -267,7 +267,6 @@ async def produce_node(state: MeetingState) -> MeetingState:
     """
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
-    compute = get_compute()
     from app.observability.log_bus import log_bus as _lb
     # 根据产出类型选择模板
     from app.agents.prompts import get_produce_template
@@ -295,7 +294,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             evidence_summary=evidence_summary or None,
         )
         req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "produce")
-        resp = await compute.think(req)
+        resp = await execute_think(req)
         if not resp.success:
             _lb.warning(
                 f"produce: compute.think 返回失败 — {resp.error}",
@@ -645,7 +644,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
                         review_req.prompt = review_req.prompt + "\n\n" + skills_text
                 except Exception:
                     pass
-                review_resp = await compute.think(review_req)
+                review_resp = await execute_think(review_req)
                 review_result = review_resp.result if hasattr(review_resp, 'result') else {}
                 if isinstance(review_result, dict):
                     issues = review_result.get("issues", [])
@@ -699,7 +698,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
                                 fix_req.prompt = fix_req.prompt + "\n\n" + skills_text
                         except Exception:
                             pass
-                        fix_resp = await compute.think(fix_req)
+                        fix_resp = await execute_think(fix_req)
                         # 正确解析LLM返回的JSON：可能是 {"fixed_code": "..."} 格式，也可能直接是代码字符串
                         fixed_code = ""
                         if isinstance(fix_resp.result, dict):
