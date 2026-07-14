@@ -1,4 +1,4 @@
-# ===== Conclave 后端 Dockerfile（四阶段构建，最大化缓存命中）=====
+﻿# ===== Conclave 后端 Dockerfile（四阶段构建，最大化缓存命中）=====
 # 分层策略（从底到顶，变更频率递增）：
 #   1. system-deps : apt 源配置 + 所有系统依赖（curl/gnupg/Xvfb/VNC/字体/docker-cli/Playwright 浏览器依赖）
 #   2. playwright  : pip install playwright + playwright install chromium（~600MB，极少变更）
@@ -8,7 +8,7 @@
 # 运行时：entrypoint.sh 以 root 启动 → 配置 Docker socket 权限 → 预拉取沙箱镜像 → 降权到 uid 1000 运行 uvicorn
 
 # ---------- 阶段 1: system-deps（系统依赖，最底层，永久缓存） ----------
-FROM docker.m.daocloud.io/library/python:3.12-slim AS system-deps
+FROM dockerproxy.net/library/python:3.12-slim AS system-deps
 
 # pip 镜像源（国内加速）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -116,7 +116,7 @@ VOLUME ["/workspace", "/app/data"]
 # 环境变量默认值
 ENV CONCLAVE_WORKSPACE_DIR=/workspace \
     CONCLAVE_DB_PATH=/app/data/conclave.db \
-    CONCLAVE_SANDBOX_IMAGE=docker.m.daocloud.io/library/python:3.12-slim \
+    CONCLAVE_SANDBOX_IMAGE=dockerproxy.net/library/python:3.12-slim \
     CONCLAVE_SANDBOX_IMAGE_DATASCIENCE=conclave-python-datascience:latest \
     CONCLAVE_SANDBOX_MODE=auto \
     DATASCIENCE_DOCKERFILE=/app/docker/sandbox-datascience/Dockerfile \

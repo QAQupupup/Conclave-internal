@@ -1,4 +1,4 @@
-# ===== Conclave 数据科学沙箱镜像 =====
+﻿# ===== Conclave 数据科学沙箱镜像 =====
 # 基于 python:3.12-slim，预装数据分析 / 科学计算库
 # 供 code_analysis / tested_system 等模板按需调用（见 sandbox.py 的 SANDBOX_IMAGE_DATASCIENCE）
 #
@@ -6,7 +6,7 @@
 #   --network none --read-only --cap-drop ALL --user 65534:65534 --security-opt no-new-privileges
 # 因此本镜像只负责“装包 + 配后端 + 非 root 兼容”，不放宽任何运行期安全策略。
 
-FROM docker.m.daocloud.io/library/python:3.12-slim
+FROM dockerproxy.net/library/python:3.12-slim
 
 # pip 镜像源（清华，国内加速）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple

@@ -1,4 +1,4 @@
-# ===== Conclave Cython 编译容器 =====
+﻿# ===== Conclave Cython 编译容器 =====
 # 用途：在 Docker 容器内编译 conclave_core 为 Cython 扩展（.so），
 #       避免宿主机环境污染，确保编译产物与 OSS 运行时的 Python 3.12 一致。
 #
@@ -12,7 +12,7 @@
 # 或通过 publish_open_source.py：
 #   python scripts/publish_open_source.py --oss-repo ../Conclave-OSS --docker-build
 
-FROM docker.m.daocloud.io/library/python:3.12-slim
+FROM dockerproxy.net/library/python:3.12-slim
 
 # pip 国内镜像源
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple

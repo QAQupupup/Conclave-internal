@@ -1,4 +1,4 @@
-# ===== Conclave 后端测试 Docker Compose =====
+﻿# ===== Conclave 后端测试 Docker Compose =====
 # 专用测试栈：PostgreSQL + Redis + Qdrant + backend(pytest)
 # 使用与开发栈错开的端口，避免本地冲突。
 #
@@ -14,7 +14,7 @@ services:
   # PostgreSQL 16 + pgvector（测试数据库）
   # ============================================================
   postgres-test:
-    image: docker.m.daocloud.io/pgvector/pgvector:pg16
+    image: dockerproxy.net/pgvector/pgvector:pg16
     container_name: conclave-test-postgres
     ports:
       - "5434:5432"
@@ -35,7 +35,7 @@ services:
   # Redis（测试缓存 / 限流）
   # ============================================================
   redis-test:
-    image: docker.m.daocloud.io/library/redis:7-alpine
+    image: dockerproxy.net/library/redis:7-alpine
     container_name: conclave-test-redis
     ports:
       - "6381:6379"

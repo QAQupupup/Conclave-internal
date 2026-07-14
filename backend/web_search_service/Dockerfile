@@ -1,4 +1,4 @@
-# ===== Web Search Service — 独立 Docker 镜像（多阶段构建）=====
+﻿# ===== Web Search Service — 独立 Docker 镜像（多阶段构建）=====
 #
 # 分层策略（从底到顶，变更频率递增）：
 #   1. system-deps : apt 源配置 + Playwright 浏览器系统依赖
@@ -21,7 +21,7 @@
 #     conclave-web-search
 
 # ---------- 阶段 1: system-deps（系统依赖，最底层，永久缓存） ----------
-FROM docker.m.daocloud.io/library/python:3.12-slim AS system-deps
+FROM dockerproxy.net/library/python:3.12-slim AS system-deps
 
 # pip 镜像源（国内加速）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple

@@ -1,4 +1,4 @@
-# ===== Conclave OSS Docker Compose =====
+﻿# ===== Conclave OSS Docker Compose =====
 # 完整部署：前端(nginx) + 后端(FastAPI) + 自动沙箱准备
 #
 # 启动: docker compose up -d
@@ -159,7 +159,7 @@ services:
   # PostgreSQL 16 + pgvector
   # ============================================================
   postgres:
-    image: docker.m.daocloud.io/pgvector/pgvector:pg16
+    image: dockerproxy.net/pgvector/pgvector:pg16
     container_name: conclave-oss-postgres
     restart: unless-stopped
     ports:
@@ -181,7 +181,7 @@ services:
   # Redis（会话缓存 / 限流 / 任务队列）
   # ============================================================
   redis:
-    image: docker.m.daocloud.io/library/redis:7-alpine
+    image: dockerproxy.net/library/redis:7-alpine
     container_name: conclave-oss-redis
     restart: unless-stopped
     ports:

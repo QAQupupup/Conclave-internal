@@ -1,4 +1,4 @@
-"""Docker 容器沙箱：隔离用户代码与命令执行
+﻿"""Docker 容器沙箱：隔离用户代码与命令执行
 
 部署架构（Docker socket mounting / sibling containers）：
 
@@ -65,7 +65,7 @@ L2_DNS_SERVER = os.environ.get("CONCLAVE_L2_DNS", "10.20.0.10")
 # 沙箱镜像（国内镜像站优先）
 SANDBOX_IMAGE = os.environ.get(
     "CONCLAVE_SANDBOX_IMAGE",
-    "docker.m.daocloud.io/library/python:3.12-slim",
+    "dockerproxy.net/library/python:3.12-slim",
 )
 
 # 数据科学镜像：预装 pandas/numpy/matplotlib/sklearn/seaborn/scipy
@@ -77,7 +77,7 @@ SANDBOX_IMAGE_DATASCIENCE = os.environ.get(
 
 # 备用镜像列表（主镜像拉取失败时依次尝试）
 FALLBACK_IMAGES = [
-    "docker.m.daocloud.io/library/python:3.12-slim",
+    "dockerproxy.net/library/python:3.12-slim",
 ]
 
 # 资源限制
@@ -866,19 +866,19 @@ async def deploy_service(
             df_text = dockerfile_path.read_text(encoding="utf-8")
             normalized = re.sub(
                 r"^FROM\s+python:",
-                "FROM docker.m.daocloud.io/library/python:",
+                "FROM dockerproxy.net/library/python:",
                 df_text,
                 flags=re.MULTILINE,
             )
             normalized = re.sub(
                 r"^FROM\s+node:",
-                "FROM docker.m.daocloud.io/library/node:",
+                "FROM dockerproxy.net/library/node:",
                 normalized,
                 flags=re.MULTILINE,
             )
             normalized = re.sub(
                 r"^FROM\s+nginx:",
-                "FROM docker.m.daocloud.io/library/nginx:",
+                "FROM dockerproxy.net/library/nginx:",
                 normalized,
                 flags=re.MULTILINE,
             )

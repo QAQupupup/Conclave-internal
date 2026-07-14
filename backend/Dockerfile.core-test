@@ -1,4 +1,4 @@
-# ===== Conclave 核心扩展编译与一致性验证 Dockerfile =====
+﻿# ===== Conclave 核心扩展编译与一致性验证 Dockerfile =====
 # 用途：验证 conclave_core 经过 Cython 编译后，全量测试是否仍能通过。
 # 后续可作为 CI 阶段或发布脚本的前置校验。
 #
@@ -6,7 +6,7 @@
 #   docker build -f Dockerfile.core-test -t conclave-core-test .
 #   docker run --rm conclave-core-test
 
-FROM docker.m.daocloud.io/library/python:3.12-slim
+FROM dockerproxy.net/library/python:3.12-slim
 
 # 国内镜像源
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
