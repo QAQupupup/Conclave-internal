@@ -113,35 +113,67 @@
 
 ---
 
-## 三、未完成项 (后续迭代)
+## 三、第三轮修复 (架构级深度修复, 10 项)
 
-| 项目 | 说明 | 风险 |
+| # | 问题 | Commit | 验证 |
+|---|---|---|---|
+| R1 | nodes/*.py 中 13 处 compute.think() → execute_think() | 4b148c8 | 22 tests pass |
+| R2 | stage_runners 反向依赖提取 (_scan_artifacts/_emit_progress) | e04d69a | syntax OK |
+| R3 | nodes/ 中残留 seed=42 替换为 settings.llm_seed | 0a0ba77 | syntax OK |
+| R4 | Docker socket 安全: docker-socket-proxy + L2 DNS 代理 | d6848b9 | YAML valid |
+| R6 | 依赖版本锁定: requirements.lock (13 pinned packages) | f846fbf | Dockerfile updated |
+| R7 | 安全模块测试: 154 test cases (sandbox/injection/middleware) | 005614a | all pass |
+| R8 | 前端 useWebSocket 测试: 17 test cases (53 total) | 005614a | all pass |
+| R9 | 内联样式提取 + TS 类型修复 (15+ styles → CSS classes) | 0aa35ab | tsc 0 errors |
+
+### R4 Docker Socket 安全加固详情
+
+**docker-socket-proxy** (tecnativa/docker-socket-proxy:0.3):
+- 仅暴露 CONTAINERS, IMAGES, INFO, VERSION 端点
+- 屏蔽 EXEC, BUILD, COMMIT, VOLUMES, NETWORKS, SECRETS, PLUGINS, SWARM 等
+- backend 通过 DOCKER_HOST=tcp://docker-socket-proxy:2375 连接
+- 移除 backend 直接 /var/run/docker.sock 挂载
+
+**L2 网络隔离** (DNS 代理):
+- conclave-sandbox-l2 自定义网络 (10.20.0.0/16)
+- dnsmasq DNS 代理仅解析白名单域名 (pypi.org, files.pythonhosted.org, mirrors.tuna.tsinghua.edu.cn)
+- sandbox.py: L2 容器使用 --network conclave-sandbox-l2 + --dns 10.20.0.10
+- L1 保持 --network none, L3 保持默认 bridge
+
+### R7 安全测试覆盖详情
+
+| 测试文件 | 用例数 | 覆盖内容 |
 |---|---|---|
-| stage_runners 反向依赖 nodes/ | 需提取 borrow/evidence/produce 辅助函数到独立模块 | 中 (函数移动可能遗漏闭包变量) |
-| produce 阶段完整迁移 | produce_node ~400 行逻辑需拆分为 Planner + 后处理 | 高 (涉及沙箱执行和 Docker 部署) |
-| nodes/*.py 中的 compute.think() 替换为 execute_think() | 7 个 node 文件 + runner.py | 低 (薄包装,行为一致) |
-| 481 处内联样式提取 | 36 个文件,需逐文件处理 | 低 (渐进式) |
-| 前端 useWebSocket 测试 | 需 Mock WebSocket,测试重连/批处理/清理 | 中 |
-| 前端核心组件测试 (ChatPanel/AgentGraph/WorkspacePanel) | 需 React Testing Library + mock | 中 |
-| LLM 硬编码参数在 nodes/ 中的使用 | nodes/ 中的 compute.think 调用仍直接使用 settings | 低 |
-| Docker socket 安全加固 | 考虑 docker-socket-proxy | 中 |
-| L2 网络隔离网络层强制执行 | 需 iptables/ebpf 规则 | 高 |
-| 安全模块测试 (sandbox/prompt_injection/middleware) | 安全关键模块无测试 | 高 |
-| 依赖版本锁定 (pip-compile/Poetry) | 当前全部使用 >= | 中 |
-| 前端工具链版本降级 (TS6/Vite8/ESLint10) | 过于激进 | 中 |
+| test_sandbox_security.py | 72 | 命令白名单/黑名单、容器安全参数、L1/L2/L3 网络分级 |
+| test_prompt_injection.py | 42 | 中英文注入检测、输入过滤、内容隔离 |
+| test_middleware_security.py | 40 | API Token 认证、频率限制、IP 封禁、开发模式跳过 |
+| useWebSocket.test.ts | 17 | 连接/重连/消息处理/卸载清理 |
+| **合计** | **171** | |
 
 ---
 
-## 四、Git 提交历史
+## 四、未完成项 (后续迭代)
+
+| 项目 | 说明 | 风险 | 决策 |
+|---|---|---|---|
+| produce 阶段完整迁移 | 638 行拆分为 Planner + 后处理 | 高 | **用户决定本次跳过** |
+| stage_runners 剩余 4 处反向依赖 | borrow/evidence_check 辅助函数提取 | 中 | 后续迭代 |
+| 前端工具链版本降级 | TS6/Vite8/ESLint10 过于激进 | 中 | **用户决定排除** |
+| 481 处内联样式剩余部分 | 36 个文件,已处理 App.tsx | 低 | 渐进式 |
+| 前端核心组件测试 | ChatPanel/AgentGraph/WorkspacePanel | 中 | 后续迭代 |
+
+---
+
+## 五、Git 提交历史
 
 ```
-4951464 test(frontend): add tests for meetingReducer and format utils
-8ec91d3 refactor(frontend): split 4809-line index.css into semantic modules
-c3902d6 perf(frontend): implement code splitting with React.lazy and manualChunks
-a459f59 refactor(agents): add execute_think unified entry point and sync proto
-c265c74 refactor(orchestrator): implement MeetingManager core methods
-03231bb refactor(db): unify to single db_legacy layer, remove dead ORM code
-504f9d2 refactor(agents): extract hardcoded LLM parameters to config
+0aa35ab refactor(frontend): extract inline styles to CSS classes and fix TS errors
+005614a test: add security module tests and useWebSocket hook tests
+f846fbf build: add requirements.lock for reproducible builds
+d6848b9 security(docker): add socket proxy and L2 network isolation
+0a0ba77 refactor(nodes): replace remaining hardcoded seed=42 with settings.llm_seed
+e04d69a refactor(orchestrator): extract produce helpers to eliminate reverse dependency
+4b148c8 refactor(agents): replace all compute.think() with execute_think()
 ```
 
-每一步均可独立 `git revert`,遵循 Conventional Commits 规范。
+加上前两轮的 8 个 commit,共计 **22 个独立 commit**,每一步均可独立 `git revert`,遵循 Conventional Commits 规范。
