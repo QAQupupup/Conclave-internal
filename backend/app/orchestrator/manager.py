@@ -103,16 +103,30 @@ class MeetingManager:
 
     # ---------- 统一交互层（后续逐步替换 Runner 中直接调用） ----------
     def persist_state(self, state: Any) -> None:
-        """持久化状态（待接入 Repository 层）"""
-        # TODO: 统一通过 Repository 写入 PostgreSQL
-        pass
+        """持久化状态到 PostgreSQL（通过 db_legacy）"""
+        from app.db_legacy import save_meeting, save_meeting_aux, save_message
+        aux = state.extract_aux() if hasattr(state, "extract_aux") else {}
+        save_meeting(
+            meeting_id=state.meeting_id,
+            topic=state.topic,
+            status=state.status.value if hasattr(state.status, "value") else str(state.status),
+            stage=state.stage.value if hasattr(state.stage, "value") else str(state.stage),
+            created_at=state.created_at,
+            payload=state.snapshot() if hasattr(state, "snapshot") else state.model_dump(),
+        )
+        save_meeting_aux(state.meeting_id, aux)
+        for msg in getattr(state, "messages", []):
+            save_message(msg)
 
-    def publish_event(self, meeting_id: str, event_type: str, payload: dict[str, Any]) -> None:
-        """发布事件（待接入 EventBus）"""
-        # TODO: 统一通过 EventBus 发布
-        pass
+    async def publish_event(self, meeting_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        """通过 EventBus 发布事件"""
+        from app.events import bus, make_event
+        await bus.publish(make_event(event_type, meeting_id, payload))
 
     def dispatch_material(self, query: str, meeting_id: str) -> dict[str, Any]:
-        """分发物料（待接入 MaterialHub）"""
-        # TODO: 统一通过 MaterialHub 检索
-        return {}
+        """通过 RAG retriever 检索物料"""
+        try:
+            from app.rag.retriever import retrieve
+            return retrieve(query, meeting_id)
+        except Exception:
+            return {}

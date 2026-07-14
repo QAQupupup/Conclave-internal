@@ -1,6 +1,10 @@
 # § Stage Runners：阶段业务逻辑（与节点解耦）
 # Phase 3：把原来散落在 nodes/*.py 中的状态更新逻辑集中到此处。
 # Runner 不再依赖具体节点文件，只通过 MeetingManager -> Planner -> Scheduler -> Reducer -> StageRunner 驱动。
+#
+# [迁移中间态] 部分辅助函数仍从 nodes/*.py 导入（borrow/evidence_check/produce），
+# 这些导入使用函数级延迟导入避免循环依赖。后续迭代将提取到独立的
+# orchestrator/ 辅助模块中，彻底消除对 nodes/ 的反向依赖。
 from __future__ import annotations
 
 from typing import Any
