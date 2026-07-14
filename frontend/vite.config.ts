@@ -5,6 +5,23 @@ import react from '@vitejs/plugin-react'
 // 前端 dev server 跑在 5173，API 请求走 proxy 不需要 CORS
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            if (id.includes('monaco-editor') || id.includes('@monaco-editor')) return 'monaco'
+            if (id.includes('echarts')) return 'echarts'
+            if (id.includes('@xterm')) return 'xterm'
+            if (id.includes('d3-force')) return 'd3'
+            if (id.includes('antd') || id.includes('@ant-design')) return 'antd-vendor'
+            if (id.includes('react') || id.includes('scheduler')) return 'react-vendor'
+          }
+        },
+      },
+    },
+    chunkSizeWarningLimit: 1000,
+  },
   server: {
     port: 5173,
     host: true,

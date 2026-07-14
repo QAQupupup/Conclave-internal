@@ -1,6 +1,6 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { ConfigProvider, Tabs, Button, Tooltip, Typography } from 'antd'
 import {
   TeamOutlined,
@@ -28,31 +28,33 @@ import { useRouter } from './hooks/useRouter.ts'
 import { navigate } from './lib/router.ts'
 import { StageIndicator } from './components/StageIndicator.tsx'
 import { MeetingControls } from './components/MeetingControls.tsx'
-import { AgentGraph } from './components/AgentGraph.tsx'
 import { ChatPanel } from './components/ChatPanel.tsx'
 import { TopicPanel } from './components/TopicPanel.tsx'
 import { EvidencePanel } from './components/EvidencePanel.tsx'
 import { ArtifactPanel } from './components/ArtifactPanel.tsx'
-import { ReportViewer } from './components/ReportViewer.tsx'
 import { TokenPanel } from './components/TokenPanel.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
 import { IntervenePanel } from './components/IntervenePanel.tsx'
 import { BorrowDialog } from './components/BorrowDialog.tsx'
 import { BorrowApprovalDialog } from './components/BorrowApprovalDialog.tsx'
 import { MeetingSidebar } from './components/MeetingSidebar.tsx'
-import { WorkspacePanel } from './components/WorkspacePanel.tsx'
 import { ThemeSettings } from './components/ThemeSettings.tsx'
 import { SettingsPanel } from './components/SettingsPanel.tsx'
 import { LandingPage } from './components/LandingPage.tsx'
-import { TaskBoard } from './components/TaskBoard.tsx'
 import { FloatingBadges, PanelModal } from './components/FloatingBadges.tsx'
 import { DrawerMenu } from './components/DrawerMenu.tsx'
-import { DashboardView } from './components/DashboardView.tsx'
-import { ModelsView } from './components/ModelsView.tsx'
 import { PanelErrorBoundary } from './components/ErrorBoundary.tsx'
 import { LogPanel } from './components/LogPanel.tsx'
 import { GuardButton } from './components/GuardButton.tsx'
 import type { BadgeItem } from './components/FloatingBadges.tsx'
+
+// 代码分割：重型组件按需加载（Monaco/echarts/d3/xterm 不进首屏 bundle）
+const AgentGraph = lazy(() => import('./components/AgentGraph.tsx').then(m => ({ default: m.AgentGraph })))
+const ReportViewer = lazy(() => import('./components/ReportViewer.tsx').then(m => ({ default: m.ReportViewer })))
+const WorkspacePanel = lazy(() => import('./components/WorkspacePanel.tsx').then(m => ({ default: m.WorkspacePanel })))
+const DashboardView = lazy(() => import('./components/DashboardView.tsx').then(m => ({ default: m.DashboardView })))
+const ModelsView = lazy(() => import('./components/ModelsView.tsx').then(m => ({ default: m.ModelsView })))
+const TaskBoard = lazy(() => import('./components/TaskBoard.tsx').then(m => ({ default: m.TaskBoard })))
 
 /** 全局视图切换：会议 / 工作区 */
 type ViewTab = 'meeting' | 'workspace'
@@ -115,7 +117,7 @@ function MeetingView({
           />,
         )
       case 'report':
-        return wrap('report', <ReportViewer />)
+        return wrap('report', <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载报告…</div>}><ReportViewer /></Suspense>)
       case 'token':
         return wrap('token', <TokenPanel />)
       case 'model':
@@ -136,7 +138,7 @@ function MeetingView({
 
       <div className="app-layout">
         <div className="graph-slot">
-          <AgentGraph />
+          <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载拓扑图…</div>}><AgentGraph /></Suspense>
           <Tooltip title={graphCollapsed ? '展开拓扑图' : '收起拓扑图'}>
             <Button
               type="text"
@@ -181,7 +183,7 @@ function WorkspaceView({ meetingId, initialFile }: { meetingId?: string; initial
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="workspace-view">
-        <WorkspacePanel meetingId={meetingId} initialFile={initialFile} />
+        <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载工作区…</div>}><WorkspacePanel meetingId={meetingId} initialFile={initialFile} /></Suspense>
       </div>
     </div>
   )
@@ -281,11 +283,11 @@ function AppShell() {
             background: 'var(--bg-secondary, #f8f9fb)',
           }}>
             {path === '/dashboard' ? (
-              <DashboardView />
+              <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载看板…</div>}><DashboardView /></Suspense>
             ) : path === '/models' ? (
-              <ModelsView />
+              <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载模型管理…</div>}><ModelsView /></Suspense>
             ) : (
-              <TaskBoard onBackToLanding={() => navigate('/')} />
+              <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载会议…</div>}><TaskBoard onBackToLanding={() => navigate('/')} /></Suspense>
             )}
           </div>
           {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
