@@ -152,21 +152,70 @@
 
 ---
 
-## 四、未完成项 (后续迭代)
+## 四、第四轮修复 (收尾项, 3 项)
+
+| # | 问题 | Commit | 验证 |
+|---|---|---|---|
+| F1 | stage_runners 剩余 4 处反向依赖 | 44dad6d | imports OK |
+| F2 | 478 处内联样式提取 (36 文件) | 9aa94a8 | tsc 0 errors, 53 tests pass |
+| F3 | 前端核心组件测试 (ChatPanel/AgentGraph/WorkspacePanel) | 7998c79 | 104 tests pass |
+
+### F1 stage_runners 反向依赖彻底消除
+
+**新建文件**:
+- `orchestrator/borrow_helpers.py`: `_let_borrowed_agents_speak` + `_moderator_assess_borrow` (从 nodes/borrow.py 提取)
+- `orchestrator/evidence_helpers.py`: `_prefetch_evidence` + `_collect_evidence` + `_make_common_knowledge_evidence` (从 nodes/evidence_check.py 提取)
+
+**修改**:
+- `nodes/borrow.py` 和 `nodes/evidence_check.py`: 改为 thin re-export wrapper
+- `stage_runners.py`: 4 处 `from app.orchestrator.nodes.*` → `from app.orchestrator.*_helpers`
+- **stage_runners.py 对 nodes/ 的反向导入: 0 处** (完全消除)
+
+### F2 内联样式提取详情
+
+| 批次 | 文件数 | 样式总数 | 提取为CSS | 保留动态 | CSS类创建 |
+|---|---|---|---|---|---|
+| Batch 1 (简单) | 8 | 13 | 12 | 1 | 11 |
+| Batch 2 (中等) | 12 | 89 | 87 | 2 | 79 |
+| Batch 3 (较大) | 7 | 109 | 98 | 6 | 77 |
+| Batch 4 (最大) | 7 | 243 | 227 | 16 | 168 |
+| ArtifactPanel + GuardButton | 2 | 24 | 24 | 0 | 17 |
+| **合计** | **36** | **478** | **448** | **25** | **352** |
+
+**剩余 25 处内联样式**: 全部为动态样式 (使用变量/三元表达式, 无法转为静态 CSS)
+
+**GuardButton 压线修复**: 折叠宽度 28px→32px, 盾牌圆 18px→20px, 图标 11→12px, padding 改为等距
+
+**额外 Bug 修复**: WorkspacePanel `renderTreeNodes` 从 `tree` 陈旧状态改为从 `pathMap` 读取最新节点状态, 修复目录展开不渲染子节点的 bug
+
+### F3 前端组件测试覆盖
+
+| 测试文件 | 用例数 | 覆盖内容 |
+|---|---|---|
+| ChatPanel.test.tsx | 14 | 空态/消息渲染/阶段分隔线/Produce进度条/滚动行为/onSelectRef |
+| AgentGraph.test.tsx | 16 | SVG容器/缩放控件/Agent节点/冲突/借调/证据/产出物/FocusMode/圆桌椭圆 |
+| WorkspacePanel.test.tsx | 21 | 工具栏/文件树懒加载/编辑器打开编辑保存/终端执行/沙箱徽章/meetingId隔离 |
+| **合计** | **51** | |
+
+**前端测试总数**: 从 53 增至 **104** (翻倍)
+
+---
+
+## 五、未完成项 (后续迭代)
 
 | 项目 | 说明 | 风险 | 决策 |
 |---|---|---|---|
 | produce 阶段完整迁移 | 638 行拆分为 Planner + 后处理 | 高 | **用户决定本次跳过** |
-| stage_runners 剩余 4 处反向依赖 | borrow/evidence_check 辅助函数提取 | 中 | 后续迭代 |
 | 前端工具链版本降级 | TS6/Vite8/ESLint10 过于激进 | 中 | **用户决定排除** |
-| 481 处内联样式剩余部分 | 36 个文件,已处理 App.tsx | 低 | 渐进式 |
-| 前端核心组件测试 | ChatPanel/AgentGraph/WorkspacePanel | 中 | 后续迭代 |
 
 ---
 
-## 五、Git 提交历史
+## 六、Git 提交历史
 
 ```
+7998c79 test(frontend): add ChatPanel/AgentGraph/WorkspacePanel component tests + fix tree render bug
+9aa94a8 refactor(frontend): extract 451 inline styles to CSS classes across 36 files
+44dad6d refactor(orchestrator): extract borrow/evidence helpers to eliminate all reverse deps
 0aa35ab refactor(frontend): extract inline styles to CSS classes and fix TS errors
 005614a test: add security module tests and useWebSocket hook tests
 f846fbf build: add requirements.lock for reproducible builds
@@ -176,4 +225,4 @@ e04d69a refactor(orchestrator): extract produce helpers to eliminate reverse dep
 4b148c8 refactor(agents): replace all compute.think() with execute_think()
 ```
 
-加上前两轮的 8 个 commit,共计 **22 个独立 commit**,每一步均可独立 `git revert`,遵循 Conventional Commits 规范。
+加上前两轮的 12 个 commit,共计 **25 个独立 commit**,每一步均可独立 `git revert`,遵循 Conventional Commits 规范。
