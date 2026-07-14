@@ -1,4 +1,4 @@
-# Evidence check stage node + evidence retrieval helpers
+﻿# Evidence check stage node + evidence retrieval helpers
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +8,7 @@ from app.agents.compute import get_compute, build_evidence_prompt
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
 from app.rag.retriever import retrieve_for_conflict
-from app.tools.web_search import get_web_search
+from app.tools import get_web_search
 
 from ._helpers import (
     _full_anchor,
@@ -66,7 +66,7 @@ async def _collect_evidence(meeting_id: str, conflict: dict) -> list[dict]:
     ]
     if len(evidence_chunks) < 3:
         web_search = get_web_search()
-        web_results = await web_search.search(summary, top_k=3)
+        web_results = await web_search.search(summary, top_k=3, session_key=meeting_id)
         for i, wr in enumerate(web_results):
             evidence_chunks.append({
                 "evidence_id": f"web-{i}",

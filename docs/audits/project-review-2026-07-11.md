@@ -2,7 +2,8 @@
 
 > **日期**: 2026-07-11  
 > **范围**: 全项目代码架构 + 文档组织 + 偏好系统 + 工程质量  
-> **方法**: AST 语法校验全量 83 文件 + 逐模块阅读 + 测试执行 + 文档清点
+> **方法**: AST 语法校验全量 83 文件 + 逐模块阅读 + 测试执行 + 文档清点  
+> **历史注记** (2026-07-14): 本报告编写时 `nodes.py` 为单文件，现已拆分为 `nodes/` 包。模块速查表中 `orchestrator/nodes.py` → `orchestrator/nodes/`（`clarify.py`, `intra_team.py`, `cross_team.py`, `evidence_check.py`, `arbitrate.py`, `produce.py`, `borrow.py`, `_helpers.py`）。
 
 ---
 

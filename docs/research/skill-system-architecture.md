@@ -51,7 +51,7 @@ backend/app/
 ├── prompts/
 │   └── bug_patterns.yaml      # Bug经验库（按分类组织的错误模式）
 └── orchestrator/
-    └── nodes.py               # 编排节点，review阶段注入Skills
+    └── nodes/                  # 编排节点包（clarify/intra_team/cross_team/evidence_check/arbitrate/produce/borrow），review阶段注入Skills
 ```
 
 ## 4. Skill 加载机制

@@ -15,6 +15,8 @@ from app.db.base import Base
 from app.db.models import (  # noqa: F401
     MeetingModel, MessageModel, EventModel, MeetingTagModel,
     AgentRoleModel, UserPreferenceModel, NetAuthRequestModel,
+    MeetingAuxModel, ApiKeyModel, DocumentModel, CostRecordModel,
+    RawMemoryModel, FeatureMemoryModel, ProfileMemoryModel,
 )
 
 # Alembic Config 对象

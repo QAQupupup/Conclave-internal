@@ -1,4 +1,4 @@
-# ReAct 循环控制器：think → act → observe → think
+﻿# ReAct 循环控制器：think → act → observe → think
 #
 # 设计原则（Claude 交叉评审共识）：
 # - max_iterations 作为一等公民终态：不是异常，是正常的循环终止条件
@@ -392,15 +392,19 @@ def create_default_tool_registry() -> ToolRegistry:
 
     # ========== 网络搜索工具 ==========
     async def _web_search(args: dict[str, Any]) -> Any:
-        from app.tools.web_search import get_web_search
+        from app.tools import get_web_search
         query = args.get("query", "")
         top_k = args.get("top_k", 5)
         tool = get_web_search()
-        # 传递可选参数：language, time_range, country
+        # 传递可选参数：language, time_range, country, session_key
         kwargs: dict[str, Any] = {}
         for key in ("language", "time_range", "country"):
             if key in args and args[key]:
                 kwargs[key] = args[key]
+        # 使用 meeting_id 作为 session_key，保证同一会议内搜索复用 Context
+        meeting_id = args.get("meeting_id", "")
+        if meeting_id:
+            kwargs["session_key"] = str(meeting_id)
         return await tool.search(query, top_k, **kwargs)
 
     registry.register(
@@ -418,7 +422,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     # web_fetch 工具：直接抓取指定 URL 内容
     async def _web_fetch(args: dict[str, Any]) -> Any:
-        from app.tools.web_search import get_web_fetch
+        from app.tools import get_web_fetch
         url = args.get("url", "")
         max_chars = args.get("max_chars", 5000)
         tool = get_web_fetch()

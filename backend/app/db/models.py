@@ -1,7 +1,6 @@
-"""SQLAlchemy 2.0 ORM 模型 — 映射当前全部 7 张表。
+"""SQLAlchemy 2.0 ORM 模型 — 映射全部 14 张表。
 
-使用 DeclarativeBase + mapped_column 风格，兼容 PostgreSQL 和 SQLite 双后端。
-迁移路径：SQLite 中的 TEXT/INTEGER → PostgreSQL 中的 TEXT/BOOLEAN/TIMESTAMPTZ/JSONB。
+仅支持 PostgreSQL 后端（SQLite 已废弃）。
 """
 from __future__ import annotations
 

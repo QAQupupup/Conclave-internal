@@ -64,11 +64,13 @@ docker compose up -d --build
 
 服务启动后：
 - **前端界面**：http://localhost:5173
-- **后端API**：http://localhost:8000
-- **API文档**：http://localhost:8000/docs
+- **后端 API 文档**：http://localhost:8000/docs
+- **WebSocket**：ws://localhost:8000/ws/{meeting_id}
 - **PostgreSQL**：localhost:5432（容器内）
 - **Redis**：localhost:6379（容器内）
 - **Qdrant向量库**：localhost:6333（容器内）
+
+> **工程规范**：所有贡献者在操作本项目前，请先阅读 [PROJECT_CONVENTIONS.md](PROJECT_CONVENTIONS.md)，了解项目的部署、构建、提交、测试和代码保护等强制规范。
 
 ### 配置LLM（可选，不配置走Stub模式）
 
@@ -236,7 +238,12 @@ Conclave/
 │   │   │   ├── conclusion_chain.py    # 结论锁定链（防漂移）
 │   │   │   ├── consistency.py         # 一致性自检
 │   │   │   ├── react_loop.py          # ReAct工具调用循环
-│   │   │   └── refine_loop.py         # 代码自修复循环
+│   │   │   ├── refine_loop.py         # 代码自修复循环
+│   │   │   ├── stage_planners.py      # V3 阶段规划器
+│   │   │   ├── stage_reducers.py      # V3 阶段结果归约器
+│   │   │   ├── stage_common.py        # 阶段公共辅助函数
+│   │   │   ├── task_graph.py          # DAG 任务图
+│   │   │   └── fast_path.py           # 快速路径分流
 │   │   ├── agents/                    # Agent计算层
 │   │   │   ├── compute.py             # LLM调用 + 多模型路由
 │   │   │   ├── agent_runtime.py       # V3：统一 Agent 运行时
@@ -246,13 +253,14 @@ Conclave/
 │   │   ├── routers/                   # API路由
 │   │   │   ├── meetings.py            # 会议CRUD + 后台执行
 │   │   │   ├── ws.py                  # WebSocket端点
-│   │   │   ├── models.py              # 模型配置
 │   │   │   ├── documents.py           # 文档上传
 │   │   │   └── ...
 │   │   ├── rag/                       # 检索增强
 │   │   │   ├── store.py               # 向量存储（内存/Qdrant）+ 清理函数
-│   │   │   ├── chunking.py            # 文档分块
-│   │   │   └── embeddings.py          # 嵌入模型
+│   │   │   ├── chunker.py             # 文档分块
+│   │   │   ├── tokenize.py            # 分词器
+│   │   │   ├── query_rewriter.py      # 查询重写
+│   │   │   └── retriever.py           # 检索器
 │   │   ├── memory/                    # 三层记忆系统
 │   │   ├── observability/             # 可观测性
 │   │   │   ├── log_bus.py             # 结构化日志总线
@@ -260,14 +268,33 @@ Conclave/
 │   │   │   ├── metrics_store.py       # 指标采集(环形缓冲)
 │   │   │   └── cost_tracker.py        # 成本追踪(上限10000条)
 │   │   ├── tools/                     # 工具集
+│   │   │   ├── __init__.py            # 工具工厂 (stub/tavily/playwright/remote 四模式)
+│   │   │   ├── search_engine.py       # 多引擎搜索协议 + MultiEngineSearch
+│   │   │   ├── playwright_search.py   # Playwright 无头浏览器搜索 (Bing + 正文提取)
 │   │   │   ├── browser_tool.py        # Playwright浏览器自动化
-│   │   │   └── ...
+│   │   │   ├── domain_registry.py     # 域名可信度注册表 (S/A/B/C/D tier)
+│   │   │   ├── playwright/            # Playwright 子包
+│   │   │   │   ├── stealth_js.py      # 30项反检测指纹覆盖
+│   │   │   │   ├── captcha_js.py      # CAPTCHA 主动检测
+│   │   │   │   ├── extract_js.py      # 页面正文提取
+│   │   │   │   ├── jsonld_js.py       # JSON-LD 结构化数据提取
+│   │   │   │   ├── chunk_js.py        # Claim 粒度分块提取
+│   │   │   │   ├── session_pool.py    # SessionPool 按 session_key 复用 Context
+│   │   │   │   └── security.py        # SSRF 防护 + URL 安全校验
+│   │   │   └── engines/               # 搜索引擎实现
+│   │   │       ├── bing_engine.py     # Bing Playwright 引擎
+│   │   │       └── ddg_engine.py      # DuckDuckGo 备用引擎
 │   │   ├── skills/                    # YAML技能规范
 │   │   └── prompts/                   # Prompt模板 + Bug Pattern
 │   ├── workspace/                     # 沙箱工作目录
 │   ├── tests/                         # 测试文件
 │   ├── Dockerfile                     # 后端镜像
 │   └── requirements.txt
+│   ├── web_search_service/            # 独立 Web Search 服务
+│   │   ├── main.py                    # FastAPI 服务 (5 端点)
+│   │   ├── research_agent.py          # DeepResearchAgent (5阶段自主研究)
+│   │   ├── requirements.txt
+│   │   └── Dockerfile
 ├── frontend/
 │   ├── src/
 │   │   ├── components/                # React组件
@@ -428,6 +455,11 @@ python -m pytest tests/test_scheduler.py tests/test_context_manager.py tests/tes
 - 使用 stub/mock compute，不调用真实大模型 API
 - 基于历史会议议题（Wiki 系统、股票分析）作为端到端输入
 - 验证 Manager、Scheduler、ContextManager、AgentRuntime、TaskBaseline 的协同工作
+
+```bash
+# 单元测试 (mock，无需真实浏览器/LLM)
+python -m pytest tests/test_web_search_unit.py -v
+```
 
 ### 避免测试调用真实 LLM
 

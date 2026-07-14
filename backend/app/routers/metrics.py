@@ -116,14 +116,14 @@ async def _health_checks() -> dict[str, Any]:
             cur.execute("SELECT 1")
             cur.fetchone()
             cur.close()
-            checks["sqlite"] = {
+            checks["postgresql"] = {
                 "status": "ok",
                 "latency_ms": round((_time.monotonic() - t0) * 1000, 1),
             }
         finally:
             _putconn(conn)
     except Exception as e:
-        checks["sqlite"] = {"status": "error", "message": str(e)[:100]}
+        checks["postgresql"] = {"status": "error", "message": str(e)[:100]}
 
     # Qdrant
     try:

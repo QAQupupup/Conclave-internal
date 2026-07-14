@@ -60,8 +60,9 @@ def _putconn(conn: psycopg2.extensions.connection) -> None:
                 return
             except Exception:
                 pass
+    # 池已关闭或 putconn 失败，直接关闭连接
     try:
-        _putconn(conn)
+        conn.close()
     except Exception:
         pass
 

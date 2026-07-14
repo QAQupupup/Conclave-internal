@@ -1,0 +1,92 @@
+# ===== Web Search Service — 独立基础设施服务（docker-compose 覆盖文件） =====
+#
+# 将 Web Search 从 Conclave 主进程拆分出来，通过 HTTP 协议通信。
+# 使用方式：
+#   docker compose -f docker-compose.yml -f docker-compose.websearch.yml up -d
+#
+# 架构：
+#   backend → HTTP(9100) → web-search → Playwright → Chromium → Bing
+#
+# 优势：
+#   - 零耦合：backend 只依赖 HTTP 协议，不依赖 Playwright 库
+#   - 独立生命周期：浏览器崩溃不影响主进程
+#   - 可共享：多个 Conclave 实例或其他项目共用同一搜索服务
+#   - 可独立扩缩：搜索负载高时可单独扩容
+
+services:
+  # ── Web Search 独立服务 ─────────────────────────────────────
+  web-search:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: conclave-dev-web-search
+    ports:
+      - "9100:9100"
+    # 使用独立入口：web_search_service/main.py
+    entrypoint: ["python", "-m", "uvicorn", "web_search_service.main:app"]
+    command: ["--host", "0.0.0.0", "--port", "9100"]
+    environment:
+      # 翻译模型配置（与 backend 共用）
+      - CONCLAVE_LLM_API_KEY=${CONCLAVE_LLM_API_KEY:-}
+      - CONCLAVE_LLM_BASE_URL=${CONCLAVE_LLM_BASE_URL:-https://api.siliconflow.cn/v1}
+      # Cookie 持久化
+      - CONCLAVE_DATA_DIR=/app/data
+      # 服务端口
+      - CONCLAVE_WEB_SEARCH_PORT=9100
+      # 守卫模式（默认关闭）
+      - CONCLAVE_WEB_SEARCH_HEADED=${CONCLAVE_WEB_SEARCH_HEADED:-0}
+      # 禁用不需要的组件
+      - CONCLAVE_DISABLE_SANDBOX_WARMUP=1
+      - CONCLAVE_DISABLE_PRICING_LOADER=1
+      - CONCLAVE_DISABLE_KEY_LOADER=1
+      - CONCLAVE_DISABLE_METRICS=1
+      - CONCLAVE_MEMORY_DISABLED=1
+      # 日志级别
+      - CONCLAVE_LOG_LEVEL=${CONCLAVE_LOG_LEVEL:-INFO}
+    cap_add:
+      - SYS_ADMIN  # Chromium 需要
+    security_opt:
+      - seccomp:unconfined  # Playwright + Chromium 需要
+    shm_size: "1g"  # Chromium 需要较大共享内存
+    tmpfs:
+      - /tmp:size=100M,mode=1777
+      - /var/tmp:size=50M,mode=1777
+    volumes:
+      - web-search-data:/app/data  # Cookie 持久化
+    dns:
+      - 8.8.8.8
+      - 223.5.5.5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:9100/health', timeout=5).raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s  # Playwright + Chromium 启动需要时间
+
+  # ── Backend 配置覆盖 ─────────────────────────────────────────
+  backend:
+    environment:
+      # 使用远程 Web Search 服务（替代进程内 Playwright）
+      - CONCLAVE_WEB_SEARCH_SERVICE_URL=http://web-search:9100
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web-search:
+        condition: service_healthy
+
+volumes:
+  web-search-data:
+    driver: local

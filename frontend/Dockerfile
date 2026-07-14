@@ -10,7 +10,7 @@ RUN npm ci --registry https://registry.npmmirror.com
 COPY . .
 RUN npx tsc && npx vite build
 
-FROM docker.m.daocloud.io/library/nginx:alpine
+FROM docker.m.daocloud.io/library/nginx:1.27-alpine
 # Alpine apk 使用阿里云镜像加速
 RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine/|https://mirrors.aliyun.com/alpine/|g' /etc/apk/repositories && \
     apk update && \

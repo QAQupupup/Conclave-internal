@@ -57,8 +57,8 @@ function buildWsUrl(meetingId: string, fromSeq: number): string {
 const RECONNECT_BASE_DELAY = 1000
 const RECONNECT_MAX_DELAY = 30000
 // [CON-08 修复] 最大重连次数：超过后停止重连，避免 CPU 耗尽。
-// 设为 -1 表示无限重连（旧行为），默认 8 次后停止（约 4 分钟累积退避）
-const MAX_RECONNECT_ATTEMPTS = -1
+// 8 次后停止（约 4 分钟累积指数退避）
+const MAX_RECONNECT_ATTEMPTS = 8
 
 // 持续推送心跳的客户端心跳 watchdog：超过 90s 没收到任何消息则主动重连
 // [CON-08 修复] 服务端僵尸连接不会发 ping，靠客户端 watchdog 检测

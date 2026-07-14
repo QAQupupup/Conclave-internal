@@ -327,7 +327,7 @@ class ToolPort(Protocol):
 
 ### 10.4 首期实现边界
 
-- 仅 Web Search：接 Tavily 或 SerpAPI，一个 HTTP 调用拿结构化结果
+- Web Search：支持四种模式（stub / tavily / playwright / remote），当前以 Playwright 无头浏览器爬取 Bing + 正文提取为主模式，亦可独立部署为 RemoteWebSearch 服务
 - 结果标注 `[web:source]`，和 `[doc:section]` 一起走仲裁
 - 浏览器自动化与桌面感知：接口定义好，实现推迟
 

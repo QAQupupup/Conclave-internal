@@ -431,7 +431,7 @@ class Runner:
         return state
 
     def _persist(self, state: MeetingState) -> None:
-        """持久化会议状态与发言到 SQLite
+        """持久化会议状态与发言到 PostgreSQL
 
         MeetingState 瘦身优化：大字段（llm_trace, evidence_set,
         conclusion_chain, borrowed_agents）通过 extract_aux() 分离存储
@@ -571,11 +571,11 @@ def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = Non
 
 
 def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
-    """从内存取或新建运行态；内存未命中时从 SQLite 恢复"""
+    """从内存取或新建运行态；内存未命中时从 PostgreSQL 恢复"""
     existing = get_state(meeting_id)
     if existing is not None:
         return existing
-    # 尝试从 SQLite 恢复
+    # 尝试从 PostgreSQL 恢复
     from app.db_legacy import get_meeting, get_meeting_aux
     record = get_meeting(meeting_id)
     if record is not None:
@@ -587,10 +587,10 @@ def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None 
             if aux:
                 state.inject_aux(aux)
             set_state(state)
-            logger.info("会议 %s 从 SQLite 恢复运行态（aux=%d keys）", meeting_id, len(aux))
+            logger.info("会议 %s 从 PostgreSQL 恢复运行态（aux=%d keys）", meeting_id, len(aux))
             return state
         except Exception as e:
-            logger.warning("会议 %s 从 SQLite 恢复失败: %s，创建新状态", meeting_id, e)
+            logger.warning("会议 %s 从 PostgreSQL 恢复失败: %s，创建新状态", meeting_id, e)
     return new_state(meeting_id, topic, doc_summaries)
 
 

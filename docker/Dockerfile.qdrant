@@ -1,5 +1,5 @@
 # 自定义 Qdrant 镜像：添加 curl 用于 Docker 健康检查
-FROM docker.m.daocloud.io/qdrant/qdrant:latest
+FROM docker.m.daocloud.io/qdrant/qdrant:v1.12.4
 
 # apt 镜像源（清华，兼容 Debian DEB822 格式）
 RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \

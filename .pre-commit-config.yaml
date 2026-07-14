@@ -36,6 +36,14 @@ repos:
         pass_filenames: false
         stages: [commit]
 
+      - id: frontend-lint
+        name: Frontend lint (eslint)
+        entry: bash -c 'cd frontend && npm run lint -- --max-warnings=0'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+        stages: [commit]
+
       - id: frontend-build
         name: Frontend production build
         entry: bash -c 'cd frontend && npm run build'

@@ -34,7 +34,7 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库 + 崩溃恢复 + 后台指标采集"""
-    # 旧 SQLite 兼容层（逐步移除）
+    # PostgreSQL 兼容层（db_legacy，逐步迁移到 async Repository）
     init_db()
     init_auth_table()
 
@@ -166,11 +166,11 @@ def create_app() -> FastAPI:
                 cur.execute("SELECT 1")
                 cur.fetchone()
                 cur.close()
-                checks["sqlite"] = "ok"
+                checks["postgresql"] = "ok"
             finally:
                 _putconn(conn)
         except Exception as e:
-            checks["sqlite"] = f"error: {e}"
+            checks["postgresql"] = f"error: {e}"
 
         # PostgreSQL 检查
         try:

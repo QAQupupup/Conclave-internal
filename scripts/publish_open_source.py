@@ -77,9 +77,11 @@ def _file_hash(path: Path) -> str:
 
 _SKIP_DIRS = {
     "node_modules",
+    "dist",
     ".git",
     "__pycache__",
     ".pytest_cache",
+    ".ruff_cache",
     ".venv",
     ".idea",
     ".pnpm-store",

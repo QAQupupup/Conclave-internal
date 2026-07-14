@@ -1,6 +1,6 @@
 """异步数据库引擎 + 会话工厂。
 
-支持 SQLite（开发）和 PostgreSQL（生产）双后端，由 DATABASE_URL 自动切换。
+仅支持 PostgreSQL 后端，由 DATABASE_URL 配置。
 """
 from __future__ import annotations
 
@@ -14,22 +14,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from app.config import settings
 
-# 根据 DATABASE_URL 自动选择驱动
 # PostgreSQL: postgresql+asyncpg://user:pass@host:5432/db
-# SQLite:      sqlite+aiosqlite:///conclave.db
 _database_url = settings.database_url
 
 
 def _create_async_engine(url: str) -> AsyncEngine:
-    """根据 URL 创建合适的异步引擎。"""
-    # SQLite 需要特殊配置：关闭连接池（单文件），开启 WAL 外键
-    if url.startswith("sqlite"):
-        return create_async_engine(
-            url,
-            echo=False,
-            poolclass=None,  # SQLite 不需要连接池
-            connect_args={"check_same_thread": False},
-        )
+    """创建 PostgreSQL 异步引擎。"""
     return create_async_engine(
         url,
         pool_size=10,

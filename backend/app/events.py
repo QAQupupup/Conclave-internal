@@ -22,9 +22,9 @@ Subscriber = Callable[[DomainEvent], Awaitable[None]]
 
 
 class InMemoryEventBus:
-    """内存事件总线 + SQLite 持久化（重启不丢事件）
+    """内存事件总线 + PostgreSQL 持久化（重启不丢事件）
 
-    事件同时写入内存缓存和 SQLite，重启后从 SQLite 恢复。
+    事件同时写入内存缓存和 PostgreSQL，重启后从 PostgreSQL 恢复。
     后期换 RedisEventBus / MQ 不改上层调用。
 
     内存安全：
@@ -42,8 +42,8 @@ class InMemoryEventBus:
         self._history: dict[str, list[DomainEvent]] = {}
 
     async def publish(self, event: DomainEvent) -> None:
-        """发布事件：写入 SQLite + 内存缓存，广播给订阅者"""
-        # 持久化到 SQLite 并获取自增 seq
+        """发布事件：写入 PostgreSQL + 内存缓存，广播给订阅者"""
+        # 持久化到 PostgreSQL 并获取自增 seq
         from app.db_legacy import save_event
         ts_str = event.ts.isoformat() if hasattr(event.ts, "isoformat") else str(event.ts)
         db_seq = save_event(
@@ -53,7 +53,7 @@ class InMemoryEventBus:
             ts=ts_str,
             trace_id=event.trace_id,
         )
-        # 用 SQLite 的自增 seq 作为全局唯一序列号
+        # 用 PostgreSQL 的自增 seq 作为全局唯一序列号
         event.seq = db_seq
 
         # 写入内存历史，超限裁剪最旧事件
@@ -94,18 +94,18 @@ class InMemoryEventBus:
         return _unsubscribe
 
     def history(self, meeting_id: str) -> list[DomainEvent]:
-        """取某会议已发布事件，优先从内存取，内存空则从 SQLite 恢复"""
+        """取某会议已发布事件，优先从内存取，内存空则从 PostgreSQL 恢复"""
         mem_events = self._history.get(meeting_id)
         if mem_events:
             return list(mem_events)
-        # 内存无缓存，从 SQLite 恢复
+        # 内存无缓存，从 PostgreSQL 恢复
         return self._restore_from_db(meeting_id)
 
     def replay(self, meeting_id: str, from_seq: int = 0) -> list[DomainEvent]:
         """增量回放：from_seq=0 返回全部事件，from_seq>0 返回 seq > from_seq 的事件"""
         events = self._history.get(meeting_id)
         if not events:
-            # 内存无缓存，从 SQLite 恢复
+            # 内存无缓存，从 PostgreSQL 恢复
             events = self._restore_from_db(meeting_id)
         if from_seq <= 0:
             return list(events)
@@ -116,16 +116,16 @@ class InMemoryEventBus:
         events = self._history.get(meeting_id)
         if events:
             return events[-1].seq
-        # 内存无缓存，从 SQLite 取
+        # 内存无缓存，从 PostgreSQL 取
         from app.db_legacy import last_event_seq
         return last_event_seq(meeting_id)
 
     def clear(self, meeting_id: str) -> None:
-        """清理某会议的内存缓存（SQLite 保留）"""
+        """清理某会议的内存缓存（PostgreSQL 保留）"""
         self._history.pop(meeting_id, None)
 
     def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
-        """从 SQLite 恢复事件到内存缓存"""
+        """从 PostgreSQL 恢复事件到内存缓存"""
         from app.db_legacy import load_events
         rows = load_events(meeting_id)
         events = []
