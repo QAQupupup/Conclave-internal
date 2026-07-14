@@ -412,19 +412,20 @@ function linkColor(type: string, supports?: string): string {
 export function AgentGraph() {
   const { store } = useMeeting()
   const meeting = store.meeting
-  if (!meeting) return null
 
-  const layout = useMemo(() => buildLayout(meeting), [
-    meeting.stage, meeting.status,
-    JSON.stringify(meeting.team_config),
-    JSON.stringify(meeting.borrowed_agents),
-    JSON.stringify(meeting.conflicts),
-    JSON.stringify(meeting.evidence_set),
-    (meeting as any).deliverable_type,
-    meeting.artifact?.deliverable_type,
-    JSON.stringify(meeting.decision_record),
-    meeting.flow_plan,
+  const layout = useMemo(() => (meeting ? buildLayout(meeting) : null), [
+    meeting?.stage, meeting?.status,
+    meeting && JSON.stringify(meeting.team_config),
+    meeting && JSON.stringify(meeting.borrowed_agents),
+    meeting && JSON.stringify(meeting.conflicts),
+    meeting && JSON.stringify(meeting.evidence_set),
+    meeting && (meeting as any).deliverable_type,
+    meeting?.artifact?.deliverable_type,
+    meeting && JSON.stringify(meeting.decision_record),
+    meeting?.flow_plan,
   ])
+
+  if (!meeting || !layout) return null
 
   return <AgentGraphInner layout={layout} />
 }

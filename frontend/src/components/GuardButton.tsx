@@ -16,14 +16,18 @@ export function GuardButton({ path }: GuardButtonProps) {
   })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  if (path === '/') return null
-
   const clearTimer = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
   }
+
+  useEffect(() => {
+    return () => { clearTimer() }
+  }, [])
+
+  if (path === '/') return null
 
   const handleMouseEnter = () => {
     clearTimer()
@@ -33,10 +37,6 @@ export function GuardButton({ path }: GuardButtonProps) {
   const handleMouseLeave = () => {
     timerRef.current = setTimeout(() => setExpanded(false), 800)
   }
-
-  useEffect(() => {
-    return () => { clearTimer() }
-  }, [])
 
   const active = guardStatus.guardMode
   const pending = guardStatus.hasPending
