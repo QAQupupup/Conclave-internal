@@ -214,7 +214,7 @@ describe('useWebSocket', () => {
     })
 
     it('收到 error 帧时 dispatch error action', () => {
-      const { result } = setup('m1')
+      setup('m1')
       const ws = MockWebSocket.last()
       act(() => {
         ws.simulateOpen()
@@ -237,12 +237,12 @@ describe('useWebSocket', () => {
     })
 
     it('DomainEvent 延迟到 rAF flush 后才 dispatch', () => {
-      const { result } = setup('m1')
+      setup('m1')
       const ws = MockWebSocket.last()
       act(() => {
         ws.simulateOpen()
       })
-      dispatch.mockClear()
+      ;(dispatch as any).mockClear()
       const evt: DomainEvent = {
         type: 'agent.spoke',
         meeting_id: 'm1',
@@ -272,12 +272,12 @@ describe('useWebSocket', () => {
     })
 
     it('同一帧内多个 DomainEvent 批量合并到单次 rAF flush', () => {
-      const { result } = setup('m1')
+      setup('m1')
       const ws = MockWebSocket.last()
       act(() => {
         ws.simulateOpen()
       })
-      dispatch.mockClear()
+      ;(dispatch as any).mockClear()
       const evt1: DomainEvent = {
         type: 'agent.spoke',
         meeting_id: 'm1',
@@ -454,12 +454,12 @@ describe('useWebSocket', () => {
     })
 
     it('unmount 时取消待执行的 rAF 批处理', () => {
-      const { result, unmount } = setup('m1')
+      const { unmount } = setup('m1')
       const ws = MockWebSocket.last()
       act(() => {
         ws.simulateOpen()
       })
-      dispatch.mockClear()
+      ;(dispatch as any).mockClear()
       act(() => {
         ws.simulateMessage({
           type: 'agent.spoke',

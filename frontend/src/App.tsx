@@ -117,7 +117,7 @@ function MeetingView({
           />,
         )
       case 'report':
-        return wrap('report', <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载报告…</div>}><ReportViewer /></Suspense>)
+        return wrap('report', <Suspense fallback={<div className="suspense-fallback">加载报告…</div>}><ReportViewer /></Suspense>)
       case 'token':
         return wrap('token', <TokenPanel />)
       case 'model':
@@ -138,7 +138,7 @@ function MeetingView({
 
       <div className="app-layout">
         <div className="graph-slot">
-          <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载拓扑图…</div>}><AgentGraph /></Suspense>
+          <Suspense fallback={<div className="suspense-fallback">加载拓扑图…</div>}><AgentGraph /></Suspense>
           <Tooltip title={graphCollapsed ? '展开拓扑图' : '收起拓扑图'}>
             <Button
               type="text"
@@ -181,9 +181,9 @@ function MeetingView({
 /** 工作区视图：文件树 + 编辑器 + 终端 */
 function WorkspaceView({ meetingId, initialFile }: { meetingId?: string; initialFile?: string }) {
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="flex-col-overflow">
       <div className="workspace-view">
-        <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载工作区…</div>}><WorkspacePanel meetingId={meetingId} initialFile={initialFile} /></Suspense>
+        <Suspense fallback={<div className="suspense-fallback">加载工作区…</div>}><WorkspacePanel meetingId={meetingId} initialFile={initialFile} /></Suspense>
       </div>
     </div>
   )
@@ -259,7 +259,7 @@ function AppShell() {
                 会议看板 / {pageTitle}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+            <div className="toolbar-button-group">
               <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
                 <Button type="text" size="small"
                   icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
@@ -283,11 +283,11 @@ function AppShell() {
             background: 'var(--bg-secondary, #f8f9fb)',
           }}>
             {path === '/dashboard' ? (
-              <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载看板…</div>}><DashboardView /></Suspense>
+              <Suspense fallback={<div className="suspense-fallback">加载看板…</div>}><DashboardView /></Suspense>
             ) : path === '/models' ? (
-              <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载模型管理…</div>}><ModelsView /></Suspense>
+              <Suspense fallback={<div className="suspense-fallback">加载模型管理…</div>}><ModelsView /></Suspense>
             ) : (
-              <Suspense fallback={<div style={{padding:24,textAlign:'center'}}>加载会议…</div>}><TaskBoard onBackToLanding={() => navigate('/')} /></Suspense>
+              <Suspense fallback={<div className="suspense-fallback">加载会议…</div>}><TaskBoard onBackToLanding={() => navigate('/')} /></Suspense>
             )}
           </div>
           {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
@@ -318,7 +318,7 @@ function AppShell() {
           padding: '10px 24px', borderBottom: '1px solid var(--border, #e5e7eb)',
           flexShrink: 0, minHeight: 44, background: 'var(--bg, #fff)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minWidth: 0 }}>
+          <div className="breadcrumb-area">
             <a style={{ color: 'var(--accent, #4f46e5)', cursor: 'pointer', whiteSpace: 'nowrap' }}
                onClick={() => { selectMeeting(null); navigate('/board') }}>
               会议看板
@@ -355,7 +355,7 @@ function AppShell() {
           ]}
           style={{ padding: '0 24px', flexShrink: 0 }}
         />
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="flex-col-overflow">
           {tab === 'meeting' ? (
             <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
           ) : (

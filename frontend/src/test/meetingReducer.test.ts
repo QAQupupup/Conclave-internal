@@ -85,7 +85,6 @@ describe('meetingReducer', () => {
       const event: DomainEvent = {
         type: 'meeting.created',
         meeting_id: 'm2',
-        seq: 1,
         ts: '2026-01-01T00:00:00Z',
         trace_id: 't1',
         payload: { meeting_id: 'm2', topic: 'new topic' },
@@ -102,7 +101,6 @@ describe('meetingReducer', () => {
       const event: DomainEvent = {
         type: 'stage.changed',
         meeting_id: 'm1',
-        seq: 2,
         ts: '2026-01-01T00:00:00Z',
         trace_id: 't1',
         payload: { to: 'intra_team' },
@@ -118,7 +116,6 @@ describe('meetingReducer', () => {
       const event: DomainEvent = {
         type: 'agent.spoke',
         meeting_id: 'm1',
-        seq: 3,
         ts: '2026-01-01T00:00:00Z',
         trace_id: 't1',
         payload: {
@@ -131,7 +128,7 @@ describe('meetingReducer', () => {
       }
       const result = meetingReducer(store, { type: 'event', event })
       expect(result.meeting!.messages).toHaveLength(1)
-      expect(result.meeting!.messages[0].id).toBe('msg1')
+      expect((result.meeting as any)?.messages[0]?.id).toBe('msg1')
     })
 
     it('deduplicates by message_id', () => {
@@ -145,7 +142,6 @@ describe('meetingReducer', () => {
       const event: DomainEvent = {
         type: 'agent.spoke',
         meeting_id: 'm1',
-        seq: 4,
         ts: '2026-01-01T00:00:00Z',
         trace_id: 't1',
         payload: {
@@ -158,7 +154,7 @@ describe('meetingReducer', () => {
       }
       const result = meetingReducer(store, { type: 'event', event })
       expect(result.meeting!.messages).toHaveLength(1)
-      expect(result.meeting!.messages[0].content).toBe('old')
+      expect((result.meeting as any)?.messages[0]?.content).toBe('old')
     })
   })
 
@@ -168,7 +164,6 @@ describe('meetingReducer', () => {
       const event: DomainEvent = {
         type: 'control.signal',
         meeting_id: 'm1',
-        seq: 5,
         ts: '2026-01-01T00:00:00Z',
         trace_id: 't1',
         payload: { status: 'paused' },
@@ -195,7 +190,6 @@ describe('meetingReducer', () => {
       const event: DomainEvent = {
         type: 'log.entry',
         meeting_id: 'm1',
-        seq: 6,
         ts: '2026-01-01T00:00:00Z',
         trace_id: 't1',
         payload: { level: 'info', logger: 'test', message: 'new log', timestamp: '2026-01-01T00:00:00Z' },
