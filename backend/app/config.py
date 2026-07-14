@@ -131,5 +131,12 @@ class Settings:
     def use_qdrant(self) -> bool:
         return bool(self.qdrant_url)
 
+    @property
+    def db_mode(self) -> str:
+        """从 database_url 推断数据库模式：postgresql 或 sqlite"""
+        if self.database_url.startswith("postgresql"):
+            return "postgresql"
+        return "sqlite"
+
 
 settings = Settings()
