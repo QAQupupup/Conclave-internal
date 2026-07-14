@@ -1,10 +1,15 @@
-# LLM 模型中心：Provider 注册表、模型发现、余额查询、定价表
+# LLM 模型中心：Provider 注册表、模型发现、余额查询、定价表、模型选型
 #
 # 设计目标：
 # 1. 支持多 LLM 厂商（SiliconFlow / DeepSeek / OpenAI / OpenRouter / 自定义）
 # 2. 运行时查询可用模型列表和账户余额
 # 3. 支持会议级别的模型切换和 BYOK（用户自带 API Key）
 # 4. 维护定价表用于成本估算
+# 5. 按阶段分配默认模型，实现成本与质量的最优平衡
+#
+# 关联文档：
+#   docs/specs/model-selection-spec.md       — 模型选型规格说明（阶段默认模型、架构设计）
+#   docs/research/model-benchmark-2026-07-15.md — 11 模型基准测试报告（4 维度评分）
 from __future__ import annotations
 
 import time

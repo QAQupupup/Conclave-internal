@@ -25,8 +25,13 @@ let _authToken: string | null = null
  * 顺序：
  * 1. localStorage 缓存（用户已在 UI 输入过）
  * 2. URL 查询参数 ?api_token=xxx（首次访问自动保存）
- * 3. 后端 /debug/auth-info 端点（开发模式）
- * 4. import.meta.env.VITE_API_TOKEN（vite 构建时注入）
+ * 3. 后端 /debug/auth-info 端点（开发模式自动发现）
+ *
+ * 安全说明：
+ * 不再从 import.meta.env.VITE_API_TOKEN 读取 token。
+ * Vite 会在构建时将 env 变量内联到 JS bundle 中，任何能访问前端的用户
+ * 都可以在浏览器 DevTools 中提取该 token，等同于密钥泄露。
+ * 生产环境应通过 URL 参数或用户手动输入传递 token。
  */
 export async function initAuthToken(): Promise<string | null> {
   if (_authToken) return _authToken
@@ -67,14 +72,6 @@ export async function initAuthToken(): Promise<string | null> {
     }
   } catch {
     // 后端可能未提供该端点，忽略
-  }
-
-  // 4) 构建时注入
-  const envToken = (import.meta as unknown as { env?: { VITE_API_TOKEN?: string } })
-    .env?.VITE_API_TOKEN
-  if (envToken) {
-    _authToken = envToken
-    return envToken
   }
 
   return null

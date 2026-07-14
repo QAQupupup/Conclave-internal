@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus
+from app.config import settings
 
 logger = get_logger("orchestrator.fast_path")
 
@@ -145,7 +146,7 @@ async def _llm_classify(query: str) -> str:
         stage="classify_intent",
         prompt=prompt,
         temperature=0.0,
-        seed=42,
+        seed=settings.llm_seed,
     ))
 
     if resp.success and resp.result:
@@ -196,7 +197,7 @@ async def run_fast_path(query: str, state: MeetingState) -> MeetingState:
             stage="fast_path",
             prompt=prompt,
             temperature=0.3,
-            seed=42,
+            seed=settings.llm_seed,
         ))
 
         elapsed = time.monotonic() - t0

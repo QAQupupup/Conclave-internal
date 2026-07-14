@@ -88,8 +88,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 复制源码（最常变，放最后）
 COPY requirements.lock ./
-RUN pip install --no-cache-dir --no-deps -r requirements.lock 2>/dev/null; \
-    pip check || echo "WARNING: pip check found issues, but continuing..."
+RUN pip install --no-cache-dir -r requirements.lock && \
+    pip check
 
 COPY . .
 
