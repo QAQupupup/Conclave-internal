@@ -69,7 +69,7 @@ services:
       - CONCLAVE_SECRET_KEY=${CONCLAVE_SECRET_KEY:-}
       - CONCLAVE_SANDBOX_MODE=auto
       - CONCLAVE_QDRANT_URL=http://qdrant:6333
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://conclave:conclave_dev@postgres:5432/conclave}
+      - DATABASE_URL=postgresql+asyncpg://conclave:conclave_dev@postgres:5432/conclave
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - CONCLAVE_API_TOKEN=${CONCLAVE_API_TOKEN:-}
       - CONCLAVE_LLM_TIMEOUT=${CONCLAVE_LLM_TIMEOUT:-120.0}
@@ -102,6 +102,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s  # 首次启动需拉取镜像，给 60s 宽限期
+    networks:
+      - conclave-internal
 
   frontend:
     build:
@@ -133,6 +135,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    networks:
+      - conclave-internal
 
   # ============================================================
   # Qdrant 向量数据库（用于 RAG 文档检索）
@@ -154,6 +158,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - conclave-internal
 
   # ============================================================
   # PostgreSQL 16 + pgvector
@@ -176,6 +182,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - conclave-internal
 
   # ============================================================
   # Redis（会话缓存 / 限流 / 任务队列）
@@ -195,6 +203,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    networks:
+      - conclave-internal
 
 volumes:
   conclave-oss-workspace:
@@ -207,3 +217,7 @@ volumes:
     driver: local
   conclave-oss-redis-data:
     driver: local
+
+networks:
+  conclave-internal:
+    driver: bridge

@@ -207,7 +207,6 @@ services:
     build:
       context: ./docker
       dockerfile: Dockerfile.qdrant
-      pull: false
     container_name: conclave-dev-qdrant
     restart: unless-stopped
     ports:
