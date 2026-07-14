@@ -33,8 +33,8 @@ def _connect() -> psycopg2.extensions.connection:
         with _lock:
             if _pool is None:
                 _pool = psycopg2.pool.ThreadedConnectionPool(
-                    1,
-                    20,
+                    2,
+                    30,
                     _pg_dsn(),
                     cursor_factory=RealDictCursor,
                 )
@@ -72,10 +72,14 @@ def _exec(
     sql: str,
     params: tuple[Any, ...] | list[Any] | None = None,
 ) -> psycopg2.extensions.cursor:
-    """创建游标并执行 SQL，返回游标供 fetch。"""
+    """创建游标并执行 SQL，返回游标供 fetch。调用方负责 fetch 后丢弃游标。"""
     cur = conn.cursor()
-    cur.execute(sql, params)
-    return cur
+    try:
+        cur.execute(sql, params)
+        return cur
+    except Exception:
+        cur.close()
+        raise
 
 
 def init_db() -> None:

@@ -35,7 +35,7 @@ logger = logging.getLogger("research_agent")
 from app.config import settings
 LLM_BASE_URL = settings.llm_base_url
 LLM_API_KEY = settings.llm_api_key
-LLM_MODEL = os.environ.get("CONCLAVE_RESEARCH_MODEL", "Qwen/Qwen3-235B-A22B-Instruct-2507")
+LLM_MODEL = os.environ.get("CONCLAVE_RESEARCH_MODEL", "deepseek-ai/DeepSeek-V3.2")
 MAX_RESEARCH_ROUNDS = int(os.environ.get("CONCLAVE_RESEARCH_MAX_ROUNDS", "3"))
 QUERIES_PER_ROUND = int(os.environ.get("CONCLAVE_RESEARCH_QUERIES_PER_ROUND", "4"))
 TOP_K_PER_QUERY = int(os.environ.get("CONCLAVE_RESEARCH_TOP_K", "3"))

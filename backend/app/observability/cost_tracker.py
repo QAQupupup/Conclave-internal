@@ -70,10 +70,7 @@ _LLM_PRICING: dict[str, dict[str, float]] = {
     # DeepSeek
     "deepseek-chat": {"input": 0.14, "output": 0.28},
     "deepseek-reasoner": {"input": 0.55, "output": 2.19},
-    # Qwen (DashScope)
-    "qwen-max": {"input": 2.50, "output": 10.00},
-    "qwen-plus": {"input": 0.40, "output": 1.20},
-    "qwen-turbo": {"input": 0.05, "output": 0.20},
+    # Qwen 全系已排除：不支持 response_format: json_object，与 Conclave 不兼容
     # 默认（未知模型）
     "_default": {"input": 1.00, "output": 3.00},
 }

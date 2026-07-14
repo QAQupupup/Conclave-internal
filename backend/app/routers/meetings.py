@@ -510,6 +510,7 @@ async def list_meetings_with_status(
             "created_at": m.get("created_at"),
             "is_running": is_running,
             "tags": m.get("tags", []),
+            "flow_plan": m.get("payload", {}).get("flow_plan", "full"),
         })
     return {
         "meetings": items,
@@ -1207,19 +1208,21 @@ async def get_llm_models(
     - base_url: 自定义Base URL（custom厂商时使用）
     - refresh: 是否强制刷新缓存
     """
-    from app.llm_providers import fetch_models, categorize_models, RECOMMENDED_MODELS
+    from app.llm_providers import fetch_models, categorize_models, RECOMMENDED_MODELS, _is_qwen_llm
     models = await fetch_models(
         provider_id=provider,
         api_key=api_key,
         base_url=base_url,
         use_cache=not refresh,
     )
-    categories = categorize_models(models)
+    # 过滤 Qwen LLM（不支持 response_format: json_object，保留向量模型）
+    filtered_models = [m for m in models if not _is_qwen_llm(m.get("id", ""))]
+    categories = categorize_models(filtered_models)
     return {
-        "models": models,
+        "models": filtered_models,
         "categories": categories,
         "recommended": RECOMMENDED_MODELS,
-        "total": len(models),
+        "total": len(filtered_models),
     }
 
 

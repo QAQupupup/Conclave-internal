@@ -34,7 +34,7 @@ class Settings:
     # LLM 配置：无 key 时走 StubLLM
     llm_api_key: str = _env("CONCLAVE_LLM_API_KEY", "")
     llm_base_url: str = _env("CONCLAVE_LLM_BASE_URL", "")
-    llm_model: str = _env("CONCLAVE_LLM_MODEL", "Qwen/Qwen3.5-4B")
+    llm_model: str = _env("CONCLAVE_LLM_MODEL", "deepseek-ai/DeepSeek-V3.2")
 
     # LLM 确定性参数（全部支持环境变量覆盖，默认值保持向后兼容）
     llm_seed: int = int(_env("CONCLAVE_LLM_SEED", "42"))

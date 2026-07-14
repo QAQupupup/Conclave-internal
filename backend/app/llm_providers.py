@@ -248,15 +248,8 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
     "Pro/deepseek-ai/DeepSeek-V3.1-Terminus": {"input": 4.0, "output": 12.0, "currency": "CNY", "tier": "pro"},
     "Pro/deepseek-ai/DeepSeek-R1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "pro"},
     # --- Qwen 系列 ---
-    "Qwen/Qwen3-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
-    "Qwen/Qwen3.5-4B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
-    "Qwen/Qwen3.5-9B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
-    "Qwen/Qwen3.5-27B": {"input": 0.6, "output": 4.8, "currency": "CNY", "tier": "standard"},
-    "Qwen/Qwen3.5-35B-A3B": {"input": 0.4, "output": 3.2, "currency": "CNY", "tier": "cheap"},
-    "Qwen/Qwen3.5-122B-A10B": {"input": 0.8, "output": 6.4, "currency": "CNY", "tier": "standard"},
-    "Qwen/Qwen3.5-397B-A17B": {"input": 1.2, "output": 7.2, "currency": "CNY", "tier": "pro"},
-    "Qwen/Qwen3.6-27B": {"input": 3.0, "output": 18.0, "currency": "CNY", "tier": "standard"},
-    "Qwen/Qwen3.6-35B-A3B": {"input": 1.8, "output": 10.8, "currency": "CNY", "tier": "cheap"},
+    # 注意：Qwen 全系不支持 response_format: json_object，与 Conclave 结构化 JSON 输出需求不兼容，已排除。
+    # 仅保留 Embedding/Reranker（见下方向量模型区）。
     # --- GLM 系列 ---
     "THUDM/GLM-Z1-9B-0414": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free"},
     "zai-org/GLM-5.1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard"},
@@ -295,12 +288,12 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
 
 # 推荐模型列表（会议中常用）
 RECOMMENDED_MODELS = [
-    {"id": "Qwen/Qwen3-8B", "name": "Qwen3-8B (免费)", "desc": "8.2B通用模型，完全免费", "recommended_for": "测试/通用任务"},
     {"id": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B", "name": "DeepSeek-R1-8B (免费)", "desc": "推理模型，免费使用", "recommended_for": "推理/数学/代码"},
     {"id": "THUDM/GLM-Z1-9B-0414", "name": "GLM-Z1-9B (免费)", "desc": "9B推理模型，免费使用", "recommended_for": "推理/通用任务"},
     {"id": "deepseek-ai/DeepSeek-V3.2", "name": "DeepSeek-V3.2", "desc": "强JSON遵循，性价比高", "recommended_for": "会议讨论/产出"},
     {"id": "deepseek-ai/DeepSeek-V4-Flash", "name": "DeepSeek-V4-Flash", "desc": "快速响应，成本低", "recommended_for": "快速讨论/简单任务"},
-    {"id": "Qwen/Qwen3.5-35B-A3B", "name": "Qwen3.5-35B-MoE", "desc": "MoE小模型，免费额度", "recommended_for": "测试/简单任务"},
+    {"id": "MiniMaxAI/MiniMax-M2.5", "name": "MiniMax-M2.5", "desc": "综合性价比最优，90.4分", "recommended_for": "跨团队/证据检查"},
+    {"id": "ByteDance-Seed/Seed-OSS-36B-Instruct", "name": "Seed-OSS-36B", "desc": "响应最快6s，成本最低", "recommended_for": "团队内部讨论"},
     {"id": "deepseek-ai/DeepSeek-R1", "name": "DeepSeek-R1", "desc": "推理模型，深度思考", "recommended_for": "复杂推理/代码审查"},
     {"id": "Pro/deepseek-ai/DeepSeek-V3.2", "name": "DeepSeek-V3.2 Pro", "desc": "专享版，稳定无速率限制", "recommended_for": "生产环境"},
 ]
@@ -322,8 +315,26 @@ def estimate_cost_cny(model_id: str, input_tokens: int, output_tokens: int) -> f
 
 # ========== 模型分类辅助 ==========
 
+def _is_qwen_llm(model_id: str) -> bool:
+    """判断是否为 Qwen LLM（非 Embedding/Reranker 向量模型）。
+    
+    Qwen 全系 LLM 不支持 response_format: json_object，与 Conclave 不兼容。
+    保留 Qwen3-VL-Embedding 和 Qwen3-VL-Reranker（向量模型，不受此限制）。
+    """
+    if not model_id.startswith("Qwen/"):
+        return False
+    # 保留向量模型
+    if "Embed" in model_id or "Rerank" in model_id:
+        return False
+    return True
+
+
 def categorize_models(models: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """将模型列表分类：free/cheap/standard/pro/reasoning/multimodal/embedding"""
+    """将模型列表分类：free/cheap/standard/pro/reasoning/multimodal/embedding
+    
+    Qwen 全系 LLM 不支持 response_format: json_object，已从可用模型池排除。
+    仅保留 Qwen 向量模型 (Qwen/Qwen3-VL-Embedding/Reranker)。
+    """
     categories: dict[str, list[dict[str, Any]]] = {
         "recommended": [],
         "free": [],
@@ -335,6 +346,9 @@ def categorize_models(models: list[dict[str, Any]]) -> dict[str, list[dict[str, 
     rec_ids = {m["id"] for m in RECOMMENDED_MODELS}
     for m in models:
         mid = m.get("id", "")
+        # 排除 Qwen LLM（保留 Embedding/Reranker 向量模型）
+        if _is_qwen_llm(mid):
+            continue
         info = {
             "id": mid,
             "object": m.get("object", "model"),

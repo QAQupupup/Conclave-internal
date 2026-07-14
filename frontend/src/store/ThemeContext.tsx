@@ -14,6 +14,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { usePersistentState } from '../hooks/usePersistentState'
+import { getPreferences, setPreference } from '../lib/api'
 
 // ========== 类型定义 ==========
 
@@ -45,7 +46,6 @@ interface ThemeContextValue {
 
 const STORAGE_KEY_MODE = 'conclave-theme-mode'
 const STORAGE_KEY_OVERRIDES = 'conclave-theme-overrides'
-const PREFERENCES_API = '/preferences'
 
 /** 白名单：允许用户覆盖的 token（防止注入任意 CSS 变量） */
 export const OVERRIDABLE_TOKENS: Record<string, { label: string; type: 'color' | 'size' | 'font'; group: string }> = {
@@ -103,9 +103,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     async function fetchPreferences() {
       try {
         setSyncStatus('syncing')
-        const res = await fetch(PREFERENCES_API)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data: Record<string, string> = await res.json()
+        const data = await getPreferences()
         if (cancelled) return
 
         // 后端的 theme-mode 覆盖本地（仅在本地为默认值时）
@@ -133,11 +131,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (syncTimer.current) clearTimeout(syncTimer.current)
     syncTimer.current = setTimeout(async () => {
       try {
-        await fetch(`${PREFERENCES_API}/theme-mode`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value: newMode }),
-        })
+        await setPreference('theme-mode', newMode)
         setSyncStatus('synced')
       } catch {
         setSyncStatus('error')
@@ -150,11 +144,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (syncTimer.current) clearTimeout(syncTimer.current)
     syncTimer.current = setTimeout(async () => {
       try {
-        await fetch(`${PREFERENCES_API}/token-overrides`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value: JSON.stringify(newOverrides) }),
-        })
+        await setPreference('token-overrides', JSON.stringify(newOverrides))
         setSyncStatus('synced')
       } catch {
         setSyncStatus('error')

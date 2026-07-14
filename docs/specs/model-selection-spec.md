@@ -9,7 +9,7 @@
 
 ## 概述
 
-Conclave 的六阶段会议流程对 LLM 有不同的质量/速度/成本需求。本文档定义阶段级模型分配策略，基于 2026-07-15 的 11 模型统一基准测试结果。
+Conclave 的六阶段会议流程对 LLM 有不同的质量/速度/成本需求。本文档定义阶段级模型分配策略，基于 2026-07-15 的 11 模型统一基准测试结果（其中 7 个可用，Qwen 全系 + GLM-4.5-Air 因不支持 `response_format: json_object` 已排除）。
 
 ---
 
@@ -162,7 +162,7 @@ ENV 默认 (CONCLAVE_LLM_MODEL)
 
 ## 参考
 
-- [模型基准测试报告](../research/model-benchmark-2026-07-15.md) — 11 模型四维度测试结果
+- [模型基准测试报告](../research/model-benchmark-2026-07-15.md) — 11 模型四维度测试结果（7 可用，4 排除）
 - [PROJECT_CONVENTIONS.md](../../PROJECT_CONVENTIONS.md) — 项目工程规范
 - `backend/app/llm_providers.py` — 模型选型核心模块
 - `backend/app/agents/llm.py` — LLM 调用链路

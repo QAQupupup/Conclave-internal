@@ -9,7 +9,7 @@ import {
   CloudServerOutlined, KeyOutlined, DollarOutlined, ThunderboltOutlined,
   StarOutlined, SafetyCertificateOutlined, InfoCircleOutlined,
   AppstoreOutlined, EyeOutlined, CodeOutlined, DatabaseOutlined,
-  FilterOutlined,
+  FilterOutlined, SortAscendingOutlined, SortDescendingOutlined,
 } from '@ant-design/icons'
 import {
   listLLMProviders,
@@ -139,9 +139,10 @@ export function ModelsView() {
   const modelsCache = useRef<Map<string, LLMModelsResponse>>(new Map())
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [seriesFilter, setSeriesFilter] = useState<string>('')
+  const [seriesFilter, setSeriesFilter] = useState<Set<string>>(new Set())
   const [tierFilter, setTierFilter] = useState<string>('')
-  const [typeFilter, setTypeFilter] = useState<string>('')
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
+  const [sortMode, setSortMode] = useState<'default' | 'price-asc' | 'price-desc'>('default')
 
   const [balance, setBalance] = useState<LLMBalanceResponse | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
@@ -369,17 +370,31 @@ export function ModelsView() {
       const q = searchQuery.toLowerCase()
       list = list.filter(m => m.id.toLowerCase().includes(q))
     }
-    if (seriesFilter) {
-      list = list.filter(m => m.series === seriesFilter)
+    if (seriesFilter.size > 0) {
+      list = list.filter(m => seriesFilter.has(m.series))
     }
     if (tierFilter) {
       list = list.filter(m => (m.pricing?.tier || 'standard') === tierFilter)
     }
-    if (typeFilter) {
-      list = list.filter(m => m.type === typeFilter)
+    if (typeFilter.size > 0) {
+      list = list.filter(m => typeFilter.has(m.type))
+    }
+    // 排序
+    if (sortMode === 'price-asc') {
+      list = [...list].sort((a, b) => {
+        const pa = a.pricing?.input ?? 999
+        const pb = b.pricing?.input ?? 999
+        return pa - pb
+      })
+    } else if (sortMode === 'price-desc') {
+      list = [...list].sort((a, b) => {
+        const pa = a.pricing?.input ?? 0
+        const pb = b.pricing?.input ?? 0
+        return pb - pa
+      })
     }
     return list
-  }, [enrichedModels, searchQuery, seriesFilter, tierFilter, typeFilter])
+  }, [enrichedModels, searchQuery, seriesFilter, tierFilter, typeFilter, sortMode])
 
   const isDefault = (providerId: string, modelId: string) =>
     providerId === defaultModel.provider_id && modelId === defaultModel.model
@@ -387,8 +402,17 @@ export function ModelsView() {
   const needsApiKey = currentProvider && !currentProvider.has_key && !apiKey && modelsData?.total === 0
 
   // ---- 清除所有筛选 ----
-  const clearFilters = () => { setSeriesFilter(''); setTierFilter(''); setTypeFilter('') }
-  const hasFilters = seriesFilter || tierFilter || typeFilter
+  const clearFilters = () => { setSeriesFilter(new Set()); setTierFilter(''); setTypeFilter(new Set()); setSortMode('default') }
+  const hasFilters = seriesFilter.size > 0 || tierFilter || typeFilter.size > 0 || sortMode !== 'default'
+
+  // ---- 切换 Set 中的值 ----
+  const toggleFilter = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, key: string) => {
+    setter(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
 
   return (
     <div className="models-view-container">
@@ -568,17 +592,20 @@ export function ModelsView() {
                   类型
                 </Text>
                 <div className="models-view-filter-buttons">
-                  {availableTypes.map(({ key, count, config }) => (
-                    <Button
-                      key={key}
-                      type={typeFilter === key ? 'primary' : 'default'}
-                      size="small"
-                      icon={config.icon}
-                      onClick={() => setTypeFilter(typeFilter === key ? '' : key)}
-                    >
-                      {config.label} <Text type="secondary" className="models-view-filter-count">({count})</Text>
-                    </Button>
-                  ))}
+                  {availableTypes.map(({ key, count, config }) => {
+                    const active = typeFilter.has(key)
+                    return (
+                      <Button
+                        key={key}
+                        type={active ? 'primary' : 'default'}
+                        size="small"
+                        icon={config.icon}
+                        onClick={() => toggleFilter(setTypeFilter, key)}
+                      >
+                        {config.label} <Text type="secondary" className="models-view-filter-count">({count})</Text>
+                      </Button>
+                    )
+                  })}
                 </div>
               </div>
 
@@ -588,24 +615,27 @@ export function ModelsView() {
                   系列
                 </Text>
                 <div className="models-view-series-list">
-                  {availableSeries.map(({ key, count, config }) => (
-                    <div
-                      key={key}
-                      onClick={() => setSeriesFilter(seriesFilter === key ? '' : key)}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
-                        background: seriesFilter === key ? 'var(--accent-bg, #eef2ff)' : 'transparent',
-                        borderLeft: seriesFilter === key ? `3px solid ${config?.color || '#6b7280'}` : '3px solid transparent',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      <span style={{ color: seriesFilter === key ? (config?.color || '#333') : 'var(--text, #333)', fontWeight: seriesFilter === key ? 600 : 400 }}>
-                        {config?.label || key}
-                      </span>
-                      <Text type="secondary" className="models-view-series-count">{count}</Text>
-                    </div>
-                  ))}
+                  {availableSeries.map(({ key, count, config }) => {
+                    const active = seriesFilter.has(key)
+                    return (
+                      <div
+                        key={key}
+                        onClick={() => toggleFilter(setSeriesFilter, key)}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                          background: active ? 'var(--accent-bg, #eef2ff)' : 'transparent',
+                          borderLeft: active ? `3px solid ${config?.color || '#6b7280'}` : '3px solid transparent',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <span style={{ color: active ? (config?.color || '#333') : 'var(--text, #333)', fontWeight: active ? 600 : 400 }}>
+                          {config?.label || key}
+                        </span>
+                        <Text type="secondary" className="models-view-series-count">{count}</Text>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
 
@@ -646,9 +676,29 @@ export function ModelsView() {
                   <Tag color="blue" className="models-view-model-count-tag">{filteredModels.length} 个</Tag>
                   {searchQuery && <Text type="secondary" className="models-view-search-hint">搜索: "{searchQuery}"</Text>}
                 </Space>
-                <Tooltip title="刷新模型列表">
-                  <Button type="text" size="small" icon={<ReloadOutlined spin={modelsLoading} />} onClick={handleRefreshModels} disabled={modelsLoading} />
-                </Tooltip>
+                <Space size={4}>
+                  <Tooltip title={sortMode === 'price-asc' ? '取消排序' : '价格从低到高'}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<SortAscendingOutlined />}
+                      onClick={() => setSortMode(sortMode === 'price-asc' ? 'default' : 'price-asc')}
+                      style={{ color: sortMode === 'price-asc' ? 'var(--accent-color, #4f46e5)' : undefined }}
+                    />
+                  </Tooltip>
+                  <Tooltip title={sortMode === 'price-desc' ? '取消排序' : '价格从高到低'}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<SortDescendingOutlined />}
+                      onClick={() => setSortMode(sortMode === 'price-desc' ? 'default' : 'price-desc')}
+                      style={{ color: sortMode === 'price-desc' ? 'var(--accent-color, #4f46e5)' : undefined }}
+                    />
+                  </Tooltip>
+                  <Tooltip title="刷新模型列表">
+                    <Button type="text" size="small" icon={<ReloadOutlined spin={modelsLoading} />} onClick={handleRefreshModels} disabled={modelsLoading} />
+                  </Tooltip>
+                </Space>
               </div>
 
               {modelsError && <Alert message={`加载失败：${modelsError}`} type="error" showIcon className="models-view-mb-12" />}

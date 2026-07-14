@@ -122,14 +122,16 @@ class MetricsStore:
                 # 活跃会议数
                 active_meetings = 0
                 try:
-                    from app.db_legacy import _connect
+                    from app.db_legacy import _connect, _putconn
                     conn = _connect()
-                    row = conn.execute(
-                        "SELECT COUNT(*) FROM meetings WHERE status = 'RUNNING'"
-                    ).fetchone()
-                    if row:
-                        active_meetings = row[0]
-                    conn.close()
+                    try:
+                        row = conn.execute(
+                            "SELECT COUNT(*) FROM meetings WHERE status = 'RUNNING'"
+                        ).fetchone()
+                        if row:
+                            active_meetings = row[0]
+                    finally:
+                        _putconn(conn)
                 except Exception:
                     pass
 

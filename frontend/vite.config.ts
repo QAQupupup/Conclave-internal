@@ -68,6 +68,16 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 用户偏好
+      '/preferences': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // LLM 管理
+      '/llm': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

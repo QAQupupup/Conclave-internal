@@ -43,7 +43,7 @@ describe('ThemeContext', () => {
     await waitFor(() => expect(screen.getByTestId('mode').textContent).toBe('dark'))
     await waitFor(() => expect(screen.getByTestId('sync').textContent).toBe('synced'))
 
-    expect(window.fetch).toHaveBeenCalledWith('/preferences')
+    expect(window.fetch).toHaveBeenCalledWith('/preferences', expect.any(Object))
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     expect(getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()).toBe('#ff0000')
   })
@@ -87,10 +87,12 @@ describe('ThemeContext', () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(600) })
 
-    expect(window.fetch).toHaveBeenCalledWith('/preferences/theme-mode', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: 'dark' }),
-    })
+    expect(window.fetch).toHaveBeenCalledWith(
+      '/preferences/theme-mode',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ value: 'dark' }),
+      }),
+    )
   })
 })
