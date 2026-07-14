@@ -4,7 +4,11 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { initAuthToken } from './lib/api.ts'
-import './index.css'
+// CSS: 按语义分区导入（替代单文件 index.css，保持层叠顺序一致）
+import './styles/tokens.css'
+import './styles/layout.css'
+import './styles/components.css'
+import './styles/landing.css'
 
 // [CON-03 修复] 启动前先初始化认证 token：localStorage → URL query → 后端 /debug/auth-info → env
 // 必须 await，否则 React 组件挂载后发 API 请求时 token 还没就绪 → 401
