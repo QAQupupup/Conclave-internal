@@ -59,8 +59,8 @@ export function MeetingSearchSelect({ selectedIds, onChange, placeholder = '搜�
       <div>
         <Text>{m.topic}</Text>
         <div>
-          <Tag color={m.status === 'completed' ? 'green' : 'blue'} style={{ fontSize: 11 }}>{m.status}</Tag>
-          <Text type="secondary" style={{ fontSize: 11 }}>{m.meeting_id.slice(-8)}</Text>
+          <Tag color={m.status === 'completed' ? 'green' : 'blue'} className="meeting-search-select-status-tag">{m.status}</Tag>
+          <Text type="secondary" className="meeting-search-select-id-text">{m.meeting_id.slice(-8)}</Text>
         </div>
       </div>
     ),
@@ -78,7 +78,7 @@ export function MeetingSearchSelect({ selectedIds, onChange, placeholder = '搜�
       filterOption={false}
       loading={loading}
       notFoundContent={loading ? <Spin size="small" /> : query ? '未找到匹配的会议' : null}
-      style={{ width: '100%' }}
+      className="meeting-search-select-field"
       size={compact ? 'small' : 'middle'}
       tagRender={({ label: _label, value, closable, onClose }) => {
         const s = summaries[value]
@@ -86,7 +86,7 @@ export function MeetingSearchSelect({ selectedIds, onChange, placeholder = '搜�
           <Tag
             closable={closable}
             onClose={onClose}
-            style={{ marginInlineEnd: 4 }}
+            className="meeting-search-select-chip-tag"
             title={s?.clarified_topic || s?.topic || value}
           >
             {s?.topic || value.slice(-8)}

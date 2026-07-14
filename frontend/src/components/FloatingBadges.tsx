@@ -58,7 +58,7 @@ export function FloatingBadges({ badges, activeId, onSelect }: FloatingBadgesPro
   )
 
   return (
-    <div className="floating-badges" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="floating-badges floating-badges-list">
       {badges.map((b) => {
         const isActive = activeId === b.id
         const btn = (
@@ -69,7 +69,7 @@ export function FloatingBadges({ badges, activeId, onSelect }: FloatingBadgesPro
               icon={b.icon}
               onClick={() => handleClick(b.id)}
               aria-label={b.label}
-              style={{ width: 40, height: 40 }}
+              className="floating-badges-btn"
             />
           </Badge>
         )

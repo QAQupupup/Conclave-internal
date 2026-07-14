@@ -103,7 +103,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
         parts.push(text.slice(lastIndex, i))
       }
       parts.push(
-        <Tag key={`${keyPrefix}-tag-${key++}`} color={match.info.color} style={{ marginInlineEnd: 4 }}>
+        <Tag key={`${keyPrefix}-tag-${key++}`} color={match.info.color} className="message-content-tag">
           {match.info.label}
         </Tag>,
       )

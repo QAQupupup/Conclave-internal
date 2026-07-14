@@ -391,38 +391,29 @@ export function ModelsView() {
   const hasFilters = seriesFilter || tierFilter || typeFilter
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1400, margin: '0 auto' }}>
+    <div className="models-view-container">
       {/* ---- 当前默认模型（顶部横幅） ---- */}
       <Card
         size="small"
-        style={{
-          borderRadius: 10,
-          border: '1px solid var(--accent-color, #4f46e5)',
-          background: 'linear-gradient(135deg, var(--accent-bg, #eef2ff) 0%, var(--bg, #fff) 100%)',
-          boxShadow: '0 1px 4px rgba(79,70,229,0.08)',
-        }}
+        className="models-view-default-banner"
         styles={{ body: { padding: '14px 20px' } }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-              background: 'var(--accent-color, #4f46e5)', color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
-            }}>
+        <div className="models-view-banner-row">
+          <div className="models-view-banner-left">
+            <div className="models-view-icon-box">
               <StarOutlined />
             </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary, #888)', marginBottom: 2 }}>当前默认模型</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <Tag color="blue" style={{ margin: 0, borderRadius: 4 }}>{defaultModel.provider_id}</Tag>
-                <Text strong style={{ fontSize: 15, fontFamily: 'Consolas, monospace' }} ellipsis>
+            <div className="models-view-model-info">
+              <div className="models-view-model-label">当前默认模型</div>
+              <div className="models-view-model-name-row">
+                <Tag color="blue" className="models-view-provider-tag">{defaultModel.provider_id}</Tag>
+                <Text strong className="models-view-model-name" ellipsis>
                   {defaultModel.model || '（未选择）'}
                 </Text>
               </div>
             </div>
           </div>
-          <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+          <Text type="secondary" className="models-view-banner-hint">
             创建新会议时使用此模型
           </Text>
         </div>
@@ -435,11 +426,11 @@ export function ModelsView() {
       {/* ---- 厂商选择 + API Key + 余额（整合为一行卡片） ---- */}
       <Card
         size="small"
-        style={{ borderRadius: 10 }}
+        className="models-view-config-card"
         styles={{ body: { padding: '16px 20px' } }}
         title={
-          <span style={{ fontSize: 14, fontWeight: 600 }}>
-            <ThunderboltOutlined style={{ marginRight: 6, color: '#6366f1' }} />
+          <span className="models-view-config-title">
+            <ThunderboltOutlined className="models-view-config-icon" />
             LLM 厂商配置
           </span>
         }
@@ -454,11 +445,11 @@ export function ModelsView() {
         }
       >
         {providersLoading ? (
-          <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
+          <div className="models-view-loading"><Spin /></div>
         ) : (
           <>
             {/* 厂商卡片横向排列：统一高度与内部对齐 */}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+            <div className="models-view-provider-grid">
               {providers.map(p => {
                 const isActive = p.id === selectedProvider
                 return (
@@ -473,19 +464,17 @@ export function ModelsView() {
                     styles={{ body: { padding: '10px 14px', height: '100%', boxSizing: 'border-box' } }}
                     onClick={() => { setSelectedProvider(p.id); setApiKey(getApiKey(p.id)); setBalance(null) }}
                   >
-                    <div style={{
-                      display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 22 }}>
+                    <div className="models-view-provider-inner">
+                      <div className="models-view-provider-header">
                         <span style={{ fontSize: 18, lineHeight: 1, color: isActive ? 'var(--accent-color, #4f46e5)' : '#888' }}>
                           {PROVIDER_ICONS[p.id] || <CloudServerOutlined />}
                         </span>
-                        <Text strong style={{ fontSize: 13, lineHeight: 1.3 }}>{p.name}</Text>
+                        <Text strong className="models-view-provider-name">{p.name}</Text>
                       </div>
-                      <Space size={4} wrap style={{ minHeight: 22, alignItems: 'flex-end' }}>
-                        {p.has_key && <Tag color="green" style={{ fontSize: 10, margin: 0 }}>已配置</Tag>}
-                        {p.supports_balance && <Tag color="cyan" style={{ fontSize: 10, margin: 0 }}>余额查询</Tag>}
-                        {p.supports_custom_key && <Tag style={{ fontSize: 10, margin: 0 }}>自定义Key</Tag>}
+                      <Space size={4} wrap className="models-view-provider-features">
+                        {p.has_key && <Tag color="green" className="models-view-feature-tag">已配置</Tag>}
+                        {p.supports_balance && <Tag color="cyan" className="models-view-feature-tag">余额查询</Tag>}
+                        {p.supports_custom_key && <Tag className="models-view-feature-tag">自定义Key</Tag>}
                       </Space>
                     </div>
                   </Card>
@@ -495,44 +484,34 @@ export function ModelsView() {
 
             {/* API Key 输入 + 余额显示 */}
             {currentProvider && (
-              <div style={{
-                display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
-                padding: '12px 16px', borderRadius: 8,
-                background: 'var(--bg-secondary, #f8f9fb)',
-                border: '1px solid var(--border, #e5e7eb)',
-              }}>
+              <div className="models-view-api-key-row">
                 {currentProvider && (
-                  <div style={{ flex: '1 1 400px', minWidth: 280, maxWidth: 560 }}>
+                  <div className="models-view-api-key-input">
                     <Input.Password
                       placeholder={currentProvider.has_key ? '留空使用系统默认 Key' : '输入 API Key（sk-...）'}
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
                       autoComplete="off"
-                      prefix={<KeyOutlined style={{ color: '#8c8c8c' }} />}
+                      prefix={<KeyOutlined className="models-view-key-icon" />}
                       size="large"
-                      style={{ borderRadius: 6 }}
+                      className="models-view-api-input"
                       disabled={!currentProvider.supports_custom_key}
                     />
                     {!currentProvider.supports_custom_key && (
-                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                      <Text type="secondary" className="models-view-api-hint">
                         该厂商后端未开放自定义 Key，输入框仅供预览
                       </Text>
                     )}
                   </div>
                 )}
                 {currentProvider.supports_balance && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '8px 16px', borderRadius: 8,
-                    background: 'var(--bg, #fff)',
-                    border: '1px solid var(--border, #e5e7eb)',
-                  }}>
-                    <DollarOutlined style={{ fontSize: 18, color: '#52c41a' }} />
+                  <div className="models-view-balance-box">
+                    <DollarOutlined className="models-view-balance-icon" />
                     <div>
-                      <div style={{ fontSize: 10, color: 'var(--text-secondary, #888)' }}>账户余额</div>
+                      <div className="models-view-balance-label">账户余额</div>
                       <div>
                         {balanceLoading ? <Spin size="small" /> : balanceError ? (
-                          <Text type="danger" style={{ fontSize: 14 }}>查询失败</Text>
+                          <Text type="danger" className="models-view-balance-error">查询失败</Text>
                         ) : balance?.supported ? (
                           <Text strong style={{
                             fontSize: 18,
@@ -540,7 +519,7 @@ export function ModelsView() {
                           }}>
                             {formatBalance(balance.balance, balance.currency)}
                           </Text>
-                        ) : <Text type="secondary" style={{ fontSize: 13 }}>不支持</Text>}
+                        ) : <Text type="secondary" className="models-view-balance-unsupported">不支持</Text>}
                       </div>
                     </div>
                     <Tooltip title="刷新余额">
@@ -565,20 +544,13 @@ export function ModelsView() {
       {/* ---- 主内容区：筛选 + 模型列表 ---- */}
       {modelsData && !needsApiKey && (
         <Card
-          style={{ borderRadius: 10, flex: 1, minHeight: 0 }}
+          className="models-view-main-card"
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%' } }}
         >
-          <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <div className="models-view-main-layout">
 
             {/* 左侧筛选栏 */}
-            <div style={{
-              width: 220, flexShrink: 0, overflowY: 'auto',
-              borderRight: '1px solid var(--border, #e5e7eb)',
-              padding: '16px 16px 16px 20px',
-              background: 'var(--bg-secondary, #fafbfc)',
-              borderTopLeftRadius: 10,
-              borderBottomLeftRadius: 10,
-            }}>
+            <div className="models-view-filter-sidebar">
               {/* 搜索 */}
               <Input
                 placeholder="搜索模型..."
@@ -586,16 +558,16 @@ export function ModelsView() {
                 allowClear
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ marginBottom: 16 }}
+                className="models-view-mb-16"
                 size="middle"
               />
 
               {/* 类型筛选 */}
-              <div style={{ marginBottom: 16 }}>
-                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: 'var(--text-secondary, #888)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              <div className="models-view-mb-16">
+                <Text strong className="models-view-filter-label">
                   类型
                 </Text>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <div className="models-view-filter-buttons">
                   {availableTypes.map(({ key, count, config }) => (
                     <Button
                       key={key}
@@ -604,18 +576,18 @@ export function ModelsView() {
                       icon={config.icon}
                       onClick={() => setTypeFilter(typeFilter === key ? '' : key)}
                     >
-                      {config.label} <Text type="secondary" style={{ fontSize: 10 }}>({count})</Text>
+                      {config.label} <Text type="secondary" className="models-view-filter-count">({count})</Text>
                     </Button>
                   ))}
                 </div>
               </div>
 
               {/* 系列筛选 */}
-              <div style={{ marginBottom: 16 }}>
-                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: 'var(--text-secondary, #888)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              <div className="models-view-mb-16">
+                <Text strong className="models-view-filter-label">
                   系列
                 </Text>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div className="models-view-series-list">
                   {availableSeries.map(({ key, count, config }) => (
                     <div
                       key={key}
@@ -631,7 +603,7 @@ export function ModelsView() {
                       <span style={{ color: seriesFilter === key ? (config?.color || '#333') : 'var(--text, #333)', fontWeight: seriesFilter === key ? 600 : 400 }}>
                         {config?.label || key}
                       </span>
-                      <Text type="secondary" style={{ fontSize: 11 }}>{count}</Text>
+                      <Text type="secondary" className="models-view-series-count">{count}</Text>
                     </div>
                   ))}
                 </div>
@@ -639,16 +611,16 @@ export function ModelsView() {
 
               {/* 层级筛选 */}
               {availableTiers.length > 1 && (
-                <div style={{ marginBottom: 16 }}>
-                  <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: 'var(--text-secondary, #888)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <div className="models-view-mb-16">
+                  <Text strong className="models-view-filter-label">
                     层级
                   </Text>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <div className="models-view-filter-buttons">
                     {availableTiers.map(t => (
                       <Tag
                         key={t}
                         color={tierFilter === t ? TIER_COLORS[t] : undefined}
-                        style={{ cursor: 'pointer', fontSize: 12, padding: '2px 8px', borderRadius: 4 }}
+                        className="models-view-tier-tag"
                         onClick={() => setTierFilter(tierFilter === t ? '' : t)}
                       >
                         {TIER_LABELS[t] ?? t}
@@ -660,35 +632,35 @@ export function ModelsView() {
 
               {/* 清除筛选 */}
               {hasFilters && (
-                <Button type="link" size="small" icon={<FilterOutlined />} onClick={clearFilters} style={{ fontSize: 12, padding: 0 }}>
+                <Button type="link" size="small" icon={<FilterOutlined />} onClick={clearFilters} className="models-view-clear-btn">
                   清除所有筛选
                 </Button>
               )}
             </div>
 
             {/* 右侧模型列表 */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '16px 20px', minHeight: 400 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexShrink: 0 }}>
+            <div className="models-view-model-list-area">
+              <div className="models-view-model-list-header">
                 <Space size={8}>
-                  <Text strong style={{ fontSize: 14 }}>可用模型</Text>
-                  <Tag color="blue" style={{ margin: 0 }}>{filteredModels.length} 个</Tag>
-                  {searchQuery && <Text type="secondary" style={{ fontSize: 12 }}>搜索: "{searchQuery}"</Text>}
+                  <Text strong className="models-view-model-list-title">可用模型</Text>
+                  <Tag color="blue" className="models-view-model-count-tag">{filteredModels.length} 个</Tag>
+                  {searchQuery && <Text type="secondary" className="models-view-search-hint">搜索: "{searchQuery}"</Text>}
                 </Space>
                 <Tooltip title="刷新模型列表">
                   <Button type="text" size="small" icon={<ReloadOutlined spin={modelsLoading} />} onClick={handleRefreshModels} disabled={modelsLoading} />
                 </Tooltip>
               </div>
 
-              {modelsError && <Alert message={`加载失败：${modelsError}`} type="error" showIcon style={{ marginBottom: 12 }} />}
+              {modelsError && <Alert message={`加载失败：${modelsError}`} type="error" showIcon className="models-view-mb-12" />}
 
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+              <div className="models-view-model-scroll">
                 {filteredModels.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-secondary, #999)' }}>
-                    <SearchOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block' }} />
+                  <div className="models-view-empty">
+                    <SearchOutlined className="models-view-empty-icon" />
                     {searchQuery || hasFilters ? '无匹配模型，试试调整筛选条件' : '暂无可用模型'}
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div className="models-view-model-list">
                     {filteredModels.map((m) => {
                       const tier = m.pricing?.tier || 'standard'
                       const isDef = isDefault(selectedProvider, m.id)
@@ -715,31 +687,31 @@ export function ModelsView() {
                           }} />
 
                           {/* 模型信息 */}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                              {isDef && <CheckOutlined style={{ color: 'var(--accent-color, #4f46e5)', fontSize: 14 }} />}
-                              <Text strong style={{ fontSize: 13, fontFamily: 'Consolas, "JetBrains Mono", monospace' }}>
+                          <div className="models-view-model-info-box">
+                            <div className="models-view-model-id-row">
+                              {isDef && <CheckOutlined className="models-view-check-icon" />}
+                              <Text strong className="models-view-model-id">
                                 {m.id}
                               </Text>
-                              {isDef && <Tag color="blue" style={{ fontSize: 10, lineHeight: '18px', padding: '0 6px', margin: 0, borderRadius: 4 }}>默认</Tag>}
+                              {isDef && <Tag color="blue" className="models-view-mini-tag">默认</Tag>}
                               {m.size && (
-                                <Tag style={{ fontSize: 10, lineHeight: '18px', padding: '0 6px', margin: 0, borderRadius: 4, background: '#f0f0f0', border: 'none', color: '#666' }}>
+                                <Tag className="models-view-size-tag">
                                   {m.size}
                                 </Tag>
                               )}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                            <div className="models-view-model-meta">
                               <Tag style={{
                                 fontSize: 10, lineHeight: '18px', padding: '0 6px', margin: 0, borderRadius: 4,
                                 borderColor: typeCfg.color, color: typeCfg.color, background: 'transparent',
                               }}>
                                 {typeCfg.icon} {m.typeLabel}
                               </Tag>
-                              <Tag color={TIER_COLORS[tier]} style={{ fontSize: 10, lineHeight: '18px', padding: '0 6px', margin: 0, borderRadius: 4 }}>
+                              <Tag color={TIER_COLORS[tier]} className="models-view-mini-tag">
                                 {TIER_LABELS[tier] ?? tier}
                               </Tag>
                               {m.pricing && m.pricing.input !== undefined && (
-                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                <Text type="secondary" className="models-view-price-text">
                                   输入 {formatPrice(m.pricing.input, m.pricing.currency)} / 输出 {formatPrice(m.pricing.output, m.pricing.currency)}
                                 </Text>
                               )}
@@ -748,7 +720,7 @@ export function ModelsView() {
 
                           {/* 操作按钮 */}
                           {isDef ? (
-                            <Tag color="blue" icon={<CheckOutlined />} style={{ margin: 0, borderRadius: 4 }}>当前默认</Tag>
+                            <Tag color="blue" icon={<CheckOutlined />} className="models-view-current-default-tag">当前默认</Tag>
                           ) : (
                             <Button
                               type="primary"
@@ -756,7 +728,7 @@ export function ModelsView() {
                               ghost={!isDef}
                               icon={<StarOutlined />}
                               onClick={() => handleSaveDefault(m.id)}
-                              style={{ flexShrink: 0, borderRadius: 6 }}
+                              className="models-view-set-default-btn"
                             >
                               设为默认
                             </Button>

@@ -75,8 +75,8 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
       <div className="panel-title">聊天流</div>
       <div className="chat-list" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && (
-          <div className="empty-hint" style={{ textAlign: 'center', padding: '40px 20px' }}>
-            <MessageOutlined style={{ fontSize: 32, color: '#d1d5db', marginBottom: 12 }} />
+          <div className="empty-hint chat-panel-empty-hint">
+            <MessageOutlined className="chat-panel-empty-icon" />
             <Text type="secondary">暂无发言，创建会议并运行后，agent 发言将在此实时展示。</Text>
           </div>
         )}
@@ -90,10 +90,10 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
         ))}
         {/* Produce 阶段进度条 */}
         {stage === 'produce' && status === 'running' && produceProgress && produceProgress.percent < 100 && (
-          <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <LoadingOutlined style={{ color: '#1890ff' }} />
-              <Text strong style={{ fontSize: 13 }}>{produceProgress.message}</Text>
+          <div className="chat-panel-progress-wrap">
+            <div className="chat-panel-progress-head">
+              <LoadingOutlined className="chat-panel-progress-icon" />
+              <Text strong className="chat-panel-progress-text">{produceProgress.message}</Text>
             </div>
             <Progress
               percent={produceProgress.percent}
@@ -113,9 +113,8 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
           shape="round"
           size="small"
           icon={<ArrowDownOutlined />}
-          className="new-msg-btn"
+          className="new-msg-btn chat-panel-new-msg-btn"
           onClick={() => scrollToBottom('smooth')}
-          style={{ position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
         >
           新消息
         </Button>
@@ -139,8 +138,8 @@ function MessageItem({
   return (
     <div className="message-wrap">
       {showSeparator && (
-        <Divider style={{ margin: '12px 0' }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
+        <Divider className="chat-panel-divider">
+          <Text type="secondary" className="chat-panel-divider-text">
             {STAGE_LABELS[message.stage] ?? message.stage}
           </Text>
         </Divider>

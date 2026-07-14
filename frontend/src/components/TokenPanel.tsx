@@ -134,7 +134,7 @@ export function TokenPanel() {
 
   if (!trace) {
     return (
-      <div style={{ textAlign: 'center', padding: 24 }}>
+      <div className="token-panel-empty">
         <Text type="secondary">暂无追踪数据</Text>
       </div>
     )
@@ -153,10 +153,10 @@ export function TokenPanel() {
     <div className="token-panel">
       {/* 当前模型信息条 */}
       {modelConfig && (
-        <Card size="small" style={{ marginBottom: 12 }}>
+        <Card size="small" className="token-panel-mb-12">
           <Space wrap>
             <Text type="secondary">模型</Text>
-            <Text strong ellipsis style={{ maxWidth: 200 }} title={modelConfig.model}>{modelConfig.model}</Text>
+            <Text strong ellipsis className="token-panel-model-name" title={modelConfig.model}>{modelConfig.model}</Text>
             {modelConfig.has_custom_key && <Tag color="purple">自定义Key</Tag>}
             {balance?.supported && balance.balance !== null && (
               <Text type={balance.balance < 1 ? 'danger' : 'secondary'}>
@@ -169,8 +169,8 @@ export function TokenPanel() {
 
       {/* 预算进度条 */}
       {budget && budget.budget > 0 && (
-        <Card size="small" style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <Card size="small" className="token-panel-mb-12">
+          <div className="token-panel-budget-row">
             <Text type="secondary">预算 {budget.used.toLocaleString()} / {budget.budget.toLocaleString()}</Text>
             <Text strong>{budget.percentage}%</Text>
           </div>
@@ -180,14 +180,14 @@ export function TokenPanel() {
             status={budgetStatus as any}
             strokeColor={budget.status === 'exceeded' ? '#ff4d4f' : budget.status === 'warning' ? '#faad14' : undefined}
           />
-          <Text type="secondary" style={{ fontSize: 12 }}>
+          <Text type="secondary" className="token-panel-text-sm">
             剩余 {budget.remaining.toLocaleString()} · {budget.total_calls} 次调用
           </Text>
         </Card>
       )}
 
       {/* 总览卡片 */}
-      <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+      <Row gutter={[8, 8]} className="token-panel-mb-12">
         <Col span={6}>
           <Card size="small">
             <Statistic title="总 Token" value={s.total_tokens || 0} valueStyle={{ fontSize: 20 }} />
@@ -212,16 +212,16 @@ export function TokenPanel() {
 
       {/* 按阶段柱状图 */}
       {stages.length > 0 && (
-        <Card size="small" title="按阶段消耗" style={{ marginBottom: 12 }}>
+        <Card size="small" title="按阶段消耗" className="token-panel-mb-12">
           {stages.map(([stage, v]: any) => {
             const tokens = (v.input_tokens || 0) + (v.output_tokens || 0)
             const pct = (tokens / maxTokens) * 100
             const label = stageLabel(stage)
             return (
-              <div key={stage} style={{ marginBottom: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                  <Text style={{ fontSize: 12 }}>{label}</Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{tokens.toLocaleString()}</Text>
+              <div key={stage} className="token-panel-stage-item">
+                <div className="token-panel-stage-row">
+                  <Text className="token-panel-text-sm">{label}</Text>
+                  <Text type="secondary" className="token-panel-text-sm">{tokens.toLocaleString()}</Text>
                 </div>
                 <Progress percent={pct} showInfo={false} strokeColor="#4f46e5" size="small" />
               </div>
@@ -233,27 +233,20 @@ export function TokenPanel() {
       {/* 调用列表 */}
       {trace.calls && trace.calls.length > 0 && (
         <Card size="small" title="调用明细">
-          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+          <div className="token-panel-call-list">
             {trace.calls.map((c, i) => {
               const sl = statusLabel(c.validation_status)
               const label = stageLabel(c.stage)
               return (
                 <div
                   key={c.call_id || i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '6px 0',
-                    borderBottom: '1px solid var(--border-color, #e5e7eb)',
-                    fontSize: 12,
-                  }}
+                  className="token-panel-call-item"
                   title={`${label} · ${c.total_tokens} tok · ${c.latency_ms}ms`}
                 >
-                  <Text style={{ flex: 1, fontSize: 12 }}>{label}</Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{(c.total_tokens || 0).toLocaleString()} tok</Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{c.latency_ms}ms</Text>
-                  <Tag color={sl.color} style={{ margin: 0 }}>{sl.label}</Tag>
+                  <Text className="token-panel-call-label">{label}</Text>
+                  <Text type="secondary" className="token-panel-text-sm">{(c.total_tokens || 0).toLocaleString()} tok</Text>
+                  <Text type="secondary" className="token-panel-text-sm">{c.latency_ms}ms</Text>
+                  <Tag color={sl.color} className="token-panel-call-tag">{sl.label}</Tag>
                 </div>
               )
             })}

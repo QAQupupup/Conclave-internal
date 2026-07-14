@@ -585,7 +585,7 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
 
             {/* 冲突节点 */}
             {isVisible.conflicts && (
-              <g className="ag-conflicts" style={{ opacity: 1, transition: 'opacity 0.4s ease' }}>
+              <g className="ag-conflicts ag-conflicts-group">
                 {conflicts.map(c => {
                   const dim = isDim(c.id)
                   const fill = c.resolved
@@ -600,7 +600,7 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
                       data-node={c.id}
                       transform={`translate(${c.x}, ${c.y})`}
                       opacity={dim ? 0.2 : 1}
-                      style={{ transition: 'opacity 0.2s ease' }}
+                      className="ag-node-transition"
                       onMouseEnter={() => setHoverId(c.id)}
                       onMouseLeave={() => setHoverId(null)}
                       filter="url(#ag-shadow-sm)"
@@ -628,7 +628,7 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
 
             {/* 证据节点 */}
             {isVisible.evidences && (
-              <g className="ag-evidence" style={{ opacity: 1, transition: 'opacity 0.4s ease 0.1s' }}>
+              <g className="ag-evidence ag-evidence-group">
                 {evidences.map(e => {
                   const dim = isDim(e.id)
                   const stroke = e.supports === 'a' || e.supports === 'b' ? CANDY.evidence : CANDY.link
@@ -638,7 +638,7 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
                       data-node={e.id}
                       transform={`translate(${e.x}, ${e.y})`}
                       opacity={dim ? 0.2 : 1}
-                      style={{ transition: 'opacity 0.2s ease' }}
+                      className="ag-node-transition"
                       onMouseEnter={() => setHoverId(e.id)}
                       onMouseLeave={() => setHoverId(null)}
                     >
@@ -680,9 +680,8 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
             {/* 产出物节点 */}
             {isVisible.artifact && artifact && (
               <g
-                className="ag-artifact"
+                className="ag-artifact ag-artifact-group"
                 transform={`translate(${artifact.x}, ${artifact.y})`}
-                style={{ opacity: 1, animation: 'ag-fadeup 0.5s ease' }}
                 filter="url(#ag-shadow)"
               >
                 <rect
@@ -707,20 +706,20 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
       {/* 图例 */}
       <div className="graph-legend">
         <span className="legend-item">
-          <span className="legend-dot" style={{ background: '#8B8FC8' }} />主持人
+          <span className="legend-dot ag-legend-dot-mod" />主持人
         </span>
         <span className="legend-item">
-          <span className="legend-dot" style={{ background: '#5EAD8F' }} />Agent
+          <span className="legend-dot ag-legend-dot-agent" />Agent
         </span>
         <span className="legend-item">
-          <span className="legend-dot" style={{ background: CANDY.conflict, borderRadius: 2, transform: 'rotate(45deg)' }} />冲突
+          <span className="legend-dot ag-legend-dot-conflict" />冲突
         </span>
         <span className="legend-item">
-          <span className="legend-dot" style={{ background: CANDY.evidence }} />证据
+          <span className="legend-dot ag-legend-dot-evidence" />证据
         </span>
         {isVisible.artifact && (
           <span className="legend-item">
-            <span className="legend-dot" style={{ background: CANDY.artifact }} />产出物
+            <span className="legend-dot ag-legend-dot-artifact" />产出物
           </span>
         )}
       </div>
@@ -736,7 +735,7 @@ function AgentGraphInner({ layout }: { layout: LayoutData }) {
       title={
         <span>
           会议拓扑 ·{' '}
-          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 12 }}>
+          <span className="ag-focus-mode-subtitle">
             {nodeCount} 节点 · {linkCount} 连线 · 当前：{stage ? STAGE_LABELS[stage] : '—'}
           </span>
         </span>
@@ -782,7 +781,7 @@ function AgentCard({
       data-node={agent.id}
       transform={`translate(${agent.x}, ${agent.y})`}
       opacity={dim ? 0.2 : 1}
-      style={{ transition: 'opacity 0.2s ease' }}
+      className="ag-node-transition"
       onMouseEnter={() => onHover(agent.id)}
       onMouseLeave={() => onHover(null)}
       filter="url(#ag-shadow)"
@@ -795,7 +794,7 @@ function AgentCard({
           stroke={stripeColor}
           strokeWidth={1.2}
           opacity={0.3}
-          style={{ animation: 'ag-pulse 1.8s ease-out infinite', transformOrigin: 'center' }}
+          className="ag-pulse-ring"
         />
       )}
 
@@ -839,7 +838,7 @@ function AgentCard({
         fontSize={13}
         fontWeight={600}
         fill={CANDY.textPrimary}
-        style={{ letterSpacing: '-0.01em' }}
+        className="ag-agent-name"
       >
         {agent.label}
       </text>

@@ -104,8 +104,8 @@ export function ReportViewer() {
 
   return (
     <div className="report-viewer">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={3} style={{ margin: 0 }}>会议报告</Title>
+      <div className="report-viewer-header">
+        <Title level={3} className="report-viewer-title">会议报告</Title>
         <Button
           icon={<DownloadOutlined />}
           onClick={() => downloadFile(`report_${state.meeting_id}.md`, reportToMarkdown(state))}
@@ -134,13 +134,13 @@ export function ReportViewer() {
         <div>
           {state.confidence_flags &&
             Object.entries(state.confidence_flags).map(([stage, conf]) => (
-              <div key={stage} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <div key={stage} className="report-viewer-confidence-row">
                 <Text>{STAGE_NAMES[stage as keyof typeof STAGE_NAMES] || stage}</Text>
                 <Tag color={conf === 'high' ? 'green' : conf === 'low' ? 'orange' : 'red'}>{String(conf)}</Tag>
               </div>
             ))}
           {ext.llm_trace && (
-            <Card size="small" style={{ marginTop: 8 }}>
+            <Card size="small" className="report-viewer-mt-8">
               <Space direction="vertical" size={4}>
                 <Text>LLM 调用: {ext.llm_trace.total_calls || 0} 次</Text>
                 <Text>成功率: {ext.llm_trace.success_rate || 'N/A'}</Text>
@@ -159,9 +159,9 @@ export function ReportViewer() {
       {/* 关键问题 */}
       {state.key_questions && state.key_questions.length > 0 && (
         <CollapsibleSection title="关键问题">
-          <ol style={{ margin: 0, paddingLeft: 20 }}>
+          <ol className="report-viewer-questions">
             {state.key_questions.map((q: string, i: number) => (
-              <li key={i} style={{ marginBottom: 4 }}>{q}</li>
+              <li key={i} className="report-viewer-question-item">{q}</li>
             ))}
           </ol>
         </CollapsibleSection>
@@ -170,9 +170,9 @@ export function ReportViewer() {
       {/* 团队配置 */}
       {state.team_config && state.team_config.length > 0 && (
         <CollapsibleSection title="团队配置">
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space direction="vertical" className="report-viewer-w-full">
             {state.team_config.map((m: any, i: number) => (
-              <div key={i} style={{ display: 'flex', gap: 8 }}>
+              <div key={i} className="report-viewer-team-item">
                 <Tag color="blue">{m.role}</Tag>
                 <Text>{m.stance}</Text>
               </div>
@@ -184,12 +184,12 @@ export function ReportViewer() {
       {/* 各阶段发言 */}
       {Object.entries(stageMessages).map(([stage, msgs]) => (
         <CollapsibleSection key={stage} title={STAGE_NAMES[stage as keyof typeof STAGE_NAMES] || stage}>
-          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+          <Space direction="vertical" className="report-viewer-w-full" size={8}>
             {msgs.map((msg: any, i: number) => (
               <Card key={i} size="small">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <div className="report-viewer-msg-header">
                   <Tag>{msg.agent_role || msg.role}</Tag>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{fmtTime(msg.created_at || msg.ts || '')}</Text>
+                  <Text type="secondary" className="report-viewer-text-sm">{fmtTime(msg.created_at || msg.ts || '')}</Text>
                 </div>
                 <div>{renderMessageContent(msg.content)}</div>
               </Card>
@@ -210,7 +210,7 @@ export function ReportViewer() {
         <CollapsibleSection title="最终产出" defaultOpen>
           <div>
             {ext.artifact.prd && (
-              <Card size="small" title={`PRD: ${ext.artifact.prd.title}`} style={{ marginBottom: 12 }}>
+              <Card size="small" title={`PRD: ${ext.artifact.prd.title}`} className="report-viewer-mb-12">
                 <Paragraph><Text strong>目标: </Text>{ext.artifact.prd.goal}</Paragraph>
                 {ext.artifact.prd.api_endpoints?.length > 0 && (
                   <div>
@@ -225,63 +225,63 @@ export function ReportViewer() {
               </Card>
             )}
             {ext.artifact.openapi && (
-              <Card size="small" title="OpenAPI" style={{ marginBottom: 12 }}>
-                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.openapi}</pre>
+              <Card size="small" title="OpenAPI" className="report-viewer-mb-12">
+                <pre className="code-block report-viewer-code">{ext.artifact.openapi}</pre>
               </Card>
             )}
             {ext.artifact.design_doc && (
-              <Card size="small" title={ext.artifact.design_doc.title} style={{ marginBottom: 12 }}>
-                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.design_doc, null, 2)}</pre>
+              <Card size="small" title={ext.artifact.design_doc.title} className="report-viewer-mb-12">
+                <pre className="code-block report-viewer-code">{JSON.stringify(ext.artifact.design_doc, null, 2)}</pre>
               </Card>
             )}
             {ext.artifact.comprehensive && (
-              <Card size="small" title={ext.artifact.comprehensive.title} style={{ marginBottom: 12 }}>
-                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.comprehensive, null, 2)}</pre>
+              <Card size="small" title={ext.artifact.comprehensive.title} className="report-viewer-mb-12">
+                <pre className="code-block report-viewer-code">{JSON.stringify(ext.artifact.comprehensive, null, 2)}</pre>
               </Card>
             )}
             {ext.artifact.research_report && (
-              <Card size="small" title={ext.artifact.research_report.title} style={{ marginBottom: 12 }}>
-                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.research_report, null, 2)}</pre>
+              <Card size="small" title={ext.artifact.research_report.title} className="report-viewer-mb-12">
+                <pre className="code-block report-viewer-code">{JSON.stringify(ext.artifact.research_report, null, 2)}</pre>
               </Card>
             )}
             {ext.artifact.business_report && (
-              <Card size="small" title={ext.artifact.business_report.title} style={{ marginBottom: 12 }}>
-                <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(ext.artifact.business_report, null, 2)}</pre>
+              <Card size="small" title={ext.artifact.business_report.title} className="report-viewer-mb-12">
+                <pre className="code-block report-viewer-code">{JSON.stringify(ext.artifact.business_report, null, 2)}</pre>
               </Card>
             )}
             {ext.artifact.code_analysis && (
-              <Card size="small" title={ext.artifact.code_analysis.title} style={{ marginBottom: 12 }}>
+              <Card size="small" title={ext.artifact.code_analysis.title} className="report-viewer-mb-12">
                 <Paragraph>{ext.artifact.code_analysis.description}</Paragraph>
-                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.code_analysis.code}</pre>
+                <pre className="code-block report-viewer-code">{ext.artifact.code_analysis.code}</pre>
                 {ext.artifact.execution && (
-                  <Card size="small" title={`执行结果 (exit=${ext.artifact.execution.exit_code})`} style={{ marginTop: 8 }}>
-                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.execution.stdout}</pre>
+                  <Card size="small" title={`执行结果 (exit=${ext.artifact.execution.exit_code})`} className="report-viewer-mt-8">
+                    <pre className="code-block report-viewer-code">{ext.artifact.execution.stdout}</pre>
                     {ext.artifact.execution.stderr && (
-                      <pre className="code-block" style={{ margin: '8px 0 0', color: '#ff4d4f' }}>{ext.artifact.execution.stderr}</pre>
+                      <pre className="code-block report-viewer-code-stderr">{ext.artifact.execution.stderr}</pre>
                     )}
                   </Card>
                 )}
               </Card>
             )}
             {ext.artifact.tested_system && (
-              <Card size="small" title={ext.artifact.tested_system.title} style={{ marginBottom: 12 }}>
+              <Card size="small" title={ext.artifact.tested_system.title} className="report-viewer-mb-12">
                 <Paragraph>{ext.artifact.tested_system.description}</Paragraph>
                 <Divider>主代码</Divider>
-                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.tested_system.main_code}</pre>
+                <pre className="code-block report-viewer-code">{ext.artifact.tested_system.main_code}</pre>
                 <Divider>测试代码</Divider>
-                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.tested_system.test_code}</pre>
+                <pre className="code-block report-viewer-code">{ext.artifact.tested_system.test_code}</pre>
                 {ext.artifact.execution && (
-                  <Card size="small" title={`测试结果 (exit=${ext.artifact.execution.exit_code})`} style={{ marginTop: 8 }}>
-                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.execution.stdout}</pre>
+                  <Card size="small" title={`测试结果 (exit=${ext.artifact.execution.exit_code})`} className="report-viewer-mt-8">
+                    <pre className="code-block report-viewer-code">{ext.artifact.execution.stdout}</pre>
                     {ext.artifact.execution.stderr && (
-                      <pre className="code-block" style={{ margin: '8px 0 0', color: '#ff4d4f' }}>{ext.artifact.execution.stderr}</pre>
+                      <pre className="code-block report-viewer-code-stderr">{ext.artifact.execution.stderr}</pre>
                     )}
                   </Card>
                 )}
               </Card>
             )}
             {ext.artifact.deployable_service && (
-              <Card size="small" title={ext.artifact.deployable_service.title || '可部署服务'} style={{ marginBottom: 12 }}>
+              <Card size="small" title={ext.artifact.deployable_service.title || '可部署服务'} className="report-viewer-mb-12">
                 {ext.artifact.deployable_service.description && (
                   <Paragraph>{ext.artifact.deployable_service.description}</Paragraph>
                 )}
@@ -303,7 +303,7 @@ export function ReportViewer() {
                       <Text strong>{ext.artifact.deployment.ok ? '服务已启动，可直接访问' : '服务启动失败'}</Text>
                     </Space>
                     {ext.artifact.deployment.ok && ext.artifact.deployment.access_url && (
-                      <div style={{ marginTop: 8 }}>
+                      <div className="report-viewer-mt-8">
                         <Text type="secondary">访问地址: </Text>
                         <a href={ext.artifact.deployment.access_url} target="_blank" rel="noopener noreferrer">
                           {ext.artifact.deployment.access_url} ↗
@@ -312,7 +312,7 @@ export function ReportViewer() {
                     )}
                     {ext.artifact.deployment.credentials &&
                       (ext.artifact.deployment.credentials.username || ext.artifact.deployment.credentials.password) && (
-                      <div style={{ marginTop: 8 }}>
+                      <div className="report-viewer-mt-8">
                         <Space wrap>
                           <Text type="secondary">账号:</Text>
                           <Tag>{ext.artifact.deployment.credentials.username || '（无，需自行注册）'}</Tag>
@@ -329,7 +329,7 @@ export function ReportViewer() {
                       </div>
                     )}
                     {ext.artifact.review && (
-                      <div style={{ marginTop: 8 }}>
+                      <div className="report-viewer-mt-8">
                         <Text>代码审查: {ext.artifact.review.rounds}轮，</Text>
                         <Tag color={ext.artifact.review.passed ? 'green' : 'red'}>
                           {ext.artifact.review.passed ? '通过' : '存在未修复问题'}
@@ -337,12 +337,12 @@ export function ReportViewer() {
                       </div>
                     )}
                     {!ext.artifact.deployment.ok && ext.artifact.deployment.error && (
-                      <div style={{ marginTop: 8 }}>
+                      <div className="report-viewer-mt-8">
                         <Text type="danger">错误: {ext.artifact.deployment.error}</Text>
                         {ext.artifact.deployment.logs && (
-                          <details style={{ marginTop: 4 }}>
-                            <summary style={{ cursor: 'pointer' }}>查看启动日志</summary>
-                            <pre className="code-block" style={{ margin: '4px 0 0', color: '#ff4d4f' }}>{ext.artifact.deployment.logs}</pre>
+                          <details className="report-viewer-details">
+                            <summary className="report-viewer-summary">查看启动日志</summary>
+                            <pre className="code-block report-viewer-code-logs">{ext.artifact.deployment.logs}</pre>
                           </details>
                         )}
                       </div>
@@ -350,7 +350,7 @@ export function ReportViewer() {
                   </Card>
                 )}
 
-                <div style={{ marginBottom: 12 }}>
+                <div className="report-viewer-mb-12">
                   <Space>
                     <Text>对本次产出评分:</Text>
                     <Rate
@@ -369,30 +369,30 @@ export function ReportViewer() {
                 </div>
 
                 <Divider>应用代码 (app.py)</Divider>
-                <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.app_code}</pre>
+                <pre className="code-block report-viewer-code">{ext.artifact.deployable_service.app_code}</pre>
                 {ext.artifact.deployable_service.requirements_txt && (
                   <>
                     <Divider>requirements.txt</Divider>
-                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.requirements_txt}</pre>
+                    <pre className="code-block report-viewer-code">{ext.artifact.deployable_service.requirements_txt}</pre>
                   </>
                 )}
                 {ext.artifact.deployable_service.dockerfile && (
                   <>
                     <Divider>Dockerfile</Divider>
-                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.dockerfile}</pre>
+                    <pre className="code-block report-viewer-code">{ext.artifact.deployable_service.dockerfile}</pre>
                   </>
                 )}
                 {ext.artifact.deployable_service.docker_compose && (
                   <>
                     <Divider>docker-compose.yml</Divider>
-                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.deployable_service.docker_compose}</pre>
+                    <pre className="code-block report-viewer-code">{ext.artifact.deployable_service.docker_compose}</pre>
                   </>
                 )}
                 {ext.artifact.execution && (
-                  <Card size="small" title="部署结果" style={{ marginTop: 8 }}>
-                    <pre className="code-block" style={{ margin: 0 }}>{ext.artifact.execution.stdout}</pre>
+                  <Card size="small" title="部署结果" className="report-viewer-mt-8">
+                    <pre className="code-block report-viewer-code">{ext.artifact.execution.stdout}</pre>
                     {ext.artifact.execution.stderr && (
-                      <pre className="code-block" style={{ margin: '8px 0 0', color: '#ff4d4f' }}>{ext.artifact.execution.stderr}</pre>
+                      <pre className="code-block report-viewer-code-stderr">{ext.artifact.execution.stderr}</pre>
                     )}
                   </Card>
                 )}

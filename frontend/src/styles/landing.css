@@ -772,3 +772,15 @@
   flex-direction: column;
   justify-content: space-between;
 }
+
+/* === LandingPage === */
+.landing-page-title-extra {
+  margin: 16px 0 8px;
+}
+.landing-page-tagline-extra {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+.landing-page-desc-extra {
+  margin: 0 0 32px;
+}

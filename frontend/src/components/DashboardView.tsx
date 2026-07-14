@@ -91,20 +91,20 @@ export function DashboardView() {
 
   if (loading) {
     return (
-      <div className="dashboard-view" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+      <div className="dashboard-view dashboard-view-loading">
         <Spin size="large" tip="加载中..." />
       </div>
     )
   }
 
   return (
-    <div className="dashboard-view" style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <Title level={3} style={{ margin: 0 }}>运维面板</Title>
+    <div className="dashboard-view dashboard-view-padded">
+      <div className="dashboard-view-header">
+        <Title level={3} className="dashboard-view-title">运维面板</Title>
         <Space>
-          {error && <Alert message={error} type="error" showIcon style={{ padding: '4px 12px' }} />}
+          {error && <Alert message={error} type="error" showIcon className="dashboard-view-error-alert" />}
           {lastUpdate && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
+            <Text type="secondary" className="dashboard-view-update-text">
               更新于 {lastUpdate.toLocaleTimeString('zh-CN')}
             </Text>
           )}
@@ -112,7 +112,7 @@ export function DashboardView() {
       </div>
 
       {/* 概览卡片行 */}
-      <div className="metric-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+      <div className="metric-grid dashboard-view-metric-grid">
         <MetricCard
           label="活跃会议"
           value={snapshot?.conclave.active_meetings ?? 0}
@@ -141,7 +141,7 @@ export function DashboardView() {
       </div>
 
       {/* 内容区：左连通性 + 右图表 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="dashboard-view-content-grid">
         <div>
           <HealthGrid
             infra={snapshot?.infrastructure ?? null}
@@ -149,7 +149,7 @@ export function DashboardView() {
             refreshing={healthRefreshing}
           />
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="dashboard-view-charts-col">
           <ResourceChart type="memory" data={history} title="内存消耗" />
           <ResourceChart type="tokens" data={history} title="Token 消耗" />
           <ResourceChart type="throughput" data={history} title="API 吞吐量" />

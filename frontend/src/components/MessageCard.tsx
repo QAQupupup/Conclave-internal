@@ -70,23 +70,23 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
     >
       <div className="message-head">
         <Space size={8}>
-          <Tag color={roleTagColor(role)} style={{ margin: 0 }}>
+          <Tag color={roleTagColor(role)} className="message-card-role-tag">
             {ROLE_LABELS[role] ?? role}
           </Tag>
-          <Text type="secondary" style={{ fontSize: 12 }}>
+          <Text type="secondary" className="message-card-stage-text">
             {STAGE_LABELS[message.stage] ?? message.stage}
           </Text>
           {message.created_at && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
+            <Text type="secondary" className="message-card-stage-text">
               {formatTime(message.created_at)}
             </Text>
           )}
         </Space>
       </div>
-      <div className="message-content" style={{ marginBlock: '8px 0' }}>
+      <div className="message-content message-card-body-spacing">
         {renderMessageContent(truncatedText)}
       </div>
-      <div className="message-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+      <div className="message-actions message-card-actions-bar">
         <Space size={4}>
           {isLong && (
             <Button
@@ -121,7 +121,7 @@ export function MessageCard({ message, onSelectRef }: MessageCardProps) {
         </Space>
       </div>
       {refs.length > 0 && (
-        <div className="message-refs" style={{ marginTop: 8 }}>
+        <div className="message-refs message-card-refs-spacing">
           <EvidenceList refs={refs} onSelectRef={onSelectRef} />
         </div>
       )}

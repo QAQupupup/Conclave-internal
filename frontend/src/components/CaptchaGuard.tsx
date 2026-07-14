@@ -349,7 +349,7 @@ export function CaptchaGuard({ compact = false, onStatusChange }: CaptchaGuardPr
   if (compact) {
     return (
       <>
-        <Space size={6} style={{ alignItems: 'center' }}>
+        <Space size={6} className="captcha-guard-compact-space">
           <Switch
             size="small"
             checked={guardMode}
@@ -360,7 +360,7 @@ export function CaptchaGuard({ compact = false, onStatusChange }: CaptchaGuardPr
           />
           <Tag
             color={guardMode ? (pending ? 'red' : 'green') : 'default'}
-            style={{ margin: 0, fontSize: 12, lineHeight: '20px' }}
+            className="captcha-guard-status-tag"
             icon={guardMode ? <SafetyCertificateOutlined /> : <SafetyOutlined />}
           >
             值守: {guardMode ? '开' : '关'}
@@ -390,7 +390,7 @@ export function CaptchaGuard({ compact = false, onStatusChange }: CaptchaGuardPr
   // -----------------------------------------------------------------------
   return (
     <>
-      <Space size={8} style={{ alignItems: 'center' }}>
+      <Space size={8} className="captcha-guard-controls-space">
         <Switch
           checked={guardMode}
           loading={toggling}
@@ -461,7 +461,7 @@ function CaptchaModal({
       open={pending !== null}
       title={
         <Space>
-          <SafetyCertificateOutlined style={{ color: '#ff4d4f' }} />
+          <SafetyCertificateOutlined className="captcha-guard-title-icon" />
           <span>检测到验证码 — 需要人工处理</span>
         </Space>
       }
@@ -473,7 +473,7 @@ function CaptchaModal({
       destroyOnClose
     >
       {pending && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="captcha-guard-modal-body">
           {/* 验证码类型与页面信息 */}
           <Alert
             type="warning"
@@ -491,13 +491,13 @@ function CaptchaModal({
               </Space>
             }
             description={
-              <div style={{ marginTop: 4 }}>
+              <div className="captcha-guard-alert-desc">
                 <div>
                   <GlobalOutlined /> <Text strong>{pending.pageTitle || '(无标题)'}</Text>
                 </div>
                 <Paragraph
                   ellipsis={{ rows: 1, expandable: true, symbol: '展开' }}
-                  style={{ marginBottom: 0, fontSize: 12, color: 'var(--text-secondary, #888)' }}
+                  className="captcha-guard-url-paragraph"
                 >
                   {pending.url}
                 </Paragraph>
@@ -506,37 +506,25 @@ function CaptchaModal({
           />
 
           {/* 截图区域 */}
-          <div
-            style={{
-              border: '1px solid var(--border, #d9d9d9)',
-              borderRadius: 6,
-              overflow: 'hidden',
-              background: '#f5f5f5',
-              minHeight: 200,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative',
-            }}
-          >
+          <div className="captcha-guard-screenshot-frame">
             {pending.screenshot ? (
               <Image
                 src={pending.screenshot}
                 alt="页面截图"
-                style={{ maxWidth: '100%', maxHeight: 400 }}
+                className="captcha-guard-screenshot-image"
                 preview={{ mask: '点击查看大图' }}
               />
             ) : screenshotLoading ? (
-              <div style={{ padding: 32, color: '#888' }}>正在加载截图...</div>
+              <div className="captcha-guard-screenshot-placeholder">正在加载截图...</div>
             ) : screenshotError ? (
-              <div style={{ padding: 32, color: '#ff4d4f', textAlign: 'center' }}>
+              <div className="captcha-guard-screenshot-error">
                 <div>截图加载失败：{screenshotError}</div>
-                <Button size="small" style={{ marginTop: 8 }} onClick={onRefreshScreenshot}>
+                <Button size="small" className="captcha-guard-retry-btn" onClick={onRefreshScreenshot}>
                   <ReloadOutlined /> 重试
                 </Button>
               </div>
             ) : (
-              <div style={{ padding: 32, color: '#888' }}>暂无截图</div>
+              <div className="captcha-guard-screenshot-placeholder">暂无截图</div>
             )}
             {pending.screenshot && (
               <Button
@@ -544,7 +532,7 @@ function CaptchaModal({
                 icon={<ReloadOutlined />}
                 onClick={onRefreshScreenshot}
                 loading={screenshotLoading}
-                style={{ position: 'absolute', top: 8, right: 8 }}
+                className="captcha-guard-refresh-btn"
               >
                 刷新截图
               </Button>
@@ -553,8 +541,8 @@ function CaptchaModal({
 
           {/* 倒计时进度 */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>剩余处理时间</Text>
+            <div className="captcha-guard-countdown-row">
+              <Text type="secondary" className="captcha-guard-countdown-label">剩余处理时间</Text>
               <Text strong style={{ color: timeColor, fontSize: 16, fontVariantNumeric: 'tabular-nums' }}>
                 {formatTime(remaining)}
               </Text>
@@ -577,7 +565,7 @@ function CaptchaModal({
           </div>
 
           {/* 操作按钮 */}
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+          <div className="captcha-guard-actions">
             <Button
               size="large"
               icon={<GlobalOutlined />}
@@ -602,7 +590,7 @@ function CaptchaModal({
               type="info"
               showIcon
               message="VNC 环境正在启动中，请稍候..."
-              style={{ fontSize: 12 }}
+              className="captcha-guard-vnc-alert"
             />
           )}
         </div>

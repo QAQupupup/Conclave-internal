@@ -17,7 +17,7 @@ export function StageIndicator() {
         items={STAGE_ORDER.map((stage) => ({
           title: STAGE_LABELS[stage],
         }))}
-        style={{ maxWidth: 680 }}
+        className="stage-indicator-steps"
       />
     </div>
   )

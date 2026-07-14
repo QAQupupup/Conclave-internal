@@ -78,14 +78,14 @@ export function EvidencePanel({ selectedConflictId, onSelectConflict }: Evidence
               key: c.id,
               label: (
                 <div>
-                  <Tag style={{ marginInlineEnd: 8 }}>{c.conflict_type ?? c.type ?? 'conflict'}</Tag>
+                  <Tag className="evidence-panel-type-tag">{c.conflict_type ?? c.type ?? 'conflict'}</Tag>
                   <Text>{c.summary}</Text>
                 </div>
               ),
               children: (
                 <div>
-                  <Card size="small" title="双方立场" style={{ marginBottom: 12 }}>
-                    <div style={{ marginBottom: 4 }}>
+                  <Card size="small" title="双方立场" className="evidence-panel-card">
+                    <div className="evidence-panel-side">
                       <Tag color="blue">A 方</Tag>
                       <Text>{c.side_a}</Text>
                     </div>
@@ -95,20 +95,20 @@ export function EvidencePanel({ selectedConflictId, onSelectConflict }: Evidence
                     </div>
                   </Card>
 
-                  <Card size="small" title="证据" style={{ marginBottom: 12 }}>
+                  <Card size="small" title="证据" className="evidence-panel-card">
                     {!ev || ev.assessments.length === 0 ? (
                       <Text type="secondary">暂无证据</Text>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div className="evidence-panel-list">
                         {ev.assessments.map((a, i) => {
                           const st = sourceType(a.source)
                           return (
-                            <div key={i} style={{ padding: 8, background: 'var(--bg-secondary, #f9fafb)', borderRadius: 4 }}>
-                              <Tag style={{ marginBottom: 4 }}>{SOURCE_LABEL[st]}</Tag>
-                              <blockquote style={{ margin: '4px 0', padding: '4px 8px', borderLeft: '2px solid var(--border-color, #e5e7eb)' }}>
+                            <div key={i} className="evidence-panel-item">
+                              <Tag className="evidence-panel-item-tag">{SOURCE_LABEL[st]}</Tag>
+                              <blockquote className="evidence-panel-quote">
                                 <Text>{a.quote}</Text>
                               </blockquote>
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                              <div className="evidence-panel-item-footer">
                                 <EvidenceBadge
                                   item={{
                                     ...parseEvidenceRef(a.source ?? ''),
@@ -131,7 +131,7 @@ export function EvidencePanel({ selectedConflictId, onSelectConflict }: Evidence
                   <Card size="small" title="裁决">
                     {dec ? (
                       <div>
-                        <Tag color={VERDICT_COLOR[dec.verdict] ?? 'default'} style={{ marginBottom: 8 }}>
+                        <Tag color={VERDICT_COLOR[dec.verdict] ?? 'default'} className="evidence-panel-verdict-tag">
                           {VERDICT_LABEL[dec.verdict] ?? dec.verdict}
                         </Tag>
                         <div>

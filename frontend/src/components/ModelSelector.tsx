@@ -275,7 +275,7 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
             </Space>
           ),
           children: (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div className="model-selector-category-list">
               {models.map(m => {
                 const tier = m.pricing?.tier || 'standard'
                 return (
@@ -290,16 +290,16 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
                     }}
                     onClick={() => { updateSel({ model: m.id }); setSwitchMsg(null) }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="model-selector-model-row">
                       <Space>
-                        {sel.model === m.id && <CheckOutlined style={{ color: 'var(--accent-color, #4f46e5)' }} />}
-                        <Text strong style={{ fontSize: 13 }}>{m.id}</Text>
+                        {sel.model === m.id && <CheckOutlined className="model-selector-check-icon" />}
+                        <Text strong className="model-selector-model-name">{m.id}</Text>
                         <Tag color={TIER_COLORS[tier] ?? 'default'}>{TIER_LABELS[tier] ?? tier}</Tag>
                       </Space>
                       {m.pricing && (
                         <Space size={12}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>入 {formatPrice(m.pricing.input, m.pricing.currency)}</Text>
-                          <Text type="secondary" style={{ fontSize: 11 }}>出 {formatPrice(m.pricing.output, m.pricing.currency)}</Text>
+                          <Text type="secondary" className="model-selector-price-text">入 {formatPrice(m.pricing.input, m.pricing.currency)}</Text>
+                          <Text type="secondary" className="model-selector-price-text">出 {formatPrice(m.pricing.output, m.pricing.currency)}</Text>
                         </Space>
                       )}
                     </div>
@@ -315,13 +315,13 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
   return (
     <div className={`model-selector${disabled ? ' disabled' : ''}`}>
       {showHeader && (
-        <div style={{ marginBottom: 16 }}>
+        <div className="model-selector-mb-16">
           <Text strong>模型设置</Text>
           {currentConfig && (
             <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
+              <Text type="secondary" className="model-selector-text-sm">
                 当前：<code>{currentConfig.model}</code>
-                {currentConfig.has_custom_key && <Tag color="purple" style={{ marginInlineStart: 4 }}>自定义Key</Tag>}
+                {currentConfig.has_custom_key && <Tag color="purple" className="model-selector-key-tag">自定义Key</Tag>}
               </Text>
             </div>
           )}
@@ -329,19 +329,19 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
       )}
 
       {/* 厂商选择 */}
-      <div style={{ marginBottom: 12 }}>
-        <Text strong style={{ display: 'block', marginBottom: 4 }}>LLM 厂商</Text>
+      <div className="model-selector-mb-12">
+        <Text strong className="model-selector-label">LLM 厂商</Text>
         <Select
           value={sel.provider_id || undefined}
           onChange={handleProviderChange}
           options={providerOptions}
           loading={providersLoading}
           disabled={disabled || providersLoading}
-          style={{ width: '100%' }}
+          className="model-selector-w-full"
           placeholder="选择厂商"
         />
         {currentProvider?.pricing_note && (
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+          <Text type="secondary" className="model-selector-hint">
             {currentProvider.pricing_note}
           </Text>
         )}
@@ -349,25 +349,25 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
 
       {/* 自定义 Base URL */}
       {sel.provider_id === 'custom' && (
-        <div style={{ marginBottom: 12 }}>
-          <Text strong style={{ display: 'block', marginBottom: 4 }}>API Base URL</Text>
+        <div className="model-selector-mb-12">
+          <Text strong className="model-selector-label">API Base URL</Text>
           <Input
             placeholder="https://api.example.com/v1"
             value={sel.base_url}
             onChange={(e) => updateSel({ base_url: e.target.value })}
             disabled={disabled}
           />
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>OpenAI 兼容接口地址</Text>
+          <Text type="secondary" className="model-selector-hint">OpenAI 兼容接口地址</Text>
         </div>
       )}
 
       {/* 自定义 API Key：始终展示输入框，方便用户配置；仅当后端声明 supports_custom_key=false 时禁用输入 */}
       {sel.provider_id && (
-        <div style={{ marginBottom: 12 }}>
-          <Text strong style={{ display: 'block', marginBottom: 4 }}>
+        <div className="model-selector-mb-12">
+          <Text strong className="model-selector-label">
             API Key（可选）
             {currentProvider && !currentProvider.supports_custom_key && (
-              <Tag color="orange" style={{ marginInlineStart: 8, fontSize: 11 }}>该厂商不建议自定义</Tag>
+              <Tag color="orange" className="model-selector-warn-tag">该厂商不建议自定义</Tag>
             )}
           </Text>
           <Input.Password
@@ -378,7 +378,7 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
             disabled={disabled || (!!currentProvider && !currentProvider.supports_custom_key)}
             autoComplete="off"
           />
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+          <Text type="secondary" className="model-selector-hint">
             {currentProvider?.has_key
               ? '填入你自己的Key可单独计费，不消耗系统额度'
               : '此厂商需要提供你自己的API Key；留空则尝试使用系统默认Key'}
@@ -388,7 +388,7 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
 
       {/* 余额显示 */}
       {currentProvider?.supports_balance && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="model-selector-mb-12">
           {balanceLoading && <Text type="secondary">查询余额中…</Text>}
           {balanceError && <Text type="danger">余额查询失败</Text>}
           {!balanceLoading && !balanceError && balance?.supported && (
@@ -400,19 +400,19 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
       )}
 
       {/* 模型列表 */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div className="model-selector-mb-12">
+        <div className="model-selector-model-header">
           <Text strong>选择模型</Text>
           <Button type="text" size="small" icon={<ReloadOutlined />} onClick={handleRefreshModels} disabled={modelsLoading || disabled}>
             {modelsLoading ? '加载中…' : '刷新'}
           </Button>
         </div>
-        {modelsError && <Alert message={`加载模型失败：${modelsError}`} type="error" showIcon style={{ marginBottom: 8 }} />}
-        {modelsLoading && !modelsData && <Spin style={{ display: 'block', textAlign: 'center', padding: 16 }} />}
+        {modelsError && <Alert message={`加载模型失败：${modelsError}`} type="error" showIcon className="model-selector-mb-8" />}
+        {modelsLoading && !modelsData && <Spin className="model-selector-loading" />}
         {modelsData && (
           <>
             {sel.model && !modelsData.models.some(m => m.id === sel.model) && (
-              <Tag color="blue" style={{ marginBottom: 8 }}>{sel.model}</Tag>
+              <Tag color="blue" className="model-selector-mb-8">{sel.model}</Tag>
             )}
             <Collapse
               activeKey={expandedCats}
@@ -432,7 +432,7 @@ export const ModelSelector: FC<ModelSelectorProps> = ({
               message={switchMsg}
               type={switchMsg.includes('失败') ? 'error' : 'success'}
               showIcon
-              style={{ marginBottom: 8 }}
+              className="model-selector-mb-8"
             />
           )}
           <Button

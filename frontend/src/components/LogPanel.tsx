@@ -62,38 +62,24 @@ function LogLine({ entry }: { entry: LogEntry }) {
         wordBreak: 'break-word',
       }}
     >
-      <span style={{ color: '#8c8c8c', flexShrink: 0, userSelect: 'none' }}>
+      <span className="log-panel-time">
         {formatTs(entry.timestamp)}
       </span>
       <Tag
         color={style.tag}
-        style={{
-          flexShrink: 0,
-          fontSize: 10,
-          lineHeight: '16px',
-          padding: '0 4px',
-          margin: 0,
-          minWidth: 44,
-          textAlign: 'center',
-        }}
+        className="log-panel-type-tag"
       >
         {style.label}
       </Tag>
       {entry.stage && (
         <Tag
           color="purple"
-          style={{
-            flexShrink: 0,
-            fontSize: 10,
-            lineHeight: '16px',
-            padding: '0 4px',
-            margin: 0,
-          }}
+          className="log-panel-stage-tag"
         >
           {entry.stage}
         </Tag>
       )}
-      <span style={{ color: '#722ed1', flexShrink: 0, fontSize: 11 }}>
+      <span className="log-panel-speaker">
         {entry.logger?.replace('app.orchestrator.', '').replace('app.agents.', '').replace('orchestrator.nodes.', '')}
       </span>
       <span style={{ color: style.fg, flex: 1 }}>{entry.message}</span>
@@ -150,47 +136,19 @@ export function LogPanel() {
   // 收起状态：只显示一个窄条+箭头
   if (!open) {
     return (
-      <div
-        className="log-panel-toggle"
-        style={{
-          position: 'fixed',
-          right: 0,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          zIndex: 1000,
-          display: 'flex',
-          alignItems: 'center',
-        }}
-      >
+      <div className="log-panel-toggle log-panel-toggle-bar">
         <Tooltip title="打开实时日志面板" placement="left">
           <Button
             type="primary"
             icon={<LeftOutlined />}
             onClick={() => setOpen(true)}
-            style={{
-              height: 56,
-              width: 24,
-              padding: 0,
-              borderTopRightRadius: 0,
-              borderBottomRightRadius: 0,
-              boxShadow: '-2px 0 8px rgba(0,0,0,0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
+            className="log-panel-toggle-btn"
           />
         </Tooltip>
         {counts.ERROR > 0 && (
           <Tag
             color="red"
-            style={{
-              position: 'absolute',
-              right: 28,
-              top: -8,
-              fontSize: 10,
-              minWidth: 20,
-              textAlign: 'center',
-            }}
+            className="log-panel-toggle-badge"
           >
             {counts.ERROR}
           </Tag>
@@ -201,35 +159,9 @@ export function LogPanel() {
 
   // 展开状态：完整日志面板
   return (
-    <div
-      className="log-panel"
-      style={{
-        position: 'fixed',
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: 520,
-        maxWidth: '70vw',
-        background: 'var(--bg, #fff)',
-        borderLeft: '1px solid var(--border, #d9d9d9)',
-        zIndex: 1000,
-        display: 'flex',
-        flexDirection: 'column',
-        boxShadow: '-4px 0 16px rgba(0,0,0,0.1)',
-      }}
-    >
+    <div className="log-panel log-panel-container">
       {/* 头部工具栏 */}
-      <div
-        style={{
-          padding: '8px 12px',
-          borderBottom: '1px solid var(--border, #d9d9d9)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexShrink: 0,
-          background: 'var(--bg-secondary, #fafafa)',
-        }}
-      >
+      <div className="log-panel-head">
         <Tooltip title="收起日志面板" placement="bottom">
           <Button
             type="text"
@@ -238,22 +170,22 @@ export function LogPanel() {
             onClick={() => setOpen(false)}
           />
         </Tooltip>
-        <Text strong style={{ fontSize: 13, flexShrink: 0 }}>实时日志</Text>
+        <Text strong className="log-panel-title">实时日志</Text>
 
         {/* 错误/警告计数 */}
-        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-          {counts.ERROR > 0 && <Tag color="red" style={{ margin: 0 }}>{counts.ERROR} 错误</Tag>}
-          {counts.WARNING > 0 && <Tag color="orange" style={{ margin: 0 }}>{counts.WARNING} 警告</Tag>}
+        <div className="log-panel-counts">
+          {counts.ERROR > 0 && <Tag color="red" className="log-panel-count-tag">{counts.ERROR} 错误</Tag>}
+          {counts.WARNING > 0 && <Tag color="orange" className="log-panel-count-tag">{counts.WARNING} 警告</Tag>}
         </div>
 
-        <div style={{ flex: 1 }} />
+        <div className="log-panel-spacer" />
 
         {/* 级别过滤 */}
         <Select
           size="small"
           value={minLevel}
           onChange={setMinLevel}
-          style={{ width: 100 }}
+          className="log-panel-filter-select"
           options={[
             { value: 'DEBUG', label: 'DEBUG+' },
             { value: 'INFO', label: 'INFO+' },
@@ -294,22 +226,10 @@ export function LogPanel() {
       {/* 日志列表 */}
       <div
         ref={scrollRef}
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          background: 'var(--bg, #fff)',
-        }}
+        className="log-panel-scroll"
       >
         {filtered.length === 0 ? (
-          <div
-            style={{
-              padding: 32,
-              textAlign: 'center',
-              color: 'var(--text-secondary, #999)',
-              fontSize: 13,
-            }}
-          >
+          <div className="log-panel-empty">
             {logs.length === 0
               ? '等待日志输入...会议启动后将实时显示后端日志'
               : `当前过滤级别下无日志（共 ${logs.length} 条被过滤）`}
@@ -317,22 +237,11 @@ export function LogPanel() {
         ) : (
           filtered.map((entry) => <LogLine key={entry.id} entry={entry} />)
         )}
-        <div ref={bottomRef} style={{ height: 1 }} />
+        <div ref={bottomRef} className="log-panel-bottom-anchor" />
       </div>
 
       {/* 底部状态栏 */}
-      <div
-        style={{
-          padding: '4px 12px',
-          borderTop: '1px solid var(--border, #d9d9d9)',
-          fontSize: 11,
-          color: 'var(--text-secondary, #999)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          flexShrink: 0,
-          background: 'var(--bg-secondary, #fafafa)',
-        }}
-      >
+      <div className="log-panel-footer">
         <span>
           共 {logs.length} 条{paused && ' (已暂停)'}
         </span>

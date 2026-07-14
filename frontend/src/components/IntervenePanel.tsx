@@ -91,33 +91,33 @@ export function IntervenePanel({ onClose }: IntervenePanelProps) {
   }
 
   return (
-    <div className="intervene-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="intervene-panel intervene-panel-root">
       {/* 头部 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border-color, #e5e7eb)' }}>
+      <div className="intervene-panel-header">
         <Space>
           <MessageOutlined />
           <Text strong>介入对话</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>私密 · 仅主持人可见</Text>
+          <Text type="secondary" className="intervene-panel-subtitle">私密 · 仅主持人可见</Text>
         </Space>
         <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
       </div>
 
       {/* 消息列表 */}
-      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+      <div ref={listRef} className="intervene-panel-list">
         {messages.length === 0 ? (
           <Empty
             description={
               <div>
                 <Text type="secondary">向主持人发送私密消息</Text>
                 <br />
-                <Text type="secondary" style={{ fontSize: 12 }}>你的消息不会出现在 Agent 聊天流中</Text>
+                <Text type="secondary" className="intervene-panel-empty-hint">你的消息不会出现在 Agent 聊天流中</Text>
               </div>
             }
-            image={<MessageOutlined style={{ fontSize: 32, color: '#d1d5db' }} />}
-            style={{ marginTop: 60 }}
+            image={<MessageOutlined className="intervene-panel-empty-icon" />}
+            className="intervene-panel-empty"
           />
         ) : (
-          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+          <Space direction="vertical" className="intervene-panel-messages" size={8}>
             {messages.map((msg) => {
               const isUser = msg.sender === 'user'
               const repliedMsg = msg.reply_to_id
@@ -134,20 +134,20 @@ export function IntervenePanel({ onClose }: IntervenePanelProps) {
                   }}
                 >
                   {repliedMsg && (
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', marginBottom: 4, padding: '4px 8px', background: 'var(--bg-tertiary, #f3f4f6)', borderRadius: 4 }}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
+                    <div className="intervene-panel-reply-quote">
+                      <Text type="secondary" className="intervene-panel-reply-quote-text">
                         回复 {repliedMsg.sender === 'user' ? '你' : '主持人'}：{repliedMsg.content.slice(0, 80)}
                         {repliedMsg.content.length > 80 ? '...' : ''}
                       </Text>
                     </div>
                   )}
-                  <div style={{ marginBottom: 4 }}>
+                  <div className="intervene-panel-msg-content">
                     <Text>{msg.content}</Text>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(msg.timestamp)}</Text>
+                  <div className="intervene-panel-msg-footer">
+                    <Text type="secondary" className="intervene-panel-msg-time">{formatTime(msg.timestamp)}</Text>
                     {!isUser && (
-                      <Button type="link" size="small" onClick={() => handleReply(msg)} style={{ padding: 0, fontSize: 12 }}>
+                      <Button type="link" size="small" onClick={() => handleReply(msg)} className="intervene-panel-reply-btn">
                         回复
                       </Button>
                     )}
@@ -161,11 +161,11 @@ export function IntervenePanel({ onClose }: IntervenePanelProps) {
 
       {/* 回复预览 */}
       {replyTo && (
-        <div style={{ padding: '8px 16px', borderTop: '1px solid var(--border-color, #e5e7eb)', background: 'var(--bg-secondary, #f9fafb)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
+        <div className="intervene-panel-reply-preview">
+          <Text type="secondary" className="intervene-panel-reply-preview-label">
             回复 {replyTo.sender === 'user' ? '自己' : '主持人'}：
           </Text>
-          <Text type="secondary" ellipsis style={{ flex: 1, fontSize: 12 }}>
+          <Text type="secondary" ellipsis className="intervene-panel-reply-preview-text">
             {replyTo.content.slice(0, 60)}{replyTo.content.length > 60 ? '...' : ''}
           </Text>
           <Button type="text" size="small" icon={<CloseOutlined />} onClick={cancelReply} />
@@ -173,7 +173,7 @@ export function IntervenePanel({ onClose }: IntervenePanelProps) {
       )}
 
       {/* 输入框 */}
-      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color, #e5e7eb)', display: 'flex', gap: 8 }}>
+      <div className="intervene-panel-input-row">
         <Input.TextArea
           ref={inputRef}
           value={input}
@@ -182,7 +182,7 @@ export function IntervenePanel({ onClose }: IntervenePanelProps) {
           placeholder="向主持人发送消息... (Enter 发送)"
           autoSize={{ minRows: 2, maxRows: 4 }}
           disabled={sending}
-          style={{ flex: 1 }}
+          className="intervene-panel-input"
         />
         <Button
           type="primary"

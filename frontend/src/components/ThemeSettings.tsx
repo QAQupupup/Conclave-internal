@@ -48,13 +48,13 @@ export function ThemeSettings({ onClose }: Props) {
       </Space>
     ),
     children: (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="theme-settings-token-list">
         {tokens.map(([token, meta]) => (
-          <div key={token} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div key={token} className="theme-settings-token-row">
             <div>
-              <Text style={{ fontSize: 13 }}>{meta.label}</Text>
+              <Text className="theme-settings-token-label">{meta.label}</Text>
               <br />
-              <Text type="secondary" style={{ fontSize: 11 }}>--{token}</Text>
+              <Text type="secondary" className="theme-settings-text-xs">--{token}</Text>
             </div>
             <Space size={4}>
               {meta.type === 'color' && (
@@ -74,7 +74,7 @@ export function ThemeSettings({ onClose }: Props) {
                 />
               )}
               {overrides[token] && (
-                <Button type="text" size="small" icon={<UndoOutlined />} onClick={() => resetToken(token)} style={{ fontSize: 11 }}>
+                <Button type="text" size="small" icon={<UndoOutlined />} onClick={() => resetToken(token)} className="theme-settings-text-xs">
                   重置
                 </Button>
               )}
@@ -97,7 +97,7 @@ export function ThemeSettings({ onClose }: Props) {
       onClose={onClose}
       width={420}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div className="theme-settings-footer">
           <Button icon={<UndoOutlined />} onClick={resetAllTokens}>
             重置全部 Token
           </Button>
@@ -105,8 +105,8 @@ export function ThemeSettings({ onClose }: Props) {
         </div>
       }
     >
-      <div style={{ marginBottom: 24 }}>
-        <Text strong style={{ display: 'block', marginBottom: 8 }}>主题模式</Text>
+      <div className="theme-settings-section">
+        <Text strong className="theme-settings-section-title">主题模式</Text>
         <Segmented
           value={mode}
           onChange={(val) => setMode(val as 'light' | 'dark')}
@@ -119,8 +119,8 @@ export function ThemeSettings({ onClose }: Props) {
       </div>
 
       <div>
-        <Text strong style={{ display: 'block', marginBottom: 8 }}>Token 覆盖</Text>
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+        <Text strong className="theme-settings-section-title">Token 覆盖</Text>
+        <Text type="secondary" className="theme-settings-section-hint">
           默认规则基于设计规范，此处可覆盖
         </Text>
         <Collapse

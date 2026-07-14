@@ -81,13 +81,13 @@ export const BorrowApprovalDialog: FC<Props> = ({ request, onClose }) => {
       open
       title={
         <Space>
-          <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+          <ExclamationCircleOutlined className="borrow-approval-dialog-warn-color" />
           <span>借调审批请求</span>
         </Space>
       }
       onCancel={onClose}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div className="borrow-approval-dialog-footer">
           <Button
             onClick={handleFreeze}
             disabled={disabled}
@@ -111,7 +111,7 @@ export const BorrowApprovalDialog: FC<Props> = ({ request, onClose }) => {
       closable={false}
       maskClosable={false}
     >
-      <p style={{ marginBottom: 16 }}>
+      <p className="borrow-approval-dialog-desc">
         主持人检测到当前讨论涉及 <Tag color="blue">{roleName}</Tag> 领域的专业问题，
         自动借调次数已达上限，需要您审批是否借调。
       </p>
@@ -123,21 +123,21 @@ export const BorrowApprovalDialog: FC<Props> = ({ request, onClose }) => {
         <Descriptions.Item label="借调目标">{request.goal}</Descriptions.Item>
         <Descriptions.Item label="必要性">{request.necessary}</Descriptions.Item>
         <Descriptions.Item label="不借调代价">
-          <span style={{ color: '#faad14' }}>{request.no_loan_cost}</span>
+          <span className="borrow-approval-dialog-warn-color">{request.no_loan_cost}</span>
         </Descriptions.Item>
       </Descriptions>
 
       {actionResult === 'approved' && (
-        <Alert message={`已批准借调 ${roleName}，该专家将立即加入讨论`} type="success" showIcon style={{ marginTop: 12 }} />
+        <Alert message={`已批准借调 ${roleName}，该专家将立即加入讨论`} type="success" showIcon className="borrow-approval-dialog-alert" />
       )}
       {actionResult === 'rejected' && (
-        <Alert message="已拒绝本次借调请求" type="info" showIcon style={{ marginTop: 12 }} />
+        <Alert message="已拒绝本次借调请求" type="info" showIcon className="borrow-approval-dialog-alert" />
       )}
       {actionResult === 'frozen' && (
-        <Alert message="已冻结借调功能，本次会议后续不再自动申请借调" type="warning" showIcon style={{ marginTop: 12 }} />
+        <Alert message="已冻结借调功能，本次会议后续不再自动申请借调" type="warning" showIcon className="borrow-approval-dialog-alert" />
       )}
       {!connected && (
-        <Alert message="WebSocket 未连接，无法审批" type="error" showIcon style={{ marginTop: 12 }} />
+        <Alert message="WebSocket 未连接，无法审批" type="error" showIcon className="borrow-approval-dialog-alert" />
       )}
     </Modal>
   )

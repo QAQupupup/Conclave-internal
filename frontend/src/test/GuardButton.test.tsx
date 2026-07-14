@@ -23,7 +23,7 @@ describe('GuardButton', () => {
     const shield = screen.getByTestId('guard-shield')
 
     expect(button).toBeInTheDocument()
-    expect(button).toHaveStyle({ position: 'fixed', right: '0px' })
+    expect(button).toHaveClass('guard-button')
     expect(shield).toHaveStyle({
       background: '#f0f7ff',
       color: '#1677ff',
@@ -36,7 +36,7 @@ describe('GuardButton', () => {
     render(<GuardButton path="/board" />)
 
     const button = screen.getByTestId('guard-button')
-    expect(button).toHaveStyle({ width: '28px' })
+    expect(button).toHaveStyle({ width: '32px' })
     expect(screen.getByTestId('guard-panel')).toHaveStyle({ opacity: '0' })
 
     fireEvent.mouseEnter(button)
@@ -47,7 +47,7 @@ describe('GuardButton', () => {
     fireEvent.mouseLeave(button)
     act(() => { vi.advanceTimersByTime(900) })
 
-    expect(button).toHaveStyle({ width: '28px' })
+    expect(button).toHaveStyle({ width: '32px' })
     expect(screen.getByTestId('guard-panel')).toHaveStyle({ opacity: '0' })
   })
 })

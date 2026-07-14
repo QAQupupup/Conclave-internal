@@ -585,7 +585,7 @@ function LogicGraphInner({
                 fill={COLOR_TEXT_MUTED}
                 fontSize="13"
                 fontWeight="600"
-                style={{ letterSpacing: '0.04em' }}
+                className="lg-col-title"
               >
                 主张 · CLAIMS ({claimNodes.length})
               </text>
@@ -596,7 +596,7 @@ function LogicGraphInner({
                 fill={COLOR_CONFLICT_SIDE}
                 fontSize="13"
                 fontWeight="600"
-                style={{ letterSpacing: '0.04em' }}
+                className="lg-col-title"
               >
                 冲突 · CONFLICTS ({conflictNodes.length})
               </text>
@@ -607,7 +607,7 @@ function LogicGraphInner({
                 fill={COLOR_DECISION_VERDICT}
                 fontSize="13"
                 fontWeight="600"
-                style={{ letterSpacing: '0.04em' }}
+                className="lg-col-title"
               >
                 裁决 · DECISIONS ({decisionNodes.length})
               </text>
@@ -667,15 +667,15 @@ function LogicGraphInner({
         {/* 图例 */}
         <div className="logic-graph-legend">
           <div className="legend-item">
-            <span className="legend-line" style={{ background: COLOR_EDGE_RESOLVE }} />
+            <span className="legend-line lg-legend-line-resolve" />
             解决
           </div>
           <div className="legend-item">
-            <span className="legend-line dashed" style={{ borderColor: COLOR_EDGE_FEED }} />
+            <span className="legend-line dashed lg-legend-line-feed" />
             涉及
           </div>
           <div className="legend-item">
-            <span className="legend-swatch" style={{ background: COLOR_CLAIM_ADOPTED_BG, borderColor: COLOR_CLAIM_ADOPTED_BORDER }} />
+            <span className="legend-swatch lg-legend-swatch-adopted" />
             已采纳
           </div>
         </div>
@@ -693,7 +693,7 @@ function LogicGraphInner({
       title={
         <span>
           逻辑关系图 ·{' '}
-          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 12 }}>
+          <span className="lg-focus-mode-subtitle">
             {claimNodes.length} 主张 · {conflictNodes.length} 冲突 · {decisionNodes.length} 裁决
           </span>
         </span>
@@ -797,7 +797,7 @@ function ClaimNodeView({
             y={(i + 1) * LINE_H}
             fill={COLOR_TEXT}
             fontSize="12"
-            style={{ fontFamily: 'var(--font-sans)' }}
+            className="lg-node-text"
           >
             {line}
           </text>
@@ -839,7 +839,7 @@ function ConflictNodeView({
             fill={COLOR_TEXT}
             fontSize="12"
             fontWeight="600"
-            style={{ fontFamily: 'var(--font-sans)' }}
+            className="lg-node-text"
           >
             {line}
           </text>
@@ -887,7 +887,7 @@ function DecisionNodeView({
             y={(i + 1) * LINE_H}
             fill={COLOR_TEXT}
             fontSize="12"
-            style={{ fontFamily: 'var(--font-sans)' }}
+            className="lg-node-text"
           >
             {line}
           </text>

@@ -141,7 +141,7 @@ export function ChatInput({ meetingId }: Props) {
     <div className="chat-input-wrap">
       {/* 已选引用标签 */}
       {selectedRefs.length > 0 && (
-        <div className="chat-input-refs" style={{ marginBottom: 8 }}>
+        <div className="chat-input-refs chat-input-refs-bar">
           <Space wrap size={[4, 4]}>
             {selectedRefs.map(ref => (
               <Tag
@@ -158,7 +158,7 @@ export function ChatInput({ meetingId }: Props) {
         </div>
       )}
 
-      <div className="chat-input-row" style={{ display: 'flex', gap: 8 }}>
+      <div className="chat-input-row chat-input-row-flex">
         <Input.TextArea
           ref={textareaRef}
           value={text}
@@ -167,7 +167,7 @@ export function ChatInput({ meetingId }: Props) {
           placeholder="输入消息… 输入 @ 引用历史会议"
           autoSize={{ minRows: 1, maxRows: 4 }}
           disabled={busy}
-          style={{ flex: 1 }}
+          className="chat-input-textarea"
         />
         <Button
           type="primary"
@@ -180,7 +180,7 @@ export function ChatInput({ meetingId }: Props) {
       </div>
 
       {status && (
-        <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+        <Text type="secondary" className="chat-input-status">
           {status}
         </Text>
       )}
@@ -189,22 +189,13 @@ export function ChatInput({ meetingId }: Props) {
       {showMention && (
         <div
           ref={mentionRef}
-          className="chat-mention-dropdown"
-          style={{
-            background: 'var(--card-bg, #fff)',
-            border: '1px solid var(--border-color, #e5e7eb)',
-            borderRadius: 8,
-            marginTop: 4,
-            maxHeight: 260,
-            overflowY: 'auto',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-          }}
+          className="chat-mention-dropdown chat-mention-dropdown-panel"
         >
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color, #e5e7eb)' }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>引用历史会议</Text>
+          <div className="chat-mention-header">
+            <Text type="secondary" className="chat-mention-header-text">引用历史会议</Text>
           </div>
           {mentionResults.length === 0 && (
-            <div style={{ padding: '12px', textAlign: 'center' }}>
+            <div className="chat-mention-empty">
               <Text type="secondary">未找到匹配的会议</Text>
             </div>
           )}
@@ -225,8 +216,8 @@ export function ChatInput({ meetingId }: Props) {
                 onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--hover-bg, #f9fafb)' }}
                 onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
               >
-                <Text ellipsis style={{ maxWidth: '70%' }}>{m.topic}</Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>{m.meeting_id.slice(-8)}</Text>
+                <Text ellipsis className="chat-mention-item-topic">{m.topic}</Text>
+                <Text type="secondary" className="chat-mention-item-id">{m.meeting_id.slice(-8)}</Text>
               </div>
             )
           })}

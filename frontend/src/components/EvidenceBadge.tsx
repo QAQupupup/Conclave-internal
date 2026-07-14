@@ -106,16 +106,16 @@ export function EvidenceBadge({ item, onClick, expanded: forceExpanded, classNam
       <Tag
         icon={cfg.icon}
         color={cfg.color}
-        style={{ cursor: 'pointer', marginBottom: 4 }}
+        className="evidence-badge-tag"
         onClick={handleClick}
         title={item.sourceName ?? item.id}
       >
         <span>{item.sourceName ?? item.id}</span>
-        <span style={{ marginInlineStart: 4, opacity: 0.7 }}>({cfg.label})</span>
+        <span className="evidence-badge-level">({cfg.label})</span>
       </Tag>
       {expanded && item.quote && (
-        <div style={{ padding: '4px 8px', background: 'var(--bg-secondary, #f9fafb)', borderRadius: 4, marginTop: 4 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>「{item.quote}」</Text>
+        <div className="evidence-badge-quote-box">
+          <Text type="secondary" className="evidence-badge-quote-text">「{item.quote}」</Text>
         </div>
       )}
     </span>
@@ -142,7 +142,7 @@ export function EvidenceList({ refs, onSelectRef, visibleCount = 3 }: EvidenceLi
   if (refs.length === 0) return null
 
   return (
-    <div className="evidence-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+    <div className="evidence-list evidence-badge-list-inline">
       {visible.map((ref, i) => (
         <EvidenceBadge
           key={`${ref}-${i}`}
@@ -176,10 +176,10 @@ export function EvidenceDetail({ items, title = '证据链' }: EvidenceDetailPro
   }
   return (
     <div className="evidence-detail">
-      <Text strong style={{ display: 'block', marginBottom: 8 }}>{title}</Text>
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Text strong className="evidence-detail-title">{title}</Text>
+      <Space direction="vertical" size={8} className="evidence-detail-space">
         {items.map((item, i) => (
-          <div key={item.id} style={{ display: 'flex', gap: 8 }}>
+          <div key={item.id} className="evidence-detail-item">
             <Text type="secondary">{i + 1}.</Text>
             <EvidenceBadge item={item} expanded />
           </div>

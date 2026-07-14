@@ -97,17 +97,17 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
       open
       title={
         <div>
-          <Title level={4} style={{ margin: 0 }}>设置</Title>
-          <Text type="secondary" style={{ fontSize: 12 }}>LLM 模型和 API Key 偏好保存在浏览器本地</Text>
+          <Title level={4} className="settings-panel-title">设置</Title>
+          <Text type="secondary" className="settings-panel-hint">LLM 模型和 API Key 偏好保存在浏览器本地</Text>
         </div>
       }
       onClose={onClose}
       width={480}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div className="settings-panel-footer">
           {showResetConfirm ? (
             <Space>
-              <Text type="danger" style={{ fontSize: 12 }}>确定重置所有设置？</Text>
+              <Text type="danger" className="settings-panel-hint">确定重置所有设置？</Text>
               <Button size="small" onClick={() => setShowResetConfirm(false)}>取消</Button>
               <Button size="small" danger onClick={handleReset}>确认重置</Button>
             </Space>
@@ -122,15 +122,15 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
         </div>
       }
     >
-      {savedMsg && <Alert message={savedMsg} type="success" showIcon style={{ marginBottom: 16 }} />}
+      {savedMsg && <Alert message={savedMsg} type="success" showIcon className="settings-panel-alert" />}
 
-      <div style={{ marginBottom: 24 }}>
+      <div className="settings-panel-section">
         <Text strong>默认模型</Text>
-        <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
+        <Text type="secondary" className="settings-panel-section-hint">
           新创建的会议将默认使用此模型。会议中可随时切换。
         </Text>
         <ModelSelector value={sel} onChange={setSel} showHeader={false} />
-        <div style={{ marginTop: 8 }}>
+        <div className="settings-panel-mt-8">
           <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSaveDefault} disabled={!sel.model}>
             保存为默认
           </Button>
@@ -139,9 +139,9 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
 
       <Divider />
 
-      <div style={{ marginBottom: 24 }}>
+      <div className="settings-panel-section">
         <Text strong>会议中切换</Text>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+        <div className="settings-panel-switch-row">
           <Switch checked={prefs.auto_save_model} onChange={handleToggleAutoSave} />
           <Text>会议中切换模型时自动保存为默认</Text>
         </div>
@@ -149,16 +149,16 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
 
       <Divider />
 
-      <div style={{ marginBottom: 24 }}>
+      <div className="settings-panel-section">
         <Text strong>已保存的 API Key</Text>
         {savedKeyProviders.length === 0 ? (
-          <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+          <Text type="secondary" className="settings-panel-block-hint">
             暂无保存的 Key。在上方选择厂商并输入 Key 后点"保存为默认"即可保存。
           </Text>
         ) : (
           <List
             size="small"
-            style={{ marginTop: 8 }}
+            className="settings-panel-mt-8"
             dataSource={savedKeyProviders}
             renderItem={([pid, key]) => (
               <List.Item
@@ -182,7 +182,7 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
 
       <div>
         <Text strong>数据管理</Text>
-        <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+        <Text type="secondary" className="settings-panel-block-hint">
           设置存储在浏览器 localStorage 中，清除浏览器数据会丢失。
           当前配置：{exportPreferences().length > 10 ? '已配置默认模型' : '未配置'}
           {savedKeyProviders.length > 0 && `，${savedKeyProviders.length} 个 Key`}

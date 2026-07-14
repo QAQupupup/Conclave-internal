@@ -125,7 +125,7 @@ export function BorrowDialog({ open, onClose }: BorrowDialogProps) {
             message="WebSocket 未连接，无法发送借调请求。请检查会议是否正在运行。"
             type="error"
             showIcon
-            style={{ marginBottom: 12 }}
+            className="borrow-dialog-alert"
           />
         )}
         {submitState === 'sent' && (
@@ -133,11 +133,11 @@ export function BorrowDialog({ open, onClose }: BorrowDialogProps) {
             message="借调请求已发送。后端将评估是否批准，请关注会议中的后续消息。"
             type="success"
             showIcon
-            style={{ marginBottom: 12 }}
+            className="borrow-dialog-alert"
           />
         )}
 
-        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Space className="borrow-dialog-actions">
           {submitState === 'sent' ? (
             <Button type="primary" onClick={onClose}>关闭</Button>
           ) : (

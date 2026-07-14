@@ -30,13 +30,13 @@ export function LandingPage({ onEnter }: LandingPageProps) {
             <circle cx="46" cy="24" r="2.5" fill="currentColor" />
           </svg>
         </div>
-        <Typography.Title level={1} className="landing-title" style={{ margin: '16px 0 8px' }}>
+        <Typography.Title level={1} className="landing-title landing-page-title-extra">
           Conclave
         </Typography.Title>
-        <Typography.Paragraph className="landing-tagline" type="secondary" style={{ fontSize: 16, margin: '0 0 8px' }}>
+        <Typography.Paragraph className="landing-tagline landing-page-tagline-extra" type="secondary">
           多智能体会议系统 · 结构化议题审议与决策
         </Typography.Paragraph>
-        <Typography.Paragraph className="landing-desc" type="secondary" style={{ margin: '0 0 32px' }}>
+        <Typography.Paragraph className="landing-desc landing-page-desc-extra" type="secondary">
           多角色智能体协作 · 六阶段审议流程 · 实时可观测
         </Typography.Paragraph>
         <Button

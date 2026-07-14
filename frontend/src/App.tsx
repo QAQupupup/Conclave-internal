@@ -193,16 +193,16 @@ function WorkspaceView({ meetingId, initialFile }: { meetingId?: string; initial
 function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
   const { meetingId } = useMeeting()
   return (
-    <div className="meeting-sidebar-collapsed" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px 4px', gap: 8 }}>
+    <div className="meeting-sidebar-collapsed app-collapsed-sidebar-extra">
       <Tooltip title="展开会议列表" placement="right">
         <Button
           type="text"
           icon={<MenuFoldOutlined />}
           onClick={onExpand}
-          style={{ height: 40, width: 40 }}
+          className="app-collapsed-sidebar-btn"
         />
       </Tooltip>
-      {meetingId && <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-color, #4f46e5)' }} title="当前会议已选中" />}
+      {meetingId && <div className="app-collapsed-sidebar-dot" title="当前会议已选中" />}
     </div>
   )
 }
@@ -240,22 +240,14 @@ function AppShell() {
     }
     const pageTitle = pageTitles[path] || '页面'
     return (
-      <div className="app-shell board-shell" style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+      <div className="app-shell board-shell">
         <DrawerMenu currentPath={path} />
-        <div className="board-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+        <div className="board-main">
           {/* 统一页面头部：标题 + 面包屑 + 工具栏 */}
-          <div style={{
-            padding: '16px 32px 12px',
-            borderBottom: '1px solid var(--border, #e5e7eb)',
-            background: 'var(--bg, #fff)',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 16,
-          }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Typography.Title level={4} style={{ margin: 0, fontSize: 18 }}>{pageTitle}</Typography.Title>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginTop: 2 }}>
+          <div className="app-page-header">
+            <div className="app-page-header-left">
+              <Typography.Title level={4} className="app-page-title">{pageTitle}</Typography.Title>
+              <div className="app-page-breadcrumb">
                 会议看板 / {pageTitle}
               </div>
             </div>
@@ -276,12 +268,7 @@ function AppShell() {
             </div>
           </div>
           {/* 页面内容区，统一padding，可滚动 */}
-          <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '24px 32px 32px',
-            background: 'var(--bg-secondary, #f8f9fb)',
-          }}>
+          <div className="app-page-content">
             {path === '/dashboard' ? (
               <Suspense fallback={<div className="suspense-fallback">加载看板…</div>}><DashboardView /></Suspense>
             ) : path === '/models' ? (
@@ -299,10 +286,10 @@ function AppShell() {
 
   // 第三层：会议视图（/meeting/:id，侧栏 + 主体）
   return (
-    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`} style={{ display: 'flex' }}>
+    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
         {!sidebarCollapsed ? (
-          <div className="sidebar-expanded-pane" style={{ position: 'relative' }}>
+          <div className="sidebar-expanded-pane app-sidebar-pane-relative">
             <MeetingSidebar onCollapseSidebar={() => setSidebarCollapsed(true)} />
           </div>
         ) : (
@@ -311,26 +298,22 @@ function AppShell() {
           </div>
         )}
       </aside>
-      <div className="app-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+      <div className="app-main">
         {/* 会议级统一导航栏：面包屑 + 返回 + 工具栏合为一行 */}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '10px 24px', borderBottom: '1px solid var(--border, #e5e7eb)',
-          flexShrink: 0, minHeight: 44, background: 'var(--bg, #fff)',
-        }}>
+        <div className="app-meeting-navbar">
           <div className="breadcrumb-area">
-            <a style={{ color: 'var(--accent, #4f46e5)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            <a className="app-breadcrumb-link"
                onClick={() => { selectMeeting(null); navigate('/board') }}>
               会议看板
             </a>
-            <span style={{ color: 'var(--text-secondary, #999)' }}>/</span>
-            <span style={{ color: 'var(--text-secondary, #666)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span className="app-breadcrumb-sep">/</span>
+            <span className="app-breadcrumb-topic">
               {store.meeting?.topic
                 ? (store.meeting.topic.length > 30 ? store.meeting.topic.slice(0, 30) + '…' : store.meeting.topic)
                 : meetingId}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+          <div className="app-meeting-actions">
             <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
               <Button type="text" size="small"
                 icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
@@ -353,7 +336,7 @@ function AppShell() {
             { key: 'meeting', label: <span><TeamOutlined /> 会议</span> },
             { key: 'workspace', label: <span><CodeOutlined /> 工作区</span> },
           ]}
-          style={{ padding: '0 24px', flexShrink: 0 }}
+          className="app-meeting-tabs"
         />
         <div className="flex-col-overflow">
           {tab === 'meeting' ? (

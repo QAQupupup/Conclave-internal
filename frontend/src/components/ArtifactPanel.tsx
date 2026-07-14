@@ -1,5 +1,5 @@
 // 右下：PRD 结构化预览 + OpenAPI 语法高亮 + 一键复制 + 借调入口 + 附件列表(跳转工作区)
-// 使用 AntD Card + Button + List + Tag + Empty + Typography + Collapse
+// 使用 AntD Card + Button + List + Tag + Empty + Typography + Space + Collapse
 import { Card, Button, List, Tag, Empty, Typography, Space, Divider } from 'antd'
 import { CopyOutlined, CheckOutlined, DownloadOutlined, FolderOpenOutlined, UserSwitchOutlined } from '@ant-design/icons'
 import type { ReactNode } from 'react'
@@ -30,7 +30,7 @@ export function ArtifactPanel({ onOpenBorrow, onOpenInWorkspace }: ArtifactPanel
 
   return (
     <section className="panel artifact-panel">
-      <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="panel-title artifact-title-bar">
         <span>产物预览</span>
         <Button type="link" size="small" icon={<UserSwitchOutlined />} onClick={onOpenBorrow}>
           借调专家
@@ -68,7 +68,7 @@ function AttachmentsSection({
   if (list.length === 0) return null
 
   return (
-    <Card size="small" title={`产出文件（${list.length}）`} style={{ marginTop: 12 }}>
+    <Card size="small" title={`产出文件（${list.length}）`} className="artifact-card">
       <List
         size="small"
         dataSource={list}
@@ -124,9 +124,9 @@ function PRDSection({ prd }: { prd: PRD | undefined }) {
   const { copied, copy } = useCopy()
   const handleCopy = () => copy(prdToMarkdown(prd))
   return (
-    <Card size="small" style={{ marginTop: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <Title level={5} style={{ margin: 0 }}>{prd?.title || '未命名 PRD'}</Title>
+    <Card size="small" className="artifact-card">
+      <div className="artifact-prd-header">
+        <Title level={5} className="artifact-prd-title">{prd?.title || '未命名 PRD'}</Title>
         <Button
           type="text"
           size="small"
@@ -136,15 +136,15 @@ function PRDSection({ prd }: { prd: PRD | undefined }) {
           {copied ? '已复制' : '复制 PRD'}
         </Button>
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div className="artifact-field">
         <Text type="secondary">目标</Text>
         <div><Text>{prd?.goal || '—'}</Text></div>
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div className="artifact-field">
         <Text type="secondary">范围</Text>
         <div><Text>{prd?.scope || '—'}</Text></div>
       </div>
-      <Divider style={{ margin: '8px 0' }} />
+      <Divider className="artifact-divider" />
       <ListField label="假设" items={prd?.assumptions} color="gold" />
       <ListField label="约束" items={prd?.constraints} color="orange" />
       <ListField label="API 端点" items={prd?.api_endpoints} color="blue" />
@@ -157,15 +157,15 @@ function PRDSection({ prd }: { prd: PRD | undefined }) {
 function ListField({ label, items, color }: { label: string; items?: string[]; color: string }) {
   const arr = items ?? []
   return (
-    <div style={{ marginBottom: 8 }}>
+    <div className="artifact-field">
       <Text type="secondary">{label}（{arr.length}）</Text>
       {arr.length === 0 ? (
         <div><Text type="secondary">无</Text></div>
       ) : (
-        <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+        <ul className="artifact-list">
           {arr.map((item, i) => (
-            <li key={i} style={{ marginBottom: 2 }}>
-              <Tag color={color} style={{ marginInlineEnd: 4 }}>{label.charAt(0)}</Tag>
+            <li key={i} className="artifact-list-item">
+              <Tag color={color} className="artifact-tag">{label.charAt(0)}</Tag>
               <Text>{item}</Text>
             </li>
           ))}
@@ -210,7 +210,7 @@ function OpenAPISection({ yaml }: { yaml: string | undefined }) {
   const text = yaml || '# 暂无 OpenAPI'
   const handleCopy = () => copy(text)
   return (
-    <Card size="small" title="OpenAPI 片段" style={{ marginTop: 12 }} extra={
+    <Card size="small" title="OpenAPI 片段" className="artifact-card" extra={
       <Button
         type="text"
         size="small"
@@ -220,7 +220,7 @@ function OpenAPISection({ yaml }: { yaml: string | undefined }) {
         {copied ? '已复制' : '复制 OpenAPI'}
       </Button>
     }>
-      <pre className="code-block yaml-code" style={{ margin: 0, fontSize: 12, maxHeight: 300, overflow: 'auto' }}>{highlightYaml(text)}</pre>
+      <pre className="code-block yaml-code artifact-code">{highlightYaml(text)}</pre>
     </Card>
   )
 }
@@ -247,7 +247,7 @@ function renderYamlLine(line: string): ReactNode {
     return (
       <>
         {commentOnly[1]}
-        <span style={{ color: '#8b949e' }}>{commentOnly[2]}</span>
+        <span className="artifact-yaml-comment">{commentOnly[2]}</span>
       </>
     )
   }
@@ -256,7 +256,7 @@ function renderYamlLine(line: string): ReactNode {
     return (
       <>
         {kv[1]}
-        <span style={{ color: '#79c0ff' }}>{kv[2]}</span>
+        <span className="artifact-yaml-key">{kv[2]}</span>
         <span>:</span>
         {renderValue(kv[3])}
       </>
@@ -281,16 +281,16 @@ function renderValue(valuePart: string): ReactNode {
     return (
       <>
         {strMatch[1]}
-        <span style={{ color: '#a5d6ff' }}>{strMatch[2]}</span>
+        <span className="artifact-yaml-string">{strMatch[2]}</span>
         {strMatch[3]}
-        {comment ? <span style={{ color: '#8b949e' }}>{comment}</span> : null}
+        {comment ? <span className="artifact-yaml-comment">{comment}</span> : null}
       </>
     )
   }
   return (
     <>
       {main}
-      {comment ? <span style={{ color: '#8b949e' }}>{comment}</span> : null}
+      {comment ? <span className="artifact-yaml-comment">{comment}</span> : null}
     </>
   )
 }

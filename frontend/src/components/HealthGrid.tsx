@@ -72,7 +72,7 @@ export function HealthGrid({ infra, onRefresh, refreshing = false }: HealthGridP
   if (!infra || !infra.components) {
     return (
       <Card size="small">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div className="health-grid-header-row">
           <Text strong>组件连通性</Text>
           {onRefresh && <RefreshButton onClick={onRefresh} refreshing={refreshing} />}
         </div>
@@ -87,7 +87,7 @@ export function HealthGrid({ infra, onRefresh, refreshing = false }: HealthGridP
 
   return (
     <Card size="small">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div className="health-grid-header-row">
         <Space>
           <Text strong>组件连通性</Text>
           {degraded.length > 0
@@ -119,12 +119,12 @@ export function HealthGrid({ infra, onRefresh, refreshing = false }: HealthGridP
           return (
             <Col key={key} xs={12} sm={8} md={6}>
               <Tooltip title={tip}>
-                <Card size="small" style={{ height: '100%' }}>
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                    <Badge status={SEVERITY_BADGE[display.severity] ?? 'default'} text={<Text strong style={{ fontSize: 13 }}>{label}</Text>} />
+                <Card size="small" className="health-grid-card-full">
+                  <Space direction="vertical" size={4} className="health-grid-space-full">
+                    <Badge status={SEVERITY_BADGE[display.severity] ?? 'default'} text={<Text strong className="health-grid-label-text">{label}</Text>} />
                     <Space size={4}>
                       <Tag color={SEVERITY_COLOR[display.severity] ?? 'default'}>{display.label}</Tag>
-                      {extra && <Text type="secondary" style={{ fontSize: 12 }}>{extra}</Text>}
+                      {extra && <Text type="secondary" className="health-grid-extra-text">{extra}</Text>}
                     </Space>
                   </Space>
                 </Card>

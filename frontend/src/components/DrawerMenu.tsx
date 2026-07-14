@@ -33,11 +33,7 @@ export function DrawerMenu({ currentPath }: DrawerMenuProps) {
       trigger={null}
       width={200}
       collapsedWidth={48}
-      style={{
-        background: 'var(--card-bg, #fff)',
-        borderRight: '1px solid var(--border-color, #e5e7eb)',
-        minHeight: '100vh',
-      }}
+      className="drawer-menu-sider"
     >
       <div style={{
         padding: collapsed ? '16px 8px' : '16px',
@@ -46,7 +42,7 @@ export function DrawerMenu({ currentPath }: DrawerMenuProps) {
         alignItems: 'center',
         borderBottom: '1px solid var(--border-color, #e5e7eb)',
       }}>
-        {!collapsed && <span style={{ fontWeight: 600, fontSize: 16 }}>Conclave</span>}
+        {!collapsed && <span className="drawer-menu-title">Conclave</span>}
         <Button
           type="text"
           size="small"
@@ -59,7 +55,7 @@ export function DrawerMenu({ currentPath }: DrawerMenuProps) {
         selectedKeys={[selectedKey]}
         items={menuItems}
         onClick={({ key }) => navigate(key)}
-        style={{ borderRight: 'none' }}
+        className="drawer-menu-nav"
       />
     </Sider>
   )

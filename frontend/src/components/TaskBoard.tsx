@@ -29,7 +29,7 @@ function RoleAvatar({ roleId, displayName, size = 32 }: { roleId: string; displa
   const bg = AVATAR_COLORS[colorIdx]
   const initial = (displayName || roleId).charAt(0).toUpperCase()
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
+    <svg width={size} height={size} viewBox="0 0 32 32" className="task-board-avatar">
       <circle cx="16" cy="16" r="15" fill={bg} opacity="0.12" />
       <circle cx="16" cy="16" r="15" fill="none" stroke={bg} strokeWidth="1.5" opacity="0.8" />
       <text x="16" y="21" textAnchor="middle" fontSize="14" fontWeight="600" fill={bg} fontFamily="system-ui, sans-serif">{initial}</text>
@@ -179,9 +179,9 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
     {
       title: '议题', dataIndex: 'topic', ellipsis: true, align: 'left',
       render: (topic: string, record: MeetingListItem) => (
-        <div style={{ display: 'inline-flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.45, verticalAlign: 'middle' }}>
-          <Text style={{ fontWeight: 500 }}>{topic || '(无议题)'}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{record.meeting_id.slice(-8)}</Text>
+        <div className="task-board-topic-cell">
+          <Text className="task-board-topic-title">{topic || '(无议题)'}</Text>
+          <Text type="secondary" className="task-board-text-sm">{record.meeting_id.slice(-8)}</Text>
         </div>
       ),
     },
@@ -200,7 +200,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
           ))}
           {tagEditId === record.meeting_id ? (
             <Input
-              size="small" autoFocus style={{ width: 80 }}
+              size="small" autoFocus className="task-board-tag-input"
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
               onKeyDown={(e) => {
@@ -239,11 +239,11 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
   ]
 
   return (
-    <div className="task-board" style={{ padding: 24 }}>
+    <div className="task-board task-board-pad">
       {/* 顶部标题栏 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className="task-board-toolbar">
         <Space>
-          <Title level={3} style={{ margin: 0 }}>会议看板</Title>
+          <Title level={3} className="task-board-page-title">会议看板</Title>
           <Text type="secondary">{total} 条记录</Text>
         </Space>
         <Space>
@@ -256,16 +256,16 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
 
       {/* 内联创建表单 */}
       {showCreate && (
-        <Card size="small" style={{ marginBottom: 16 }}>
+        <Card size="small" className="task-board-mb-16">
           <form onSubmit={handleCreate}>
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Space.Compact style={{ width: '100%' }}>
+            <Space direction="vertical" className="task-board-w-full" size={8}>
+              <Space.Compact className="task-board-w-full">
                 <Input
                   value={createTopic}
                   onChange={(e) => { setCreateTopic(e.target.value); setCreatedRoles([]) }}
                   placeholder="输入会议议题…"
                   disabled={createBusy}
-                  style={{ flex: 1 }}
+                  className="task-board-grow"
                 />
                 <Button onClick={handleGenerateRoles} disabled={rolesLoading || createTopic.trim().length < 3}>
                   {rolesLoading ? '生成中…' : createdRoles.length > 0 ? '重新生成角色' : '生成角色'}
@@ -273,7 +273,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
               </Space.Compact>
               <MeetingSearchSelect selectedIds={referenceIds} onChange={setReferenceIds} placeholder="引用历史会议…" compact />
               <Space wrap>
-                <Select value={createDeliverable} onChange={setCreateDeliverable} options={DELIVERABLE_OPTIONS} disabled={createBusy} style={{ width: 200 }} />
+                <Select value={createDeliverable} onChange={setCreateDeliverable} options={DELIVERABLE_OPTIONS} disabled={createBusy} className="task-board-deliverable-select" />
                 <input type="file" accept=".md,.markdown,text/markdown" onChange={(e) => setCreateFile(e.target.files?.[0] ?? null)} disabled={createBusy} />
                 {createFile && <Text type="secondary">{createFile.name}</Text>}
                 <Button type="primary" htmlType="submit" loading={createBusy} disabled={!createTopic.trim()}>
@@ -284,7 +284,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
           </form>
 
           {createdRoles.length > 0 && (
-            <div style={{ marginTop: 16 }}>
+            <div className="task-board-mt-16">
               <Divider>角色阵容 ({createdRoles.length})</Divider>
               <Row gutter={[8, 8]}>
                 {createdRoles.map(role => (
@@ -297,10 +297,10 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
                         <div>
                           <Text strong>{role.display_name}</Text>
                           <br />
-                          <Text type="secondary" style={{ fontSize: 12 }}>{role.perspective}</Text>
+                          <Text type="secondary" className="task-board-text-sm">{role.perspective}</Text>
                         </div>
                       </Space>
-                      <div style={{ marginTop: 8 }}>
+                      <div className="task-board-mt-8">
                         <Space wrap size={[4, 4]}>
                           {role.expertise_domains.map(d => <Tag key={d}>{d}</Tag>)}
                           <Tag color={role.risk_appetite === 'aggressive' ? 'red' : role.risk_appetite === 'conservative' ? 'blue' : 'default'}>
@@ -308,7 +308,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
                           </Tag>
                         </Space>
                       </div>
-                      {role.background_brief && <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>{role.background_brief}</Text>}
+                      {role.background_brief && <Text type="secondary" className="task-board-role-brief">{role.background_brief}</Text>}
                     </Card>
                   </Col>
                 ))}
@@ -316,18 +316,18 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
             </div>
           )}
 
-          {createError && <Alert message={createError} type="error" showIcon style={{ marginTop: 8 }} />}
+          {createError && <Alert message={createError} type="error" showIcon className="task-board-mt-8" />}
         </Card>
       )}
 
       {/* 工具栏 */}
-      <Space wrap style={{ marginBottom: 12 }}>
+      <Space wrap className="task-board-mb-12">
         <Input.Search
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           placeholder="搜索议题…"
           allowClear
-          style={{ width: 260 }}
+          className="task-board-search-input"
         />
         <Select
           mode="multiple"
@@ -335,7 +335,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
           value={selectedTags}
           onChange={(vals) => { setSelectedTags(vals); setPage(0) }}
           options={allTags.map(t => ({ value: t.tag, label: `${t.tag} (${t.count})` }))}
-          style={{ minWidth: 160 }}
+          className="task-board-tag-filter"
           suffixIcon={<TagsOutlined />}
           allowClear
         />
@@ -344,11 +344,11 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
       {/* 批量操作 */}
       {selectedIds.size > 0 && (
         <Alert
-          style={{ marginBottom: 12 }}
+          className="task-board-mb-12"
           message={`已选 ${selectedIds.size} 项`}
           action={
             <Space>
-              <Select size="small" value={batchMode} onChange={setBatchMode} style={{ width: 120 }}
+              <Select size="small" value={batchMode} onChange={setBatchMode} className="task-board-batch-mode-select"
                 options={[{ value: 'soft', label: '软删除' }, { value: 'hard', label: '永久删除' }]}
               />
               <Button size="small" danger onClick={() => setShowBatchConfirm(true)}>批量删除</Button>
@@ -393,7 +393,7 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
         <div>
           <Text>即将删除 <Text strong>{selectedIds.size}</Text> 个会议</Text>
           <br />
-          <Text type="secondary" style={{ marginTop: 8, display: 'block' }}>
+          <Text type="secondary" className="task-board-batch-hint">
             {batchMode === 'soft' ? '软删除：会议标记为已删除，数据保留，可从数据库恢复。' : '永久删除：会议及全部关联数据将被永久删除，不可恢复。'}
           </Text>
         </div>

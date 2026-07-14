@@ -109,12 +109,12 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
   )
 
   return (
-    <div className="meeting-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '8px 12px', display: 'flex', gap: 4, alignItems: 'center' }}>
+    <div className="meeting-sidebar">
+      <div className="meeting-sidebar-toolbar">
         <Button type="primary" icon={<PlusOutlined />} size="small" onClick={() => selectMeeting(null)}>
           新建会议
         </Button>
-        <div style={{ flex: 1 }} />
+        <div className="meeting-sidebar-spacer" />
         <Tooltip title="刷新">
           <Button type="text" size="small" icon={<ReloadOutlined spin={loading} />} onClick={refresh} />
         </Tooltip>
@@ -126,14 +126,14 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
       </div>
 
       {/* 历史会议标题 + 搜索 */}
-      <div style={{ padding: '0 12px' }}>
+      <div className="meeting-sidebar-search-section">
         <div
-          style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '6px 0' }}
+          className="meeting-sidebar-toggle-row"
           onClick={() => setListCollapsed(v => !v)}
         >
           <Button type="text" size="small" icon={listCollapsed ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />} />
-          <Text strong style={{ flex: 1, fontSize: 13 }}>历史会议 ({filteredMeetings.length})</Text>
-          {runningCount > 0 && <Badge count={runningCount} style={{ backgroundColor: '#52c41a' }} />}
+          <Text strong className="meeting-sidebar-history-title">历史会议 ({filteredMeetings.length})</Text>
+          {runningCount > 0 && <Badge count={runningCount} className="meeting-sidebar-running-badge" />}
         </div>
         {!listCollapsed && meetings.length > 3 && (
           <Input
@@ -143,13 +143,13 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
             allowClear
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ marginBottom: 6 }}
+            className="meeting-sidebar-search-input"
           />
         )}
       </div>
 
       {!listCollapsed && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 6px' }}>
+        <div className="meeting-sidebar-list-container">
           {filteredMeetings.length === 0 ? (
             <Empty description={searchQuery ? '无匹配会议' : '暂无会议'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
           ) : (
@@ -193,26 +193,26 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
                       title={
                         <Space size={4}>
                           {m.is_running && <Badge status="processing" />}
-                          <Text ellipsis style={{ maxWidth: 140, fontSize: 13 }}>{m.topic || '(无议题)'}</Text>
+                          <Text ellipsis className="meeting-sidebar-item-title">{m.topic || '(无议题)'}</Text>
                         </Space>
                       }
                       description={
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <Tag color={sl.cls === 'ok' ? 'green' : sl.cls === 'running' ? 'blue' : 'default'} style={{ margin: 0, fontSize: 11, lineHeight: '18px' }}>
+                        <div className="meeting-sidebar-item-desc">
+                          <Tag color={sl.cls === 'ok' ? 'green' : sl.cls === 'running' ? 'blue' : 'default'} className="meeting-sidebar-status-tag">
                             {sl.text}
                           </Tag>
-                          <Text type="secondary" style={{ fontSize: 11 }}>{relativeTime(m.created_at)}</Text>
+                          <Text type="secondary" className="meeting-sidebar-time-text">{relativeTime(m.created_at)}</Text>
                         </div>
                       }
                     />
                     {isPendingDelete && (
-                      <div onClick={(e) => e.stopPropagation()} style={{ padding: 8, background: 'var(--bg-secondary, #fafafa)', borderRadius: 4, marginTop: 8, width: '100%' }}>
-                        <Text strong style={{ fontSize: 12 }}>确认删除？</Text>
+                      <div onClick={(e) => e.stopPropagation()} className="meeting-sidebar-delete-confirm">
+                        <Text strong className="meeting-sidebar-delete-confirm-text">确认删除？</Text>
                         <Radio.Group
                           size="small"
                           value={currentDeleteMode}
                           onChange={(e) => setPendingDelete({ id: m.meeting_id, mode: e.target.value })}
-                          style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '8px 0' }}
+                          className="meeting-sidebar-radio-group"
                         >
                           <Radio value="soft">软删除（保留数据）</Radio>
                           <Radio value="hard">永久删除（不可恢复）</Radio>
@@ -239,8 +239,8 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
         </div>
       )}
 
-      <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color, #e5e7eb)', textAlign: 'center' }}>
-        <Text type="secondary" style={{ fontSize: 11 }}>
+      <div className="meeting-sidebar-footer">
+        <Text type="secondary" className="meeting-sidebar-time-text">
           运行中 {runningCount} / 上限 {concurrentLimit}
         </Text>
       </div>

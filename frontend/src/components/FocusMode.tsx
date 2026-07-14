@@ -25,7 +25,7 @@ export function FocusMode({
       centered
       destroyOnClose
     >
-      {hint && <div className="focus-mode-hint" style={{ marginBottom: 8, opacity: 0.6, fontSize: 12 }}>{hint}</div>}
+      {hint && <div className="focus-mode-hint focus-mode-hint-extra">{hint}</div>}
       <div className="focus-mode-body">{children}</div>
     </Modal>
   )

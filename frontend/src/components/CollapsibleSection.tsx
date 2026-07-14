@@ -44,7 +44,7 @@ export function CollapsibleSection({
         label: (
           <span>
             <span className="collapsible-title">{title}</span>
-            {headerExtra && <span className="collapsible-extra" style={{ marginLeft: 8 }}>{headerExtra}</span>}
+            {headerExtra && <span className="collapsible-extra collapsible-section-extra">{headerExtra}</span>}
           </span>
         ),
         children: <div className="collapsible-body-inner">{children}</div>,

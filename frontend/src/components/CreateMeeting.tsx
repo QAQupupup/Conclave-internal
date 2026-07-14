@@ -108,10 +108,10 @@ export function CreateMeeting() {
   }
 
   return (
-    <div className="create-page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh', padding: 24 }}>
-      <Card style={{ maxWidth: 560, width: '100%' }}>
-        <Title level={2} style={{ textAlign: 'center', marginBottom: 4 }}>Conclave</Title>
-        <Text type="secondary" style={{ display: 'block', textAlign: 'center', marginBottom: 24 }}>
+    <div className="create-page create-meeting-page">
+      <Card className="create-meeting-card">
+        <Title level={2} className="create-meeting-title">Conclave</Title>
+        <Text type="secondary" className="create-meeting-subtitle">
           会议型多智能体系统 · 迭代一
         </Text>
 
@@ -166,7 +166,7 @@ export function CreateMeeting() {
                   <Space>
                     <Text>模型与 API Key</Text>
                     {!modelExpanded && (
-                      <Text type="secondary" style={{ fontSize: 12 }}>
+                      <Text type="secondary" className="create-meeting-model-hint">
                         {isCustomModel ? modelSel.model : `默认：${defaultSel.model}`}
                         {modelSel.api_key && ' · 自定义Key'}
                       </Text>
@@ -181,7 +181,7 @@ export function CreateMeeting() {
                   />
                 ),
               }]}
-              style={{ marginBottom: 16 }}
+              className="create-meeting-collapse"
             />
           </Form>
 
@@ -197,7 +197,7 @@ export function CreateMeeting() {
               创建会议
             </Button>
           ) : (
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space direction="vertical" className="create-meeting-actions">
               <Alert
                 message={`会议已创建：${createdId}`}
                 description={info || undefined}
@@ -216,7 +216,7 @@ export function CreateMeeting() {
             </Space>
           )}
 
-          {error && <Alert message={error} type="error" showIcon style={{ marginTop: 12 }} />}
+          {error && <Alert message={error} type="error" showIcon className="create-meeting-error" />}
         </form>
       </Card>
     </div>
