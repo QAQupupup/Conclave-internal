@@ -1,6 +1,25 @@
 syntax = "proto3";
 package conclave;
 
+// ReAct 工具调用请求
+message ToolCallRequest {
+  string name = 1;
+  string arguments_json = 2;
+}
+
+// ReAct 工具调用响应
+message ToolCallResponse {
+  string name = 1;
+  string arguments_json = 2;
+}
+
+// ReAct 工具执行结果
+message ToolResultMessage {
+  string tool_name = 1;
+  string result_json = 2;
+  bool is_error = 3;
+}
+
 // Agent 思考请求
 message ThinkRequest {
   string request_id = 1;       // 追踪 ID
@@ -13,6 +32,11 @@ message ThinkRequest {
   double temperature = 8;     // 温度
   int32 seed = 9;             // 种子
   string trace_context_json = 10; // 追踪上下文 JSON
+  // ReAct 扩展字段（与 compute.py dataclass 同步）
+  string model = 11;                      // 模型覆盖
+  repeated ToolCallRequest available_tools = 12; // 可用工具列表
+  repeated ToolResultMessage tool_history = 13;  // 工具执行历史
+  int32 iteration = 14;                   // ReAct 迭代次数
 }
 
 // Agent 思考响应
@@ -23,6 +47,11 @@ message ThinkResponse {
   int32 latency_ms = 4;       // 耗时
   string validation_status = 5; // valid/invalid/fallback_stub
   string raw_response = 6;    // LLM 原始返回
+  // ReAct 扩展字段（与 compute.py dataclass 同步）
+  repeated ToolCallResponse tool_calls = 7; // LLM 请求的工具调用
+  bool need_continue = 8;                 // 是否需要继续 ReAct 循环
+  int32 input_tokens = 9;                 // 输入 token 数
+  int32 output_tokens = 10;               // 输出 token 数
 }
 
 // Agent 计算服务

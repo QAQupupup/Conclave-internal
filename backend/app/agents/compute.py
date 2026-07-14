@@ -563,6 +563,20 @@ def reset_compute() -> None:
     _compute = None
 
 
+async def execute_think(req: "ThinkRequest") -> "ThinkResponse":
+    """统一 Agent 执行入口：所有 LLM 调用应经此函数
+
+    职责：
+    1. 获取全局 compute 实例（Local 或 gRPC）
+    2. 委托执行 think()
+    3. 统一错误处理和日志
+
+    替代直接调用 compute.think()，为后续添加 trace、metrics 提供统一切入点。
+    """
+    compute = get_compute()
+    return await compute.think(req)
+
+
 async def shutdown_compute() -> None:
     """异步关闭计算实例并释放连接池（真实 LLM 脚本必须调用）
 
