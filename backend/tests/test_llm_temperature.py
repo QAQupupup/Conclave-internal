@@ -10,12 +10,13 @@ from app.agents.llm import STAGE_TEMPERATURES, RealLLM
 @pytest.mark.asyncio
 async def test_stage_temperature_map_values():
     """Temperatures must follow the hard constraints in project memory."""
-    assert STAGE_TEMPERATURES["clarify"] == 0.0
-    assert STAGE_TEMPERATURES["intra_team"] == 0.3
-    assert STAGE_TEMPERATURES["cross_team"] == 0.0
-    assert STAGE_TEMPERATURES["evidence_check"] == 0.0
-    assert STAGE_TEMPERATURES["arbitrate"] == 0.0
-    assert STAGE_TEMPERATURES["produce"] == 0.1
+    temps = STAGE_TEMPERATURES()
+    assert temps["clarify"] == 0.0
+    assert temps["intra_team"] == 0.3
+    assert temps["cross_team"] == 0.0
+    assert temps["evidence_check"] == 0.0
+    assert temps["arbitrate"] == 0.0
+    assert temps["produce"] == 0.1
 
 
 async def _capture_temperature_for_stage(stage: str, monkeypatch) -> float:

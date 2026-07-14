@@ -15,9 +15,37 @@ from app.logging_config import get_logger
 
 logger = get_logger("agents.llm")
 
-# 可配置 LLM 超时：produce 阶段默认 1200s，其他阶段默认 120s
-_CONCLAVE_LLM_TIMEOUT = float(os.getenv("CONCLAVE_LLM_TIMEOUT", "120.0"))
-_CONCLAVE_PRODUCE_TIMEOUT = float(os.getenv("CONCLAVE_PRODUCE_TIMEOUT", "1200.0"))
+
+def _get_stage_temperatures() -> dict[str, float]:
+    """从 settings.llm_stage_temperatures 解析阶段温度映射，解析失败回退到默认值"""
+    import json
+    try:
+        result = json.loads(settings.llm_stage_temperatures)
+        if isinstance(result, dict):
+            return {k: float(v) for k, v in result.items()}
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        logger.warning("解析 CONCLAVE_LLM_STAGE_TEMPERATURES 失败，使用默认值: %s", e)
+    # 默认值（与原 STAGE_TEMPERATURES 常量一致）
+    return {
+        "clarify": 0.0, "intra_team": 0.3, "cross_team": 0.0,
+        "evidence_check": 0.0, "arbitrate": 0.0, "produce": 0.1,
+        "produce_prd_openapi": 0.1, "produce_design_doc": 0.1,
+        "produce_comprehensive": 0.1, "produce_research_report": 0.1,
+        "produce_business_report": 0.1, "produce_code_analysis": 0.1,
+        "produce_tested_system": 0.1, "produce_deployable_service": 0.1,
+    }
+
+
+# 缓存解析结果
+_STAGE_TEMPERATURES_CACHE: dict[str, float] | None = None
+
+
+def STAGE_TEMPERATURES() -> dict[str, float]:
+    """获取阶段温度映射（带缓存）"""
+    global _STAGE_TEMPERATURES_CACHE
+    if _STAGE_TEMPERATURES_CACHE is None:
+        _STAGE_TEMPERATURES_CACHE = _get_stage_temperatures()
+    return _STAGE_TEMPERATURES_CACHE
 
 
 class LLMClient(Protocol):
@@ -382,27 +410,8 @@ class StubLLM:
         return m.group(1) if m else "c1"
 
 
-# 分阶段温度策略：需要确定性的阶段锁死，允许有限发散的阶段适度放开
-# 依据：关键阶段（clarify/evidence_check/arbitrate/produce）必须可复现，
-# 讨论阶段（intra_team）保留创意空间，但角色差异已提供足够多样性。
-# cross_team 找冲突要客观不能虚构矛盾，因此也锁死。
-STAGE_TEMPERATURES: dict[str, float] = {
-    "clarify": 0.0,        # 准确理解议题，不能发散
-    "intra_team": 0.3,     # 允许有限发散，角色差异已提供多样性
-    "cross_team": 0.0,     # 找冲突要客观，不能虚构
-    "evidence_check": 0.0,  # 证据对照必须客观
-    "arbitrate": 0.0,      # 裁决必须确定且可复现
-    "produce": 0.1,        # PRD 要稳定，允许微小表达差异
-    # produce 子类型继承 produce 的温度（produce_design_doc 等）
-    "produce_prd_openapi": 0.1,
-    "produce_design_doc": 0.1,
-    "produce_comprehensive": 0.1,
-    "produce_research_report": 0.1,
-    "produce_business_report": 0.1,
-    "produce_code_analysis": 0.1,
-    "produce_tested_system": 0.1,
-    "produce_deployable_service": 0.1,
-}
+# 分阶段温度策略已迁移到 config.py 的 settings.llm_stage_temperatures
+# 通过 STAGE_TEMPERATURES() 函数获取（带缓存和 JSON 解析容错）
 
 
 class CircuitBreaker:
@@ -411,7 +420,7 @@ class CircuitBreaker:
     状态机：closed → open（连续失败 >= threshold）→ half_open（冷却后）→ closed/half_open
     """
 
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 60.0):
+    def __init__(self, failure_threshold: int = settings.llm_circuit_failure_threshold, recovery_timeout: float = settings.llm_circuit_recovery_timeout):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self._failure_count = 0
@@ -481,13 +490,13 @@ class RealLLM:
     """
 
     # 最大重试次数（含首次）
-    MAX_ATTEMPTS = 3
+    MAX_ATTEMPTS = settings.llm_max_attempts
 
     def __init__(self) -> None:
         self.api_key = settings.llm_api_key
         self.base_url = settings.llm_base_url or "https://api.openai.com/v1"
         self.model = settings.llm_model
-        self._client = httpx.AsyncClient(timeout=120.0)
+        self._client = httpx.AsyncClient(timeout=settings.llm_default_timeout)
         # 接口是否支持 json_object 响应格式；遇到 400 时自动置 False 并回退
         # 注意：按 (base_url, model) 维度缓存，不同provider/model支持情况可能不同
         self._json_mode_supported: dict[str, bool] = {}
@@ -545,21 +554,21 @@ class RealLLM:
         schema_desc = self._schema_description(model_cls)
         # schema_hint 即阶段名，用于 trace 记录
         stage = schema_hint
-        temp = STAGE_TEMPERATURES.get(stage, 0.0)
+        temp = STAGE_TEMPERATURES().get(stage, 0.0)
         # 解析当前生效的模型配置（用于日志记录）
         _log_base, _log_key, _log_model = self._resolve_config()
 
         # [FALLBACK] 上下文窗口管理：超长 prompt 自动截断
         from app.llm_providers import trim_prompt_to_budget, estimate_tokens
         prompt_token_est = estimate_tokens(prompt)
-        if prompt_token_est > 32000:
+        if prompt_token_est > settings.llm_max_prompt_tokens:
             from app.observability.log_bus import log_bus
             log_bus.warning(
-                f"Prompt 超长 ({prompt_token_est} tokens), 自动截断到 32000",
+                f"Prompt 超长 ({prompt_token_est} tokens), 自动截断到 {settings.llm_max_prompt_tokens}",
                 logger="agents.llm",
                 extra={"stage": stage, "original_tokens": prompt_token_est},
             )
-            prompt = trim_prompt_to_budget(prompt, max_tokens=32000)
+            prompt = trim_prompt_to_budget(prompt, max_tokens=settings.llm_max_prompt_tokens)
 
         # [FALLBACK] Provider 回退链：连接失败时尝试下一个 provider
         from app.llm_providers import get_fallback_chain
@@ -684,8 +693,8 @@ class RealLLM:
         record_call(
             stage=stage,
             model=_fb_model,
-            temperature=STAGE_TEMPERATURES.get(stage, 0.0),
-            seed=42,
+            temperature=STAGE_TEMPERATURES().get(stage, 0.0),
+            seed=settings.llm_seed,
             prompt=prompt,
             raw_response="",
             parsed_result=None,
@@ -749,16 +758,17 @@ class RealLLM:
                 f"{schema_desc}"
             )
         # 关闭 Qwen3.5 思考模式，防止思考过程干扰 JSON 输出
-        system_content += "\n/no_think"
+        if settings.llm_no_think:
+            system_content += "\n/no_think"
         # 分阶段温度：按 stage 查表，默认 0（最严格）
-        temp = STAGE_TEMPERATURES.get(stage, 0.0)
+        temp = STAGE_TEMPERATURES().get(stage, 0.0)
         body: dict[str, Any] = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_prompt},
             ],
-            # 第1层：参数确定性 —— 分阶段温度, top_p=1.0, seed=42
+            # 第1层：参数确定性 —— 分阶段温度, top_p=1.0, seed=settings.llm_seed
             "temperature": temp,
             "top_p": 1.0,
             "seed": 42,
@@ -771,7 +781,7 @@ class RealLLM:
         # produce 阶段生成大量文本（OpenAPI），需要更长超时
         # DeepSeek-V3.2 生成 PRD+OpenAPI 可能需要 200-400s
         # produce_* 子类型同样需要长超时
-        stage_timeout = _CONCLAVE_PRODUCE_TIMEOUT if stage.startswith("produce") else _CONCLAVE_LLM_TIMEOUT
+        stage_timeout = settings.llm_produce_timeout if stage.startswith("produce") else settings.llm_default_timeout
         t0 = time.monotonic()
         try:
             resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
@@ -799,7 +809,7 @@ class RealLLM:
                         stage=stage,
                         model=model,
                         temperature=temp,
-                        seed=42,
+                        seed=settings.llm_seed,
                         prompt=user_prompt,
                         raw_response=f"HTTP {e2.response.status_code}: {e2.response.text[:500]}",
                         validation_status="invalid",
@@ -819,7 +829,7 @@ class RealLLM:
                     stage=stage,
                     model=model,
                     temperature=temp,
-                    seed=42,
+                    seed=settings.llm_seed,
                     prompt=user_prompt,
                     raw_response=f"HTTP {e.response.status_code}: {e.response.text[:500]}",
                     validation_status="invalid",
@@ -843,7 +853,7 @@ class RealLLM:
                 stage=stage,
                 model=model,
                 temperature=temp,
-                seed=42,
+                seed=settings.llm_seed,
                 prompt=user_prompt,
                 raw_response=str(e)[:500],
                 validation_status="invalid",
@@ -870,7 +880,7 @@ class RealLLM:
             stage=stage,
             model=model,
             temperature=temp,
-            seed=42,
+            seed=settings.llm_seed,
             prompt=user_prompt,
             raw_response=content,
             parsed_result=None,  # 解析后由 complete() 更新
