@@ -2,9 +2,11 @@
 # Phase 3：把原来散落在 nodes/*.py 中的状态更新逻辑集中到此处。
 # Runner 不再依赖具体节点文件，只通过 MeetingManager -> Planner -> Scheduler -> Reducer -> StageRunner 驱动。
 #
-# [迁移中间态] 部分辅助函数仍从 nodes/*.py 导入（borrow/evidence_check/produce），
-# 这些导入使用函数级延迟导入避免循环依赖。后续迭代将提取到独立的
-# orchestrator/ 辅助模块中，彻底消除对 nodes/ 的反向依赖。
+# 辅助函数已全部提取到 orchestrator/ 层独立模块：
+#   - borrow_helpers.py: _let_borrowed_agents_speak, _moderator_assess_borrow
+#   - evidence_helpers.py: _prefetch_evidence, _collect_evidence
+#   - produce_helpers.py: _scan_artifacts, _emit_progress
+# nodes/ 层保留 re-export 以向后兼容。
 from __future__ import annotations
 
 from typing import Any
@@ -104,8 +106,8 @@ async def run_arbitrate(state: MeetingState, result: dict[str, Any], confidence:
 
 async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence: str = "high") -> MeetingState:
     """CrossTeam 阶段：把 LLM 返回结果写回 MeetingState"""
-    from app.orchestrator.nodes.borrow import _let_borrowed_agents_speak, _moderator_assess_borrow
-    from app.orchestrator.nodes.evidence_check import _prefetch_evidence
+    from app.orchestrator.borrow_helpers import _let_borrowed_agents_speak, _moderator_assess_borrow
+    from app.orchestrator.evidence_helpers import _prefetch_evidence
 
     conflicts = result.get("conflicts", [])
     for c in conflicts:
@@ -193,7 +195,7 @@ async def run_intra_team(
     role_results 每项结构：
         {"role": str, "stance": str, "claims": list[dict], "confidence": str, "react": bool}
     """
-    from app.orchestrator.nodes.borrow import _let_borrowed_agents_speak, _moderator_assess_borrow
+    from app.orchestrator.borrow_helpers import _let_borrowed_agents_speak, _moderator_assess_borrow
     import uuid
 
     if not state.team_config:
@@ -262,7 +264,7 @@ async def run_evidence_check(
             "confidence": str,
         }
     """
-    from app.orchestrator.nodes.borrow import _let_borrowed_agents_speak
+    from app.orchestrator.borrow_helpers import _let_borrowed_agents_speak
 
     worst_conf = "high"
     evidence_set: list[dict[str, Any]] = []
