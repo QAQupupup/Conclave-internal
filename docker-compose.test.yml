@@ -14,7 +14,7 @@ services:
   # PostgreSQL 16 + pgvector（测试数据库）
   # ============================================================
   postgres-test:
-    image: dockerproxy.net/pgvector/pgvector:pg16
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/pgvector/pgvector:pg16
     container_name: conclave-test-postgres
     ports:
       - "5434:5432"
@@ -35,7 +35,7 @@ services:
   # Redis（测试缓存 / 限流）
   # ============================================================
   redis-test:
-    image: dockerproxy.net/library/redis:7-alpine
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:7-alpine
     container_name: conclave-test-redis
     ports:
       - "6381:6379"

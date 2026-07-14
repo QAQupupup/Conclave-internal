@@ -8,7 +8,7 @@
 # 运行时：entrypoint.sh 以 root 启动 → 配置 Docker socket 权限 → 预拉取沙箱镜像 → 降权到 uid 1000 运行 uvicorn
 
 # ---------- 阶段 1: system-deps（系统依赖，最底层，永久缓存） ----------
-FROM dockerproxy.net/library/python:3.12-slim AS system-deps
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim AS system-deps
 
 # pip 镜像源（国内加速）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -116,7 +116,7 @@ VOLUME ["/workspace", "/app/data"]
 # 环境变量默认值
 ENV CONCLAVE_WORKSPACE_DIR=/workspace \
     CONCLAVE_DB_PATH=/app/data/conclave.db \
-    CONCLAVE_SANDBOX_IMAGE=dockerproxy.net/library/python:3.12-slim \
+    CONCLAVE_SANDBOX_IMAGE=python:3.12-slim \
     CONCLAVE_SANDBOX_IMAGE_DATASCIENCE=conclave-python-datascience:latest \
     CONCLAVE_SANDBOX_MODE=auto \
     DATASCIENCE_DOCKERFILE=/app/docker/sandbox-datascience/Dockerfile \

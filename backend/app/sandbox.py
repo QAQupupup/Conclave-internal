@@ -65,7 +65,7 @@ L2_DNS_SERVER = os.environ.get("CONCLAVE_L2_DNS", "10.20.0.10")
 # 沙箱镜像（国内镜像站优先）
 SANDBOX_IMAGE = os.environ.get(
     "CONCLAVE_SANDBOX_IMAGE",
-    "dockerproxy.net/library/python:3.12-slim",
+    "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim",
 )
 
 # 数据科学镜像：预装 pandas/numpy/matplotlib/sklearn/seaborn/scipy
@@ -77,7 +77,7 @@ SANDBOX_IMAGE_DATASCIENCE = os.environ.get(
 
 # 备用镜像列表（主镜像拉取失败时依次尝试）
 FALLBACK_IMAGES = [
-    "dockerproxy.net/library/python:3.12-slim",
+    "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim",
 ]
 
 # 资源限制
@@ -866,19 +866,19 @@ async def deploy_service(
             df_text = dockerfile_path.read_text(encoding="utf-8")
             normalized = re.sub(
                 r"^FROM\s+python:",
-                "FROM dockerproxy.net/library/python:",
+                "FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:",
                 df_text,
                 flags=re.MULTILINE,
             )
             normalized = re.sub(
                 r"^FROM\s+node:",
-                "FROM dockerproxy.net/library/node:",
+                "FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:",
                 normalized,
                 flags=re.MULTILINE,
             )
             normalized = re.sub(
                 r"^FROM\s+nginx:",
-                "FROM dockerproxy.net/library/nginx:",
+                "FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/nginx:",
                 normalized,
                 flags=re.MULTILINE,
             )

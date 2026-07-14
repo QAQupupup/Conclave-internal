@@ -6,7 +6,7 @@ set -u  # 未定义变量时报错
 APP_UID=1000
 APP_GID=1000
 APP_USER=app
-SANDBOX_IMAGE="${CONCLAVE_SANDBOX_IMAGE:-dockerproxy.net/library/python:3.12-slim}"
+SANDBOX_IMAGE="${CONCLAVE_SANDBOX_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim}"
 DATASCIENCE_IMAGE="${CONCLAVE_SANDBOX_IMAGE_DATASCIENCE:-conclave-python-datascience:latest}"
 DATASCIENCE_DOCKERFILE="${DATASCIENCE_DOCKERFILE:-/app/docker/sandbox-datascience/Dockerfile}"
 
@@ -86,8 +86,8 @@ if [ "$DOCKER_READY" = "1" ]; then
         if su -s /bin/bash "$APP_USER" -c "docker pull '$SANDBOX_IMAGE'" 2>&1; then
             echo "[entrypoint] Sandbox image pulled successfully"
         else
-        echo "[entrypoint] Primary pull failed, trying fallback dockerproxy.net/library/python:3.12-slim..."
-        su -s /bin/bash "$APP_USER" -c "docker pull dockerproxy.net/library/python:3.12-slim" 2>&1 || echo "[entrypoint] WARNING: fallback pull also failed"
+        echo "[entrypoint] Primary pull failed, trying fallback swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim..."
+        su -s /bin/bash "$APP_USER" -c "docker pull swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim" 2>&1 || echo "[entrypoint] WARNING: fallback pull also failed"
     fi
     fi
 

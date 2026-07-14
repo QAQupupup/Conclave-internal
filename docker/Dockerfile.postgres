@@ -1,6 +1,6 @@
 ﻿# 自定义 PostgreSQL 16 + pgvector 镜像
 # 基于 daocloud 镜像源，apt 使用清华镜像，pgvector 源码通过 ghproxy 国内代理下载
-FROM dockerproxy.net/library/postgres:16
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/postgres:16
 
 # apt 镜像源（清华，兼容 Debian Bookworm DEB822 格式）
 RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \

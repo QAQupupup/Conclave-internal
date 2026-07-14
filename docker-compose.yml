@@ -25,7 +25,7 @@ services:
   # Docker Socket Proxy — 限制 Docker API 暴露面
   # ============================================================
   docker-socket-proxy:
-    image: dockerproxy.net/tecnativa/docker-socket-proxy:0.3
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/tecnativa/docker-socket-proxy:v0.4.2
     container_name: conclave-dev-socket-proxy
     restart: unless-stopped
     volumes:
@@ -66,7 +66,7 @@ services:
   # DNS 代理 — L2 网络隔离的域名白名单解析
   # ============================================================
   sandbox-dns:
-    image: dockerproxy.net/jpillora/dnsmasq:latest
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/jpillora/dnsmasq:latest
     container_name: conclave-dev-sandbox-dns
     restart: unless-stopped
     command: --no-resolv --log-facility=- \
@@ -74,7 +74,7 @@ services:
       --address=/files.pythonhosted.org/151.101.0.223 \
       --address=/pypi.python.org/151.101.0.223 \
       --address=/mirrors.tuna.tsinghua.edu.cn/101.6.15.130 \
-      --address=/dockerproxy.net/0.0.0.0 \
+      --address=/0.0.0.0 \
       --server=8.8.8.8
     networks:
       conclave-sandbox-l2:
@@ -222,7 +222,7 @@ services:
   # PostgreSQL 16 + pgvector
   # ============================================================
   postgres:
-    image: dockerproxy.net/pgvector/pgvector:pg16
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/pgvector/pgvector:pg16
     container_name: conclave-dev-postgres
     restart: unless-stopped
     ports:
@@ -244,7 +244,7 @@ services:
   # Redis（会话缓存 / 限流 / 任务队列）
   # ============================================================
   redis:
-    image: dockerproxy.net/library/redis:7-alpine
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:7-alpine
     container_name: conclave-dev-redis
     restart: unless-stopped
     ports:

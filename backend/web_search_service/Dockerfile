@@ -21,7 +21,7 @@
 #     conclave-web-search
 
 # ---------- 阶段 1: system-deps（系统依赖，最底层，永久缓存） ----------
-FROM dockerproxy.net/library/python:3.12-slim AS system-deps
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim AS system-deps
 
 # pip 镜像源（国内加速）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple

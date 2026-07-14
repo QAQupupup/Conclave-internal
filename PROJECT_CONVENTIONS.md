@@ -63,7 +63,7 @@
 ### 2.2 基础镜像选择
 
 - 优先使用 `-slim` 变体（减小体积）
-- 所有镜像必须通过国内镜像源拉取（`dockerproxy.net`）
+- 所有镜像必须通过国内镜像源拉取（`swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io`）
 - 禁止使用 `latest` 标签，必须指定具体版本号
 
 ---
@@ -78,7 +78,7 @@
 
 | 层级 | 镜像源 | 配置方式 |
 |------|--------|---------|
-| Docker 基础镜像 | `dockerproxy.net` | FROM 指令 |
+| Docker 基础镜像 | `swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io` | FROM 指令 |
 | Python pip | `https://pypi.tuna.tsinghua.edu.cn/simple` | `pip config set global.index-url` |
 | Debian/Ubuntu apt | `https://mirrors.tuna.tsinghua.edu.cn` | DEB822 格式 sources.list |
 | Alpine apk | `https://mirrors.aliyun.com` | `sed -i` 替换 |
@@ -109,7 +109,7 @@ pnpm config set registry https://registry.npmmirror.com
 **Docker 守护进程**（`/etc/docker/daemon.json`）：
 ```json
 {
-  "registry-mirrors": ["https://dockerproxy.net"]
+  "registry-mirrors": ["https://swr.cn-north-4.myhuaweicloud.com"]
 }
 ```
 

@@ -159,7 +159,7 @@ services:
   # PostgreSQL 16 + pgvector
   # ============================================================
   postgres:
-    image: dockerproxy.net/pgvector/pgvector:pg16
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/pgvector/pgvector:pg16
     container_name: conclave-oss-postgres
     restart: unless-stopped
     ports:
@@ -181,7 +181,7 @@ services:
   # Redis（会话缓存 / 限流 / 任务队列）
   # ============================================================
   redis:
-    image: dockerproxy.net/library/redis:7-alpine
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:7-alpine
     container_name: conclave-oss-redis
     restart: unless-stopped
     ports:
