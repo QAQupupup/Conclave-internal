@@ -1,7 +1,7 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
 import { useState, lazy, Suspense, useCallback, useEffect } from 'react'
-import { ConfigProvider, Tabs, Button, Tooltip, Typography, Drawer, Divider, Breadcrumb, Dropdown } from 'antd'
+import { ConfigProvider, Tabs, Button, Tooltip, Typography, Drawer, Divider, Breadcrumb } from 'antd'
 import {
   TeamOutlined,
   CodeOutlined,
@@ -13,10 +13,6 @@ import {
   DownOutlined,
   MenuFoldOutlined,
   HomeOutlined,
-  MenuOutlined,
-  AppstoreOutlined,
-  BarChartOutlined,
-  CloudServerOutlined,
 } from '@ant-design/icons'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { AuthProvider, useAuth } from './store/AuthContext.tsx'
@@ -62,8 +58,10 @@ type ViewTab = 'meeting' | 'workspace'
 /** 会议主视图：聊天流全宽 + 顶部工具栏按钮 + 右侧 Drawer 面板 */
 function MeetingView({
   onOpenInWorkspace,
+  headerExtra,
 }: {
   onOpenInWorkspace?: (filePath: string) => void
+  headerExtra?: React.ReactNode
 }) {
   const { meetingId, store, rejectBorrow, selectMeeting } = useMeeting()
   const meeting = store.meeting
@@ -143,11 +141,35 @@ function MeetingView({
     return null
   }
 
+  const topic = meeting?.topic
+    ? (meeting.topic.length > 20 ? meeting.topic.slice(0, 20) + '…' : meeting.topic)
+    : meetingId
+
   return (
     <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}`}>
       <div className="meeting-top-bar">
-        <StageIndicator />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {/* 左侧：面包屑 + StageIndicator */}
+        <div className="meeting-top-bar-left" style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+          <Breadcrumb
+            separator="/"
+            className="app-meeting-breadcrumb"
+            items={[
+              {
+                title: <HomeOutlined onClick={() => navigate('/')} style={{ cursor: 'pointer' }} title="返回首页" />,
+              },
+              {
+                title: <a onClick={() => { selectMeeting(null); navigate('/board') }}>会议看板</a>,
+              },
+              {
+                title: <span title={meeting?.topic}>{topic}</span>,
+              },
+            ]}
+          />
+          <div className="breadcrumb-stage-separator" style={{ width: 1, height: 16, background: 'var(--border-color, #e5e7eb)', flexShrink: 0 }} />
+          <StageIndicator />
+        </div>
+        {/* 右侧：FloatingBadges + MeetingControls + 全局按钮 */}
+        <div className="meeting-top-bar-right" style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
           <FloatingBadges
             panels={panels}
             onToggle={togglePanel}
@@ -159,6 +181,12 @@ function MeetingView({
             onOpenReport={() => togglePanel('report')}
             onBackToBoard={() => { selectMeeting(null); navigate('/board') }}
           />
+          {headerExtra && (
+            <>
+              <div className="button-separator" style={{ width: 1, height: 20, background: 'var(--border-color, #e5e7eb)', margin: '0 4px' }} />
+              {headerExtra}
+            </>
+          )}
         </div>
       </div>
 
@@ -278,25 +306,6 @@ function AppShell() {
     navigate('/')
   }, [logout])
 
-  // 全局导航菜单项（会议视图中使用）
-  const globalNavItems = [
-    {
-      key: '/board',
-      icon: <AppstoreOutlined />,
-      label: '会议看板',
-    },
-    {
-      key: '/dashboard',
-      icon: <BarChartOutlined />,
-      label: '运维面板',
-    },
-    {
-      key: '/models',
-      icon: <CloudServerOutlined />,
-      label: '模型管理',
-    },
-  ]
-
   // 认证加载中：显示空白（避免闪烁）
   if (authLoading) {
     return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
@@ -386,25 +395,37 @@ function AppShell() {
     ? (store.meeting.topic.length > 30 ? store.meeting.topic.slice(0, 30) + '…' : store.meeting.topic)
     : meetingId
 
-  // 会议级面包屑
-  const meetingBreadcrumbItems = [
-    {
-      title: <HomeOutlined onClick={() => navigate('/')} style={{ cursor: 'pointer' }} title="返回首页" />,
-    },
-    {
-      title: <a onClick={() => { selectMeeting(null); navigate('/board') }}>会议看板</a>,
-    },
-    {
-      title: <span title={store.meeting?.topic}>{topic}</span>,
-    },
-  ]
+  // 会议视图的全局工具栏按钮（值守 + 主题/设置 + UserMenu）
+  const meetingGlobalButtons = (
+    <>
+      <GuardButton />
+      <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
+        <Button type="text" size="small"
+          icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
+          onClick={toggleMode} />
+      </Tooltip>
+      <Tooltip title="主题设置">
+        <Button type="text" size="small" icon={<SkinOutlined />}
+          onClick={() => setThemeOpen(true)} />
+      </Tooltip>
+      <Tooltip title="设置">
+        <Button type="text" size="small" icon={<SettingOutlined />}
+          onClick={() => setSettingsOpen(true)} />
+      </Tooltip>
+      <UserMenu
+        onOpenSettings={() => setSettingsOpen(true)}
+        onNavigateBoard={() => { selectMeeting(null); navigate('/board') }}
+        onLogout={handleLogout}
+      />
+    </>
+  )
 
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
         {!sidebarCollapsed ? (
           <div className="sidebar-expanded-pane app-sidebar-pane-relative">
-            <MeetingSidebar onCollapseSidebar={() => setSidebarCollapsed(true)} />
+            <MeetingSidebar onCollapse={() => setSidebarCollapsed(true)} />
           </div>
         ) : (
           <div className="sidebar-collapsed-pane">
@@ -413,51 +434,6 @@ function AppShell() {
         )}
       </aside>
       <div className="app-main">
-        {/* 会议级统一导航栏：面包屑 + 全局导航 + 值守 + 主题/设置 */}
-        <div className="app-meeting-navbar">
-          <div className="breadcrumb-area" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Dropdown
-              menu={{
-                items: globalNavItems,
-                onClick: ({ key }) => {
-                  if (key === '/board') {
-                    selectMeeting(null)
-                  }
-                  navigate(key)
-                },
-              }}
-              placement="bottomLeft"
-              trigger={['click']}
-            >
-              <Tooltip title="全局导航">
-                <Button type="text" size="small" icon={<MenuOutlined />} />
-              </Tooltip>
-            </Dropdown>
-            <Breadcrumb items={meetingBreadcrumbItems} separator="/" />
-          </div>
-          <div className="app-meeting-actions" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <GuardButton />
-            <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
-            <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
-              <Button type="text" size="small"
-                icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
-                onClick={toggleMode} />
-            </Tooltip>
-            <Tooltip title="主题设置">
-              <Button type="text" size="small" icon={<SkinOutlined />}
-                onClick={() => setThemeOpen(true)} />
-            </Tooltip>
-            <Tooltip title="设置">
-              <Button type="text" size="small" icon={<SettingOutlined />}
-                onClick={() => setSettingsOpen(true)} />
-            </Tooltip>
-            <UserMenu
-              onOpenSettings={() => setSettingsOpen(true)}
-              onNavigateBoard={() => { selectMeeting(null); navigate('/board') }}
-              onLogout={handleLogout}
-            />
-          </div>
-        </div>
         <Tabs
           activeKey={tab}
           onChange={(key) => setTab(key as ViewTab)}
@@ -469,9 +445,34 @@ function AppShell() {
         />
         <div className="flex-col-overflow">
           {tab === 'meeting' ? (
-            <MeetingView onOpenInWorkspace={handleOpenInWorkspace} />
+            <MeetingView
+              onOpenInWorkspace={handleOpenInWorkspace}
+              headerExtra={meetingGlobalButtons}
+            />
           ) : (
-            <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
+            <div className="workspace-view-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div className="workspace-top-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid var(--border-color, #e5e7eb)', flexShrink: 0 }}>
+                <Breadcrumb
+                  separator="/"
+                  items={[
+                    { title: <HomeOutlined onClick={() => navigate('/')} style={{ cursor: 'pointer' }} title="返回首页" /> },
+                    { title: <a onClick={() => { selectMeeting(null); navigate('/board') }}>会议看板</a> },
+                    { title: <span title={store.meeting?.topic}>{topic}</span> },
+                    { title: '工作区' },
+                  ]}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Button size="small" onClick={() => { selectMeeting(null); navigate('/board') }}>
+                    返回看板
+                  </Button>
+                  <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
+                  {meetingGlobalButtons}
+                </div>
+              </div>
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <WorkspaceView meetingId={meetingId ?? undefined} initialFile={workspaceInitialFile} />
+              </div>
+            </div>
           )}
         </div>
       </div>

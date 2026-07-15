@@ -1,15 +1,19 @@
-// 会议控制按钮：暂停 / 恢复 / 终止（带 Popconfirm 确认）
-// 按当前会议 status 决定显示哪些按钮；会议结束后显示返回引导
+// 会议控制按钮：暂停 / 恢复 / 终止 / 删除 / 返回看板
+// 按当前会议 status 决定显示哪些按钮
 import { useState } from 'react'
-import { Button, Space, Popconfirm } from 'antd'
+import { Button, Space, Popconfirm, Radio, message } from 'antd'
 import {
   PauseCircleOutlined,
   PlayCircleOutlined,
   StopOutlined,
   RollbackOutlined,
   FileDoneOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
+import { deleteMeeting } from '../lib/api.ts'
+import { clearLogs } from '../hooks/useMeetingLogs.ts'
+import { navigate } from '../lib/router.ts'
 import type { ControlRequest } from '../types/events.ts'
 
 interface MeetingControlsProps {
@@ -20,6 +24,7 @@ interface MeetingControlsProps {
 export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControlsProps) {
   const { store, meetingId, controlMeeting, selectMeeting } = useMeeting()
   const [loading, setLoading] = useState<string | null>(null)
+  const [deleteMode, setDeleteMode] = useState<'soft' | 'hard'>('soft')
 
   const status = store.meeting?.status
 
@@ -40,8 +45,42 @@ export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControls
       onBackToBoard()
     } else {
       selectMeeting(null)
+      navigate('/board')
     }
   }
+
+  const handleDelete = async () => {
+    if (!meetingId) return
+    setLoading('delete')
+    try {
+      await deleteMeeting(meetingId, deleteMode)
+      clearLogs(meetingId)
+      message.success(deleteMode === 'hard' ? '会议已永久删除' : '会议已删除')
+      selectMeeting(null)
+      navigate('/board')
+    } catch (err) {
+      console.error('删除会议失败:', err)
+      message.error('删除会议失败: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const deletePopconfirmTitle = (
+    <div style={{ width: 220 }}>
+      <div style={{ marginBottom: 8 }}>
+        <strong>确认删除此会议？</strong>
+      </div>
+      <Radio.Group
+        size="small"
+        value={deleteMode}
+        onChange={(e) => setDeleteMode(e.target.value)}
+      >
+        <Radio value="soft">软删除（保留数据）</Radio>
+        <Radio value="hard">永久删除</Radio>
+      </Radio.Group>
+    </div>
+  )
 
   // 会议结束/失败/终止状态：显示结束状态提示和操作按钮
   if (status === 'done' || status === 'aborted' || status === 'failed') {
@@ -61,6 +100,24 @@ export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControls
               查看报告
             </Button>
           )}
+          <Popconfirm
+            title={deletePopconfirmTitle}
+            onConfirm={handleDelete}
+            okText="确认删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true, size: 'small', loading: loading === 'delete' }}
+            cancelButtonProps={{ size: 'small' }}
+            placement="bottomRight"
+          >
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={loading === 'delete'}
+            >
+              删除会议
+            </Button>
+          </Popconfirm>
           <Button
             type="primary"
             size="small"
@@ -76,6 +133,7 @@ export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControls
 
   const busy = loading !== null
 
+  // 运行中/暂停/待启动状态
   return (
     <div className="meeting-controls">
       <Space size="small">
@@ -124,7 +182,28 @@ export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControls
             </Button>
           </Popconfirm>
         )}
-        {/* 运行中/暂停状态也提供返回看板入口 */}
+        {/* 删除会议（任意状态下都可用） */}
+        <Popconfirm
+          title={deletePopconfirmTitle}
+          onConfirm={handleDelete}
+          okText="确认删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true, size: 'small', loading: loading === 'delete' }}
+          cancelButtonProps={{ size: 'small' }}
+          placement="bottomRight"
+          description={status === 'running' ? '会议正在运行，删除将强制终止会议并删除相关数据。' : undefined}
+        >
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            loading={loading === 'delete'}
+            disabled={busy && loading !== 'delete'}
+          >
+            删除
+          </Button>
+        </Popconfirm>
+        {/* 返回看板（会议继续在后台运行） */}
         <Button
           size="small"
           icon={<RollbackOutlined />}

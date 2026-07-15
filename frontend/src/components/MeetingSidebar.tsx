@@ -1,20 +1,17 @@
-// 会议列表侧边栏：展示所有历史会议，支持切换 / 新建 / 删除 / 折叠
-// 使用 AntD List + Button + Popconfirm + Badge + Tag + Typography + Tooltip + Input
-// 删除按钮 hover 时才显示，避免图标杂乱
-import { useState, useEffect, useCallback } from 'react'
-import { Button, List, Badge, Tag, Typography, Tooltip, Input, Popconfirm, Radio, Empty } from 'antd'
+// 会议侧边栏：轻量级会议切换器
+// 设计原则：侧栏只负责会议快速切换，新建/删除等管理操作在看板页或会议控制栏完成
+// 避免在会议视图内嵌套"迷你看板"造成双层结构
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { List, Input, Empty, Tooltip, Tag, Popconfirm, Radio, message } from 'antd'
 import {
-  PlusOutlined, ReloadOutlined, DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  SearchOutlined, ThunderboltOutlined, ScheduleOutlined, CheckCircleOutlined,
+  SearchOutlined,
+  MenuUnfoldOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons'
 import { listMeetings, deleteMeeting } from '../lib/api.ts'
 import { useMeeting } from '../store/MeetingContext.tsx'
-import { usePersistentState } from '../hooks/usePersistentState.ts'
-import { STAGE_LABELS, getMeetingStatusInfo } from '../constants.ts'
 import { clearLogs } from '../hooks/useMeetingLogs.ts'
-import { navigateWithQuery } from '../lib/router.ts'
-
-const { Text } = Typography
+import { navigate } from '../lib/router.ts'
 
 interface MeetingListItem {
   meeting_id: string
@@ -22,286 +19,228 @@ interface MeetingListItem {
   stage: string
   status: string
   created_at?: string
+  updated_at?: string
   is_running?: boolean
   flow_plan?: string
 }
 
 interface MeetingSidebarProps {
-  /** 收起整个侧边栏的回调 */
-  onCollapseSidebar?: () => void
+  onCollapse?: () => void
 }
 
-export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
+function getTimeAgo(dateStr?: string): string {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  if (diffMins < 1) return '刚刚'
+  if (diffMins < 60) return `${diffMins}分钟前`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}小时前`
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 30) return `${diffDays}天前`
+  return date.toLocaleDateString()
+}
+
+export function MeetingSidebar({ onCollapse }: MeetingSidebarProps) {
   const { meetingId, selectMeeting } = useMeeting()
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
-  const [concurrentLimit, setConcurrentLimit] = useState(0)
-  const [runningCount, setRunningCount] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [listCollapsed, setListCollapsed] = usePersistentState<boolean>(
-    'conclave-meeting-list-collapsed',
-    false,
-  )
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [search, setSearch] = useState('')
   const [deleteMode, setDeleteMode] = useState<'soft' | 'hard'>('soft')
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
-  // 相对时间显示
-  const relativeTime = (dateStr?: string) => {
-    if (!dateStr) return ''
-    const d = new Date(dateStr)
-    const now = new Date()
-    const diffMs = now.getTime() - d.getTime()
-    const diffMin = Math.floor(diffMs / 60000)
-    if (diffMin < 1) return '刚刚'
-    if (diffMin < 60) return `${diffMin}分钟前`
-    const diffHour = Math.floor(diffMin / 60)
-    if (diffHour < 24) return `${diffHour}小时前`
-    const diffDay = Math.floor(diffHour / 24)
-    if (diffDay < 7) return `${diffDay}天前`
-    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-  }
-
-  // 搜索过滤后的会议列表
-  const filteredMeetings = searchQuery.trim()
-    ? meetings.filter(m => m.topic.toLowerCase().includes(searchQuery.toLowerCase()) || m.meeting_id.includes(searchQuery))
-    : meetings
-
-  const refresh = useCallback(async () => {
+  const fetchMeetings = useCallback(async () => {
     setLoading(true)
     try {
       const data = await listMeetings()
-      const running = data.meetings.filter((m: MeetingListItem) => m.is_running)
-      const others = data.meetings.filter((m: MeetingListItem) => !m.is_running)
-      setMeetings([...running, ...others])
-      setConcurrentLimit(data.concurrent_limit)
-      setRunningCount(data.running_count)
+      setMeetings(data.meetings || [])
     } catch (err) {
-      console.error('刷新会议列表失败:', err)
+      console.error('加载会议列表失败:', err)
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    refresh()
-    const timer = setInterval(refresh, 5000)
-    return () => clearInterval(timer)
-  }, [refresh])
+    fetchMeetings()
+    const interval = setInterval(fetchMeetings, 15000)
+    return () => clearInterval(interval)
+  }, [fetchMeetings])
 
-  const statusLabel = (status: string, stage: string) => {
-    const stageLabel = STAGE_LABELS[stage as keyof typeof STAGE_LABELS] ?? stage
-    return getMeetingStatusInfo(status, stageLabel)
+  // 排序：运行中置顶，其他按更新时间倒序
+  const sortedMeetings = useMemo(() => {
+    const running = meetings.filter((m) => m.is_running)
+    const others = meetings.filter((m) => !m.is_running)
+    return [...running, ...others]
+  }, [meetings])
+
+  const filteredMeetings = useMemo(() => {
+    if (!search.trim()) return sortedMeetings
+    const q = search.toLowerCase()
+    return sortedMeetings.filter(
+      (m) =>
+        m.topic.toLowerCase().includes(q) || m.meeting_id.toLowerCase().includes(q),
+    )
+  }, [sortedMeetings, search])
+
+  const handleSelect = (id: string) => {
+    selectMeeting(id)
+    navigate(`/meeting/${id}`)
   }
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      setDeletingId(id)
-      try {
-        await deleteMeeting(id, deleteMode)
-        clearLogs(id)
-        if (id === meetingId) {
-          selectMeeting(null)
-        }
-        await refresh()
-      } catch (err) {
-        console.error('删除会议失败:', err)
-      } finally {
-        setDeletingId(null)
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await deleteMeeting(id, deleteMode)
+      clearLogs(id)
+      message.success(deleteMode === 'hard' ? '会议已永久删除' : '会议已删除')
+      if (id === meetingId) {
+        selectMeeting(null)
+        navigate('/board')
+      } else {
+        fetchMeetings()
       }
-    },
-    [meetingId, selectMeeting, refresh, deleteMode],
-  )
-
-  // 当前正在操作删除的会议ID（用于控制Popconfirm显示时重置模式）
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-
-  // 打开删除确认时重置为软删除（防止模式粘滞导致误删）
-  const handleDeletePopconfirmOpenChange = (open: boolean, id: string) => {
-    if (open) {
-      setDeleteMode('soft')
-      setDeleteConfirmId(id)
-    } else {
-      setDeleteConfirmId(null)
+    } catch (err) {
+      console.error('删除会议失败:', err)
+      message.error('删除失败')
     }
   }
 
-  const deletePopconfirmTitle = (
-    <div style={{ width: 220 }}>
-      <div style={{ marginBottom: 8 }}>
-        <Text strong>确认删除此会议？</Text>
-      </div>
-      <Radio.Group
-        size="small"
-        value={deleteMode}
-        onChange={(e) => setDeleteMode(e.target.value)}
-      >
-        <Radio value="soft">软删除（保留数据）</Radio>
-        <Radio value="hard">永久删除</Radio>
-      </Radio.Group>
-    </div>
-  )
-
   return (
-    <div className="meeting-sidebar">
-      <div className="meeting-sidebar-toolbar">
-        <Button type="primary" icon={<PlusOutlined />} size="small" onClick={() => {
-          selectMeeting(null)
-          navigateWithQuery('/board', { create: '1' })
-        }}>
-          新建会议
-        </Button>
-        <div className="meeting-sidebar-spacer" />
-        <Tooltip title="刷新">
-          <Button type="text" size="small" icon={<ReloadOutlined spin={loading} />} onClick={refresh} />
+    <aside className="meeting-sidebar">
+      <div className="meeting-sidebar-header">
+        <Tooltip title="收起侧栏" placement="right">
+          <button
+            className="meeting-sidebar-collapse-btn"
+            onClick={onCollapse}
+            aria-label="收起侧栏"
+          >
+            <MenuUnfoldOutlined />
+          </button>
         </Tooltip>
-        {onCollapseSidebar && (
-          <Tooltip title="收起会议列表（专注内容）">
-            <Button type="text" size="small" icon={<MenuFoldOutlined />} onClick={onCollapseSidebar} />
-          </Tooltip>
-        )}
+        <span className="meeting-sidebar-title">会议列表</span>
       </div>
 
-      {/* 历史会议标题 + 搜索 */}
-      <div className="meeting-sidebar-search-section">
-        <div
-          className="meeting-sidebar-toggle-row"
-          onClick={() => setListCollapsed(v => !v)}
-        >
-          <Button type="text" size="small" icon={listCollapsed ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />} />
-          <Text strong className="meeting-sidebar-history-title">历史会议 ({filteredMeetings.length})</Text>
-          {runningCount > 0 && <Badge count={runningCount} className="meeting-sidebar-running-badge" />}
-        </div>
-        {!listCollapsed && (
-          <Input
-            size="small"
-            placeholder="搜索会议..."
-            prefix={<SearchOutlined />}
-            allowClear
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="meeting-sidebar-search-input"
+      <div className="meeting-sidebar-search">
+        <Input
+          prefix={<SearchOutlined style={{ color: 'var(--text-tertiary, #bfbfbf)' }} />}
+          placeholder="搜索会议..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          allowClear
+          size="small"
+        />
+      </div>
+
+      <div className="meeting-sidebar-list-container">
+        {filteredMeetings.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              search ? '没有匹配的会议' : loading ? '加载中...' : '暂无会议'
+            }
+            style={{ padding: '24px 0' }}
+          />
+        ) : (
+          <List
+            dataSource={filteredMeetings}
+            split={false}
+            renderItem={(m: MeetingListItem) => {
+              const isActive = m.meeting_id === meetingId
+              const displayStatus = m.is_running
+                ? 'running'
+                : m.status === 'aborted'
+                  ? 'aborted'
+                  : m.status
+              return (
+                <List.Item
+                  className={`meeting-sidebar-item${isActive ? ' meeting-sidebar-item--active' : ''} meeting-sidebar-item--${displayStatus}`}
+                  onClick={() => handleSelect(m.meeting_id)}
+                  style={{ padding: '8px 12px', cursor: 'pointer' }}
+                >
+                  <div className="meeting-sidebar-item-content">
+                    <div className="meeting-sidebar-item-top" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <span
+                        className="meeting-sidebar-item-topic"
+                        title={m.topic}
+                        style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        {m.topic || '(未命名会议)'}
+                      </span>
+                      {m.is_running && (
+                        <Tag color="processing" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                          进行中
+                        </Tag>
+                      )}
+                      {!m.is_running && m.status === 'done' && (
+                        <Tag color="success" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                          已完成
+                        </Tag>
+                      )}
+                      {!m.is_running && m.status === 'aborted' && (
+                        <Tag color="default" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                          已终止
+                        </Tag>
+                      )}
+                      {!m.is_running && m.status === 'failed' && (
+                        <Tag color="error" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                          失败
+                        </Tag>
+                      )}
+                    </div>
+                    <div className="meeting-sidebar-item-meta" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-tertiary, #bfbfbf)' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                        <ClockCircleOutlined style={{ fontSize: 10 }} />
+                        {getTimeAgo(m.updated_at || m.created_at)}
+                      </span>
+                      <span style={{ fontFamily: 'monospace', fontSize: 10, opacity: 0.7 }}>
+                        {m.meeting_id.slice(-8)}
+                      </span>
+                      {!isActive && (
+                        <Popconfirm
+                          title={
+                            <div style={{ width: 200 }}>
+                              <div style={{ marginBottom: 6 }}><strong>删除此会议？</strong></div>
+                              <Radio.Group size="small" value={deleteMode} onChange={(e) => setDeleteMode(e.target.value)}>
+                                <Radio value="soft">软删除</Radio>
+                                <Radio value="hard">永久删除</Radio>
+                              </Radio.Group>
+                            </div>
+                          }
+                          onConfirm={(e) => handleDelete(m.meeting_id, e as unknown as React.MouseEvent)}
+                          okText="删除"
+                          cancelText="取消"
+                          okButtonProps={{ danger: true, size: 'small' }}
+                          cancelButtonProps={{ size: 'small' }}
+                          placement="right"
+                        >
+                          <button
+                            className="meeting-sidebar-item-delete"
+                            onClick={(e) => e.stopPropagation()}
+                            title="删除会议"
+                            style={{
+                              marginLeft: 'auto',
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--text-tertiary, #bfbfbf)',
+                              cursor: 'pointer',
+                              padding: 2,
+                              fontSize: 11,
+                            }}
+                          >
+                            删除
+                          </button>
+                        </Popconfirm>
+                      )}
+                    </div>
+                  </div>
+                </List.Item>
+              )
+            }}
           />
         )}
       </div>
-
-      {!listCollapsed && (
-        <div className="meeting-sidebar-list-container">
-          {filteredMeetings.length === 0 ? (
-            <Empty description={searchQuery ? '无匹配会议' : '暂无会议'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-          ) : (
-            <List
-              dataSource={filteredMeetings}
-              renderItem={(m) => {
-                const sl = statusLabel(m.status, m.stage)
-                const isActive = m.meeting_id === meetingId
-                const isDeleting = deletingId === m.meeting_id
-                const isHovered = hoveredId === m.meeting_id
-                return (
-                  <List.Item
-                    key={m.meeting_id}
-                    onClick={() => !isDeleting && selectMeeting(m.meeting_id)}
-                    onMouseEnter={() => setHoveredId(m.meeting_id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                    style={{
-                      cursor: 'pointer',
-                      background: isActive ? 'var(--accent-light, #eef2ff)' : 'transparent',
-                      borderRadius: 6,
-                      padding: '8px 10px',
-                      marginBottom: 2,
-                      border: isActive ? '1px solid var(--accent, #4f46e5)' : '1px solid transparent',
-                      position: 'relative',
-                      transition: 'background 0.15s ease, border-color 0.15s ease',
-                    }}
-                  >
-                    <List.Item.Meta
-                      title={
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingRight: 28 }}>
-                          {m.is_running && <Badge status="processing" style={{ flexShrink: 0 }} />}
-                          <Text ellipsis className="meeting-sidebar-item-title" style={{ flex: 1, minWidth: 0 }}>
-                            {m.topic || '(无议题)'}
-                          </Text>
-                        </div>
-                      }
-                      description={
-                        <div className="meeting-sidebar-item-desc" style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', lineHeight: '20px' }}>
-                          <Tag
-                            color={sl.cls === 'ok' ? 'green' : sl.cls === 'running' ? 'blue' : 'default'}
-                            className="meeting-sidebar-status-tag"
-                            style={{ margin: 0, lineHeight: '18px' }}
-                          >
-                            {sl.text}
-                          </Tag>
-                          {(m.flow_plan === 'instant' || m.flow_plan === 'fast' || m.flow_plan === 'fast_path' || m.flow_plan === 'simple') && (
-                            <Tag color="blue" className="meeting-sidebar-flow-tag" icon={<ThunderboltOutlined />} style={{ margin: 0, lineHeight: '18px' }}>
-                              Instant
-                            </Tag>
-                          )}
-                          {m.flow_plan === 'plan' && (
-                            <Tag color="purple" className="meeting-sidebar-flow-tag" icon={<ScheduleOutlined />} style={{ margin: 0, lineHeight: '18px' }}>
-                              Plan
-                            </Tag>
-                          )}
-                          {(m.flow_plan === 'standard' || m.flow_plan === 'deep_think' || m.flow_plan === 'full' || !m.flow_plan) && (
-                            <Tag color="geekblue" className="meeting-sidebar-flow-tag" icon={<CheckCircleOutlined />} style={{ margin: 0, lineHeight: '18px' }}>
-                              Standard
-                            </Tag>
-                          )}
-                          <Text type="secondary" className="meeting-sidebar-time-text" style={{ fontSize: 11, marginLeft: 'auto' }}>
-                            {relativeTime(m.created_at)}
-                          </Text>
-                        </div>
-                      }
-                    />
-                    {/* 删除按钮：hover 或正在删除时显示 */}
-                    {(isHovered || isDeleting) && !m.is_running && (
-                      <Popconfirm
-                        title={deletePopconfirmTitle}
-                        open={deleteConfirmId === m.meeting_id}
-                        onOpenChange={(open) => handleDeletePopconfirmOpenChange(open, m.meeting_id)}
-                        onConfirm={(e) => {
-                          e?.stopPropagation()
-                          handleDelete(m.meeting_id)
-                        }}
-                        onCancel={(e) => e?.stopPropagation()}
-                        okText="确认删除"
-                        cancelText="取消"
-                        okButtonProps={{ danger: true, size: 'small', loading: isDeleting }}
-                        cancelButtonProps={{ size: 'small' }}
-                        placement="left"
-                      >
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                          disabled={m.is_running || isDeleting}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{
-                            position: 'absolute',
-                            right: 6,
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            padding: '0 4px',
-                            height: 24,
-                          }}
-                          title="删除会议"
-                        />
-                      </Popconfirm>
-                    )}
-                  </List.Item>
-                )
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      <div className="meeting-sidebar-footer">
-        <Text type="secondary" className="meeting-sidebar-time-text" style={{ fontSize: 11 }}>
-          运行中 {runningCount} / 上限 {concurrentLimit}
-        </Text>
-      </div>
-    </div>
+    </aside>
   )
 }
