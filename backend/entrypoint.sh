@@ -12,6 +12,16 @@ DATASCIENCE_DOCKERFILE="${DATASCIENCE_DOCKERFILE:-/app/docker/sandbox-datascienc
 
 echo "[entrypoint] Conclave backend starting..."
 
+# ---- 0. 时区配置 ----
+TZ="${TZ:-Asia/Shanghai}"
+if [ -f "/usr/share/zoneinfo/$TZ" ]; then
+    ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+    echo "$TZ" > /etc/timezone
+    echo "[entrypoint] Timezone set to $TZ"
+else
+    echo "[entrypoint] WARNING: Timezone $TZ not found, using UTC"
+fi
+
 # 确保 app 用户存在（Dockerfile 中已创建，这里做兜底）
 if ! id "$APP_USER" >/dev/null 2>&1; then
     groupadd -g "$APP_GID" "$APP_USER" 2>/dev/null || true

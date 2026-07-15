@@ -1,8 +1,8 @@
-// 设置面板：管理 LLM 默认模型、API Key 等本地偏好
-// 使用 AntD Drawer + Form + Switch + Button + List + Typography + Popconfirm + Alert + Divider
+// 设置面板：管理 LLM 默认模型、API Key、时区等本地偏好
+// 使用 AntD Drawer + Form + Switch + Button + List + Typography + Popconfirm + Alert + Divider + Select
 import { useState, useEffect, useCallback } from 'react'
 import type { FC } from 'react'
-import { Drawer, Switch, Button, List, Typography, Alert, Divider, Space } from 'antd'
+import { Drawer, Switch, Button, List, Typography, Alert, Divider, Space, Select } from 'antd'
 import { SaveOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons'
 import { ModelSelector, type ModelSelection } from './ModelSelector.tsx'
 import {
@@ -15,6 +15,24 @@ import {
 } from '../lib/llmPreferences.ts'
 
 const { Text, Title } = Typography
+
+// 常用时区列表
+const TIMEZONE_OPTIONS = [
+  { value: 'Asia/Shanghai', label: '中国标准时间 (UTC+8)' },
+  { value: 'Asia/Tokyo', label: '日本标准时间 (UTC+9)' },
+  { value: 'Asia/Seoul', label: '韩国标准时间 (UTC+9)' },
+  { value: 'Asia/Singapore', label: '新加坡时间 (UTC+8)' },
+  { value: 'Asia/Hong_Kong', label: '香港时间 (UTC+8)' },
+  { value: 'Asia/Taipei', label: '台北时间 (UTC+8)' },
+  { value: 'Europe/London', label: '格林尼治标准时间 (UTC+0)' },
+  { value: 'Europe/Paris', label: '中欧时间 (UTC+1)' },
+  { value: 'America/New_York', label: '美东时间 (UTC-5)' },
+  { value: 'America/Los_Angeles', label: '美西时间 (UTC-8)' },
+  { value: 'America/Chicago', label: '美中时间 (UTC-6)' },
+  { value: 'UTC', label: '协调世界时 (UTC+0)' },
+]
+
+const TZ_STORAGE_KEY = 'conclave_user_timezone'
 
 interface Props {
   onClose: () => void
@@ -33,6 +51,7 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
   })
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [userTz, setUserTz] = useState<string>(() => localStorage.getItem(TZ_STORAGE_KEY) || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai')
 
   useEffect(() => {
     return onPreferencesChanged(() => {
@@ -176,6 +195,30 @@ export const SettingsPanel: FC<Props> = ({ onClose }) => {
             )}
           />
         )}
+      </div>
+
+      <Divider />
+
+      <div className="settings-panel-section">
+        <Text strong>时区设置</Text>
+        <Text type="secondary" className="settings-panel-section-hint">
+          选择你所在的时区，会议时间和日志将按此时区显示。默认为浏览器检测到的时区。
+        </Text>
+        <Select
+          style={{ width: '100%', marginTop: 8 }}
+          value={userTz}
+          showSearch
+          optionFilterProp="label"
+          options={TIMEZONE_OPTIONS}
+          onChange={(val) => {
+            setUserTz(val)
+            localStorage.setItem(TZ_STORAGE_KEY, val)
+            // 派发自定义事件通知其他组件时区变更
+            window.dispatchEvent(new CustomEvent('conclave:timezone-changed', { detail: val }))
+            setSavedMsg('时区已更新')
+            setTimeout(() => setSavedMsg(null), 2000)
+          }}
+        />
       </div>
 
       <Divider />

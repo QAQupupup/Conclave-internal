@@ -120,6 +120,7 @@ services:
     env_file:
       - .env
     environment:
+      - TZ=${TZ:-Asia/Shanghai}
       - CONCLAVE_WORKSPACE_DIR=/workspace
       - CONCLAVE_DB_PATH=/app/data/conclave.db
       - CONCLAVE_SECRET_KEY=${CONCLAVE_SECRET_KEY:-}
@@ -233,6 +234,7 @@ services:
     ports:
       - "5432:5432"
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       POSTGRES_DB: conclave
       POSTGRES_USER: conclave
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-conclave_dev}
@@ -254,6 +256,8 @@ services:
     image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:7-alpine
     container_name: conclave-dev-redis
     restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "6379:6379"
     command: redis-server --save 60 1 --loglevel warning

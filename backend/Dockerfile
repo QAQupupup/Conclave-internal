@@ -37,7 +37,7 @@ RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
 #   - Playwright 浏览器运行依赖（lib 系列）
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        curl ca-certificates gnupg \
+        curl ca-certificates gnupg tzdata \
         xvfb x11vnc websockify novnc \
         fonts-wqy-zenhei fonts-noto-cjk \
         libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
@@ -114,7 +114,8 @@ RUN chown -R 1000:1000 /workspace /app/data && chmod 755 /workspace /app/data
 VOLUME ["/workspace", "/app/data"]
 
 # 环境变量默认值
-ENV CONCLAVE_WORKSPACE_DIR=/workspace \
+ENV TZ=Asia/Shanghai \
+    CONCLAVE_WORKSPACE_DIR=/workspace \
     CONCLAVE_DB_PATH=/app/data/conclave.db \
     CONCLAVE_SANDBOX_IMAGE=python:3.12-slim \
     CONCLAVE_SANDBOX_IMAGE_DATASCIENCE=conclave-python-datascience:latest \

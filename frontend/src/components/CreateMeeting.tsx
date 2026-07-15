@@ -24,10 +24,23 @@ const DELIVERABLE_OPTIONS = [
   { value: 'deployable_service', label: '可部署服务（Docker 镜像）' },
 ]
 
+const FLOW_PLAN_OPTIONS = [
+  { value: 'standard', label: '标准会议（六阶段多 Agent 辩论）' },
+  { value: 'instant', label: '即时回答（单次 LLM 快速响应）' },
+]
+
+const DEBATE_DEPTH_OPTIONS = [
+  { value: 'light', label: '轻量（2-3 Agent，快速产出）' },
+  { value: 'standard', label: '标准（全 Agent，正常辩论）' },
+  { value: 'deep', label: '深度（多轮辩论，充分论证）' },
+]
+
 export function CreateMeeting() {
   const { createMeeting, uploadDocument, selectMeeting, runMeeting } = useMeeting()
   const [topic, setTopic] = useState('')
   const [deliverableType, setDeliverableType] = useState('prd_openapi')
+  const [flowPlan, setFlowPlan] = useState('standard')
+  const [debateDepth, setDebateDepth] = useState('standard')
   const [file, setFile] = useState<File | null>(null)
   const [referenceIds, setReferenceIds] = useState<string[]>([])
   const [modelSel, setModelSel] = useState<ModelSelection>(() => getDefaultSelection())
@@ -53,7 +66,12 @@ export function CreateMeeting() {
     setError(null)
     setInfo(null)
     try {
-      const res = await createMeeting(topic.trim(), deliverableType, referenceIds.length > 0 ? referenceIds : undefined)
+      const res = await createMeeting(topic.trim(), {
+        deliverableType,
+        referenceMeetingIds: referenceIds.length > 0 ? referenceIds : undefined,
+        flowPlan,
+        debateDepth,
+      })
       setCreatedId(res.meeting_id)
       if (isCustomModel) {
         try {
@@ -135,6 +153,26 @@ export function CreateMeeting() {
                 disabled={!!createdId || busy}
               />
             </Form.Item>
+
+            <Form.Item label="执行模式">
+              <Select
+                value={flowPlan}
+                onChange={setFlowPlan}
+                options={FLOW_PLAN_OPTIONS}
+                disabled={!!createdId || busy}
+              />
+            </Form.Item>
+
+            {flowPlan === 'standard' && (
+              <Form.Item label="辩论深度">
+                <Select
+                  value={debateDepth}
+                  onChange={setDebateDepth}
+                  options={DEBATE_DEPTH_OPTIONS}
+                  disabled={!!createdId || busy}
+                />
+              </Form.Item>
+            )}
 
             <Form.Item label="引用历史会议（可选）">
               <MeetingSearchSelect

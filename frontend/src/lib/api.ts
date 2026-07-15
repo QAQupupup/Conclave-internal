@@ -143,10 +143,25 @@ export async function request<T>(url: string, init: RequestInit = {}): Promise<T
 }
 
 /** 创建会议：POST /meetings body {topic, deliverable_type, reference_meeting_ids} */
-export async function createMeeting(topic: string, deliverableType?: string, referenceMeetingIds?: string[]): Promise<CreateMeetingResponse> {
+export interface CreateMeetingOptions {
+  deliverable_type?: string
+  reference_meeting_ids?: string[]
+  flow_plan?: string
+  debate_depth?: string
+  model?: string
+}
+
+export async function createMeeting(topic: string, opts?: CreateMeetingOptions): Promise<CreateMeetingResponse> {
   return request<CreateMeetingResponse>('/meetings', {
     method: 'POST',
-    body: JSON.stringify({ topic, deliverable_type: deliverableType, reference_meeting_ids: referenceMeetingIds ?? [] }),
+    body: JSON.stringify({
+      topic,
+      deliverable_type: opts?.deliverable_type ?? 'prd_openapi',
+      reference_meeting_ids: opts?.reference_meeting_ids ?? [],
+      flow_plan: opts?.flow_plan ?? 'standard',
+      debate_depth: opts?.debate_depth ?? 'standard',
+      model: opts?.model ?? '',
+    }),
   })
 }
 

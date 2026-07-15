@@ -51,8 +51,12 @@ interface MeetingShellContextValue {
   selectMeeting: (meetingId: string | null) => void
   createMeeting: (
     topic: string,
-    deliverableType?: string,
-    referenceMeetingIds?: string[],
+    opts?: {
+      deliverableType?: string
+      referenceMeetingIds?: string[]
+      flowPlan?: string
+      debateDepth?: string
+    },
   ) => Promise<CreateMeetingResponse>
   uploadDocument: (meetingId: string, file: File) => Promise<UploadDocumentResponse>
   runMeeting: (meetingId: string) => Promise<RunMeetingResponse>
@@ -128,10 +132,19 @@ export function MeetingProvider({ children }: { children: ReactNode }) {
   const createMeeting = useCallback(
     async (
       topic: string,
-      deliverableType?: string,
-      referenceMeetingIds?: string[],
+      opts?: {
+        deliverableType?: string
+        referenceMeetingIds?: string[]
+        flowPlan?: string
+        debateDepth?: string
+      },
     ): Promise<CreateMeetingResponse> => {
-      return apiCreateMeeting(topic, deliverableType, referenceMeetingIds)
+      return apiCreateMeeting(topic, {
+        deliverable_type: opts?.deliverableType,
+        reference_meeting_ids: opts?.referenceMeetingIds,
+        flow_plan: opts?.flowPlan,
+        debate_depth: opts?.debateDepth,
+      })
     },
     [],
   )

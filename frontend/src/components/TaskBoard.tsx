@@ -142,7 +142,10 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
     if (!createTopic.trim()) { setCreateError('请输入会议议题'); return }
     setCreateBusy(true); setCreateError(null)
     try {
-      const res = await createMeeting(createTopic.trim(), createDeliverable, referenceIds.length > 0 ? referenceIds : undefined)
+      const res = await createMeeting(createTopic.trim(), {
+        deliverableType: createDeliverable,
+        referenceMeetingIds: referenceIds.length > 0 ? referenceIds : undefined,
+      })
       if (createFile) await uploadDocument(res.meeting_id, createFile)
       selectMeeting(res.meeting_id); void runMeeting(res.meeting_id)
     } catch (err) { setCreateError(err instanceof Error ? err.message : String(err)) }
