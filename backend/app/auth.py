@@ -151,21 +151,23 @@ def _init_users_table() -> None:
     from app.db_legacy import _connect, _putconn
     conn = _connect()
     try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(64) UNIQUE NOT NULL,
-                password_hash VARCHAR(256) NOT NULL,
-                role VARCHAR(32) NOT NULL DEFAULT 'user',
-                display_name VARCHAR(128),
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                last_login_at TIMESTAMP
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(64) UNIQUE NOT NULL,
+                    password_hash VARCHAR(256) NOT NULL,
+                    role VARCHAR(32) NOT NULL DEFAULT 'user',
+                    display_name VARCHAR(128),
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    last_login_at TIMESTAMP
+                )
+                """
             )
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+        conn.commit()
     finally:
         _putconn(conn)
 
@@ -175,9 +177,11 @@ def _load_users_from_db() -> None:
     from app.db_legacy import _connect, _putconn
     conn = _connect()
     try:
-        rows = conn.execute(
-            "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at FROM users"
-        ).fetchall()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at FROM users"
+            )
+            rows = cur.fetchall()
         with _users_lock:
             _users_cache.clear()
             for row in rows:
@@ -202,17 +206,22 @@ def _create_user_in_db(username: str, password_hash: str, role: str, display_nam
     conn = _connect()
     try:
         try:
-            conn.execute(
-                "INSERT INTO users(username, password_hash, role, display_name) VALUES(%s, %s, %s, %s)",
-                (username, password_hash, role, display_name),
-            )
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO users(username, password_hash, role, display_name) VALUES(%s, %s, %s, %s)",
+                    (username, password_hash, role, display_name),
+                )
+            conn.commit()
         except Exception as e:
+            conn.rollback()
             logger.warning("Failed to create user %s: %s", username, e)
             return None
-        row = conn.execute(
-            "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at FROM users WHERE username=%s",
-            (username,),
-        ).fetchone()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at FROM users WHERE username=%s",
+                (username,),
+            )
+            row = cur.fetchone()
         if not row:
             return None
         return {
@@ -233,7 +242,9 @@ def _update_last_login(username: str) -> None:
     from app.db_legacy import _connect, _putconn
     conn = _connect()
     try:
-        conn.execute("UPDATE users SET last_login_at = NOW() WHERE username=%s", (username,))
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET last_login_at = NOW() WHERE username=%s", (username,))
+        conn.commit()
     finally:
         _putconn(conn)
 

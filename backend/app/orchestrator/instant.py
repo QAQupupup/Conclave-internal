@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus
 from app.config import settings
+from conclave_core.state import Stage
 from app.orchestrator.system_prompt import (
     build_classification_prompt,
     parse_classification_result,
@@ -197,6 +198,7 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
                 "latency_ms": int(elapsed * 1000),
             }
             state.status = MeetingStatus.DONE
+            state.stage = Stage.PRODUCE
             state.completed_at = datetime.now(timezone.utc)
             state.flow_plan = FLOW_INSTANT
 
@@ -212,6 +214,14 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
                         "answer": answer,
                         "deliverable_type": state.deliverable_type,
                     },
+                )
+            )
+            # 发布 meeting.failed/meeting.done 事件以通知状态变更
+            await bus.publish(
+                make_event(
+                    "meeting.done",
+                    state.meeting_id,
+                    {"meeting_id": state.meeting_id, "flow": FLOW_INSTANT},
                 )
             )
 
@@ -232,8 +242,20 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
             # LLM 调用失败
             elapsed = time.monotonic() - t0
             state.status = MeetingStatus.FAILED
+            state.stage = Stage.PRODUCE
             state.error_detail = f"即时模式 LLM 调用失败: {resp.error}"
             state.completed_at = datetime.now(timezone.utc)
+            # 发布失败事件通知前端
+            try:
+                await bus.publish(
+                    make_event(
+                        "meeting.failed",
+                        state.meeting_id,
+                        {"meeting_id": state.meeting_id, "error": state.error_detail},
+                    )
+                )
+            except Exception:
+                pass
             logger.warning(
                 "即时模式 LLM 调用失败: meeting=%s, error=%s",
                 state.meeting_id, resp.error,
@@ -247,8 +269,20 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
     except Exception as e:
         elapsed = time.monotonic() - t0
         state.status = MeetingStatus.FAILED
+        state.stage = Stage.PRODUCE
         state.error_detail = f"即时模式执行异常: {str(e)[:2000]}"
         state.completed_at = datetime.now(timezone.utc)
+        # 发布失败事件通知前端
+        try:
+            await bus.publish(
+                make_event(
+                    "meeting.failed",
+                    state.meeting_id,
+                    {"meeting_id": state.meeting_id, "error": state.error_detail},
+                )
+            )
+        except Exception:
+            pass
         logger.error(
             "即时模式执行异常: meeting=%s, error=%s",
             state.meeting_id, e, exc_info=True,

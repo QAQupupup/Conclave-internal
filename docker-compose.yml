@@ -1,4 +1,4 @@
-﻿# ===== Conclave Docker Compose =====
+# ===== Conclave Docker Compose =====
 # 完整部署：前端(nginx) + 后端(FastAPI) + 自动沙箱准备
 #
 # 启动: docker compose up -d

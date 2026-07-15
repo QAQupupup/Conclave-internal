@@ -1,4 +1,4 @@
-﻿# FastAPI 入口：挂载 routers，CORS，lifespan
+# FastAPI 入口：挂载 routers，CORS，lifespan
 from __future__ import annotations
 
 import os

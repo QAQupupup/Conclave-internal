@@ -5,8 +5,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Button, List, Badge, Tag, Typography, Tooltip, Input, Popconfirm, Radio, Empty } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  SearchOutlined, ThunderboltOutlined, ScheduleOutlined, FireOutlined,
-  ApiOutlined, CheckCircleOutlined,
+  SearchOutlined, ThunderboltOutlined, ScheduleOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'
 import { listMeetings, deleteMeeting } from '../lib/api.ts'
 import { useMeeting } from '../store/MeetingContext.tsx'
@@ -216,14 +215,9 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
                           >
                             {sl.text}
                           </Tag>
-                          {m.flow_plan === 'fast' && (
+                          {(m.flow_plan === 'instant' || m.flow_plan === 'fast' || m.flow_plan === 'fast_path' || m.flow_plan === 'simple') && (
                             <Tag color="blue" className="meeting-sidebar-flow-tag" icon={<ThunderboltOutlined />} style={{ margin: 0, lineHeight: '18px' }}>
-                              Fast
-                            </Tag>
-                          )}
-                          {m.flow_plan === 'simple' && (
-                            <Tag color="cyan" className="meeting-sidebar-flow-tag" icon={<ApiOutlined />} style={{ margin: 0, lineHeight: '18px' }}>
-                              Simple
+                              Instant
                             </Tag>
                           )}
                           {m.flow_plan === 'plan' && (
@@ -231,14 +225,9 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
                               Plan
                             </Tag>
                           )}
-                          {m.flow_plan === 'standard' && (
+                          {(m.flow_plan === 'standard' || m.flow_plan === 'deep_think' || m.flow_plan === 'full' || !m.flow_plan) && (
                             <Tag color="geekblue" className="meeting-sidebar-flow-tag" icon={<CheckCircleOutlined />} style={{ margin: 0, lineHeight: '18px' }}>
                               Standard
-                            </Tag>
-                          )}
-                          {(!m.flow_plan || m.flow_plan === 'full') && (
-                            <Tag color="gold" className="meeting-sidebar-flow-tag" icon={<FireOutlined />} style={{ margin: 0, lineHeight: '18px' }}>
-                              Deep
                             </Tag>
                           )}
                           <Text type="secondary" className="meeting-sidebar-time-text" style={{ fontSize: 11, marginLeft: 'auto' }}>

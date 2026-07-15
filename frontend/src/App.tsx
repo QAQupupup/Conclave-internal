@@ -13,7 +13,6 @@ import {
   DownOutlined,
   MenuFoldOutlined,
   HomeOutlined,
-  LogoutOutlined,
 } from '@ant-design/icons'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { AuthProvider, useAuth } from './store/AuthContext.tsx'
@@ -43,6 +42,7 @@ import { DrawerMenu } from './components/DrawerMenu.tsx'
 import { PanelErrorBoundary } from './components/ErrorBoundary.tsx'
 import { LogPanelContent } from './components/LogPanel.tsx'
 import { GuardButton } from './components/GuardButton.tsx'
+import { UserMenu } from './components/UserMenu.tsx'
 
 // 代码分割：重型组件按需加载（Monaco/echarts/d3/xterm 不进首屏 bundle）
 const AgentGraph = lazy(() => import('./components/AgentGraph.tsx').then(m => ({ default: m.AgentGraph })))
@@ -61,7 +61,7 @@ function MeetingView({
 }: {
   onOpenInWorkspace?: (filePath: string) => void
 }) {
-  const { meetingId, store } = useMeeting()
+  const { meetingId, store, rejectBorrow, selectMeeting } = useMeeting()
   const meeting = store.meeting
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null)
   const [borrowOpen, setBorrowOpen] = useState(false)
@@ -151,7 +151,10 @@ function MeetingView({
             interventionCount={interventionCount}
           />
           <div className="button-separator" style={{ width: 1, height: 20, background: 'var(--border-color, #e5e7eb)', margin: '0 4px' }} />
-          <MeetingControls />
+          <MeetingControls
+            onOpenReport={() => togglePanel('report')}
+            onBackToBoard={() => { selectMeeting(null); navigate('/board') }}
+          />
         </div>
       </div>
 
@@ -191,7 +194,11 @@ function MeetingView({
         <BorrowDialog open={borrowOpen} onClose={() => setBorrowOpen(false)} />
         <BorrowApprovalDialog
           request={pendingBorrowRequest}
-          onClose={() => {}}
+          onClose={() => {
+            if (pendingBorrowRequest) {
+              rejectBorrow(pendingBorrowRequest.id, '用户选择稍后处理')
+            }
+          }}
         />
       </div>
     </div>
@@ -238,7 +245,7 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 /** 根据 URL path 切换三层视图：/ → 封面，/board → 看板，/models → 模型管理，/meeting/:id → 会议 */
 function AppShell() {
   const { meetingId, store, selectMeeting } = useMeeting()
-  const { user, logout, isAuthenticated, loading: authLoading } = useAuth()
+  const { logout, isAuthenticated, loading: authLoading } = useAuth()
   const { path } = useRouter()
   const [tab, setTab] = useState<ViewTab>('meeting')
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState<boolean>(
@@ -307,13 +314,10 @@ function AppShell() {
                 <Button type="text" size="small" icon={<SettingOutlined />}
                   onClick={() => setSettingsOpen(true)} />
               </Tooltip>
-              <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
-              <span style={{ fontSize: 12, color: 'var(--text-secondary, #8c8c8c)', marginRight: 4 }}>
-                {user?.display_name || user?.username}
-              </span>
-              <Tooltip title="退出登录">
-                <Button type="text" size="small" icon={<LogoutOutlined />} onClick={logout} />
-              </Tooltip>
+              <UserMenu
+                onOpenSettings={() => setSettingsOpen(true)}
+                onLogout={logout}
+              />
             </div>
           </div>
           {/* 页面内容区，统一padding，可滚动 */}
@@ -379,13 +383,11 @@ function AppShell() {
               <Button type="text" size="small" icon={<SettingOutlined />}
                 onClick={() => setSettingsOpen(true)} />
             </Tooltip>
-            <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
-            <span style={{ fontSize: 12, color: 'var(--text-secondary, #8c8c8c)', marginRight: 4 }}>
-              {user?.display_name || user?.username}
-            </span>
-            <Tooltip title="退出登录">
-              <Button type="text" size="small" icon={<LogoutOutlined />} onClick={() => { logout(); navigate('/'); }} />
-            </Tooltip>
+            <UserMenu
+              onOpenSettings={() => setSettingsOpen(true)}
+              onNavigateBoard={() => { selectMeeting(null); navigate('/board') }}
+              onLogout={() => { logout(); navigate('/'); }}
+            />
           </div>
         </div>
         <Tabs

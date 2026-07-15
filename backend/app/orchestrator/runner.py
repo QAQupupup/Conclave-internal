@@ -230,16 +230,8 @@ class Runner:
                 )
             except Exception as e:
                 log_bus.warning(f"模型快照失败（将回退到动态 resolve）: {e}", logger="orchestrator.runner")
-        # 起始事件：进入首个阶段
-        await bus.publish(
-            make_event(
-                "stage.changed",
-                state.meeting_id,
-                {"meeting_id": state.meeting_id, "from": None, "to": state.stage.value},
-            )
-        )
-
         # --- Instant 模式分流 ---
+        # 在发布 stage.changed 之前先判断是否走即时模式，避免前端看到 clarify 阶段闪烁。
         # 如果 state 已标记为即时模式（例如 API 层预设），或议题被 LLM 分类为简单查询，
         # 跳过六阶段管线，直接单次 LLM 调用完成后返回。
         # 注意：plan 模式不走 instant，而是进入六阶段管线配合 Planner 逐步执行。
@@ -281,6 +273,15 @@ class Runner:
             if is_terminal(state):
                 _schedule_cleanup(state.meeting_id, _STATE_TTL_AFTER_DONE)
             return state
+
+        # 非 instant 模式：发布起始事件，进入首个阶段
+        await bus.publish(
+            make_event(
+                "stage.changed",
+                state.meeting_id,
+                {"meeting_id": state.meeting_id, "from": None, "to": state.stage.value},
+            )
+        )
 
         # [AUDIT-FIX P0-4] 新增：try/except 兜底，确保节点异常时状态转为 FAILED
         # 而非遗留 RUNNING 僵死态。同时记录 error_detail 供审计追溯。
@@ -662,12 +663,14 @@ def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None 
         payload = record["payload"]
         try:
             state = MeetingState(**payload)
+            # 标准化 flow_plan（旧会议可能使用 "full"/"fast_path"/"deep_think" 等旧值）
+            state.flow_plan = normalize_mode(state.flow_plan)
             # 从 meeting_aux 表加载大字段并注入（向后兼容：旧会议无 aux 数据时安全跳过）
             aux = get_meeting_aux(meeting_id)
             if aux:
                 state.inject_aux(aux)
             set_state(state)
-            logger.info("会议 %s 从 PostgreSQL 恢复运行态（aux=%d keys）", meeting_id, len(aux))
+            logger.info("会议 %s 从 PostgreSQL 恢复运行态（aux=%d keys, flow_plan=%s）", meeting_id, len(aux), state.flow_plan)
             return state
         except Exception as e:
             logger.warning("会议 %s 从 PostgreSQL 恢复失败: %s，创建新状态", meeting_id, e)
@@ -695,6 +698,8 @@ def recover_crashed_meetings() -> list[str]:
             payload = json.loads(payload)
         try:
             state = MeetingState(**payload)
+            # 标准化 flow_plan（旧会议可能使用旧值）
+            state.flow_plan = normalize_mode(state.flow_plan)
             # 从 meeting_aux 表恢复大字段（向后兼容）
             aux = get_meeting_aux(meeting_id)
             if aux:

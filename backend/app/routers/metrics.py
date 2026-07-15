@@ -1,4 +1,4 @@
-﻿# 运维面板 API：快照 + 历史 + 组件连通性
+# 运维面板 API：快照 + 历史 + 组件连通性
 from __future__ import annotations
 
 import os

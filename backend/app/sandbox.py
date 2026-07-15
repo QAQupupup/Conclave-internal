@@ -1,4 +1,4 @@
-﻿"""Docker 容器沙箱：隔离用户代码与命令执行
+"""Docker 容器沙箱：隔离用户代码与命令执行
 
 部署架构（Docker socket mounting / sibling containers）：
 

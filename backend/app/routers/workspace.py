@@ -101,13 +101,23 @@ async def list_files(path: str = "") -> dict[str, Any]:
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"路径不存在: {path}")
     if target.is_file():
-        # 单个文件：返回元信息
+        # 单个文件：返回统一结构，将文件包装在 items 中，避免前端解构出错
+        import os
         stat = target.stat()
+        filename = os.path.basename(path)
+        parent_path = os.path.dirname(path).replace("\\", "/")
         return {
-            "path": path,
-            "type": "file",
-            "size": stat.st_size,
-            "modified": stat.st_mtime,
+            "path": parent_path or "/",
+            "type": "directory",
+            "items": [{
+                "name": filename,
+                "path": path.replace("\\", "/"),
+                "type": "file",
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+                "child_count": 0,
+                "expanded": False,
+            }],
         }
 
     items = []

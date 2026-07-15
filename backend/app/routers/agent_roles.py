@@ -1,4 +1,4 @@
-﻿# Agent 角色管理：CRUD + 议题驱动自动生成
+# Agent 角色管理：CRUD + 议题驱动自动生成
 from __future__ import annotations
 
 import json

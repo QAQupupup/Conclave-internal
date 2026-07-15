@@ -812,9 +812,9 @@ export async function resolveCaptcha(sessionId: string): Promise<{ ok: boolean; 
 
 // ========== Preferences ==========
 
-/** 获取所有偏好：GET /preferences */
+/** 获取所有偏好：GET /preferences/ */
 export async function getPreferences(): Promise<Record<string, string>> {
-  return request('/preferences')
+  return request('/preferences/')
 }
 
 /** 设置单个偏好：PUT /preferences/{key} */

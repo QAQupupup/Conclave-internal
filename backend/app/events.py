@@ -64,9 +64,9 @@ class InMemoryEventBus:
                 "Failed to persist event to DB: meeting_id=%s type=%s error=%s: %s",
                 event.meeting_id, event.type, type(e).__name__, str(e)[:200],
             )
-            # 使用内存计数器作为兜底 seq，避免 seq=0 导致前端混乱
+            # 使用内存计数器作为兜底 seq，避免 seq 不一致导致前端混乱
             fallback = self._history.get(event.meeting_id, [])
-            event.seq = (fallback[-1].seq + 1) if fallback else 1
+            event.seq = (fallback[-1].seq + 1) if fallback else 0
 
         # 写入内存历史，超限裁剪最旧事件
         history = self._history.setdefault(event.meeting_id, [])
@@ -84,15 +84,16 @@ class InMemoryEventBus:
                     "Event subscriber failed for meeting=%s type=%s: %s: %s",
                     event.meeting_id, event.type, type(e).__name__, str(e)[:200],
                 )
-        # 广播给通配订阅者
-        for sub in list(self._subs.get("*", [])):
-            try:
-                await sub(event)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    "Wildcard event subscriber failed for meeting=%s type=%s: %s: %s",
-                    event.meeting_id, event.type, type(e).__name__, str(e)[:200],
-                )
+        # 广播给通配订阅者（但避免当 event.meeting_id == "*" 时重复投递）
+        if event.meeting_id != "*":
+            for sub in list(self._subs.get("*", [])):
+                try:
+                    await sub(event)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "Wildcard event subscriber failed for meeting=%s type=%s: %s: %s",
+                        event.meeting_id, event.type, type(e).__name__, str(e)[:200],
+                    )
 
     def subscribe(self, meeting_id: str, handler: Subscriber) -> Callable[[], None]:
         """订阅指定会议的事件，返回取消订阅函数"""

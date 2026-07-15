@@ -1,4 +1,4 @@
-﻿# 运维面板指标采集：内存环形缓冲区 + 后台采集
+# 运维面板指标采集：内存环形缓冲区 + 后台采集
 # 每 10 秒采集一次系统资源，保留最近 360 个数据点（60 分钟）
 from __future__ import annotations
 
@@ -125,9 +125,11 @@ class MetricsStore:
                     from app.db_legacy import _connect, _putconn
                     conn = _connect()
                     try:
-                        row = conn.execute(
-                            "SELECT COUNT(*) AS cnt FROM meetings WHERE status = 'RUNNING'"
-                        ).fetchone()
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT COUNT(*) AS cnt FROM meetings WHERE status = 'RUNNING'"
+                            )
+                            row = cur.fetchone()
                         if row:
                             # RealDictCursor 返回 dict，用 key 访问
                             active_meetings = row.get("cnt", row.get("count", 0))

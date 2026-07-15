@@ -132,7 +132,7 @@ def parse_classification_result(result_text: str) -> dict:
     预期 LLM 返回 JSON 格式：
     {"mode": "instant|standard|plan|simple", "reason": "..."}
 
-    兼容旧名称：fast_path→instant, deep_think→standard, fast→instant, quick→instant
+    兼容旧名称：fast_path→instant, deep_think→standard, fast→instant, quick→instant, full→standard
 
     Args:
         result_text: LLM 返回的原始文本
@@ -141,21 +141,16 @@ def parse_classification_result(result_text: str) -> dict:
         {"mode": str, "reason": str} 或 {"mode": "standard", "reason": "parse error"}
     """
     import json
-    from app.orchestrator.instant import normalize_mode, FLOW_STANDARD
+    from app.orchestrator.instant import normalize_mode, FLOW_STANDARD, FLOW_INSTANT, FLOW_PLAN, FLOW_SIMPLE
 
     text = result_text.strip()
 
-    _valid_modes = {"instant", "standard", "plan", "simple"}
-    _legacy_map = {"fast_path": "instant", "deep_think": "standard", "fast": "instant", "quick": "instant"}
-
-    def _normalize(m: str) -> str:
-        m = (m or "").lower().strip()
-        return _legacy_map.get(m, m)
+    _valid_modes = {FLOW_INSTANT, FLOW_STANDARD, FLOW_PLAN, FLOW_SIMPLE}
 
     # 尝试直接解析 JSON
     try:
         data = json.loads(text)
-        mode = _normalize(data.get("mode", ""))
+        mode = normalize_mode(data.get("mode", ""))
         reason = data.get("reason", "")
         if mode in _valid_modes:
             return {"mode": mode, "reason": reason}
@@ -167,7 +162,7 @@ def parse_classification_result(result_text: str) -> dict:
         if match:
             try:
                 data = json.loads(match.group())
-                mode = _normalize(data.get("mode", ""))
+                mode = normalize_mode(data.get("mode", ""))
                 reason = data.get("reason", "")
                 if mode in _valid_modes:
                     return {"mode": mode, "reason": reason}

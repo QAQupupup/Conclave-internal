@@ -1,4 +1,4 @@
-﻿# §2 全部 Prompt 模板（字符串 + format 填充）
+# §2 全部 Prompt 模板（字符串 + format 填充）
 from __future__ import annotations
 
 # ---------- 2.1 主持人 Clarify 阶段 ----------

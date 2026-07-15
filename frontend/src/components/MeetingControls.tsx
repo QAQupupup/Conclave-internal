@@ -1,13 +1,24 @@
 // 会议控制按钮：暂停 / 恢复 / 终止（带 Popconfirm 确认）
-// 按当前会议 status 决定显示哪些按钮
+// 按当前会议 status 决定显示哪些按钮；会议结束后显示返回引导
 import { useState } from 'react'
 import { Button, Space, Popconfirm } from 'antd'
-import { PauseCircleOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons'
+import {
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  StopOutlined,
+  RollbackOutlined,
+  FileDoneOutlined,
+} from '@ant-design/icons'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import type { ControlRequest } from '../types/events.ts'
 
-export function MeetingControls() {
-  const { store, meetingId, controlMeeting } = useMeeting()
+interface MeetingControlsProps {
+  onOpenReport?: () => void
+  onBackToBoard?: () => void
+}
+
+export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControlsProps) {
+  const { store, meetingId, controlMeeting, selectMeeting } = useMeeting()
   const [loading, setLoading] = useState<string | null>(null)
 
   const status = store.meeting?.status
@@ -24,7 +35,44 @@ export function MeetingControls() {
     }
   }
 
-  if (status === 'done' || status === 'aborted') return null
+  const handleBackToBoard = () => {
+    if (onBackToBoard) {
+      onBackToBoard()
+    } else {
+      selectMeeting(null)
+    }
+  }
+
+  // 会议结束/失败/终止状态：显示结束状态提示和操作按钮
+  if (status === 'done' || status === 'aborted' || status === 'failed') {
+    const statusLabel = status === 'done' ? '会议已完成' : status === 'failed' ? '会议已失败' : '会议已终止'
+    return (
+      <div className="meeting-controls meeting-controls--finished">
+        <Space size="small">
+          <span style={{ fontSize: 12, color: 'var(--text-secondary, #8c8c8c)' }}>
+            {statusLabel}
+          </span>
+          {onOpenReport && (
+            <Button
+              size="small"
+              icon={<FileDoneOutlined />}
+              onClick={onOpenReport}
+            >
+              查看报告
+            </Button>
+          )}
+          <Button
+            type="primary"
+            size="small"
+            icon={<RollbackOutlined />}
+            onClick={handleBackToBoard}
+          >
+            返回看板
+          </Button>
+        </Space>
+      </div>
+    )
+  }
 
   const busy = loading !== null
 

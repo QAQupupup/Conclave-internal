@@ -1,4 +1,4 @@
-﻿# ReAct 循环控制器：think → act → observe → think
+# ReAct 循环控制器：think → act → observe → think
 #
 # 设计原则（Claude 交叉评审共识）：
 # - max_iterations 作为一等公民终态：不是异常，是正常的循环终止条件

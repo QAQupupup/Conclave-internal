@@ -404,7 +404,7 @@ export function ReportViewer() {
                   {ext.artifact.attachments.map((att: any, i: number) => (
                     <a
                       key={i}
-                      href={`/api/meetings/${ext.artifact.meeting_id}/attachments/${att.filename}`}
+                      href={`/meetings/${ext.artifact.meeting_id}/attachments/${encodeURIComponent(att.filename)}`}
                       download={att.filename}
                       title={`${att.filename}（${(att.size / 1024).toFixed(1)} KB）`}
                     >

@@ -504,10 +504,12 @@ async def list_meetings_with_status(
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
     result = query_meetings(q=q, limit=limit, offset=offset, tags=tag_list)
+    from app.orchestrator.instant import normalize_mode, FLOW_STANDARD
     items = []
     for m in result["items"]:
         mid = m["id"]
         is_running = mid in _running_tasks and not _running_tasks[mid].done()
+        raw_flow = m.get("payload", {}).get("flow_plan", FLOW_STANDARD)
         items.append({
             "meeting_id": mid,
             "topic": m["topic"],
@@ -516,7 +518,7 @@ async def list_meetings_with_status(
             "created_at": m.get("created_at"),
             "is_running": is_running,
             "tags": m.get("tags", []),
-            "flow_plan": m.get("payload", {}).get("flow_plan", "full"),
+            "flow_plan": normalize_mode(raw_flow),
         })
     return {
         "meetings": items,

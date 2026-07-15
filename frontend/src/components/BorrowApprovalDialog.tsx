@@ -88,14 +88,17 @@ export const BorrowApprovalDialog: FC<Props> = ({ request, onClose }) => {
       onCancel={onClose}
       footer={
         <div className="borrow-approval-dialog-footer">
-          <Button
-            onClick={handleFreeze}
-            disabled={disabled}
-            title="冻结后本次会议不再自动申请借调"
-          >
-            冻结借调
+          <Button onClick={onClose} disabled={disabled}>
+            稍后处理
           </Button>
           <Space>
+            <Button
+              onClick={handleFreeze}
+              disabled={disabled}
+              title="冻结后本次会议不再自动申请借调"
+            >
+              冻结借调
+            </Button>
             <Button onClick={handleReject} disabled={disabled}>拒绝</Button>
             <Button
               type="primary"
@@ -108,8 +111,8 @@ export const BorrowApprovalDialog: FC<Props> = ({ request, onClose }) => {
           </Space>
         </div>
       }
-      closable={false}
-      maskClosable={false}
+      closable={true}
+      maskClosable={true}
     >
       <p className="borrow-approval-dialog-desc">
         主持人检测到当前讨论涉及 <Tag color="blue">{roleName}</Tag> 领域的专业问题，

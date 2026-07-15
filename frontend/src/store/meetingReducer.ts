@@ -413,7 +413,40 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
             meeting: { ...meeting, status: 'failed' as const },
           }
         }
-        // control.ack / loan.requested / loan.resolved / error 等暂不改变核心状态
+        case 'meeting.done': {
+          // instant 模式完成时发布，与 instant.completed 冗余但确保状态一致
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              status: 'done' as const,
+              stage: (ev.payload as { flow?: string })?.flow === 'instant' ? 'produce' as const : meeting.stage,
+            },
+          }
+        }
+        case 'meeting.error': {
+          // 后台任务异常事件
+          const p = ev.payload as { error?: string; message?: string; error_detail?: string }
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              status: 'failed' as const,
+              error_detail: p.error || p.error_detail || p.message || '未知错误',
+            },
+          }
+        }
+        case 'run.started': {
+          // 会议开始运行事件
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              status: 'running' as const,
+            },
+          }
+        }
+        // control.ack / loan.requested / loan.resolved 等暂不改变核心状态
         default:
           return store
       }

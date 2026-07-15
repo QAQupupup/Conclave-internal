@@ -1,4 +1,4 @@
-﻿# 用户偏好（主题等）持久化 API
+# 用户偏好（主题等）持久化 API
 from __future__ import annotations
 
 from typing import Any
