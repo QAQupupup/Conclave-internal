@@ -36,11 +36,11 @@ async def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
             elif isinstance(a, str) and a:
                 adopted_ids.add(a)
 
-        # 构建已验证证据集合（evidence_set 中 supports="supports" 的）
+        # 构建已验证证据集合（evidence_set 中 supports="a" 或 "b" 的为明确支持某方）
         validated_sources: set[str] = set()
         for es in evidence_set:
             for assessment in es.get("assessments", []):
-                if assessment.get("supports") == "supports":
+                if assessment.get("supports") in ("a", "b"):
                     src = assessment.get("source", "")
                     if src:
                         validated_sources.add(src)

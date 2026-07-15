@@ -18,6 +18,7 @@ import {
   resolveCaptcha as apiResolveCaptcha,
   type CaptchaPendingPayload,
 } from '../lib/api.ts'
+import { STORAGE_KEYS } from '../constants.ts'
 
 const { Text, Paragraph } = Typography
 
@@ -35,7 +36,7 @@ function buildSystemWsUrl(): string {
   const base = `${proto}://${window.location.host}/ws/system`
   const params = new URLSearchParams()
   try {
-    const token = localStorage.getItem('conclave.api_token')
+    const token = localStorage.getItem(STORAGE_KEYS.authToken) || localStorage.getItem(STORAGE_KEYS.apiToken)
     if (token) params.set('token', token)
   } catch { /* ignore */ }
   const qs = params.toString()

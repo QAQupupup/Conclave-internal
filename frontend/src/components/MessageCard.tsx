@@ -32,6 +32,14 @@ function roleTagColor(role: MeetingMessage['agent_role']): string {
       return 'blue'
     case 'engineer':
       return 'green'
+    case 'security_expert':
+      return 'red'
+    case 'data_engineer':
+      return 'cyan'
+    case 'ux_designer':
+      return 'magenta'
+    case 'marketing_expert':
+      return 'orange'
     default:
       return 'default'
   }
@@ -46,6 +54,14 @@ function roleClass(role: MeetingMessage['agent_role']): string {
       return 'role-architect'
     case 'engineer':
       return 'role-engineer'
+    case 'security_expert':
+      return 'role-security'
+    case 'data_engineer':
+      return 'role-data'
+    case 'ux_designer':
+      return 'role-ux'
+    case 'marketing_expert':
+      return 'role-marketing'
     default:
       return 'role-default'
   }

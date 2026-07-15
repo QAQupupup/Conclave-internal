@@ -76,8 +76,9 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
         # 如果工具注册表可用，使用 ReactLoop 多轮模式
         if tool_registry is not None:
             try:
+                from app.agents.compute import get_compute
                 react = ReactLoop(
-                    compute=compute,
+                    compute=get_compute(),
                     tools=tool_registry,
                     meeting_id=state.meeting_id,
                 )

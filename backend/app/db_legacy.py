@@ -623,17 +623,30 @@ def save_event(
             _putconn(conn)
 
 
-def load_events(meeting_id: str, from_seq: int = 0) -> list[dict[str, Any]]:
-    """从 PostgreSQL 加载事件，支持增量回放"""
+def load_events(meeting_id: str, from_seq: int = 0, limit: int = 0) -> list[dict[str, Any]]:
+    """从 PostgreSQL 加载事件，支持增量回放。
+    limit=0 表示不限制（增量回放场景）；全量恢复时应传 limit 防止内存暴涨。
+    """
     with _lock:
         conn = _connect()
         try:
-            rows = _exec(conn, 
-                """SELECT seq, meeting_id, type, payload, ts, trace_id
-                FROM events WHERE meeting_id = %s AND seq > %s
-                ORDER BY seq ASC""",
-                (meeting_id, from_seq),
-            ).fetchall()
+            if limit > 0 and from_seq == 0:
+                # 全量恢复：取最近N条（子查询倒序取后再正序排列）
+                rows = _exec(conn, 
+                    """SELECT seq, meeting_id, type, payload, ts, trace_id FROM (
+                        SELECT seq, meeting_id, type, payload, ts, trace_id
+                        FROM events WHERE meeting_id = %s AND seq > %s
+                        ORDER BY seq DESC LIMIT %s
+                    ) t ORDER BY seq ASC""",
+                    (meeting_id, from_seq, limit),
+                ).fetchall()
+            else:
+                rows = _exec(conn, 
+                    """SELECT seq, meeting_id, type, payload, ts, trace_id
+                    FROM events WHERE meeting_id = %s AND seq > %s
+                    ORDER BY seq ASC""",
+                    (meeting_id, from_seq),
+                ).fetchall()
             out = []
             for row in rows:
                 out.append({

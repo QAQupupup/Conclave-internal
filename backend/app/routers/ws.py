@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.events import DomainEvent, bus, make_event
-from app.middleware import _DEV_TOKEN, _check_rate_limit
+from app.middleware import verify_ws_token, _check_rate_limit
 from app.orchestrator.runner import get_state, set_state
 from conclave_core.state import apply_signal
 from app.db_legacy import save_meeting
@@ -22,27 +22,27 @@ router = APIRouter()
 
 # WS 推送配额：每连接每分钟最多 N 条事件，防止恶意/异常客户端撑爆带宽
 WS_MAX_EVENTS_PER_MIN = int(os.environ.get("CONCLAVE_WS_RATE_LIMIT", "600"))
+# WS 队列最大长度：防止慢客户端导致内存无限堆积
+WS_QUEUE_MAXSIZE = int(os.environ.get("CONCLAVE_WS_QUEUE_MAX", "500"))
 _ws_event_log: dict[str, list[float]] = {}  # client_ip -> [timestamp]
 _ws_event_lock = asyncio.Lock()
+# 批量发送配置：同一帧内到达的事件最多等待 BATCH_MAX_WAIT 秒后合并发送
+WS_BATCH_MAX_WAIT = float(os.environ.get("CONCLAVE_WS_BATCH_WAIT", "0.05"))  # 50ms
 
 
-def _check_ws_token(ws: WebSocket) -> bool:
+def _check_ws_token(ws: WebSocket) -> dict | None:
     """WebSocket 连接的 token 认证
 
     HTTP 中间件无法拦截 WebSocket，需在 accept 前手动检查。
     支持 query 参数 ?token=<token>（浏览器 WebSocket API 无法设 header）。
-    [CON-03 修复] 用 hmac.compare_digest 防时序攻击。
-    测试模式下关闭认证。
+    返回用户信息 dict 或 None。
+    测试模式下关闭认证，返回 dev 用户。
     """
     if os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
-        return True
-
-    import hmac
+        return {"username": "test", "role": "admin", "uid": None}
 
     token = ws.query_params.get("token", "")
-    if not token:
-        return False
-    return hmac.compare_digest(token.encode("utf-8"), _DEV_TOKEN.encode("utf-8"))
+    return verify_ws_token(token)
 
 
 async def _check_ws_event_rate(client_ip: str) -> tuple[bool, str]:
@@ -90,7 +90,7 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         await ws.accept()
         await _send_json(ws, {
             "type": "error", "meeting_id": meeting_id,
-            "message": "未授权：请提供有效的 API token",
+            "message": "未授权：请先登录",
         })
         await ws.close(code=4401, reason="Unauthorized")
         return
@@ -143,10 +143,21 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     # 不在 replay 列表中也不触发订阅者，永久丢失。
     # 修复：先 subscribe 到队列，replay 期间产生的新事件进入队列，
     # replay 完成后从队列补发，保证无遗漏。
-    queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue()
+    queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue(maxsize=WS_QUEUE_MAXSIZE)
+    _dropped_count = 0
 
     async def _on_event(event: DomainEvent) -> None:
-        await queue.put(event)
+        nonlocal _dropped_count
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            # 队列满时丢弃最旧事件，腾出空间放新事件
+            try:
+                queue.get_nowait()
+                queue.put_nowait(event)
+                _dropped_count += 1
+            except Exception:
+                pass
 
     unsubscribe = bus.subscribe(meeting_id, _on_event)
 
@@ -322,14 +333,40 @@ async def system_ws(ws: WebSocket) -> None:
         await ws.close(code=4401, reason="Unauthorized")
         return
 
+    # 接入层速率限制（与 meeting_ws 一致）
+    fake_request_ip = ws.headers.get("x-forwarded-for")
+    if fake_request_ip:
+        client_ip = fake_request_ip.split(",")[0].strip()
+    elif ws.client:
+        client_ip = ws.client.host
+    else:
+        client_ip = "unknown"
+    ok, reason = _check_rate_limit(client_ip, is_failed_attempt=False)
+    if not ok:
+        await ws.accept()
+        await _send_json(ws, {"type": "error", "message": f"速率限制：{reason}"})
+        await ws.close(code=4429, reason="Too Many Requests")
+        return
+
     await ws.accept()
 
-    queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue()
+    queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue(maxsize=WS_QUEUE_MAXSIZE)
+    _sys_dropped = 0
 
     async def _on_event(event: DomainEvent) -> None:
-        # 接受 system.* 和 captcha.* 事件（captcha 事件用于前端值守弹窗）
-        if event.type.startswith("system.") or event.type.startswith("captcha."):
-            await queue.put(event)
+        nonlocal _sys_dropped
+        # 接受 system.* 和 captcha.* / net_auth.* / service.* 事件
+        if event.type.startswith("system.") or event.type.startswith("captcha.") \
+                or event.type.startswith("net_auth.") or event.type.startswith("service."):
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                    queue.put_nowait(event)
+                    _sys_dropped += 1
+                except Exception:
+                    pass
 
     # 订阅通配（bus 已实现 * 通配订阅）
     unsubscribe = bus.subscribe("*", _on_event)

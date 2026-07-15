@@ -24,7 +24,7 @@ export type Stage =
   | 'produce'
 
 /** 会议运行状态 */
-export type MeetingStatus = 'running' | 'paused' | 'aborted' | 'done'
+export type MeetingStatus = 'running' | 'paused' | 'aborted' | 'done' | 'failed'
 
 /** 冲突类型 */
 export type ConflictType = 'factual' | 'preference' | 'scope'
@@ -272,7 +272,7 @@ export interface MeetingCreatedPayload {
 
 export interface StageChangedPayload {
   meeting_id: string
-  from: Stage
+  from: Stage | null
   to: Stage
 }
 

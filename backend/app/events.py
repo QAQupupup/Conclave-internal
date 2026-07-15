@@ -1,4 +1,4 @@
-﻿# §4 WebSocket 事件：DomainEvent + InMemoryEventBus
+# §4 WebSocket 事件：DomainEvent + InMemoryEventBus
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -45,16 +45,28 @@ class InMemoryEventBus:
         """发布事件：写入 PostgreSQL + 内存缓存，广播给订阅者"""
         # 持久化到 PostgreSQL 并获取自增 seq
         from app.db_legacy import save_event
+        import logging
+        logger = logging.getLogger(__name__)
         ts_str = event.ts.isoformat() if hasattr(event.ts, "isoformat") else str(event.ts)
-        db_seq = save_event(
-            meeting_id=event.meeting_id,
-            event_type=event.type,
-            payload=event.payload,
-            ts=ts_str,
-            trace_id=event.trace_id,
-        )
-        # 用 PostgreSQL 的自增 seq 作为全局唯一序列号
-        event.seq = db_seq
+        try:
+            db_seq = save_event(
+                meeting_id=event.meeting_id,
+                event_type=event.type,
+                payload=event.payload,
+                ts=ts_str,
+                trace_id=event.trace_id,
+            )
+            # 用 PostgreSQL 的自增 seq 作为全局唯一序列号
+            event.seq = db_seq
+        except Exception as e:
+            # 持久化失败不阻止事件广播，但记录错误日志
+            logger.error(
+                "Failed to persist event to DB: meeting_id=%s type=%s error=%s: %s",
+                event.meeting_id, event.type, type(e).__name__, str(e)[:200],
+            )
+            # 使用内存计数器作为兜底 seq，避免 seq=0 导致前端混乱
+            fallback = self._history.get(event.meeting_id, [])
+            event.seq = (fallback[-1].seq + 1) if fallback else 1
 
         # 写入内存历史，超限裁剪最旧事件
         history = self._history.setdefault(event.meeting_id, [])
@@ -67,14 +79,20 @@ class InMemoryEventBus:
         for sub in list(self._subs.get(event.meeting_id, [])):
             try:
                 await sub(event)
-            except Exception:  # noqa: BLE001 单个订阅者失败不影响其它
-                pass
+            except Exception as e:  # noqa: BLE001 单个订阅者失败不影响其它
+                logger.warning(
+                    "Event subscriber failed for meeting=%s type=%s: %s: %s",
+                    event.meeting_id, event.type, type(e).__name__, str(e)[:200],
+                )
         # 广播给通配订阅者
         for sub in list(self._subs.get("*", [])):
             try:
                 await sub(event)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Wildcard event subscriber failed for meeting=%s type=%s: %s: %s",
+                    event.meeting_id, event.type, type(e).__name__, str(e)[:200],
+                )
 
     def subscribe(self, meeting_id: str, handler: Subscriber) -> Callable[[], None]:
         """订阅指定会议的事件，返回取消订阅函数"""
@@ -125,9 +143,9 @@ class InMemoryEventBus:
         self._history.pop(meeting_id, None)
 
     def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
-        """从 PostgreSQL 恢复事件到内存缓存"""
+        """从 PostgreSQL 恢复事件到内存缓存（限制最近 _MAX_HISTORY_PER_MEETING 条）"""
         from app.db_legacy import load_events
-        rows = load_events(meeting_id)
+        rows = load_events(meeting_id, from_seq=0, limit=self._MAX_HISTORY_PER_MEETING)
         events = []
         for row in rows:
             try:

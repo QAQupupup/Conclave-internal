@@ -1,9 +1,15 @@
-"""Fast Path: 简单执行型任务跳过六阶段管线，直接单 Agent 处理。
+"""Instant 模式：简单执行型任务跳过六阶段管线，直接单 Agent 即时回答。
 
 分流决策核心原则：
 - 不用关键词匹配（"简单来讲" ≠ 任务简单，"帮我" ≠ 简单查询）
 - 向 LLM 发送 Conclave 完整系统上下文（能力、模式、约束），让 LLM 基于语义理解自主决策
 - 系统提示词（Conclave 身份）→ 用户提示词（原始请求）→ 修正覆盖（API 显式指定）
+
+模式枚举：
+- instant: 即时回答模式（单 Agent，跳过六阶段辩论，直接回答）
+- standard: 标准会议模式（六阶段多 Agent 辩论，产出完整交付物）
+- plan: 规划模式（未来扩展，当前映射到 standard）
+- simple: 简单任务（未来扩展，当前映射到 instant）
 """
 from __future__ import annotations
 
@@ -17,7 +23,36 @@ from app.orchestrator.system_prompt import (
     parse_classification_result,
 )
 
-logger = get_logger("orchestrator.fast_path")
+logger = get_logger("orchestrator.instant")
+
+
+# 会议流模式枚举值
+FLOW_INSTANT = "instant"
+FLOW_STANDARD = "standard"
+FLOW_PLAN = "plan"
+FLOW_SIMPLE = "simple"
+
+# 向后兼容的旧名称映射（API 可能传 "fast"）
+_LEGACY_MODE_MAP = {
+    "fast": FLOW_INSTANT,
+    "fast_path": FLOW_INSTANT,
+    "deep_think": FLOW_STANDARD,
+    "quick": FLOW_INSTANT,
+    "full": FLOW_STANDARD,
+}
+
+
+def normalize_mode(mode: str | None) -> str:
+    """将任意模式字符串标准化为枚举值。"""
+    if not mode:
+        return FLOW_STANDARD
+    mode_lower = mode.lower().strip()
+    return _LEGACY_MODE_MAP.get(mode_lower, mode_lower)
+
+
+def is_instant_mode(mode: str | None) -> bool:
+    """判断是否为即时回答模式。"""
+    return normalize_mode(mode) in (FLOW_INSTANT, FLOW_SIMPLE)
 
 
 async def classify_intent_async(
@@ -33,10 +68,10 @@ async def classify_intent_async(
 
     Args:
         query: 用户议题文本（原始，不修改）
-        override_mode: API 显式指定的 flow_plan（如 "fast"），为空时无覆盖
+        override_mode: API 显式指定的 flow_plan（如 "instant"），为空时无覆盖
 
     Returns:
-        'fast_path'、'deep_think'、'plan' 或 'simple'
+        'instant'、'standard'、'plan' 或 'simple'
     """
     from app.agents.compute import get_compute, ThinkRequest
 
@@ -53,7 +88,7 @@ async def classify_intent_async(
         f"{user_prompt}\n\n"
         f"─── 输出格式要求 ───\n"
         f"请仅输出一个 JSON 对象，不要输出其他文字：\n"
-        f'{{"mode": "fast_path|deep_think|plan|simple", "reason": "简短说明选择此模式的原因"}}'
+        f'{{"mode": "instant|standard|plan|simple", "reason": "简短说明选择此模式的原因"}}'
     )
 
     try:
@@ -76,7 +111,7 @@ async def classify_intent_async(
                 result_text = str(resp.result)
 
             parsed = parse_classification_result(result_text)
-            mode = parsed["mode"]
+            mode = normalize_mode(parsed.get("mode", FLOW_STANDARD))
             reason = parsed.get("reason", "")
             logger.info(
                 "意图分类: mode=%s, reason=%s, query=%s",
@@ -85,13 +120,13 @@ async def classify_intent_async(
             return mode
 
     except Exception as e:
-        logger.warning("LLM 意图分类失败，默认走 deep_think: %s", e)
+        logger.warning("LLM 意图分类失败，默认走 standard: %s", e)
 
-    return "deep_think"
+    return FLOW_STANDARD
 
 
-async def run_fast_path(query: str, state: MeetingState) -> MeetingState:
-    """执行快速路径：单次 LLM 调用，以主持人身份直接回答。
+async def run_instant(query: str, state: MeetingState) -> MeetingState:
+    """执行即时回答模式：单次 LLM 调用，以主持人身份直接回答。
 
     适用于简单查询/执行型任务，跳过六阶段管线。
     结果写入 state.artifact，状态直接置为 DONE。
@@ -122,14 +157,14 @@ async def run_fast_path(query: str, state: MeetingState) -> MeetingState:
         f"- 如果需要，使用列表或分点说明，分点前加序号\n"
         f"- 保持专业、简洁、实用，但内容要足够详细有深度\n"
         f"- 如果用户请求涉及设计/规划/分析，给出结构化的方案\n"
-        f"- 输出格式：纯文本或 Markdown"  # 不用 json_object，避免 Qwen 不兼容
+        f"- 输出格式：纯文本或 Markdown"
     )
 
     try:
         compute = get_compute()
         resp = await compute.think(ThinkRequest(
             agent_role="moderator",
-            stage="fast_path",
+            stage="instant",
             prompt=prompt,
             temperature=0.3,
             seed=settings.llm_seed,
@@ -154,33 +189,35 @@ async def run_fast_path(query: str, state: MeetingState) -> MeetingState:
             if not answer:
                 answer = "（无法生成回答）"
 
-            # 写入 artifact（快速路径产出）
+            # 写入 artifact（即时模式产出）
             state.artifact = {
-                "title": f"快速回答：{query[:50]}",
+                "title": f"即时回答：{query[:50]}",
                 "answer": answer,
-                "flow": "fast_path",
+                "flow": FLOW_INSTANT,
                 "latency_ms": int(elapsed * 1000),
             }
             state.status = MeetingStatus.DONE
             state.completed_at = datetime.now(timezone.utc)
-            state.flow_plan = "fast"
+            state.flow_plan = FLOW_INSTANT
 
             # 发布事件通知前端
             await bus.publish(
                 make_event(
-                    "fast_path.completed",
+                    "instant.completed",
                     state.meeting_id,
                     {
                         "meeting_id": state.meeting_id,
                         "artifact": state.artifact,
                         "elapsed_ms": int(elapsed * 1000),
+                        "answer": answer,
+                        "deliverable_type": state.deliverable_type,
                     },
                 )
             )
 
             log_bus.info(
-                f"Fast Path 完成: meeting={state.meeting_id}, elapsed={elapsed:.2f}s",
-                logger="orchestrator.fast_path",
+                f"即时模式完成: meeting={state.meeting_id}, elapsed={elapsed:.2f}s",
+                logger="orchestrator.instant",
                 extra={
                     "meeting_id": state.meeting_id,
                     "elapsed_s": round(elapsed, 2),
@@ -188,37 +225,37 @@ async def run_fast_path(query: str, state: MeetingState) -> MeetingState:
                 },
             )
             logger.info(
-                "Fast Path 完成: meeting=%s, elapsed=%.2fs",
+                "即时模式完成: meeting=%s, elapsed=%.2fs",
                 state.meeting_id, elapsed,
             )
         else:
             # LLM 调用失败
             elapsed = time.monotonic() - t0
             state.status = MeetingStatus.FAILED
-            state.error_detail = f"Fast Path LLM 调用失败: {resp.error}"
+            state.error_detail = f"即时模式 LLM 调用失败: {resp.error}"
             state.completed_at = datetime.now(timezone.utc)
             logger.warning(
-                "Fast Path LLM 调用失败: meeting=%s, error=%s",
+                "即时模式 LLM 调用失败: meeting=%s, error=%s",
                 state.meeting_id, resp.error,
             )
             log_bus.warning(
-                f"Fast Path LLM 失败: {resp.error}",
-                logger="orchestrator.fast_path",
+                f"即时模式 LLM 失败: {resp.error}",
+                logger="orchestrator.instant",
                 extra={"meeting_id": state.meeting_id, "error": resp.error},
             )
 
     except Exception as e:
         elapsed = time.monotonic() - t0
         state.status = MeetingStatus.FAILED
-        state.error_detail = f"Fast Path 执行异常: {str(e)[:2000]}"
+        state.error_detail = f"即时模式执行异常: {str(e)[:2000]}"
         state.completed_at = datetime.now(timezone.utc)
         logger.error(
-            "Fast Path 执行异常: meeting=%s, error=%s",
+            "即时模式执行异常: meeting=%s, error=%s",
             state.meeting_id, e, exc_info=True,
         )
         log_bus.error(
-            f"Fast Path 异常: {e}",
-            logger="orchestrator.fast_path",
+            f"即时模式异常: {e}",
+            logger="orchestrator.instant",
             extra={"meeting_id": state.meeting_id, "error": str(e)[:500]},
         )
 

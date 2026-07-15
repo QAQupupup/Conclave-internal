@@ -110,9 +110,35 @@ BLOCKED_PATTERNS: list[str] = [
     r"\brm\s+-rf\s+/",          # rm -rf /
     r"\bdd\s+if=",              # 磁盘擦除
     r":\(\)\s*\{.*\};:",         # fork bomb
-    r"curl\s+.*\|\s*(bash|sh)",  # 远程脚本执行
-    r"wget\s+.*\|\s*(bash|sh)",
+    r"curl\s+.*\|\s*(bash|sh|zsh|ksh)",  # 远程脚本执行
+    r"wget\s+.*\|\s*(bash|sh|zsh|ksh)",
     r"\bchmod\s+777\s+/",       # 全开权限到根目录
+    r"\bpython(?:3)?\s+-c\s+['\"]",  # python -c "..." 内联代码（阻止直接内联执行）
+    r"\bnode\s+-e\s+['\"]",     # node -e "..."
+    r"\bperl\s+-e\s+['\"]",     # perl -e "..."
+    r"\bruby\s+-e\s+['\"]",     # ruby -e "..."
+    r">\s*/dev/",               # 写入块设备
+    r"\bmkfs\b",                # 格式化磁盘
+    r"\b(?:shutdown|reboot|halt|poweroff)\b",  # 系统关机/重启
+    r"\b(?:iptables|ufw)\b",    # 防火墙操作
+    r"\b(?:apt|apt-get|yum|dnf|apk|brew)\s+(?:install|remove|purge)\b",  # 包管理器修改
+    r"/etc/(?:passwd|shadow|sudoers)",  # 访问敏感系统文件
+    r"\bssh\b",                 # SSH 连接
+    r"\bnc\b.*-e",              # netcat 反弹 shell
+    r"\bbase64\b.*\|.*sh",      # base64 解码后管道执行
+    r"\beval\b",                # eval 命令注入
+    r"\$\(",                    # 命令替换 $(...)
+    r"`[^`]+`",                 # 反引号命令替换
+    r"\.\s+/etc/",              # source /etc/ 下文件
+    r"\bsudo\b",                # sudo 提权
+    r"\bsu\s+-",                # su 切换用户
+    r"\bchown\b",               # 改变文件所有者
+    r"\bmount\b",               # 挂载文件系统
+    r"\bumount\b",              # 卸载文件系统
+    r">\s*/etc/",               # 写入系统配置目录
+    r"\bkill\s+-9\s+-1\b",      # 杀所有进程
+    r">/proc/",                 # 写入procfs
+    r">\s*/sys/",               # 写入sysfs
 ]
 
 # Docker socket 路径（容器内挂载位置）
@@ -455,18 +481,47 @@ async def _run_on_host(
     workspace_root: Path,
     timeout: int,
 ) -> ExecResult:
-    """降级方案：直接在宿主机执行（不安全，仅作 fallback）"""
+    """降级方案：直接在宿主机执行（最高安全风险，仅在无Docker时作fallback）
+
+    安全措施：
+    - code 执行：通过 sys.executable -c 执行，但代码本身由 LLM 生成，风险高
+    - command 执行：使用 shlex.split 解析后通过 create_subprocess_exec list 参数执行，
+      避免 shell 注入；且命令已过 _check_command_safety 白名单+黑名单检查
+    - 执行结果限制在 workspace_root 目录下（cwd 设置）
+    - 超时 kill 防止挂死
+    """
+    import shlex as _shlex
+    _tmp_code_file: str | None = None
     if code is not None:
+        # 代码执行：写入临时文件后执行，避免命令行长度限制和转义问题
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', dir=str(workspace_root),
+                                          delete=False, encoding='utf-8') as tf:
+            tf.write(code)
+            _tmp_code_file = tf.name
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-c", code,
+            sys.executable, _tmp_code_file,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace_root),
         )
     else:
         assert command is not None
-        proc = await asyncio.create_subprocess_shell(
-            command,
+        # 安全解析命令字符串为 argv list，避免 shell=True
+        try:
+            argv = _shlex.split(command)
+        except ValueError:
+            return ExecResult(
+                exit_code=127, stdout="", stderr="命令解析失败：引号不匹配",
+                sandboxed=False, fallback_reason="host_fallback_parse_error",
+            )
+        if not argv:
+            return ExecResult(
+                exit_code=127, stdout="", stderr="空命令",
+                sandboxed=False, fallback_reason="host_fallback_empty",
+            )
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace_root),
@@ -480,6 +535,13 @@ async def _run_on_host(
         proc.kill()
         await proc.wait()
         raise TimeoutError(f"宿主机执行超时（{timeout}s）")
+    finally:
+        # 清理临时代码文件
+        if _tmp_code_file:
+            try:
+                os.unlink(_tmp_code_file)
+            except OSError:
+                pass
 
     return ExecResult(
         exit_code=proc.returncode or 0,

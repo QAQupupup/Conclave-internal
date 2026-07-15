@@ -1,7 +1,7 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
-import { useState, lazy, Suspense } from 'react'
-import { ConfigProvider, Tabs, Button, Tooltip, Typography } from 'antd'
+import { useState, lazy, Suspense, useCallback } from 'react'
+import { ConfigProvider, Tabs, Button, Tooltip, Typography, Drawer, Divider } from 'antd'
 import {
   TeamOutlined,
   CodeOutlined,
@@ -12,20 +12,17 @@ import {
   UpOutlined,
   DownOutlined,
   MenuFoldOutlined,
-  UnorderedListOutlined,
-  SearchOutlined,
-  ShopOutlined,
-  FileTextOutlined,
-  DollarOutlined,
-  AppstoreOutlined,
-  MessageOutlined,
+  HomeOutlined,
+  LogoutOutlined,
 } from '@ant-design/icons'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
+import { AuthProvider, useAuth } from './store/AuthContext.tsx'
 import { ThemeProvider, useTheme } from './store/ThemeContext.tsx'
 import { getAntdTheme } from './theme/antdTheme.ts'
 import { usePersistentState } from './hooks/usePersistentState.ts'
 import { useRouter } from './hooks/useRouter.ts'
 import { navigate } from './lib/router.ts'
+import { LoginPage } from './pages/LoginPage.tsx'
 import { StageIndicator } from './components/StageIndicator.tsx'
 import { MeetingControls } from './components/MeetingControls.tsx'
 import { ChatPanel } from './components/ChatPanel.tsx'
@@ -41,12 +38,11 @@ import { MeetingSidebar } from './components/MeetingSidebar.tsx'
 import { ThemeSettings } from './components/ThemeSettings.tsx'
 import { SettingsPanel } from './components/SettingsPanel.tsx'
 import { LandingPage } from './components/LandingPage.tsx'
-import { FloatingBadges, PanelModal } from './components/FloatingBadges.tsx'
+import { FloatingBadges, type PanelToggleState } from './components/FloatingBadges.tsx'
 import { DrawerMenu } from './components/DrawerMenu.tsx'
 import { PanelErrorBoundary } from './components/ErrorBoundary.tsx'
-import { LogPanel } from './components/LogPanel.tsx'
+import { LogPanelContent } from './components/LogPanel.tsx'
 import { GuardButton } from './components/GuardButton.tsx'
-import type { BadgeItem } from './components/FloatingBadges.tsx'
 
 // 代码分割：重型组件按需加载（Monaco/echarts/d3/xterm 不进首屏 bundle）
 const AgentGraph = lazy(() => import('./components/AgentGraph.tsx').then(m => ({ default: m.AgentGraph })))
@@ -59,81 +55,104 @@ const TaskBoard = lazy(() => import('./components/TaskBoard.tsx').then(m => ({ d
 /** 全局视图切换：会议 / 工作区 */
 type ViewTab = 'meeting' | 'workspace'
 
-/** 会议主视图：聊天流全宽 + 浮动徽标展开面板 */
+/** 会议主视图：聊天流全宽 + 顶部工具栏按钮 + 右侧 Drawer 面板 */
 function MeetingView({
   onOpenInWorkspace,
 }: {
   onOpenInWorkspace?: (filePath: string) => void
 }) {
   const { meetingId, store } = useMeeting()
+  const meeting = store.meeting
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null)
   const [borrowOpen, setBorrowOpen] = useState(false)
-  const pendingBorrowRequest = store.meeting?.pending_borrow_request ?? null
+  const pendingBorrowRequest = meeting?.pending_borrow_request ?? null
   const [graphCollapsed, setGraphCollapsed] = usePersistentState<boolean>(
     'conclave-graph-collapsed',
     false,
   )
-  const [activeBadge, setActiveBadge] = useState('')
 
-  const badgeItems: BadgeItem[] = [
-    { id: 'topic', label: '议题', icon: <UnorderedListOutlined /> },
-    { id: 'evidence', label: '证据', icon: <SearchOutlined /> },
-    { id: 'artifact', label: '产出', icon: <ShopOutlined /> },
-    { id: 'report', label: '报告', icon: <FileTextOutlined /> },
-    { id: 'token', label: 'Token', icon: <DollarOutlined /> },
-    { id: 'model', label: '模型', icon: <AppstoreOutlined /> },
-    { id: 'intervene', label: '介入', icon: <MessageOutlined /> },
-  ]
+  // 面板开关状态（互斥：同一时间只开一个 Drawer）
+  const [panels, setPanels] = useState<PanelToggleState>({
+    topic: false, evidence: false, output: false, report: false,
+    token: false, model: false, intervention: false, logs: false,
+  })
 
-  const badgeLabels: Record<string, string> = {
-    topic: '议题与团队',
-    evidence: '证据与裁决',
-    artifact: '产出物',
-    report: '会议报告',
-    token: 'Token 消耗',
-    model: '模型设置',
-    intervene: '介入对话',
+  const togglePanel = useCallback((key: keyof PanelToggleState) => {
+    setPanels(prev => {
+      const next: PanelToggleState = {
+        topic: false, evidence: false, output: false, report: false,
+        token: false, model: false, intervention: false, logs: false,
+      }
+      next[key] = !prev[key]
+      return next
+    })
+  }, [])
+
+  // ESC 关闭 Drawer
+  const closeDrawer = useCallback(() => {
+    setPanels({
+      topic: false, evidence: false, output: false, report: false,
+      token: false, model: false, intervention: false, logs: false,
+    })
+  }, [])
+
+  const pendingBorrow = !!pendingBorrowRequest
+  const interventionCount = (meeting?.intervention_messages ?? []).filter(
+    (m: { reply_to_id?: string | null; sender?: string }) => !m.reply_to_id && m.sender === 'user',
+  ).length
+
+  const activeDrawerKey = (Object.keys(panels) as Array<keyof PanelToggleState>).find(k => panels[k])
+  const drawerTitles: Record<keyof PanelToggleState, string> = {
+    topic: '议题聚焦',
+    evidence: '证据面板',
+    output: '产出物',
+    report: '最终报告',
+    token: 'Token 监控',
+    model: '模型调度',
+    intervention: '介入申请',
+    logs: '实时日志',
   }
 
-  const renderPanelContent = (id: string) => {
-    const wrap = (panelId: string, node: React.ReactNode) => (
-      <PanelErrorBoundary panel={panelId}>{node}</PanelErrorBoundary>
+  const drawerWidth = activeDrawerKey === 'logs' ? 600
+    : activeDrawerKey === 'output' || activeDrawerKey === 'token' ? 500
+    : 440
+
+  const wrap = (panelId: string, node: React.ReactNode) => (
+    <PanelErrorBoundary panel={panelId}>{node}</PanelErrorBoundary>
+  )
+
+  const renderDrawerContent = () => {
+    if (panels.topic) return wrap('topic', <TopicPanel />)
+    if (panels.evidence) return wrap('evidence',
+      <EvidencePanel selectedConflictId={selectedConflictId} onSelectConflict={setSelectedConflictId} />,
     )
-    switch (id) {
-      case 'topic':
-        return wrap('topic', <TopicPanel />)
-      case 'evidence':
-        return wrap('evidence',
-          <EvidencePanel
-            selectedConflictId={selectedConflictId}
-            onSelectConflict={setSelectedConflictId}
-          />,
-        )
-      case 'artifact':
-        return wrap('artifact',
-          <ArtifactPanel
-            onOpenBorrow={() => setBorrowOpen(true)}
-            onOpenInWorkspace={onOpenInWorkspace}
-          />,
-        )
-      case 'report':
-        return wrap('report', <Suspense fallback={<div className="suspense-fallback">加载报告…</div>}><ReportViewer /></Suspense>)
-      case 'token':
-        return wrap('token', <TokenPanel />)
-      case 'model':
-        return wrap('model', <ModelSelector meetingId={meetingId} showHeader />)
-      case 'intervene':
-        return wrap('intervene', <IntervenePanel onClose={() => setActiveBadge('')} />)
-      default:
-        return null
-    }
+    if (panels.output) return wrap('output',
+      <ArtifactPanel onOpenBorrow={() => setBorrowOpen(true)} onOpenInWorkspace={onOpenInWorkspace} />,
+    )
+    if (panels.report) return wrap('report',
+      <Suspense fallback={<div className="suspense-fallback">加载报告…</div>}><ReportViewer /></Suspense>,
+    )
+    if (panels.token) return wrap('token', <TokenPanel />)
+    if (panels.model) return wrap('model', <ModelSelector meetingId={meetingId} showHeader />)
+    if (panels.intervention) return wrap('intervene', <IntervenePanel onClose={closeDrawer} />)
+    if (panels.logs) return wrap('logs', <LogPanelContent embedded />)
+    return null
   }
 
   return (
     <div className={`meeting-view${graphCollapsed ? ' graph-collapsed' : ''}`}>
       <div className="meeting-top-bar">
         <StageIndicator />
-        <MeetingControls />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <FloatingBadges
+            panels={panels}
+            onToggle={togglePanel}
+            pendingBorrow={pendingBorrow}
+            interventionCount={interventionCount}
+          />
+          <div className="button-separator" style={{ width: 1, height: 20, background: 'var(--border-color, #e5e7eb)', margin: '0 4px' }} />
+          <MeetingControls />
+        </div>
       </div>
 
       <div className="app-layout">
@@ -154,19 +173,20 @@ function MeetingView({
             <ChatPanel onSelectRef={(ref) => setSelectedConflictId(ref)} />
           </div>
         </div>
-        <FloatingBadges
-          badges={badgeItems}
-          activeId={activeBadge || null}
-          onSelect={setActiveBadge}
-        />
 
-        <PanelModal
-          open={activeBadge !== ''}
-          title={badgeLabels[activeBadge] || ''}
-          onClose={() => setActiveBadge('')}
+        {/* 右侧 Drawer 面板（互斥打开，mask=false 不遮挡聊天区） */}
+        <Drawer
+          title={activeDrawerKey ? drawerTitles[activeDrawerKey] : ''}
+          placement="right"
+          width={drawerWidth}
+          open={!!activeDrawerKey}
+          onClose={closeDrawer}
+          mask={false}
+          styles={{ body: { padding: 16, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' } }}
+          zIndex={varZDrawer()}
         >
-          {activeBadge ? renderPanelContent(activeBadge) : null}
-        </PanelModal>
+          {renderDrawerContent()}
+        </Drawer>
 
         <BorrowDialog open={borrowOpen} onClose={() => setBorrowOpen(false)} />
         <BorrowApprovalDialog
@@ -176,6 +196,14 @@ function MeetingView({
       </div>
     </div>
   )
+}
+
+/** 读取 CSS 变量中 --z-drawer 的值，用于 AntD Drawer zIndex */
+function varZDrawer(): number {
+  if (typeof window === 'undefined') return 200
+  const val = getComputedStyle(document.documentElement).getPropertyValue('--z-drawer').trim()
+  const n = parseInt(val, 10)
+  return isNaN(n) ? 200 : n
 }
 
 /** 工作区视图：文件树 + 编辑器 + 终端 */
@@ -210,6 +238,7 @@ function CollapsedSidebar({ onExpand }: { onExpand: () => void }) {
 /** 根据 URL path 切换三层视图：/ → 封面，/board → 看板，/models → 模型管理，/meeting/:id → 会议 */
 function AppShell() {
   const { meetingId, store, selectMeeting } = useMeeting()
+  const { user, logout, isAuthenticated, loading: authLoading } = useAuth()
   const { path } = useRouter()
   const [tab, setTab] = useState<ViewTab>('meeting')
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState<boolean>(
@@ -226,7 +255,17 @@ function AppShell() {
     setTab('workspace')
   }
 
-  // 第一层：封面页（仅 / 路由）—— CaptchaGuard 由外层 CaptchaGuardLayer 控制不在首页显示
+  // 认证加载中：显示空白（避免闪烁）
+  if (authLoading) {
+    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+  }
+
+  // 未登录：显示登录页
+  if (!isAuthenticated) {
+    return <LoginPage />
+  }
+
+  // 第一层：封面页（仅 / 路由）
   if (path === '/') {
     return <LandingPage onEnter={() => navigate('/board')} />
   }
@@ -234,11 +273,12 @@ function AppShell() {
   // 第二层：看板/运维面板/模型管理（无 meetingId，有左侧抽屉菜单）
   if (!meetingId) {
     const pageTitles: Record<string, string> = {
-      '/dashboard': '会议看板',
+      '/dashboard': '运维面板',
       '/models': '模型管理',
       '/ops': '运维面板',
     }
-    const pageTitle = pageTitles[path] || '页面'
+    const pageTitle = pageTitles[path] || '会议看板'
+    const breadcrumbText = path === '/board' ? '会议看板' : `会议看板 / ${pageTitle}`
     return (
       <div className="app-shell board-shell">
         <DrawerMenu currentPath={path} />
@@ -248,10 +288,12 @@ function AppShell() {
             <div className="app-page-header-left">
               <Typography.Title level={4} className="app-page-title">{pageTitle}</Typography.Title>
               <div className="app-page-breadcrumb">
-                会议看板 / {pageTitle}
+                {breadcrumbText}
               </div>
             </div>
-            <div className="toolbar-button-group">
+            <div className="toolbar-button-group" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <GuardButton />
+              <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
               <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
                 <Button type="text" size="small"
                   icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
@@ -259,11 +301,18 @@ function AppShell() {
               </Tooltip>
               <Tooltip title="主题设置">
                 <Button type="text" size="small" icon={<SkinOutlined />}
-                  onClick={() => setThemeOpen(true)}>主题</Button>
+                  onClick={() => setThemeOpen(true)} />
               </Tooltip>
               <Tooltip title="设置">
                 <Button type="text" size="small" icon={<SettingOutlined />}
-                  onClick={() => setSettingsOpen(true)}>设置</Button>
+                  onClick={() => setSettingsOpen(true)} />
+              </Tooltip>
+              <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
+              <span style={{ fontSize: 12, color: 'var(--text-secondary, #8c8c8c)', marginRight: 4 }}>
+                {user?.display_name || user?.username}
+              </span>
+              <Tooltip title="退出登录">
+                <Button type="text" size="small" icon={<LogoutOutlined />} onClick={logout} />
               </Tooltip>
             </div>
           </div>
@@ -285,6 +334,10 @@ function AppShell() {
   }
 
   // 第三层：会议视图（/meeting/:id，侧栏 + 主体）
+  const topic = store.meeting?.topic
+    ? (store.meeting.topic.length > 30 ? store.meeting.topic.slice(0, 30) + '…' : store.meeting.topic)
+    : meetingId
+
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
@@ -299,21 +352,20 @@ function AppShell() {
         )}
       </aside>
       <div className="app-main">
-        {/* 会议级统一导航栏：面包屑 + 返回 + 工具栏合为一行 */}
+        {/* 会议级统一导航栏：面包屑 + 值守 + 主题/设置 */}
         <div className="app-meeting-navbar">
-          <div className="breadcrumb-area">
-            <a className="app-breadcrumb-link"
-               onClick={() => { selectMeeting(null); navigate('/board') }}>
-              会议看板
-            </a>
+          <div className="breadcrumb-area" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <HomeOutlined
+              style={{ color: 'var(--text-secondary, #6b7280)', fontSize: 13, cursor: 'pointer' }}
+              onClick={() => { selectMeeting(null); navigate('/board') }}
+              title="返回会议看板"
+            />
             <span className="app-breadcrumb-sep">/</span>
-            <span className="app-breadcrumb-topic">
-              {store.meeting?.topic
-                ? (store.meeting.topic.length > 30 ? store.meeting.topic.slice(0, 30) + '…' : store.meeting.topic)
-                : meetingId}
-            </span>
+            <span className="app-breadcrumb-topic" title={store.meeting?.topic}>{topic}</span>
           </div>
-          <div className="app-meeting-actions">
+          <div className="app-meeting-actions" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <GuardButton />
+            <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
             <Tooltip title={mode === 'light' ? '切换到暗色' : '切换到亮色'}>
               <Button type="text" size="small"
                 icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
@@ -326,6 +378,13 @@ function AppShell() {
             <Tooltip title="LLM 设置">
               <Button type="text" size="small" icon={<SettingOutlined />}
                 onClick={() => setSettingsOpen(true)} />
+            </Tooltip>
+            <Divider type="vertical" style={{ height: 16, margin: '0 4px' }} />
+            <span style={{ fontSize: 12, color: 'var(--text-secondary, #8c8c8c)', marginRight: 4 }}>
+              {user?.display_name || user?.username}
+            </span>
+            <Tooltip title="退出登录">
+              <Button type="text" size="small" icon={<LogoutOutlined />} onClick={() => { logout(); navigate('/'); }} />
             </Tooltip>
           </div>
         </div>
@@ -348,7 +407,6 @@ function AppShell() {
       </div>
       {themeOpen && <ThemeSettings onClose={() => setThemeOpen(false)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
-      <LogPanel />
     </div>
   )
 }
@@ -363,19 +421,15 @@ function AntdThemeWrapper({ children }: { children: React.ReactNode }) {
   )
 }
 
-function CaptchaGuardLayer() {
-  const { path } = useRouter()
-  return <GuardButton path={path} />
-}
-
 export default function App() {
   return (
     <ThemeProvider>
       <AntdThemeWrapper>
-        <MeetingProvider>
-          <AppShell />
-        </MeetingProvider>
-        <CaptchaGuardLayer />
+        <AuthProvider>
+          <MeetingProvider>
+            <AppShell />
+          </MeetingProvider>
+        </AuthProvider>
       </AntdThemeWrapper>
     </ThemeProvider>
   )

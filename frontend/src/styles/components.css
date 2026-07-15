@@ -1,4 +1,4 @@
-﻿  letter-spacing: 0.02em;
+  letter-spacing: 0.02em;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -1506,78 +1506,8 @@
   overflow-y: auto;
 }
 
-/* ============================ 浮动徽标 ============================ */
-.floating-badges {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  z-index: 1001;
-}
-.floating-badge {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  padding: 0;
-  font-family: inherit;
-}
-.floating-badge:hover {
-  background: var(--bg-hover);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.floating-badge.active {
-  background: var(--accent-light);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.floating-badge-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  color: inherit;
-}
-.floating-badge-tooltip {
-  position: absolute;
-  right: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
-  background: var(--text);
-  color: var(--bg);
-  font-size: 12px;
-  line-height: 1;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-  pointer-events: none;
-  animation: fade-in 0.12s ease;
-}
-.floating-badge-dot {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  width: 8px;
-  height: 8px;
-  background: var(--accent);
-  border-radius: 50%;
-  border: 2px solid var(--bg-elev);
-  font-size: 0;
-  line-height: 0;
-}
+/* ============================ 浮动徽标（已重构为顶部工具栏，保留空规则避免引用错误） ============================ */
+/* 旧版 fixed 浮动徽章已废弃，功能入口已整合到 meeting-top-bar 的 panel-toolbar 中 */
 
 /* ============================ 面板弹窗 ============================ */
 .panel-modal {
@@ -2916,15 +2846,25 @@
   max-width: 680px;
 }
 
-/* === FloatingBadges === */
-.floating-badges-list {
+/* === FloatingBadges（已重构为 panel-toolbar） === */
+.panel-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 2px;
 }
-.floating-badges-btn {
-  width: 40px;
-  height: 40px;
+.panel-toolbar .ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* === 按钮分隔线 === */
+.button-separator {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
 }
 
 /* === BorrowDialog === */
@@ -2952,7 +2892,12 @@
 .app-breadcrumb-link { color: var(--accent, #4f46e5); cursor: pointer; white-space: nowrap; }
 .app-breadcrumb-sep { color: var(--text-secondary, #999); }
 .app-breadcrumb-topic { color: var(--text-secondary, #666); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-meeting-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.app-meeting-actions { display: flex; gap: 2px; flex-shrink: 0; align-items: center; }
+.app-meeting-actions .ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .app-meeting-tabs { padding: 0 24px; flex-shrink: 0; }
 
 /* ============================================================ */
@@ -3499,103 +3444,9 @@
 .intervene-panel-input { flex: 1; }
 
 /* === LogPanel === */
-.log-panel-time { color: #8c8c8c; flex-shrink: 0; user-select: none; }
-.log-panel-type-tag {
-  flex-shrink: 0;
-  font-size: 10px;
-  line-height: 16px;
-  padding: 0 4px;
-  margin: 0;
-  min-width: 44px;
-  text-align: center;
-}
-.log-panel-stage-tag {
-  flex-shrink: 0;
-  font-size: 10px;
-  line-height: 16px;
-  padding: 0 4px;
-  margin: 0;
-}
-.log-panel-speaker { color: #722ed1; flex-shrink: 0; font-size: 11px; }
-.log-panel-toggle-bar {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-}
-.log-panel-toggle-btn {
-  height: 56px;
-  width: 24px;
-  padding: 0;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  box-shadow: -2px 0 8px rgba(0,0,0,0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.log-panel-toggle-badge {
-  position: absolute;
-  right: 28px;
-  top: -8px;
-  font-size: 10px;
-  min-width: 20px;
-  text-align: center;
-}
-.log-panel-container {
-  position: fixed;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 520px;
-  max-width: 70vw;
-  background: var(--bg, #fff);
-  border-left: 1px solid var(--border, #d9d9d9);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  box-shadow: -4px 0 16px rgba(0,0,0,0.1);
-}
-.log-panel-head {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border, #d9d9d9);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  background: var(--bg-secondary, #fafafa);
-}
-.log-panel-title { font-size: 13px; flex-shrink: 0; }
-.log-panel-counts { display: flex; gap: 4px; flex-shrink: 0; }
-.log-panel-count-tag { margin: 0; }
-.log-panel-spacer { flex: 1; }
-.log-panel-filter-select { width: 100px; }
-.log-panel-scroll {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  background: var(--bg, #fff);
-}
-.log-panel-empty {
-  padding: 32px;
-  text-align: center;
-  color: var(--text-secondary, #999);
-  font-size: 13px;
-}
+/* 旧版 fixed 定位的日志面板已改为 Drawer 渲染，以下 fixed/toggle 样式已废弃 */
+/* 保留日志行内元素样式供 LogPanelContent 使用 */
 .log-panel-bottom-anchor { height: 1px; }
-.log-panel-footer {
-  padding: 4px 12px;
-  border-top: 1px solid var(--border, #d9d9d9);
-  font-size: 11px;
-  color: var(--text-secondary, #999);
-  display: flex;
-  justify-content: space-between;
-  flex-shrink: 0;
-  background: var(--bg-secondary, #fafafa);
-}
 
 /* === TaskBoard === */
 .task-board-avatar { flex-shrink: 0; }
@@ -3987,4 +3838,221 @@
   gap: 8px;
   margin-left: 8px;
   transition: opacity 0.2s ease;
+}
+
+/* ============================================================ */
+/* === 统一布局优化：留白、对齐、按钮尺寸 === */
+/* ============================================================ */
+
+/* 工具栏按钮统一尺寸和基线对齐 */
+.panel-toolbar .ant-btn,
+.app-meeting-actions .ant-btn,
+.toolbar-button-group .ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  line-height: 1;
+}
+
+/* 顶栏区域：垂直居中，底部对齐 */
+.meeting-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  background: var(--bg, #fff);
+  flex-shrink: 0;
+  gap: 12px;
+  min-height: 48px;
+}
+
+/* 顶栏右侧按钮组：基线对齐 */
+.meeting-top-bar .ant-btn,
+.meeting-top-bar .ant-btn-group {
+  vertical-align: middle;
+}
+
+/* 面包屑区域：底部对齐，字号统一 */
+.breadcrumb-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 28px;
+  min-width: 0;
+}
+.breadcrumb-area .anticon {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ============================================================ */
+/* === 值守/监管按钮绿色主题（导航栏圆形图标风格） === */
+/* ============================================================ */
+
+/* 值守关闭状态：灰色空心盾牌，hover 时轻微高亮 */
+.guard-btn-off.ant-btn {
+  color: var(--text-secondary, #8c8c8c);
+}
+.guard-btn-off.ant-btn:hover {
+  color: var(--text, #262626) !important;
+  background: var(--hover-bg, rgba(0,0,0,0.04)) !important;
+}
+
+/* 值守中按钮：圆形绿色实心 + 柔和阴影 */
+.guard-btn-active.ant-btn {
+  background: var(--success, #2d8a56) !important;
+  border-color: var(--success, #2d8a56) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 6px rgba(45,138,86,0.3);
+}
+.guard-btn-active.ant-btn .anticon {
+  color: #fff !important;
+}
+.guard-btn-active.ant-btn:hover,
+.guard-btn-active.ant-btn:focus {
+  background: var(--success-hover, #256f47) !important;
+  border-color: var(--success-hover, #256f47) !important;
+  box-shadow: 0 3px 10px rgba(45,138,86,0.45) !important;
+}
+
+/* 有待处理验证码时：圆形绿色 + 红色角标，按钮保持绿色 */
+.guard-btn-pending.ant-btn {
+  background: var(--success, #2d8a56) !important;
+  border-color: var(--success, #2d8a56) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(45,138,86,0.35);
+}
+.guard-btn-pending.ant-btn .anticon {
+  color: #fff !important;
+}
+
+/* 脉冲动效：值守激活时的呼吸光圈（类似原浮标效果） */
+@keyframes guard-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(45,138,86,0.45); }
+  70%  { box-shadow: 0 0 0 8px rgba(45,138,86,0); }
+  100% { box-shadow: 0 0 0 0 rgba(45,138,86,0); }
+}
+.guard-btn-pulse.ant-btn {
+  animation: guard-pulse-ring 2.2s ease-out infinite;
+}
+/* 有待处理时脉冲加快并带红色提示 */
+@keyframes guard-pulse-alert {
+  0%   { box-shadow: 0 0 0 0 rgba(255,77,79,0.5); }
+  60%  { box-shadow: 0 0 0 10px rgba(255,77,79,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,77,79,0); }
+}
+.guard-btn-pending.guard-btn-pulse.ant-btn {
+  animation: guard-pulse-alert 1.4s ease-out infinite;
+}
+
+/* 页面头部留白优化 */
+.app-page-header {
+  padding: 16px 32px 12px;
+}
+.app-page-content {
+  padding: 24px 32px 32px;
+}
+
+/* 导航栏按钮分隔线 */
+.button-separator {
+  width: 1px;
+  height: 16px;
+  background: var(--border, #e5e7eb);
+  margin: 0 6px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* Drawer 内容区适当留白 */
+.ant-drawer-body {
+  padding: 16px 20px !important;
+}
+
+/* 表格行操作按钮：hover时才显示（删除按钮） */
+.ant-table-row .meeting-list-delete-btn,
+.ant-table-row .task-board-delete-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.ant-table-row:hover .meeting-list-delete-btn,
+.ant-table-row:hover .task-board-delete-btn {
+  opacity: 1;
+}
+
+/* 日志面板嵌入样式优化 */
+.log-panel-embedded {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 面板工具栏按钮激活态 */
+.panel-toolbar .ant-btn-primary {
+  box-shadow: none;
+}
+
+/* 值守图标按钮在工具栏中与其他按钮对齐 */
+.app-meeting-actions .ant-btn,
+.toolbar-button-group .ant-btn {
+  vertical-align: middle;
+}
+
+/* Tabs 区域适当留白 */
+.app-meeting-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+.app-meeting-tabs .ant-tabs-tab {
+  padding: 8px 0;
+  line-height: 24px;
+}
+
+/* 聊天区域与拓扑图之间的留白 */
+.graph-slot {
+  flex-shrink: 0;
+  position: relative;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+/* 主体区域 */
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.chat-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* 同一行文字/图标基线对齐：通用规则 */
+.align-baseline-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* 卡片/面板标题与操作按钮两端对齐 */
+.panel-header,
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 确保所有按钮图标居中 */
+.ant-btn .anticon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -0.125em;
 }

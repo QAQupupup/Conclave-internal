@@ -28,8 +28,8 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
   const status = meeting?.status
   const artifact = meeting?.artifact
   const produceProgress = meeting?.produce_progress
-  // Fast Path：无 agent 发言，但有直接答案
-  const isFastPath = artifact?.flow === 'fast_path' && !!artifact?.answer && messages.length === 0
+  // Instant 模式：无 agent 多轮发言，直接给出答案
+  const isInstant = (artifact?.flow === 'instant' || artifact?.flow === 'fast_path') && !!artifact?.answer && messages.length === 0
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [showNewMsg, setShowNewMsg] = useState(false)
@@ -85,19 +85,19 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
             <Text type="secondary">暂无发言，创建会议并运行后，agent 发言将在此实时展示。</Text>
           </div>
         )}
-        {isFastPath && artifact && (
-          <div className="chat-panel-fast-path">
+        {isInstant && artifact && (
+          <div className="chat-panel-instant">
             <Card
-              className="fast-path-card"
+              className="instant-card"
               title={
-                <div className="fast-path-card-header">
-                  <ThunderboltOutlined className="fast-path-icon" />
-                  <span>{artifact.title || '快速回答'}</span>
+                <div className="instant-card-header">
+                  <ThunderboltOutlined className="instant-icon" />
+                  <span>{artifact.title || '即时回答'}</span>
                 </div>
               }
               extra={
-                <div className="fast-path-card-extra">
-                  <Tag color="blue" icon={<ThunderboltOutlined />}>Fast Path</Tag>
+                <div className="instant-card-extra">
+                  <Tag color="blue" icon={<ThunderboltOutlined />}>即时模式</Tag>
                   {artifact.latency_ms != null && (
                     <Tag icon={<ClockCircleOutlined />}>
                       {(artifact.latency_ms / 1000).toFixed(1)}s
@@ -106,7 +106,7 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
                 </div>
               }
             >
-              <Paragraph className="fast-path-answer">
+              <Paragraph className="instant-answer">
                 {artifact.answer}
               </Paragraph>
             </Card>

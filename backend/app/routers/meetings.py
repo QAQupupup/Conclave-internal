@@ -58,11 +58,13 @@ _meeting_semaphore = asyncio.Semaphore(MAX_CONCURRENT_MEETINGS)
 
 class CreateMeetingRequest(BaseModel):
     """创建会议请求"""
-    topic: str = Field(..., description="会议议题")
-    deliverable_type: str = Field("prd_openapi", description="产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|code_analysis|tested_system")
-    role_ids: list[str] = Field(default_factory=list, description="预选角色 ID 列表，为空则自动生成")
-    reference_meeting_ids: list[str] = Field(default_factory=list, description="引用的历史会议 ID 列表")
-    model: str = Field("", description="会议级模型覆盖（格式: provider_id:model_id 或纯 model_id），空=继承 ENV 默认")
+    topic: str = Field(..., min_length=1, max_length=500, description="会议议题")
+    deliverable_type: str = Field("prd_openapi", description="产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|code_analysis|tested_system|deployable_service|execution")
+    flow_plan: str = Field("standard", description="执行模式: instant(即时回答)|standard(标准六阶段)|plan(先计划后执行)")
+    debate_depth: str = Field("standard", description="辩论深度: light|standard|deep")
+    role_ids: list[str] = Field(default_factory=list, max_length=50, description="预选角色 ID 列表，为空则自动生成")
+    reference_meeting_ids: list[str] = Field(default_factory=list, max_length=20, description="引用的历史会议 ID 列表")
+    model: str = Field("", max_length=200, description="会议级模型覆盖（格式: provider_id:model_id 或纯 model_id），空=继承 ENV 默认")
 
 
 class CreateMeetingResponse(BaseModel):
@@ -150,6 +152,10 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     # 初始化运行态
     state = load_or_create(meeting_id, req.topic)
     state.deliverable_type = req.deliverable_type
+    # 标准化 flow_plan（兼容旧名称 fast/fast_path/deep_think/full）
+    from app.orchestrator.instant import normalize_mode
+    state.flow_plan = normalize_mode(req.flow_plan)
+    state.debate_depth = req.debate_depth if req.debate_depth in ("light", "standard", "deep") else "standard"
     # 会议级模型覆盖（空=继承 ENV 默认，runner 启动时 resolve 为快照）
     if req.model:
         state.model_override = req.model

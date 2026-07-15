@@ -112,7 +112,12 @@ class MemoryStore:
 
     async def _load_raw(self, session) -> None:
         from app.db.models import RawMemoryModel
-        result = await session.execute(select(RawMemoryModel))
+        from sqlalchemy import desc
+        # 仅加载最近的记录，每个agent最多加载 _MAX_HISTORY_PER_MEETING * 10 条（跨会议）
+        # 防止全量加载导致内存暴涨
+        result = await session.execute(
+            select(RawMemoryModel).order_by(desc(RawMemoryModel.created_at)).limit(5000)
+        )
         for row in result.scalars():
             rm = RawMemory(
                 id=row.id,
@@ -126,6 +131,9 @@ class MemoryStore:
                 created_at=row.created_at or datetime.now(timezone.utc),
             )
             self._raw.setdefault(rm.agent_role, []).append(rm)
+        # 按时间正序排列
+        for role in self._raw:
+            self._raw[role].sort(key=lambda x: x.created_at)
 
     # ---------- 原始发言层 ----------
 
@@ -153,6 +161,10 @@ class MemoryStore:
                 created_at=datetime.now(timezone.utc),
             )
             self._raw.setdefault(agent_role, []).append(mem)
+            # 内存保护：每agent最多保留 _MAX_RAW_PER_AGENT 条
+            _MAX_RAW_PER_AGENT = self._MAX_HISTORY_PER_MEETING * 5  # 5000条/agent
+            if len(self._raw[agent_role]) > _MAX_RAW_PER_AGENT:
+                self._raw[agent_role] = self._raw[agent_role][-_MAX_RAW_PER_AGENT:]
             await self._persist_raw(mem)
             return mem
         except Exception as e:  # noqa: BLE001

@@ -19,7 +19,8 @@ export const STORAGE_KEYS = {
   sidebarCollapsed: 'conclave-sidebar-collapsed',
   graphCollapsed: 'conclave-graph-collapsed',
   chatDraft: 'conclave-chat-draft',
-  apiToken: 'conclave_api_token',
+  apiToken: 'conclave.api_token',     // 旧版 dev token（兼容保留）
+  authToken: 'conclave.auth_token',   // JWT 认证 token（登录后使用）
 } as const
 
 /** 会议状态中文标签 + 样式类 */

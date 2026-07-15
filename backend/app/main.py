@@ -16,7 +16,9 @@ from app.db.engine import async_session_factory
 from app.db.base import Base
 from sqlalchemy import text
 from app.net_auth import init_auth_table
+from app.auth import init_auth as init_jwt_auth
 from app.routers import agent_roles as agent_roles_router
+from app.routers import auth as auth_router
 from app.routers import captcha as captcha_router
 from app.routers import documents as documents_router
 from app.routers import meetings as meetings_router
@@ -37,6 +39,8 @@ async def lifespan(app: FastAPI):
     # PostgreSQL 兼容层（db_legacy，逐步迁移到 async Repository）
     init_db()
     init_auth_table()
+    # JWT 用户认证系统（建表 + 默认管理员）
+    init_jwt_auth()
 
     # PostgreSQL 表结构初始化（SQLAlchemy ORM，含记忆子系统表）
     from app.config import settings
@@ -121,9 +125,20 @@ def create_app() -> FastAPI:
         version="0.2.0",
         lifespan=lifespan,
     )
-    # CORS：开发期全放开，生产环境应限制 origins
+    # CORS：生产环境必须通过 CONCLAVE_CORS_ORIGINS 限制；开发环境默认允许常见本地端口
     _cors_origins_raw = os.environ.get("CONCLAVE_CORS_ORIGINS", "")
-    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()] or ["*"]
+    if _cors_origins_raw.strip():
+        _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    else:
+        # 开发模式默认：仅允许常见本地开发端口，不使用通配符 *
+        _cors_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+        ]
     # CORS 规范禁止 allow_origins=["*"] + allow_credentials=True
     # 当 origins 为通配 * 时不允许 credentials；指定了具体源时才允许
     _allow_credentials = _cors_origins != ["*"]
@@ -140,6 +155,7 @@ def create_app() -> FastAPI:
     # 请求追踪中间件：分配 request_id，注入日志
     setup_trace_middleware(app)
     # 挂载路由
+    app.include_router(auth_router.router)  # 认证路由（/auth/login, /auth/me）
     app.include_router(agent_roles_router.router)
     app.include_router(captcha_router.router)
     app.include_router(meetings_router.router)

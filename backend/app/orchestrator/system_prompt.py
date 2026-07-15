@@ -24,20 +24,20 @@ SYSTEM_PROMPT_TEMPLATE = """## 身份
 
 ## Conclave 的全部执行模式
 
-### 模式 1：fast_path（快速回答）
+### 模式 1：instant（即时回答）
 - 适用场景：纯知识问答、简单计算、翻译、查天气/时间、简短解释概念、
   一句话总结已知内容。单个助手可直接回答，不需要多角色协作。
 - 执行方式：单次 LLM 调用，直接生成答案，跳过六阶段管线。
 - 耗时：~10-60秒
 - 不适用：任何涉及设计、开发、架构、方案制定、需求分析、系统规划的任务。
 
-### 模式 2：deep_think（完整六阶段管线）
+### 模式 2：standard（标准会议模式 / 完整六阶段管线）
 - 适用场景：涉及设计、开发、架构、方案制定、需求分析、系统规划、
   多步骤操作、代码生成、多角色协作、需要做出权衡决策的任务。
 - 执行方式：澄清议题 → 队内发言 → 跨队辩论 → 证据对照 → 仲裁裁决 → 产出物
 - 耗时：~5-30分钟
 - 注意：即使请求很短（如"帮我生成一个物流管理系统"），只要涉及系统级产出，
-  就是复杂任务，应走 deep_think。
+  就是复杂任务，应走 standard。
 
 ### 模式 3：plan（先计划后执行）
 - 适用场景：用户明确要求制定计划、分步执行、逐步推进。
@@ -48,13 +48,14 @@ SYSTEM_PROMPT_TEMPLATE = """## 身份
 ### 模式 4：simple（简化路由）
 - 适用场景：中等复杂度任务，不需要跨队辩论和证据对照。
 - 执行方式：澄清 → 队内发言 → 仲裁 → 产出（跳过 cross_team 和 evidence_check）
+- 注意：simple 模式在内部映射为 instant 处理。
 
 ## 路由决策规则
 - 用户说"plan"、"计划"、"逐步"、"深度思考"、"先规划" → plan 模式
-- 用户明确要求"快速"、"简单回答" → fast_path
-- 用户请求涉及设计/开发/架构/系统 → deep_think（完整六阶段）
-- 用户请求是简单的知识问答/计算/翻译 → fast_path
-- 不确定时 → 偏向 deep_think（宁可慢，不可错）
+- 用户明确要求"快速"、"简单回答"、"即时" → instant
+- 用户请求涉及设计/开发/架构/系统 → standard（完整六阶段）
+- 用户请求是简单的知识问答/计算/翻译 → instant
+- 不确定时 → 偏向 standard（宁可慢，不可错）
 
 ## Conclave 当前能力
 - 支持多 Agent 角色协作：主持人、产品架构师、工程师
@@ -129,24 +130,34 @@ def parse_classification_result(result_text: str) -> dict:
     """解析 LLM 返回的模式分类结果。
 
     预期 LLM 返回 JSON 格式：
-    {"mode": "fast_path|deep_think|plan|simple", "reason": "..."}
+    {"mode": "instant|standard|plan|simple", "reason": "..."}
+
+    兼容旧名称：fast_path→instant, deep_think→standard, fast→instant, quick→instant
 
     Args:
         result_text: LLM 返回的原始文本
 
     Returns:
-        {"mode": str, "reason": str} 或 {"mode": "deep_think", "reason": "parse error"}
+        {"mode": str, "reason": str} 或 {"mode": "standard", "reason": "parse error"}
     """
     import json
+    from app.orchestrator.instant import normalize_mode, FLOW_STANDARD
 
     text = result_text.strip()
+
+    _valid_modes = {"instant", "standard", "plan", "simple"}
+    _legacy_map = {"fast_path": "instant", "deep_think": "standard", "fast": "instant", "quick": "instant"}
+
+    def _normalize(m: str) -> str:
+        m = (m or "").lower().strip()
+        return _legacy_map.get(m, m)
 
     # 尝试直接解析 JSON
     try:
         data = json.loads(text)
-        mode = data.get("mode", "")
+        mode = _normalize(data.get("mode", ""))
         reason = data.get("reason", "")
-        if mode in ("fast_path", "deep_think", "plan", "simple"):
+        if mode in _valid_modes:
             return {"mode": mode, "reason": reason}
         logger.warning("LLM 返回未知模式: %s", mode)
     except json.JSONDecodeError:
@@ -156,16 +167,16 @@ def parse_classification_result(result_text: str) -> dict:
         if match:
             try:
                 data = json.loads(match.group())
-                mode = data.get("mode", "")
+                mode = _normalize(data.get("mode", ""))
                 reason = data.get("reason", "")
-                if mode in ("fast_path", "deep_think", "plan", "simple"):
+                if mode in _valid_modes:
                     return {"mode": mode, "reason": reason}
             except json.JSONDecodeError:
                 pass
 
-    # 回退：默认 deep_think（保守策略）
-    logger.warning("无法解析 LLM 分类结果，回退到 deep_think: %s", result_text[:100])
-    return {"mode": "deep_think", "reason": "parse error, fallback to deep_think"}
+    # 回退：默认 standard（保守策略）
+    logger.warning("无法解析 LLM 分类结果，回退到 standard: %s", result_text[:100])
+    return {"mode": FLOW_STANDARD, "reason": "parse error, fallback to standard"}
 
 
 # ── 辅助函数 ──────────────────────────────────────────────

@@ -19,6 +19,7 @@ import type {
   MeetingState,
   StageChangedPayload,
 } from '../types/events.ts'
+import { LOG_CONSTANTS } from '../hooks/useMeetingLogs.ts'
 
 /** reducer 管理的 store：会议状态 + 回放标记 + 最近错误 */
 export interface MeetingStore {
@@ -40,6 +41,7 @@ export type MeetingAction =
   | { type: 'snapshot'; payload: MeetingState }
   | { type: 'replay.done'; events: number }
   | { type: 'hydrate'; payload: Partial<MeetingState> }
+  | { type: 'logs.hydrate'; payload: LogEntry[] }
   | { type: 'event'; event: DomainEvent }
   | { type: 'error'; message: string }
 
@@ -129,6 +131,18 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
     case 'error':
       return { ...store, lastError: action.message }
 
+    // 从 localStorage 加载历史日志
+    case 'logs.hydrate': {
+      if (!store.meeting) return store
+      // 合并 hydrate 的日志与现有日志（按 id 去重，hydrate 的日志是历史，现有日志可能是 snapshot 后收到的新日志）
+      const existing = store.meeting.logs ?? []
+      const existingIds = new Set(existing.map((l) => l.id))
+      const merged = [...action.payload.filter((l) => !existingIds.has(l.id)), ...existing]
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .slice(-LOG_CONSTANTS.MAX_LOGS_PER_MEETING)
+      return { ...store, meeting: { ...store.meeting, logs: merged } }
+    }
+
     // 领域事件分发
     case 'event': {
       if (!store.meeting) return store
@@ -162,7 +176,26 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
             ...store,
             meeting: {
               ...meeting,
-              artifact: { meeting_id: p.meeting_id, prd: p.prd, openapi: p.openapi },
+              artifact: {
+                ...meeting.artifact,
+                ...(p.prd !== undefined ? { prd: p.prd } : {}),
+                ...(p.openapi !== undefined ? { openapi: p.openapi } : {}),
+                ...(p.deliverable_type ? { deliverable_type: p.deliverable_type } : {}),
+                ...(p.code_analysis !== undefined ? { code_analysis: p.code_analysis } : {}),
+                ...(p.tested_system !== undefined ? { tested_system: p.tested_system } : {}),
+                ...(p.deployable_service !== undefined ? { deployable_service: p.deployable_service } : {}),
+                ...(p.design_doc !== undefined ? { design_doc: p.design_doc } : {}),
+                ...(p.comprehensive !== undefined ? { comprehensive: p.comprehensive } : {}),
+                ...(p.research_report !== undefined ? { research_report: p.research_report } : {}),
+                ...(p.business_report !== undefined ? { business_report: p.business_report } : {}),
+                ...(p.execution !== undefined ? { execution: p.execution } : {}),
+                ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
+                ...(p.deployment !== undefined ? { deployment: p.deployment } : {}),
+                ...(p.review !== undefined ? { review: p.review } : {}),
+                ...(p.answer !== undefined ? { answer: p.answer } : {}),
+                ...(p.flow !== undefined ? { flow: p.flow } : {}),
+                meeting_id: p.meeting_id,
+              },
               stage: 'produce',
             },
           }
@@ -175,10 +208,15 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
           }
         }
         case 'flow_plan.set': {
-          const p = ev.payload as { flow_plan: string; skipped_stages: string[] }
+          const p = ev.payload as { flow_plan: string; debate_depth?: string; skipped_stages: string[] }
           return {
             ...store,
-            meeting: { ...meeting, flow_plan: p.flow_plan },
+            meeting: {
+              ...meeting,
+              flow_plan: p.flow_plan,
+              ...(p.debate_depth ? { debate_depth: p.debate_depth } : {}),
+              ...(p.skipped_stages ? { skipped_stages: p.skipped_stages } : {}),
+            },
           }
         }
         case 'intervention.reply': {
@@ -284,11 +322,95 @@ export function meetingReducer(store: MeetingStore, action: MeetingAction): Meet
             stage: p.stage,
           }
           const existingLogs = meeting.logs ?? []
-          // 最多保留500条日志，防止内存溢出
-          const logs = [...existingLogs, newEntry].slice(-500)
+          const logs = [...existingLogs, newEntry].slice(-LOG_CONSTANTS.MAX_LOGS_PER_MEETING)
           return {
             ...store,
             meeting: { ...meeting, logs },
+          }
+        }
+        // ---- 新增事件处理 ----
+        case 'instant.completed':
+        case 'fast_path.completed': {  // 兼容旧事件名
+          const p = ev.payload as { deliverable_type?: string; answer?: string }
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              status: 'done' as const,
+              stage: 'produce' as const,
+              flow_plan: 'instant' as const,
+              ...(p.answer ? { artifact: { ...meeting.artifact, answer: p.answer, flow: 'instant' } } : {}),
+            },
+          }
+        }
+        case 'produce.degradation': {
+          const p = ev.payload as { message: string; severity?: string }
+          const existing = meeting.degradation_warnings ?? []
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              degradation_warnings: [...existing, { message: p.message, severity: p.severity ?? 'warning', ts: new Date().toISOString() }],
+            },
+          }
+        }
+        case 'service.deployed': {
+          const p = ev.payload as { service_id: string; url: string; port: number }
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              deployed_services: [...(meeting.deployed_services ?? []), p],
+            },
+          }
+        }
+        case 'service.deploy_failed': {
+          const p = ev.payload as { error: string; stage?: string }
+          return {
+            ...store,
+            meeting: {
+              ...meeting,
+              deployment_error: p.error,
+            },
+          }
+        }
+        case 'captcha.pending': {
+          const p = ev.payload as { session_id: string; url?: string; screenshot_url?: string }
+          return {
+            ...store,
+            meeting: { ...meeting, captcha_pending: p },
+          }
+        }
+        case 'captcha.resolved': {
+          return {
+            ...store,
+            meeting: { ...meeting, captcha_pending: null },
+          }
+        }
+        case 'captcha.timeout': {
+          return {
+            ...store,
+            meeting: { ...meeting, captcha_pending: null },
+          }
+        }
+        case 'net_auth.requested': {
+          const p = ev.payload as { request_id: string; url: string; reason?: string }
+          return {
+            ...store,
+            meeting: { ...meeting, pending_net_auth: p },
+          }
+        }
+        case 'net_auth.reviewed':
+        case 'net_auth.timeout': {
+          return {
+            ...store,
+            meeting: { ...meeting, pending_net_auth: null },
+          }
+        }
+        case 'meeting.failed': {
+          return {
+            ...store,
+            meeting: { ...meeting, status: 'failed' as const },
           }
         }
         // control.ack / loan.requested / loan.resolved / error 等暂不改变核心状态

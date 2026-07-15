@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+import os
 
 from app.config import settings
 from app.db_legacy import save_meeting, save_message
@@ -13,10 +14,19 @@ from app.models import MeetingState, MeetingStatus, Stage
 from app.observability.log_bus import log_bus
 from app.orchestrator.manager import MeetingManager
 from app.orchestrator.nodes import decide_next_stage, _inc_loop_count, _let_borrowed_agents_speak
-from app.orchestrator.fast_path import classify_intent_async, run_fast_path
+from app.orchestrator.instant import classify_intent_async, run_instant, is_instant_mode, normalize_mode, FLOW_INSTANT, FLOW_STANDARD
 from conclave_core.state import STAGE_ORDER, is_terminal, should_pause
 
 logger = get_logger("orchestrator.runner")
+
+# ---- 内存保护配置 ----
+# 已完成会议状态在内存中保留时长（秒），到期后自动清理
+# 用户在此时长内仍可查看会议结果；超过时长后下次访问会从PG恢复
+_STATE_TTL_AFTER_DONE = int(os.environ.get("CONCLAVE_STATE_TTL", "1800"))  # 默认30分钟
+# _states 字典最大容量，超出时按最后访问时间淘汰最旧的非运行中会议
+_MAX_CACHED_STATES = int(os.environ.get("CONCLAVE_MAX_CACHED_STATES", "100"))
+# 已完成会议的最后访问时间记录（用于LRU淘汰）
+_state_last_access: dict[str, float] = {}
 
 
 async def _process_interventions(state: MeetingState) -> MeetingState:
@@ -229,46 +239,47 @@ class Runner:
             )
         )
 
-        # --- Fast Path 分流 ---
-        # 如果 state 已标记 flow_plan="fast"（例如 API 层预设），或议题被 LLM 分类为简单查询，
+        # --- Instant 模式分流 ---
+        # 如果 state 已标记为即时模式（例如 API 层预设），或议题被 LLM 分类为简单查询，
         # 跳过六阶段管线，直接单次 LLM 调用完成后返回。
-        # 注意：plan 模式不走 fast_path，而是进入六阶段管线配合 Planner 逐步执行。
-        use_fast_path = False
-        if state.flow_plan == "fast":
-            use_fast_path = True
-            logger.info("会议 %s 使用 Fast Path（flow_plan=fast 已预设）", state.meeting_id)
+        # 注意：plan 模式不走 instant，而是进入六阶段管线配合 Planner 逐步执行。
+        use_instant = False
+        if is_instant_mode(state.flow_plan):
+            use_instant = True
+            state.flow_plan = FLOW_INSTANT
+            logger.info("会议 %s 使用即时模式（flow_plan=%s 已预设）", state.meeting_id, state.flow_plan)
         else:
-            intent = await classify_intent_async(state.topic)
-            if intent == "fast_path":
-                use_fast_path = True
-                state.flow_plan = "fast"
-                logger.info("会议 %s 意图分流为 fast_path", state.meeting_id)
+            intent = await classify_intent_async(state.topic, override_mode=state.flow_plan)
+            if intent == FLOW_INSTANT or intent == "simple":
+                use_instant = True
+                state.flow_plan = FLOW_INSTANT
+                logger.info("会议 %s 意图分流为 instant", state.meeting_id)
             elif intent == "plan":
                 state.flow_plan = "plan"
                 logger.info("会议 %s 意图分流为 plan（先计划后执行）", state.meeting_id)
-            elif intent == "simple":
-                state.flow_plan = "simple"
-                logger.info("会议 %s 意图分流为 simple（简化路由）", state.meeting_id)
             else:
-                # deep_think 或其他：保持默认 full
-                state.flow_plan = "full"
-                logger.info("会议 %s 意图分流为 deep_think（完整六阶段）", state.meeting_id)
+                # standard 或其他：完整六阶段管线
+                state.flow_plan = FLOW_STANDARD
+                logger.info("会议 %s 意图分流为 standard（完整六阶段）", state.meeting_id)
 
-        if use_fast_path:
+        if use_instant:
             try:
-                state = await run_fast_path(state.topic, state)
+                state = await run_instant(state.topic, state)
             except Exception as exc:
-                logger.error("Fast Path 异常: %s", exc, exc_info=True)
+                logger.error("即时模式异常: %s", exc, exc_info=True)
                 state.status = MeetingStatus.FAILED
                 state.error_detail = str(exc)[:2000]
-                from datetime import datetime as _dt_fp
-                state.completed_at = _dt_fp.now()
+                from datetime import datetime as _dt_fp, timezone as _tz_fp
+                state.completed_at = _dt_fp.now(_tz_fp.utc)
             # 持久化最终状态后返回（不进入六阶段管线）
             self._persist(state)
             reset_meeting_id(mid_token)
             reset_runner_session_id(rsid_token)
             if rid_token is not None:
                 reset_request_id(rid_token)
+            # Fast path也是终态，安排延迟清理
+            if is_terminal(state):
+                _schedule_cleanup(state.meeting_id, _STATE_TTL_AFTER_DONE)
             return state
 
         # [AUDIT-FIX P0-4] 新增：try/except 兜底，确保节点异常时状态转为 FAILED
@@ -417,8 +428,8 @@ class Runner:
             )
             state.status = MeetingStatus.FAILED
             state.error_detail = str(exc)[:2000]
-            from datetime import datetime as _dt
-            state.completed_at = _dt.now()
+            from datetime import datetime as _dt, timezone as _tz
+            state.completed_at = _dt.now(_tz.utc)
             self._persist(state)
 
         logger.info("会议 %s 运行结束: stage=%s, status=%s", state.meeting_id, state.stage.value, state.status.value)
@@ -438,6 +449,12 @@ class Runner:
         reset_runner_session_id(rsid_token)
         if rid_token is not None:
             reset_request_id(rid_token)
+
+        # 终态会议安排延迟内存清理（TTL到期后释放_states/events等内存资源）
+        # PAUSED状态不清理（用户可能随时resume）；RUNNING不会到这里（while循环内pause时已return）
+        if is_terminal(state):
+            _schedule_cleanup(state.meeting_id, _STATE_TTL_AFTER_DONE)
+
         return state
 
     def _persist(self, state: MeetingState) -> None:
@@ -446,31 +463,35 @@ class Runner:
         MeetingState 瘦身优化：大字段（llm_trace, evidence_set,
         conclusion_chain, borrowed_agents）通过 extract_aux() 分离存储
         到 meeting_aux 表，主 payload 仅保留轻量字段。
+
+        异常安全：无论 DB 操作是否成功，都确保 inject_aux 被调用，
+        防止内存态 state 丢失 aux 数据。
         """
         from app.db_legacy import save_meeting_aux
 
         # 提取 aux 大字段（在 snapshot 之前调用，因为 extract_aux 会清空这些字段）
         aux = state.extract_aux()
+        try:
+            # 先保存会议主记录（确保 meetings 表中有记录，满足 meeting_aux 的外键约束）
+            save_meeting(
+                meeting_id=state.meeting_id,
+                topic=state.topic,
+                status=state.status.value,
+                stage=state.stage.value,
+                created_at=state.created_at,
+                payload=state.snapshot(),
+            )
 
-        # 先保存会议主记录（确保 meetings 表中有记录，满足 meeting_aux 的外键约束）
-        save_meeting(
-            meeting_id=state.meeting_id,
-            topic=state.topic,
-            status=state.status.value,
-            stage=state.stage.value,
-            created_at=state.created_at,
-            payload=state.snapshot(),
-        )
+            # 再保存 aux 大字段到独立表（依赖 meetings.id 外键）
+            save_meeting_aux(state.meeting_id, aux)
 
-        # 再保存 aux 大字段到独立表（依赖 meetings.id 外键）
-        save_meeting_aux(state.meeting_id, aux)
-
-        # 持久化尚未入库的发言（按 id 去重 upsert）
-        for msg in state.messages:
-            save_message(msg)
-
-        # 恢复 aux 到内存态，保证 Runner 返回的 state 完整且后续阶段可读取结论链
-        state.inject_aux(aux)
+            # 持久化尚未入库的发言（按 id 去重 upsert）
+            for msg in state.messages:
+                save_message(msg)
+        finally:
+            # 恢复 aux 到内存态，保证 Runner 返回的 state 完整且后续阶段可读取结论链
+            # 使用 finally 确保即使 DB 操作异常，内存态也不会丢失数据
+            state.inject_aux(aux)
 
 
 # 进程级运行态注册表（线程安全）
@@ -482,16 +503,64 @@ _states: dict[str, MeetingState] = {}
 _states_lock = threading.RLock()
 
 
-def get_state(meeting_id: str) -> MeetingState | None:
-    """取某会议的运行态（线程安全）"""
+def _evict_if_needed() -> None:
+    """当缓存超限时，淘汰最久未访问的非运行中会议状态"""
     with _states_lock:
-        return _states.get(meeting_id)
+        if len(_states) <= _MAX_CACHED_STATES:
+            return
+        # 找出可淘汰的会议（非RUNNING/PAUSED状态）
+        now = time.monotonic()
+        evictable = []
+        for mid, st in _states.items():
+            if st.status not in (MeetingStatus.RUNNING, MeetingStatus.PAUSED):
+                last = _state_last_access.get(mid, 0)
+                evictable.append((last, mid))
+        # 按最后访问时间排序，淘汰最旧的
+        evictable.sort()
+        to_evict = len(_states) - _MAX_CACHED_STATES
+        for _, mid in evictable[:to_evict]:
+            _states.pop(mid, None)
+            _state_last_access.pop(mid, None)
+            logger.info("LRU淘汰会议状态: %s", mid)
+
+
+def get_state(meeting_id: str) -> MeetingState | None:
+    """取某会议的运行态（线程安全），记录访问时间用于LRU"""
+    with _states_lock:
+        st = _states.get(meeting_id)
+        if st is not None:
+            _state_last_access[meeting_id] = time.monotonic()
+        return st
 
 
 def set_state(state: MeetingState) -> None:
-    """更新运行态（线程安全）"""
+    """更新运行态（线程安全），记录访问时间并触发LRU检查"""
     with _states_lock:
         _states[state.meeting_id] = state
+        _state_last_access[state.meeting_id] = time.monotonic()
+    # LRU淘汰在锁外执行
+    _evict_if_needed()
+
+
+def _schedule_cleanup(meeting_id: str, delay: int) -> None:
+    """延迟清理已完成会议的内存资源（在事件循环中调度）"""
+    async def _do_cleanup():
+        try:
+            await asyncio.sleep(delay)
+            # 二次检查：如果会议已被重新启动（状态变回RUNNING），不清理
+            with _states_lock:
+                st = _states.get(meeting_id)
+                if st and st.status in (MeetingStatus.RUNNING, MeetingStatus.PAUSED):
+                    return
+            cleanup_meeting_resources(meeting_id)
+            logger.info("TTL到期清理会议资源: %s", meeting_id)
+        except Exception as e:
+            logger.warning("延迟清理会议 %s 失败: %s", meeting_id, e)
+    loop = asyncio.get_event_loop()
+    try:
+        loop.create_task(_do_cleanup())
+    except RuntimeError:
+        pass  # 无事件循环时跳过（测试/脚本场景）
 
 
 def clear_state(meeting_id: str) -> bool:
@@ -511,6 +580,7 @@ def clear_state(meeting_id: str) -> bool:
     with _states_lock:
         if _states.pop(meeting_id, None) is not None:
             removed = True
+        _state_last_access.pop(meeting_id, None)
     _intervention_locks.pop(meeting_id, None)
     return removed
 

@@ -12,6 +12,7 @@ import type {
   DomainEvent,
   MeetingState,
 } from '../types/events.ts'
+import { STORAGE_KEYS } from '../constants.ts'
 
 interface UseWebSocketResult {
   /** 是否已连接 */
@@ -43,10 +44,9 @@ function buildWsUrl(meetingId: string, fromSeq: number): string {
   const base = `${proto}://${window.location.host}/ws/meetings/${meetingId}`
   const params = new URLSearchParams()
   if (fromSeq > 0) params.set('from_seq', String(fromSeq))
-  // 附加认证 token（如果用户设置了）
-  // [CON-03 修复] 统一使用 localStorage 键 conclave.api_token（与 api.ts 一致）
+  // 附加认证 token（优先 JWT authToken，兼容旧 dev apiToken）
   try {
-    const token = localStorage.getItem('conclave.api_token')
+    const token = localStorage.getItem(STORAGE_KEYS.authToken) || localStorage.getItem(STORAGE_KEYS.apiToken)
     if (token) params.set('token', token)
   } catch { /* localStorage 不可用时忽略 */ }
   const qs = params.toString()

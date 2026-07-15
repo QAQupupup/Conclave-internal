@@ -53,10 +53,13 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
     record_drift(state, Role.MODERATOR, Stage.CLARIFY, summary)
 
     complexity = result.get("complexity", "full")
-    if complexity in ("simple", "standard", "full"):
+    # 若意图分流已判定为 plan（先计划后执行），则保留 plan 模式不被 clarify 覆盖
+    if state.flow_plan == "plan":
+        state.debate_depth = "deep"
+    elif complexity in ("simple", "standard", "full"):
         state.flow_plan = complexity
-    depth_map = {"simple": "light", "standard": "standard", "full": "deep"}
-    state.debate_depth = depth_map.get(complexity, "standard")
+        depth_map = {"simple": "light", "standard": "standard", "full": "deep"}
+        state.debate_depth = depth_map.get(complexity, "standard")
 
     await bus.publish(make_event(
         "flow_plan.set",
@@ -305,7 +308,7 @@ async def run_evidence_check(
     supporting = sum(
         1 for es in evidence_set
         for a in es.get("assessments", [])
-        if a.get("supports") in ("side_a", "side_b")
+        if a.get("supports") in ("a", "b")
     )
     neutral = total_ev - supporting
     summary = (
@@ -390,8 +393,10 @@ async def run_produce(
     record_drift(state, Role.MODERATOR, Stage.PRODUCE, artifact_text)
 
     # 终态
+    from datetime import datetime, timezone
     state.stage = Stage.PRODUCE
     state.status = MeetingStatus.DONE
+    state.completed_at = datetime.now(timezone.utc)
     _logger.info("produce: 状态已设为 DONE")
 
     # LLM 降级检测

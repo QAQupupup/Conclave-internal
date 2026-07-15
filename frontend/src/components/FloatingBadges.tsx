@@ -1,81 +1,84 @@
-// 浮动徽标：证据/产出/报告/Token/议题 五个功能入口
-// 使用 AntD Button + Tooltip + Modal + Badge
-import { useCallback } from 'react'
-import { Button, Tooltip, Modal, Badge } from 'antd'
-import type { ReactNode } from 'react'
+// 会议功能面板切换工具栏
+// 放在 meeting-top-bar 右侧，统一管理议题/证据/产出/报告/Token/模型/介入/日志面板的开关
+// 使用 AntD Tooltip + Button，统一尺寸、基线对齐
+import { Tooltip, Badge, Button } from 'antd'
+import {
+  FileSearchOutlined,
+  ProfileOutlined,
+  FileDoneOutlined,
+  LineChartOutlined,
+  ThunderboltOutlined,
+  RobotOutlined,
+  QuestionCircleOutlined,
+  FileTextOutlined,
+} from '@ant-design/icons'
+import { useLogErrorCount } from './LogPanel.tsx'
 
-export interface BadgeItem {
-  id: string
-  label: string
-  icon: ReactNode
-  /** 可选的未读数或状态标识 */
-  badge?: string
+export interface PanelToggleState {
+  topic: boolean
+  evidence: boolean
+  output: boolean
+  report: boolean
+  token: boolean
+  model: boolean
+  intervention: boolean
+  logs: boolean
 }
 
 interface FloatingBadgesProps {
-  badges: BadgeItem[]
-  activeId: string | null
-  onSelect: (id: string) => void
+  panels: PanelToggleState
+  onToggle: (key: keyof PanelToggleState) => void
+  pendingBorrow: boolean
+  interventionCount: number
 }
 
-/** 面板弹窗：点击徽标后弹出，标题 + 内容 */
-export function PanelModal({
-  open,
-  title,
-  onClose,
-  children,
-}: {
-  open: boolean
-  title: string
-  onClose: () => void
-  children: ReactNode
-}) {
+export function FloatingBadges({
+  panels,
+  onToggle,
+  pendingBorrow,
+  interventionCount,
+}: FloatingBadgesProps) {
+  const logErrorCount = useLogErrorCount()
+  const interventionBadge = (pendingBorrow ? 1 : 0) + interventionCount
+
+  const buttons: Array<{
+    key: keyof PanelToggleState
+    icon: React.ReactNode
+    label: string
+    badge?: number
+  }> = [
+    { key: 'topic', icon: <FileSearchOutlined />, label: '议题聚焦' },
+    { key: 'evidence', icon: <ProfileOutlined />, label: '证据面板' },
+    { key: 'output', icon: <FileDoneOutlined />, label: '产出物' },
+    { key: 'report', icon: <LineChartOutlined />, label: '最终报告' },
+    { key: 'token', icon: <ThunderboltOutlined />, label: 'Token 监控' },
+    { key: 'model', icon: <RobotOutlined />, label: '模型调度' },
+    { key: 'intervention', icon: <QuestionCircleOutlined />, label: '介入申请', badge: interventionBadge },
+    { key: 'logs', icon: <FileTextOutlined />, label: '实时日志', badge: logErrorCount },
+  ]
+
   return (
-    <Modal
-      open={open}
-      title={title}
-      onCancel={onClose}
-      footer={null}
-      width={720}
-      centered
-      destroyOnClose
+    <div
+      className="panel-toolbar"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+      }}
     >
-      {children}
-    </Modal>
-  )
-}
-
-export function FloatingBadges({ badges, activeId, onSelect }: FloatingBadgesProps) {
-  const handleClick = useCallback(
-    (id: string) => {
-      if (activeId === id) {
-        onSelect('') // 再次点击关闭
-      } else {
-        onSelect(id)
-      }
-    },
-    [activeId, onSelect],
-  )
-
-  return (
-    <div className="floating-badges floating-badges-list">
-      {badges.map((b) => {
-        const isActive = activeId === b.id
-        const btn = (
-          <Badge key={b.id} count={b.badge || 0} size="small" offset={[-4, 4]}>
-            <Button
-              type={isActive ? 'primary' : 'default'}
-              shape="circle"
-              icon={b.icon}
-              onClick={() => handleClick(b.id)}
-              aria-label={b.label}
-              className="floating-badges-btn"
-            />
-          </Badge>
-        )
+      {buttons.map(({ key, icon, label, badge }) => {
+        const active = panels[key]
+        const iconEl = badge && badge > 0
+          ? <Badge count={badge} size="small" offset={[-2, 2]}>{icon}</Badge>
+          : icon
         return (
-          <Tooltip key={b.id} title={b.label} placement="left">
-            {btn}
+          <Tooltip key={key} title={label} placement="bottom">
+            <Button
+              type={active ? 'primary' : 'text'}
+              size="small"
+              icon={iconEl}
+              onClick={() => onToggle(key)}
+            />
           </Tooltip>
         )
       })}

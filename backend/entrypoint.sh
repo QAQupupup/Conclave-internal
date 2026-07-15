@@ -52,9 +52,17 @@ if [ -S /var/run/docker.sock ]; then
     fi
 
     # 方法 C：如果以上都不行，最后尝试 chmod 666
+    # SECURITY: chmod 666 允许容器内所有用户读写 Docker socket，存在安全风险。
+    # 在生产多用户主机上，请设置 CONCLAVE_DISABLE_CHMOD666=1 禁用此 fallback，
+    # 并通过正确配置 docker 组 GID 映射来授予权限。
     if ! su -s /bin/bash "$APP_USER" -c "docker version --format '{{.Server.Version}}'" >/dev/null 2>&1; then
-        chmod 666 /var/run/docker.sock 2>/dev/null && \
-            echo "[entrypoint] Set socket 666 as fallback" || true
+        if [ "${CONCLAVE_DISABLE_CHMOD666:-0}" = "1" ]; then
+            echo "[entrypoint] SECURITY: chmod 666 fallback disabled by CONCLAVE_DISABLE_CHMOD666=1"
+        else
+            echo "[entrypoint] WARNING: Using chmod 666 fallback for Docker socket - this is insecure on multi-user hosts"
+            chmod 666 /var/run/docker.sock 2>/dev/null && \
+                echo "[entrypoint] Set socket 666 as fallback" || true
+        fi
     fi
 
     # 验证

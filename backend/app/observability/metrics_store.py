@@ -126,10 +126,11 @@ class MetricsStore:
                     conn = _connect()
                     try:
                         row = conn.execute(
-                            "SELECT COUNT(*) FROM meetings WHERE status = 'RUNNING'"
+                            "SELECT COUNT(*) AS cnt FROM meetings WHERE status = 'RUNNING'"
                         ).fetchone()
                         if row:
-                            active_meetings = row[0]
+                            # RealDictCursor 返回 dict，用 key 访问
+                            active_meetings = row.get("cnt", row.get("count", 0))
                     finally:
                         _putconn(conn)
                 except Exception:

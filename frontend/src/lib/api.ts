@@ -1,5 +1,6 @@
 // REST API 封装：对接后端（前缀无 /api，直接根路径）
 // 通过 vite proxy 转发到 http://127.0.0.1:8000，前端用相对路径即可
+import { STORAGE_KEYS } from '../constants.ts'
 import type {
   ControlRequest,
   ControlResponse,
@@ -36,9 +37,14 @@ let _authToken: string | null = null
 export async function initAuthToken(): Promise<string | null> {
   if (_authToken) return _authToken
 
-  // 1) localStorage
+  // 1) localStorage (优先检查JWT authToken，然后是旧版dev apiToken)
   if (typeof localStorage !== 'undefined') {
-    const cached = localStorage.getItem('conclave.api_token')
+    const jwtToken = localStorage.getItem(STORAGE_KEYS.authToken)
+    if (jwtToken) {
+      _authToken = jwtToken
+      return jwtToken
+    }
+    const cached = localStorage.getItem(STORAGE_KEYS.apiToken)
     if (cached) {
       _authToken = cached
       return cached
@@ -51,7 +57,7 @@ export async function initAuthToken(): Promise<string | null> {
     if (urlToken) {
       _authToken = urlToken
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('conclave.api_token', urlToken)
+        localStorage.setItem(STORAGE_KEYS.apiToken, urlToken)
       }
       return urlToken
     }
@@ -65,7 +71,7 @@ export async function initAuthToken(): Promise<string | null> {
       if (data.token) {
         _authToken = data.token
         if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('conclave.api_token', data.token)
+          localStorage.setItem(STORAGE_KEYS.apiToken, data.token)
         }
         return data.token
       }
@@ -77,19 +83,25 @@ export async function initAuthToken(): Promise<string | null> {
   return null
 }
 
-/** 手动设置 token（用户在登录 UI 输入后调用） */
+/** 手动设置 dev token（兼容旧逻辑，JWT token 由 auth 模块管理） */
 export function setAuthToken(token: string): void {
   _authToken = token
   if (typeof localStorage !== 'undefined') {
-    localStorage.setItem('conclave.api_token', token)
+    localStorage.setItem(STORAGE_KEYS.apiToken, token)
   }
 }
 
-/** 清除 token（登出或 token 失效后） */
+/** 设置 JWT token（登录成功后调用，注入到后续请求头） */
+export function setJwtToken(token: string): void {
+  _authToken = token
+}
+
+/** 清除所有 token（登出时调用） */
 export function clearAuthToken(): void {
   _authToken = null
   if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem('conclave.api_token')
+    localStorage.removeItem(STORAGE_KEYS.apiToken)
+    localStorage.removeItem(STORAGE_KEYS.authToken)
   }
 }
 

@@ -96,6 +96,19 @@
   --shadow-focus: 0 0 0 3px rgba(79, 70, 229, 0.12);
   --bg-overlay: rgba(15, 20, 25, 0.4); /* modal overlay 背景 */
 
+  /* z-index 层级管理（从低到高） */
+  --z-base: 1;
+  --z-hover: 5;           /* 折叠按钮等微交互 */
+  --z-sticky: 10;         /* 粘性元素（新消息提示） */
+  --z-dropdown: 100;      /* 下拉菜单 */
+  --z-toolbar: 150;       /* 顶部工具栏固定元素 */
+  --z-drawer: 200;        /* 抽屉面板 */
+  --z-tooltip: 300;       /* 工具提示 */
+  --z-modal-mask: 900;    /* Modal 遮罩 */
+  --z-modal: 1000;        /* AntD Modal / 全屏弹窗 */
+  --z-popover: 1050;      /* Popover（需在 Modal 之上） */
+  --z-toast: 2000;        /* Toast/通知 */
+
   /* 字体：无衬线 + 抗锯齿 */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;

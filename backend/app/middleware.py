@@ -65,7 +65,10 @@ _DEV_TOKEN = _load_or_create_dev_token()
 # 免认证路径前缀
 # [CON-03 修复] /debug/auth-info 必须公开：前端首次启动时需要拿 dev token，
 # 否则永远拿不到 token 形成鸡生蛋。
-_PUBLIC_PATHS = {"/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/debug/auth-info"}
+_PUBLIC_PATHS = {
+    "/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/debug/auth-info",
+    "/auth/login",  # 登录接口必须公开
+}
 # WebSocket 升级路径免认证（WebSocket 在 query 参数中传 token）
 _WS_PATHS = {"/ws"}
 
@@ -78,8 +81,9 @@ _RATE_LIMIT_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_PER_MIN", "600"))
 _RATE_LIMIT_FAIL_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_FAIL_PER_MIN", "5"))
 _RATE_BLOCK_SECONDS = int(os.environ.get("CONCLAVE_RATE_BLOCK_SECONDS", "60"))
 
-# 开发模式（未设置 CONCLAVE_API_TOKEN）下完全禁用失败封禁
-_FAIL_BAN_ENABLED = bool(_API_TOKEN)
+# JWT 认证启用后始终启用失败封禁（防暴力破解）
+# localhost IP 在 _check_rate_limit 中已豁免，不会误封开发者
+_FAIL_BAN_ENABLED = True
 
 # localhost 免于封禁的 IP 集合
 _LOCALHOST_IPS = {"127.0.0.1", "::1", "localhost"}
@@ -88,6 +92,14 @@ _request_log: dict[str, list[float]] = defaultdict(list)
 _fail_log: dict[str, list[float]] = defaultdict(list)
 _blocked_ips: dict[str, float] = {}  # ip -> block_until_timestamp
 _rate_lock = Lock()
+
+
+def client_ip(request: Request) -> str:
+    """提取客户端 IP（优先 X-Forwarded-For 首段，再退化到 client.host）
+
+    公开版本，供路由使用。
+    """
+    return _client_ip(request)
 
 
 def _client_ip(request: Request) -> str:
@@ -147,10 +159,11 @@ def _is_public(path: str) -> bool:
 def setup_auth_middleware(app: FastAPI) -> None:
     """注册 API 认证中间件
 
-    认证策略：
-    - CONCLAVE_API_TOKEN 未设置 → 加载/生成 .dev_token（开发模式）
+    认证策略（按优先级）：
+    1. JWT Bearer Token（登录认证）—— 用户登录后获得，注入 request.state.auth_user
+    2. Dev token（向后兼容）—— CONCLAVE_API_TOKEN 或 .dev_token 文件
     - 开发模式下保留 token 认证但禁用失败封禁（避免误封开发者）
-    - 生产模式（设置了 CONCLAVE_API_TOKEN）启用完整限流 + 失败封禁
+    - 生产模式启用完整限流 + 失败封禁
     - token 比较用 hmac.compare_digest 防时序攻击
     - localhost 始终免于失败封禁
     """
@@ -164,11 +177,7 @@ def setup_auth_middleware(app: FastAPI) -> None:
         if os.environ.get("APP_ENV") == "test" and os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
             return await call_next(request)
 
-        # 公开路径免认证 + 免限流
-        if _is_public(path):
-            return await call_next(request)
-
-        # 速率限制（即使是未认证请求也限流，防止扫描）
+        # 速率限制（所有请求包括公开路径都限流，防止暴力破解/DoS）
         ok, reason = _check_rate_limit(client_ip, is_failed_attempt=False)
         if not ok:
             return JSONResponse(
@@ -176,6 +185,10 @@ def setup_auth_middleware(app: FastAPI) -> None:
                 content={"detail": f"请求过快：{reason}"},
                 headers={"Retry-After": "60"},
             )
+
+        # 公开路径免认证（但不免限流）
+        if _is_public(path):
+            return await call_next(request)
 
         # 提取 token
         auth_header = request.headers.get("Authorization", "")
@@ -185,27 +198,54 @@ def setup_auth_middleware(app: FastAPI) -> None:
         if not token:
             token = request.query_params.get("token", "")
 
-        # [CON-03 修复] 用 hmac.compare_digest 防时序攻击
-        # 比较前必须确保两个字符串类型一致
-        if not token or not hmac.compare_digest(
+        if not token:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "未授权：请先登录"},
+            )
+
+        # token 长度限制（防 DoS）
+        if len(token) > 4096:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "认证失败：token 格式无效"},
+            )
+
+        # 认证方式1：JWT token（用户登录）
+        auth_user = None
+        try:
+            from app.auth import decode_token
+            auth_user = decode_token(token)
+        except Exception:
+            auth_user = None
+
+        if auth_user:
+            # JWT 验证通过，注入用户信息
+            request.state.auth_user = auth_user
+            return await call_next(request)
+
+        # 认证方式2：Dev token（向后兼容，开发模式 / 简单部署）
+        # 注意：dev token 不携带用户信息，视为内置服务账号
+        if hmac.compare_digest(
             token.encode("utf-8"),
             _DEV_TOKEN.encode("utf-8"),
         ):
-            # 失败计数
-            ok2, _reason2 = _check_rate_limit(client_ip, is_failed_attempt=True)
-            if not ok2:
-                logger.warning("IP %s 触发封禁：%s", client_ip, _reason2)
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": f"认证失败过多：{_reason2}"},
-                    headers={"Retry-After": str(_RATE_BLOCK_SECONDS)},
-                )
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "未授权：请提供有效的 API token"},
-            )
+            request.state.auth_user = {"username": "dev", "role": "admin", "uid": None}
+            return await call_next(request)
 
-        return await call_next(request)
+        # 全部认证失败
+        ok2, _reason2 = _check_rate_limit(client_ip, is_failed_attempt=True)
+        if not ok2:
+            logger.warning("IP %s 触发封禁：%s", client_ip, _reason2)
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"认证失败过多：{_reason2}"},
+                headers={"Retry-After": str(_RATE_BLOCK_SECONDS)},
+            )
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "认证失败：token 无效或已过期"},
+        )
 
 
 # ---- 命令注入防护 ----
@@ -312,4 +352,51 @@ def get_dev_token_info() -> dict[str, Any]:
         "rate_limit_per_min": _RATE_LIMIT_PER_MIN,
         "rate_limit_fail_per_min": _RATE_LIMIT_FAIL_PER_MIN,
         "rate_block_seconds": _RATE_BLOCK_SECONDS,
+        "jwt_auth_enabled": True,
+        "default_admin_username": os.environ.get("CONCLAVE_ADMIN_USERNAME", "admin"),
     }
+
+
+def record_auth_failure(ip: str) -> None:
+    """供 auth router 记录登录失败（best effort，不抛异常）"""
+    try:
+        _check_rate_limit(ip or "unknown", is_failed_attempt=True)
+    except Exception:
+        pass
+
+
+def reset_auth_failures(ip: str) -> None:
+    """登录成功时清除失败记录"""
+    try:
+        with _rate_lock:
+            _fail_log.pop(ip or "unknown", None)
+            _blocked_ips.pop(ip or "unknown", None)
+    except Exception:
+        pass
+
+
+def verify_ws_token(token: str) -> dict | None:
+    """WebSocket 认证：支持 JWT 和 dev token，返回用户信息或 None
+
+    安全措施：
+    - 限制 token 最大长度 4096 字节，防止超长 token 导致 DoS
+    - JWT 验证失败后不泄露具体原因
+    """
+    if not token:
+        return None
+    # 长度限制：JWT 通常 < 2KB，dev token 为 48 hex chars；4096 绰绰有余
+    if len(token) > 4096:
+        logger.warning("Rejected overlong token (%d bytes)", len(token))
+        return None
+    # JWT
+    try:
+        from app.auth import decode_token
+        user = decode_token(token)
+        if user:
+            return user
+    except Exception:
+        pass
+    # Dev token
+    if hmac.compare_digest(token.encode("utf-8"), _DEV_TOKEN.encode("utf-8")):
+        return {"username": "dev", "role": "admin", "uid": None}
+    return None

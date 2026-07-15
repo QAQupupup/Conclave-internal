@@ -73,6 +73,11 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 用户认证（登录/用户信息）
+      '/auth': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       // LLM 管理
       '/llm': {
         target: 'http://127.0.0.1:8000',

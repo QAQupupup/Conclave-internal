@@ -32,6 +32,7 @@ import {
 import { getMeetingIdFromPath, navigate, subscribe } from '../lib/router.ts'
 import { initialStore, meetingReducer } from './meetingReducer.ts'
 import type { MeetingStore } from './meetingReducer.ts'
+import { useMeetingLogs } from '../hooks/useMeetingLogs.ts'
 import type {
   BorrowRequestPayload,
   ControlRequest,
@@ -191,24 +192,47 @@ export function MeetingProvider({ children }: { children: ReactNode }) {
 function MeetingDataProviderOuter({ meetingId, children }: { meetingId: string; children: ReactNode }) {
   const [store, dispatch] = useReducer(meetingReducer, initialStore)
   const { connected, connectionError, sendControl, sendBorrow, approveBorrow, rejectBorrow, freezeBorrow } = useWebSocket(meetingId, dispatch)
+  const { hydrateLogs, persistLogs, flushLogs } = useMeetingLogs(meetingId)
+  const logsHydratedRef = useRef(false)
 
   // 首次挂载 / meetingId 变化时 REST hydrate
   useEffect(() => {
     let cancelled = false
+    logsHydratedRef.current = false
     void (async () => {
       try {
         const detail = await getMeetingDetail(meetingId)
         if (cancelled) return
         dispatch({ type: 'hydrate', payload: detail as unknown as MeetingState })
+        // hydrate 完成后加载 localStorage 中的历史日志
+        const storedLogs = hydrateLogs()
+        if (storedLogs.length > 0) {
+          dispatch({ type: 'logs.hydrate', payload: storedLogs })
+        }
+        logsHydratedRef.current = true
       } catch (e) {
         if (cancelled) return
         console.error('[MeetingContext] hydrate failed:', e)
+        // 即使REST失败也尝试加载本地日志
+        const storedLogs = hydrateLogs()
+        if (storedLogs.length > 0) {
+          dispatch({ type: 'logs.hydrate', payload: storedLogs })
+        }
+        logsHydratedRef.current = true
       }
     })()
     return () => {
       cancelled = true
+      flushLogs()
     }
-  }, [meetingId])
+  }, [meetingId, hydrateLogs, flushLogs])
+
+  // 订阅日志变化，防抖持久化到 localStorage
+  const logs = store.meeting?.logs
+  useEffect(() => {
+    if (!logsHydratedRef.current || !logs || logs.length === 0) return
+    persistLogs(logs)
+  }, [logs, persistLogs])
 
   const refreshMeeting = useCallback(async (mid: string) => {
     const detail = await getMeetingDetail(mid)

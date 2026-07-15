@@ -224,7 +224,14 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
       title: '操作', key: 'actions', width: 80, align: 'center',
       render: (_: unknown, record: MeetingListItem) => (
         <Popconfirm title="确认删除？" onConfirm={() => handleSingleDelete(record.meeting_id, 'soft')} okText="确认" cancelText="取消">
-          <Button type="text" size="small" danger icon={<DeleteOutlined />} loading={deletingId === record.meeting_id} />
+          <Button
+            type="text"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            loading={deletingId === record.meeting_id}
+            className="task-board-delete-btn"
+          />
         </Popconfirm>
       ),
     },
