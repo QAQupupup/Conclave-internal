@@ -237,19 +237,31 @@ export interface Artifact {
     ext?: string
     meeting_id?: string
   }>
-  /** Fast Path 快速回答标题 */
+  /** 即时回答标题 */
   title?: string
-  /** Fast Path 快速回答正文 */
+  /** 即时回答正文 */
   answer?: string
-  /** 执行路径：fast_path / deep_think */
+  /** 执行路径：instant / standard */
   flow?: string
-  /** Fast Path 耗时 (ms) */
+  /** 即时模式耗时 (ms) */
   latency_ms?: number
   /** Plan 模式执行计划（由 Planner 在 clarify 前生成） */
   execution_plan?: {
     steps: string[]
     rationale?: string
   }
+  // 各 deliverable_type 对应的产出内容
+  code_analysis?: unknown
+  tested_system?: unknown
+  deployable_service?: unknown
+  design_doc?: unknown
+  comprehensive?: unknown
+  research_report?: unknown
+  business_report?: unknown
+  execution?: unknown
+  deployment?: unknown
+  review?: unknown
+  data_science?: unknown
 }
 
 // ---------- 领域事件信封 ----------
@@ -295,8 +307,30 @@ export interface EvidenceAttachedPayload {
 
 export interface ArtifactGeneratedPayload {
   meeting_id: string
-  prd: PRD
-  openapi: string
+  prd?: PRD
+  openapi?: string
+  deliverable_type?: string
+  code_analysis?: unknown
+  tested_system?: unknown
+  deployable_service?: unknown
+  design_doc?: unknown
+  comprehensive?: unknown
+  research_report?: unknown
+  business_report?: unknown
+  execution?: unknown
+  attachments?: Array<{
+    filename: string
+    path: string
+    size?: number
+    ext?: string
+    meeting_id?: string
+  }>
+  deployment?: unknown
+  review?: unknown
+  answer?: string
+  flow?: string
+  artifact?: Record<string, unknown>
+  elapsed_ms?: number
 }
 
 /** control.signal 业务事件（服务端处理后的回执，经事件总线广播） */
@@ -424,6 +458,22 @@ export interface MeetingState {
   produce_progress?: { step: string; message: string; percent: number } | null
   /** 实时日志条目 */
   logs?: LogEntry[]
+  /** 降级警告列表（各阶段的降级提示） */
+  degradation_warnings?: Array<{ message: string; severity: string; ts: string }>
+  /** 已部署的服务列表 */
+  deployed_services?: Array<{ service_id: string; url: string; port: number }>
+  /** 部署错误信息 */
+  deployment_error?: string | null
+  /** 待处理的验证码事件 */
+  captcha_pending?: { session_id: string; url?: string; screenshot_url?: string } | null
+  /** 待处理的网络授权请求 */
+  pending_net_auth?: { request_id: string; url: string; reason?: string } | null
+  /** 跳过的阶段列表 */
+  skipped_stages?: string[]
+  /** 错误详情 */
+  error_detail?: string | null
+  /** 完成时间 */
+  completed_at?: string | null
 }
 
 /** 日志条目 */

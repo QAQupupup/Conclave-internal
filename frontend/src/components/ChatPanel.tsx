@@ -79,7 +79,7 @@ export function ChatPanel({ onSelectRef }: ChatPanelProps) {
     <section className="panel chat-panel">
       <div className="panel-title">聊天流</div>
       <div className="chat-list" ref={scrollRef} onScroll={handleScroll}>
-        {messages.length === 0 && !isFastPath && (
+        {messages.length === 0 && !isInstant && (
           <div className="empty-hint chat-panel-empty-hint">
             <MessageOutlined className="chat-panel-empty-icon" />
             <Text type="secondary">暂无发言，创建会议并运行后，agent 发言将在此实时展示。</Text>

@@ -365,11 +365,14 @@ STAGE_ORDER: list[Stage] = [
 # simple：跳过 cross_team + evidence_check，但保留 intra_team → arbitrate → produce
 # standard：无条件跳过的阶段为空；evidence_check 由 cross_team_node 动态跳过（无冲突时）
 # full：完整六阶段
+# plan：完整六阶段，但 clarify 前先调用 Planner 生成执行计划
+# instant：即时模式（在 runner 层直接处理，不进入六阶段管线）
 _FLOW_SKIP_MAP: dict[str, set[Stage]] = {
     "simple": {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK},
     "standard": set(),
     "full": set(),
-    "plan": set(),  # plan 模式：完整六阶段，但 clarify 前先调用 Planner 生成执行计划
+    "plan": set(),
+    "instant": set(),  # instant 模式在 runner 层分流，不走到 next_stage
 }
 
 
@@ -378,7 +381,7 @@ def get_skipped_stages(flow_plan: str) -> set[Stage]:
     return _FLOW_SKIP_MAP.get(flow_plan, set())
 
 
-def next_stage(current: Stage, flow_plan: str = "full") -> Stage | None:
+def next_stage(current: Stage, flow_plan: str = "standard") -> Stage | None:
     """返回下一阶段（跳过 flow_plan 标记的阶段），末尾返回 None"""
     skip = get_skipped_stages(flow_plan)
     idx = STAGE_ORDER.index(current)

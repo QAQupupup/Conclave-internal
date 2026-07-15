@@ -1,4 +1,4 @@
-﻿# ===== Conclave 后端 Dockerfile（四阶段构建，最大化缓存命中）=====
+# ===== Conclave 后端 Dockerfile（四阶段构建，最大化缓存命中）=====
 # 分层策略（从底到顶，变更频率递增）：
 #   1. system-deps : apt 源配置 + 所有系统依赖（curl/gnupg/Xvfb/VNC/字体/docker-cli/Playwright 浏览器依赖）
 #   2. playwright  : pip install playwright + playwright install chromium（~600MB，极少变更）
