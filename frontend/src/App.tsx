@@ -1,7 +1,7 @@
 // 应用根组件：组装四块布局
 // meetingId 为空 → 创建页；否则 → 顶部流程指示器+控制按钮 / 拓扑图 / 左侧聊天流 + 右侧三块
-import { useState, lazy, Suspense, useCallback } from 'react'
-import { ConfigProvider, Tabs, Button, Tooltip, Typography, Drawer, Divider } from 'antd'
+import { useState, lazy, Suspense, useCallback, useEffect } from 'react'
+import { ConfigProvider, Tabs, Button, Tooltip, Typography, Drawer, Divider, Breadcrumb, Dropdown } from 'antd'
 import {
   TeamOutlined,
   CodeOutlined,
@@ -13,6 +13,10 @@ import {
   DownOutlined,
   MenuFoldOutlined,
   HomeOutlined,
+  MenuOutlined,
+  AppstoreOutlined,
+  BarChartOutlined,
+  CloudServerOutlined,
 } from '@ant-design/icons'
 import { MeetingProvider, useMeeting } from './store/MeetingContext.tsx'
 import { AuthProvider, useAuth } from './store/AuthContext.tsx'
@@ -262,6 +266,37 @@ function AppShell() {
     setTab('workspace')
   }
 
+  // P1-7: 切换会议时重置Tab为会议视图
+  useEffect(() => {
+    setTab('meeting')
+    setWorkspaceInitialFile(undefined)
+  }, [meetingId])
+
+  // 统一退出登录逻辑
+  const handleLogout = useCallback(() => {
+    logout()
+    navigate('/')
+  }, [logout])
+
+  // 全局导航菜单项（会议视图中使用）
+  const globalNavItems = [
+    {
+      key: '/board',
+      icon: <AppstoreOutlined />,
+      label: '会议看板',
+    },
+    {
+      key: '/dashboard',
+      icon: <BarChartOutlined />,
+      label: '运维面板',
+    },
+    {
+      key: '/models',
+      icon: <CloudServerOutlined />,
+      label: '模型管理',
+    },
+  ]
+
   // 认证加载中：显示空白（避免闪烁）
   if (authLoading) {
     return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
@@ -282,10 +317,20 @@ function AppShell() {
     const pageTitles: Record<string, string> = {
       '/dashboard': '运维面板',
       '/models': '模型管理',
-      '/ops': '运维面板',
     }
     const pageTitle = pageTitles[path] || '会议看板'
-    const breadcrumbText = path === '/board' ? '会议看板' : `会议看板 / ${pageTitle}`
+    // 统一面包屑组件（可点击）
+    const breadcrumbItems = [
+      {
+        title: <HomeOutlined onClick={() => navigate('/')} style={{ cursor: 'pointer' }} title="返回首页" />,
+      },
+      {
+        title: path === '/board'
+          ? '会议看板'
+          : <a onClick={() => navigate('/board')}>会议看板</a>,
+      },
+      ...(path !== '/board' ? [{ title: pageTitle }] : []),
+    ]
     return (
       <div className="app-shell board-shell">
         <DrawerMenu currentPath={path} />
@@ -294,9 +339,7 @@ function AppShell() {
           <div className="app-page-header">
             <div className="app-page-header-left">
               <Typography.Title level={4} className="app-page-title">{pageTitle}</Typography.Title>
-              <div className="app-page-breadcrumb">
-                {breadcrumbText}
-              </div>
+              <Breadcrumb items={breadcrumbItems} className="app-page-breadcrumb" separator="/" />
             </div>
             <div className="toolbar-button-group" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <GuardButton />
@@ -316,7 +359,8 @@ function AppShell() {
               </Tooltip>
               <UserMenu
                 onOpenSettings={() => setSettingsOpen(true)}
-                onLogout={logout}
+                onNavigateBoard={() => navigate('/board')}
+                onLogout={handleLogout}
               />
             </div>
           </div>
@@ -342,6 +386,19 @@ function AppShell() {
     ? (store.meeting.topic.length > 30 ? store.meeting.topic.slice(0, 30) + '…' : store.meeting.topic)
     : meetingId
 
+  // 会议级面包屑
+  const meetingBreadcrumbItems = [
+    {
+      title: <HomeOutlined onClick={() => navigate('/')} style={{ cursor: 'pointer' }} title="返回首页" />,
+    },
+    {
+      title: <a onClick={() => { selectMeeting(null); navigate('/board') }}>会议看板</a>,
+    },
+    {
+      title: <span title={store.meeting?.topic}>{topic}</span>,
+    },
+  ]
+
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className={`sidebar-zone${sidebarCollapsed ? ' is-collapsed' : ''}`}>
@@ -356,16 +413,27 @@ function AppShell() {
         )}
       </aside>
       <div className="app-main">
-        {/* 会议级统一导航栏：面包屑 + 值守 + 主题/设置 */}
+        {/* 会议级统一导航栏：面包屑 + 全局导航 + 值守 + 主题/设置 */}
         <div className="app-meeting-navbar">
-          <div className="breadcrumb-area" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <HomeOutlined
-              style={{ color: 'var(--text-secondary, #6b7280)', fontSize: 13, cursor: 'pointer' }}
-              onClick={() => { selectMeeting(null); navigate('/board') }}
-              title="返回会议看板"
-            />
-            <span className="app-breadcrumb-sep">/</span>
-            <span className="app-breadcrumb-topic" title={store.meeting?.topic}>{topic}</span>
+          <div className="breadcrumb-area" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Dropdown
+              menu={{
+                items: globalNavItems,
+                onClick: ({ key }) => {
+                  if (key === '/board') {
+                    selectMeeting(null)
+                  }
+                  navigate(key)
+                },
+              }}
+              placement="bottomLeft"
+              trigger={['click']}
+            >
+              <Tooltip title="全局导航">
+                <Button type="text" size="small" icon={<MenuOutlined />} />
+              </Tooltip>
+            </Dropdown>
+            <Breadcrumb items={meetingBreadcrumbItems} separator="/" />
           </div>
           <div className="app-meeting-actions" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <GuardButton />
@@ -379,14 +447,14 @@ function AppShell() {
               <Button type="text" size="small" icon={<SkinOutlined />}
                 onClick={() => setThemeOpen(true)} />
             </Tooltip>
-            <Tooltip title="LLM 设置">
+            <Tooltip title="设置">
               <Button type="text" size="small" icon={<SettingOutlined />}
                 onClick={() => setSettingsOpen(true)} />
             </Tooltip>
             <UserMenu
               onOpenSettings={() => setSettingsOpen(true)}
               onNavigateBoard={() => { selectMeeting(null); navigate('/board') }}
-              onLogout={() => { logout(); navigate('/'); }}
+              onLogout={handleLogout}
             />
           </div>
         </div>

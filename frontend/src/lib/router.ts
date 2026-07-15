@@ -11,9 +11,14 @@ function notify(): void {
 }
 
 /** 编程式导航：pushState + 通知所有订阅者 */
-export function navigate(to: string): void {
-  if (to === window.location.pathname) return
-  window.history.pushState({}, '', to)
+export function navigate(to: string, replace?: boolean): void {
+  const currentUrl = window.location.pathname + window.location.search
+  if (to === currentUrl) return
+  if (replace) {
+    window.history.replaceState({}, '', to)
+  } else {
+    window.history.pushState({}, '', to)
+  }
   notify()
 }
 
@@ -54,4 +59,19 @@ export function isDashboardPath(): boolean {
 /** 判断当前是否在模型管理页 */
 export function isModelsPath(): boolean {
   return window.location.pathname === '/models'
+}
+
+/** 获取URL query参数 */
+export function getSearchParams(): URLSearchParams {
+  return new URLSearchParams(window.location.search)
+}
+
+/** 带query参数导航 */
+export function navigateWithQuery(to: string, params?: Record<string, string>): void {
+  let url = to
+  if (params && Object.keys(params).length > 0) {
+    const search = new URLSearchParams(params).toString()
+    url = `${to}?${search}`
+  }
+  navigate(url)
 }

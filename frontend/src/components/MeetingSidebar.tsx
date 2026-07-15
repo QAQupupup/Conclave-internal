@@ -12,6 +12,7 @@ import { useMeeting } from '../store/MeetingContext.tsx'
 import { usePersistentState } from '../hooks/usePersistentState.ts'
 import { STAGE_LABELS, getMeetingStatusInfo } from '../constants.ts'
 import { clearLogs } from '../hooks/useMeetingLogs.ts'
+import { navigateWithQuery } from '../lib/router.ts'
 
 const { Text } = Typography
 
@@ -112,6 +113,19 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
     [meetingId, selectMeeting, refresh, deleteMode],
   )
 
+  // 当前正在操作删除的会议ID（用于控制Popconfirm显示时重置模式）
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  // 打开删除确认时重置为软删除（防止模式粘滞导致误删）
+  const handleDeletePopconfirmOpenChange = (open: boolean, id: string) => {
+    if (open) {
+      setDeleteMode('soft')
+      setDeleteConfirmId(id)
+    } else {
+      setDeleteConfirmId(null)
+    }
+  }
+
   const deletePopconfirmTitle = (
     <div style={{ width: 220 }}>
       <div style={{ marginBottom: 8 }}>
@@ -131,7 +145,10 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
   return (
     <div className="meeting-sidebar">
       <div className="meeting-sidebar-toolbar">
-        <Button type="primary" icon={<PlusOutlined />} size="small" onClick={() => selectMeeting(null)}>
+        <Button type="primary" icon={<PlusOutlined />} size="small" onClick={() => {
+          selectMeeting(null)
+          navigateWithQuery('/board', { create: '1' })
+        }}>
           新建会议
         </Button>
         <div className="meeting-sidebar-spacer" />
@@ -155,7 +172,7 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
           <Text strong className="meeting-sidebar-history-title">历史会议 ({filteredMeetings.length})</Text>
           {runningCount > 0 && <Badge count={runningCount} className="meeting-sidebar-running-badge" />}
         </div>
-        {!listCollapsed && meetings.length > 3 && (
+        {!listCollapsed && (
           <Input
             size="small"
             placeholder="搜索会议..."
@@ -240,6 +257,8 @@ export function MeetingSidebar({ onCollapseSidebar }: MeetingSidebarProps) {
                     {(isHovered || isDeleting) && !m.is_running && (
                       <Popconfirm
                         title={deletePopconfirmTitle}
+                        open={deleteConfirmId === m.meeting_id}
+                        onOpenChange={(open) => handleDeletePopconfirmOpenChange(open, m.meeting_id)}
                         onConfirm={(e) => {
                           e?.stopPropagation()
                           handleDelete(m.meeting_id)

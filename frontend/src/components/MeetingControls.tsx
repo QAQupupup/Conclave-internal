@@ -78,7 +78,7 @@ export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControls
 
   return (
     <div className="meeting-controls">
-      <Space>
+      <Space size="small">
         {status === 'running' && (
           <Button
             icon={<PauseCircleOutlined />}
@@ -124,6 +124,15 @@ export function MeetingControls({ onOpenReport, onBackToBoard }: MeetingControls
             </Button>
           </Popconfirm>
         )}
+        {/* 运行中/暂停状态也提供返回看板入口 */}
+        <Button
+          size="small"
+          icon={<RollbackOutlined />}
+          onClick={handleBackToBoard}
+          title="返回会议看板（会议继续在后台运行）"
+        >
+          返回看板
+        </Button>
       </Space>
     </div>
   )

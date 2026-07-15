@@ -1,8 +1,8 @@
 // 会议看板：使用 AntD Table + Tag + Input.Search + Dropdown + Button + Modal
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { FormEvent } from 'react'
-import { Table, Tag, Input, Button, Modal, Select, Space, Typography, Alert, Card, Divider, Popconfirm, Row, Col } from 'antd'
-import { PlusOutlined, DeleteOutlined, HomeOutlined, TagsOutlined } from '@ant-design/icons'
+import { Table, Tag, Input, Button, Modal, Select, Space, Typography, Alert, Card, Divider, Popconfirm, Row, Col, Upload } from 'antd'
+import { PlusOutlined, DeleteOutlined, HomeOutlined, TagsOutlined, UploadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useMeeting } from '../store/MeetingContext.tsx'
 import {
@@ -12,6 +12,8 @@ import {
 import type { MeetingListItem, TagInfo } from '../lib/api.ts'
 import type { AgentRole } from '../types/events.ts'
 import { MeetingSearchSelect } from './MeetingSearchSelect.tsx'
+import { useRouter } from '../hooks/useRouter.ts'
+import { getSearchParams, navigate } from '../lib/router.ts'
 
 const { Text, Title } = Typography
 
@@ -50,6 +52,7 @@ interface TaskBoardProps {
 
 export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
   const { selectMeeting, createMeeting, runMeeting, uploadDocument } = useMeeting()
+  const { path } = useRouter()
 
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -102,6 +105,16 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
     const timer = setInterval(() => { void fetchMeetings(); void fetchTags() }, 5000)
     return () => clearInterval(timer)
   }, [fetchTags, fetchMeetings])
+
+  // 检测URL ?create=1 参数，自动展开创建表单
+  useEffect(() => {
+    const params = getSearchParams()
+    if (params.get('create') === '1') {
+      setShowCreate(true)
+      // 清除URL参数，避免刷新后重复展开
+      navigate('/board', true)
+    }
+  }, [path])
 
 
   const handleBatchDelete = async () => {
@@ -282,10 +295,29 @@ export function TaskBoard({ onBackToLanding }: TaskBoardProps) {
                 </Button>
               </Space.Compact>
               <MeetingSearchSelect selectedIds={referenceIds} onChange={setReferenceIds} placeholder="引用历史会议…" compact />
-              <Space wrap>
+              <Space wrap align="center">
                 <Select value={createDeliverable} onChange={setCreateDeliverable} options={DELIVERABLE_OPTIONS} disabled={createBusy} className="task-board-deliverable-select" />
-                <input type="file" accept=".md,.markdown,text/markdown" onChange={(e) => setCreateFile(e.target.files?.[0] ?? null)} disabled={createBusy} />
-                {createFile && <Text type="secondary">{createFile.name}</Text>}
+                <Upload
+                  beforeUpload={(file) => {
+                    setCreateFile(file)
+                    return false // 阻止自动上传
+                  }}
+                  onRemove={() => {
+                    setCreateFile(null)
+                  }}
+                  maxCount={1}
+                  accept=".md,.markdown,.txt,.pdf,.doc,.docx"
+                  fileList={createFile ? [{
+                    uid: '-1',
+                    name: createFile.name,
+                    status: 'done',
+                  }] : []}
+                  disabled={createBusy}
+                >
+                  <Button icon={<UploadOutlined />} size="middle" disabled={createBusy}>
+                    {createFile ? '重选文件' : '上传参考资料'}
+                  </Button>
+                </Upload>
                 <Button type="primary" htmlType="submit" loading={createBusy} disabled={!createTopic.trim()}>
                   创建并运行
                 </Button>
