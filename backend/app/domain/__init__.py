@@ -1,11 +1,21 @@
-"""兼容 shim：所有领域模型已迁移到 app.domain 子模块。
+"""领域模型包：统一 re-export 全部 20 个领域类。
 
-保留此文件是为了向后兼容 `from app.models import xxx` 的调用。
-新代码应直接使用 `from app.domain import xxx`。
+支持 `from app.domain import MeetingState` 等便捷导入。
+具体定义分布在 4 个子模块中：
+- enums: 枚举类型
+- message: 发言/证据/决策模型
+- meeting: 会议核心模型
+- agent_role: 角色模型
 """
 from __future__ import annotations
 
-from app.domain.enums import Role, ClaimType, ConflictType, Stage, MeetingStatus
+from app.domain.enums import (
+    Role,
+    ClaimType,
+    ConflictType,
+    Stage,
+    MeetingStatus,
+)
 from app.domain.message import (
     Message,
     Claim,
@@ -23,14 +33,19 @@ from app.domain.meeting import (
     BorrowRequest,
     MeetingState,
 )
-from app.domain.agent_role import AgentRole, AgentRoleListResponse
+from app.domain.agent_role import (
+    AgentRole,
+    AgentRoleListResponse,
+)
 
 __all__ = [
+    # enums
     "Role",
     "ClaimType",
     "ConflictType",
     "Stage",
     "MeetingStatus",
+    # message
     "Message",
     "Claim",
     "Conflict",
@@ -39,11 +54,13 @@ __all__ = [
     "Decision",
     "DecisionRecord",
     "EvidenceSet",
+    # meeting
     "PRD",
     "Artifact",
     "Meeting",
     "BorrowRequest",
     "MeetingState",
+    # agent_role
     "AgentRole",
     "AgentRoleListResponse",
 ]
