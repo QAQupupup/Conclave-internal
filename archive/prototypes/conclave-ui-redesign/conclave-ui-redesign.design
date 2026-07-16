@@ -1,0 +1,80 @@
+{
+  "data": [
+    {
+      "id": "page-create-meeting",
+      "title": "创建会议",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1719590400000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/create-meeting.html",
+        "interactions": [
+          {
+            "domId": "btn-start-meeting",
+            "targetPageId": "page-meeting-dashboard"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-meeting-dashboard",
+      "title": "会议仪表盘",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1719590400000,
+      "canvasData": {
+        "x": 620,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/meeting-dashboard.html",
+        "interactions": [
+          {
+            "domId": "tab-workspace",
+            "targetPageId": "page-workspace"
+          },
+          {
+            "domId": "btn-new-meeting",
+            "targetPageId": "page-create-meeting",
+            "hideEdge": true,
+            "transitionLabel": "新建会议"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-workspace",
+      "title": "工作区",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1719590400000,
+      "canvasData": {
+        "x": 1240,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/workspace.html",
+        "interactions": [
+          {
+            "domId": "tab-meeting",
+            "targetPageId": "page-meeting-dashboard",
+            "hideEdge": true,
+            "transitionLabel": "返回会议"
+          }
+        ]
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "desktop",
+    "projectName": "Conclave UI 重设计"
+  }
+}

@@ -1,0 +1,965 @@
+﻿.muted {
+  color: var(--text-muted);
+}
+
+/* ---------- 通用工具类 ---------- */
+.suspense-fallback {
+  padding: 24px;
+  text-align: center;
+}
+.flex-col-overflow {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.toolbar-button-group {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.breadcrumb-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+/* ---------- 四块布局 ---------- */
+.app-layout {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-header {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 2fr auto;
+  gap: 20px;
+  align-items: center;
+  padding: 14px 24px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.header-left {
+  min-width: 0;
+}
+.header-title {
+  font-weight: 600;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.header-sub {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 5px;
+  font-size: 12px;
+}
+.status-tag {
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.status-running {
+  color: var(--info);
+  border-color: var(--info);
+  background: var(--accent-light);
+}
+.status-paused {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
+.status-aborted {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--err-bg);
+}
+.status-done {
+  color: var(--success);
+  border-color: var(--success);
+  background: var(--ok-bg);
+}
+.conn-tag {
+  color: var(--text-muted);
+}
+.conn-tag.on {
+  color: var(--success);
+}
+
+/* ---------- 阶段进度条 ---------- */
+.stage-progress {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+.stage-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.4;
+  min-width: 68px;
+  transition: opacity 0.25s ease;
+}
+.stage-step.done {
+  opacity: 0.65;
+}
+.stage-step.current {
+  opacity: 1;
+}
+.stage-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1.5px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  transition: var(--transition);
+}
+.stage-step.done .stage-dot {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--accent-fg);
+}
+.stage-step.current .stage-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: var(--shadow-focus);
+}
+.stage-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: -0.005em;
+}
+.stage-step.current .stage-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 置信度标记 */
+.conf-mark {
+  font-size: 10px;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.conf-mark.conf-low {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+.conf-mark.conf-fallback {
+  color: var(--danger);
+  background: var(--err-bg);
+}
+.stage-dot.conf-low {
+  box-shadow: 0 0 0 3px var(--warn-bg);
+}
+.stage-dot.conf-fallback {
+  box-shadow: 0 0 0 3px var(--err-bg);
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- 六步流程指示器 + 会议控制（置于 meeting-top-bar） ---------- */
+.meeting-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* meeting-view 内的 app-layout：覆盖默认 100vh / 三行栅格 */
+.meeting-view .app-layout {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  grid-template-rows: auto 1fr;
+}
+
+/* 拓扑图槽：作为 AgentGraph 的容器，提供折叠功能 + 折叠按钮定位 */
+.graph-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease, flex-basis 0.25s ease;
+}
+.graph-slot .graph-container {
+  flex: 1;
+  min-height: 0;
+  transition: opacity 0.2s ease;
+}
+/* 折叠态：隐藏拓扑图主体，仅保留一行细带子显示标题 + 节点统计 + 展开按钮 */
+.meeting-view.graph-collapsed .graph-slot {
+  max-height: 32px;
+  flex: 0 0 32px;
+}
+.meeting-view.graph-collapsed .graph-slot .graph-container {
+  /* 折叠时不整体隐藏，而是让 AgentGraph 自己渲染一个极简的"折叠条" */
+  padding: 4px 18px;
+  flex: 0 0 32px;
+  min-height: 32px;
+  border-bottom: 1px solid var(--border);
+}
+.meeting-view.graph-collapsed .graph-slot .graph-header {
+  margin: 0;
+}
+/* 折叠态隐藏 SVG 图体和提示：用 opacity + max-height 替代 display:none 避免硬切抖动 */
+.meeting-view.graph-collapsed .graph-slot .graph-scroll,
+.meeting-view.graph-collapsed .graph-slot .graph-legend,
+.meeting-view.graph-collapsed .graph-slot .graph-zoom-controls,
+.meeting-view.graph-collapsed .graph-slot .graph-empty-hint {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+/* 折叠按钮：浮在拓扑图下边缘的小横条，水平居中 */
+.graph-collapse-btn {
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: 44px;
+  height: 14px;
+  padding: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, height 0.15s ease;
+  box-shadow: var(--shadow-sm);
+}
+.graph-collapse-btn:hover {
+  background: var(--bg);
+  color: var(--accent);
+  border-color: var(--accent);
+  height: 18px;
+}
+
+.meeting-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  height: 56px;
+  gap: 16px;
+}
+
+/* 六步流程指示器：六个圆形节点 + 连接线 */
+.stage-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.stage-node-wrap {
+  display: flex;
+  align-items: center;
+}
+.stage-node-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stage-node {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+.stage-node.current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: var(--shadow-focus);
+}
+.stage-node.done {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--accent-fg);
+}
+.stage-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+.stage-label.current {
+  color: var(--text);
+  font-weight: 600;
+}
+.stage-connector {
+  width: 32px;
+  height: 1.5px;
+  background: var(--border);
+  margin: 0 8px;
+  border-radius: 1px;
+  transition: var(--transition);
+}
+.stage-connector.done {
+  background: var(--success);
+}
+
+/* 会议控制按钮 */
+.meeting-controls {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+/* ---------- 主体两栏 ---------- */
+.app-body {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  min-height: 0;
+}
+/* 聊天面板和右侧面板的可折叠容器 */
+.chat-slot {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  transition: max-width 0.22s ease;
+}
+/* 全宽模式：聊天流占据全部空间，右侧面板变为浮动徽标 */
+.app-body-full {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: transparent;
+  min-height: 0;
+}
+.chat-slot-full {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+.right-column-slot {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  transition: max-width 0.22s ease;
+}
+/* 折叠态：聊天面板收窄为细条 */
+.meeting-view.chat-collapsed .chat-slot {
+  max-width: 24px;
+  flex: 0 0 24px;
+}
+.meeting-view.chat-collapsed .chat-slot .chat-panel {
+  opacity: 0;
+  pointer-events: none;
+}
+/* 折叠态：右侧面板收窄为细条 */
+.meeting-view.right-collapsed .right-column-slot {
+  max-width: 24px;
+  flex: 0 0 24px;
+}
+.meeting-view.right-collapsed .right-column-slot .right-column {
+  opacity: 0;
+  pointer-events: none;
+}
+/* 面板折叠按钮：竖向小箭头 */
+.panel-collapse-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 44px;
+  padding: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.panel-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.chat-collapse-btn {
+  right: -1px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.right-collapse-btn {
+  left: -1px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+/* 折叠态时按钮居中显示 */
+.meeting-view.chat-collapsed .chat-collapse-btn,
+.meeting-view.right-collapsed .right-collapse-btn {
+  left: 50%;
+  right: auto;
+  transform: translate(-50%, -50%);
+}
+
+.right-column {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 1px;
+  background: var(--border);
+  min-height: 0;
+  flex: 1;
+  transition: opacity 0.15s ease;
+}
+
+/* ---------- 面板通用：边框分明 ---------- */
+.panel {
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-title {
+  padding: 10px 18px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-elev);
+  letter-spacing: -0.005em;
+}
+.field-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  display: block;
+  margin-bottom: 3px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+/* ---------- 聊天流 ---------- */
+.chat-panel {
+  min-height: 0;
+  position: relative;
+  flex: 1;
+  transition: opacity 0.15s ease;
+}
+.chat-list {
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.empty-hint {
+  color: var(--text-muted);
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.message-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  position: relative;
+  transition: var(--transition);
+}
+
+.message-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.message-card:hover {
+  border-color: var(--border-strong);
+}
+
+.message-card.role-moderator::before { background: var(--role-moderator); }
+.message-card.role-architect::before { background: var(--role-architect); }
+.message-card.role-engineer::before { background: var(--role-engineer); }
+.message-card.role-security::before { background: var(--role-security); }
+.message-card.role-data::before { background: var(--role-data); }
+.message-card.role-ux::before { background: var(--role-ux); }
+.message-card.role-marketing::before { background: var(--role-marketing); }
+.message-card.role-default::before { background: var(--role-default); }
+
+.message-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.message-role {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  letter-spacing: -0.005em;
+}
+.role-moderator .message-role {
+  color: var(--role-moderator);
+}
+.role-architect .message-role {
+  color: var(--role-architect);
+}
+.role-engineer .message-role {
+  color: var(--role-engineer);
+}
+.role-security .message-role {
+  color: var(--role-security);
+}
+.role-data .message-role {
+  color: var(--role-data);
+}
+.role-ux .message-role {
+  color: var(--role-ux);
+}
+.role-marketing .message-role {
+  color: var(--role-marketing);
+}
+.message-stage {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.message-time {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.message-content {
+  margin: 0;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text);
+  font-family: var(--font-sans);
+  padding: 2px 0;
+  min-width: 0;
+}
+/* 消息正文行 */
+.msg-line {
+  display: block;
+  line-height: 1.75;
+  min-height: 1.75em;
+}
+/* 元信息行（风险等级、证据来源等）：缩进、灰色小字 */
+.msg-meta-line {
+  display: block;
+  padding-left: 22px;
+  margin-top: 1px;
+  margin-bottom: 3px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+.msg-meta-line .msg-tag {
+  font-size: 10px;
+  padding: 0 5px;
+  line-height: 1.5;
+}
+/* FocusMode 中全屏展示的完整消息内容（保持与普通消息一致的简洁样式） */
+.message-content-full {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  margin: 0;
+  white-space: normal;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+/* ---- 消息内容语义标签 badge ---- */
+.msg-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  margin: 0 2px;
+  vertical-align: baseline;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msg-tag.tag-constraint {
+  background: var(--accent-light);
+  color: var(--accent);
+  border: 1px solid var(--accent-light);
+}
+.msg-tag.tag-assumption {
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--accent);
+  border: 1px solid var(--accent-light);
+}
+.msg-tag.tag-common {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-bg);
+}
+.msg-tag.tag-fact {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+  border: 1px solid var(--ok-bg);
+}
+.msg-tag.tag-risk {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--err-fg);
+  border: 1px solid var(--err-bg);
+}
+.msg-tag.tag-decision {
+  background: var(--accent-light);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.msg-tag.tag-question {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-bg);
+}
+.msg-tag.tag-requirement {
+  background: var(--accent-light);
+  color: var(--accent);
+  border: 1px solid var(--accent-light);
+}
+.msg-tag.tag-doc {
+  background: rgba(91, 143, 249, 0.1);
+  color: #3b6fd4;
+  border: 1px solid rgba(91, 143, 249, 0.2);
+}
+.msg-tag.tag-web {
+  background: rgba(107, 165, 196, 0.12);
+  color: #4a88a8;
+  border: 1px solid rgba(107, 165, 196, 0.25);
+}
+.msg-tag.tag-risk-high {
+  background: rgba(220, 56, 72, 0.12);
+  color: #c53048;
+  border: 1px solid rgba(220, 56, 72, 0.25);
+}
+.msg-tag.tag-risk-low {
+  background: rgba(94, 173, 143, 0.12);
+  color: #3d8a6b;
+  border: 1px solid rgba(94, 173, 143, 0.25);
+}
+/* 消息操作工具条 */
+.message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.message-actions-left,
+.message-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 长消息展开后：卡片整体描边轻微强调，提醒用户"此条已展开" */
+.message-card.is-expanded {
+  border-color: var(--accent-soft, var(--accent));
+  box-shadow: 0 0 0 1px var(--accent-soft, transparent) inset;
+}
+.expand-btn,
+.copy-btn,
+.focus-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.copy-btn {
+  color: var(--text-muted);
+}
+.copy-btn.is-copied {
+  color: var(--success, #4caf50);
+}
+.focus-btn {
+  color: var(--text-muted);
+}
+.focus-btn:hover,
+.copy-btn:hover {
+  color: var(--accent);
+}
+/* ref chip "更多" 按钮：圆形数字徽章风格 */
+.ref-chip-toggle {
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.ref-chip-toggle:hover {
+  border-color: var(--accent);
+  border-style: solid;
+  color: var(--accent);
+}
+.message-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ---------- 统一证据渲染组件 EvidenceBadge ---------- */
+/* 三级可靠性配色：已核验(绿) / 可追溯(蓝) / 推理假设(琥珀) */
+.ev-lvl-verified   { --ev-color: #059669; --ev-bg: #ecfdf5; --ev-border: #a7f3d0; }
+.ev-lvl-traceable  { --ev-color: #2563eb; --ev-bg: #eff6ff; --ev-border: #bfdbfe; }
+.ev-lvl-assumption { --ev-color: #d97706; --ev-bg: #fffbeb; --ev-border: #fde68a; }
+
+/* 证据徽章容器 */
+.evidence-badge {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+}
+
+/* 证据徽章触发按钮 */
+.evidence-badge-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+  background: var(--ev-bg);
+  border: 1px solid var(--ev-border);
+  color: var(--ev-color);
+  transition: var(--transition);
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+.evidence-badge-trigger:hover {
+  filter: brightness(0.95);
+}
+
+/* 证据图标 */
+.evidence-badge-icon {
+  font-size: 11px;
+  font-weight: 600;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* 证据来源标签 */
+.evidence-badge-label {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+/* 可靠性等级标签 */
+.evidence-badge-level {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.evidence-badge-level.ev-lvl-verified   { background: #d1fae5; color: #065f46; }
+.evidence-badge-level.ev-lvl-traceable  { background: #dbeafe; color: #1e40af; }
+.evidence-badge-level.ev-lvl-assumption { background: #fef3c7; color: #92400e; }
+
+/* 证据引用原文 */
+.evidence-badge-quote {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 3px 10px;
+  border-left: 2px solid var(--ev-border);
+  margin-left: 4px;
+  line-height: 1.5;
+  font-style: italic;
+  max-width: 360px;
+}
+
+/* 证据列表 */
+.evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 折叠/展开按钮 */
+.evidence-list-toggle {
+  background: var(--bg-elev);
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.evidence-list-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 证据详情面板 */
+.evidence-detail {
+  padding: 4px 0;
+}
+.evidence-detail-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.evidence-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.evidence-detail-index {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 18px;
+  text-align: right;
+  padding-top: 4px;
+}
+.evidence-detail-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 12px 0;
+  text-align: center;
+}
+
+/* ---------- 聊天流增强：动画 / 阶段分隔线 / 新消息提示 / 展开 ---------- */
+@keyframes message-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.message-card.message-in {
+  animation: message-in 0.3s ease-out;
+}
+.message-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stage-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 6px;
+  position: relative;
+}
+.stage-separator::before {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.stage-sep-line {
+  display: none;
+}
+.stage-sep-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  white-space: nowrap;

@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from app.db_legacy import (
     delete_preference,
@@ -12,6 +11,7 @@ from app.db_legacy import (
     get_preference,
     set_preference,
 )
+from app.schemas.preferences import PreferenceValue
 
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
@@ -19,21 +19,16 @@ router = APIRouter(prefix="/preferences", tags=["preferences"])
 DEFAULT_USER_ID = "default"
 
 
-class PreferenceValue(BaseModel):
-    """偏好写入请求体"""
-    value: str
-
-
 @router.get("/")
 async def list_preferences() -> dict[str, str]:
     """返回当前用户全部偏好"""
-    return get_all_preferences(DEFAULT_USER_ID)
+    return await get_all_preferences(DEFAULT_USER_ID)
 
 
 @router.get("/{key}")
 async def get_preference_route(key: str) -> dict[str, str]:
     """取单条偏好，不存在返回 404"""
-    value = get_preference(DEFAULT_USER_ID, key)
+    value = await get_preference(DEFAULT_USER_ID, key)
     if value is None:
         raise HTTPException(404, f"偏好 '{key}' 不存在")
     return {key: value}
@@ -42,14 +37,14 @@ async def get_preference_route(key: str) -> dict[str, str]:
 @router.put("/{key}")
 async def set_preference_route(key: str, body: PreferenceValue) -> dict[str, Any]:
     """写入（upsert）单条偏好"""
-    updated_at = set_preference(DEFAULT_USER_ID, key, body.value)
+    updated_at = await set_preference(DEFAULT_USER_ID, key, body.value)
     return {key: body.value, "updated_at": updated_at}
 
 
 @router.delete("/{key}")
 async def delete_preference_route(key: str) -> dict[str, str]:
     """删除单条偏好，不存在返回 404"""
-    deleted = delete_preference(DEFAULT_USER_ID, key)
+    deleted = await delete_preference(DEFAULT_USER_ID, key)
     if not deleted:
         raise HTTPException(404, f"偏好 '{key}' 不存在")
     return {"deleted": key}

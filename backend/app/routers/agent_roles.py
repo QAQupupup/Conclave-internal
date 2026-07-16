@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 from app.db_legacy import (
     delete_agent_role,
@@ -16,40 +15,14 @@ from app.db_legacy import (
     save_agent_role,
 )
 from app.models import AgentRole, AgentRoleListResponse
+from app.schemas.agent_role import (
+    CreateRoleRequest,
+    GenerateRolesRequest,
+    GenerateRolesResponse,
+    UpsertRoleResponse,
+)
 
 router = APIRouter(prefix="/agent-roles", tags=["agent-roles"])
-
-
-# ---------- 请求/响应模型 ----------
-
-class CreateRoleRequest(BaseModel):
-    """创建/更新角色请求"""
-    id: str = Field(..., description="英文标识，如 fullstack_engineer")
-    display_name: str = Field(..., description="中文名")
-    perspective: str = Field("", description="核心视角")
-    expertise_domains: list[str] = Field(default_factory=list)
-    risk_appetite: str = Field("balanced", description="conservative | balanced | aggressive")
-    default_stance: str = Field("")
-    evidence_preference: str = Field("balanced")
-    model_override: str = Field("")
-    background_brief: str = Field("")
-    prompt_template: str = Field("")
-
-
-class GenerateRolesRequest(BaseModel):
-    """议题驱动生成角色请求"""
-    topic: str = Field(..., description="会议议题")
-
-
-class GenerateRolesResponse(BaseModel):
-    """生成角色响应"""
-    roles: list[AgentRole]
-    generated_at: str
-
-
-class UpsertRoleResponse(BaseModel):
-    """单个角色 upsert 响应"""
-    role: AgentRole
 
 
 # ---------- 内置角色种子数据 ----------
@@ -142,15 +115,15 @@ BUILTIN_ROLES = [
 ]
 
 
-def _init_builtin_roles() -> int:
+async def _init_builtin_roles() -> int:
     """初始化内置角色到数据库（仅当数据库为空时）"""
-    existing = list_agent_roles()
+    existing = await list_agent_roles()
     if existing:
         return 0
     now = datetime.now(timezone.utc).isoformat()
     count = 0
     for r in BUILTIN_ROLES:
-        save_agent_role({
+        await save_agent_role({
             **r,
             "is_builtin": 1,
             "is_active": 1,
@@ -166,8 +139,8 @@ def _init_builtin_roles() -> int:
 @router.get("", response_model=AgentRoleListResponse)
 async def list_roles(active_only: bool = False) -> AgentRoleListResponse:
     """列出所有角色"""
-    _init_builtin_roles()
-    rows = list_agent_roles(active_only=active_only)
+    await _init_builtin_roles()
+    rows = await list_agent_roles(active_only=active_only)
     roles = [AgentRole.from_db_row(r) for r in rows]
     return AgentRoleListResponse(roles=roles, total=len(roles))
 
@@ -175,8 +148,8 @@ async def list_roles(active_only: bool = False) -> AgentRoleListResponse:
 @router.get("/{role_id}", response_model=AgentRole)
 async def get_role(role_id: str) -> AgentRole:
     """取单个角色"""
-    _init_builtin_roles()
-    row = get_agent_role(role_id)
+    await _init_builtin_roles()
+    row = await get_agent_role(role_id)
     if row is None:
         raise HTTPException(status_code=404, detail="角色不存在")
     return AgentRole.from_db_row(row)
@@ -185,7 +158,7 @@ async def get_role(role_id: str) -> AgentRole:
 @router.post("", response_model=UpsertRoleResponse)
 async def create_role(req: CreateRoleRequest) -> UpsertRoleResponse:
     """创建新角色"""
-    row = get_agent_role(req.id)
+    row = await get_agent_role(req.id)
     if row is not None:
         raise HTTPException(status_code=409, detail="角色 ID 已存在")
     now = datetime.now(timezone.utc).isoformat()
@@ -205,15 +178,15 @@ async def create_role(req: CreateRoleRequest) -> UpsertRoleResponse:
         "created_at": now,
         "updated_at": now,
     }
-    save_agent_role(role_dict)
-    saved = get_agent_role(req.id)
+    await save_agent_role(role_dict)
+    saved = await get_agent_role(req.id)
     return UpsertRoleResponse(role=AgentRole.from_db_row(saved or role_dict))
 
 
 @router.put("/{role_id}", response_model=UpsertRoleResponse)
 async def update_role(role_id: str, req: CreateRoleRequest) -> UpsertRoleResponse:
     """更新角色"""
-    existing = get_agent_role(role_id)
+    existing = await get_agent_role(role_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="角色不存在")
     now = datetime.now(timezone.utc).isoformat()
@@ -233,17 +206,17 @@ async def update_role(role_id: str, req: CreateRoleRequest) -> UpsertRoleRespons
         "created_at": existing["created_at"],
         "updated_at": now,
     }
-    save_agent_role(role_dict)
-    saved = get_agent_role(role_id)
+    await save_agent_role(role_dict)
+    saved = await get_agent_role(role_id)
     return UpsertRoleResponse(role=AgentRole.from_db_row(saved or role_dict))
 
 
 @router.delete("/{role_id}")
 async def remove_role(role_id: str) -> dict[str, Any]:
     """删除角色"""
-    deleted = delete_agent_role(role_id)
+    deleted = await delete_agent_role(role_id)
     if not deleted:
-        row = get_agent_role(role_id)
+        row = await get_agent_role(role_id)
         if row is None:
             raise HTTPException(status_code=404, detail="角色不存在")
         raise HTTPException(status_code=403, detail="内置角色不可删除")
@@ -253,14 +226,14 @@ async def remove_role(role_id: str) -> dict[str, Any]:
 @router.post("/generate", response_model=GenerateRolesResponse)
 async def generate_roles(req: GenerateRolesRequest) -> GenerateRolesResponse:
     """根据议题自动生成角色阵容"""
-    _init_builtin_roles()
+    await _init_builtin_roles()
 
     from app.config import settings
     from app.agents.llm import RealLLM
 
     if not settings.use_real_llm:
         # 无 LLM 时返回内置角色兜底
-        rows = list_agent_roles(active_only=True)
+        rows = await list_agent_roles(active_only=True)
         roles = [AgentRole.from_db_row(r) for r in rows]
         return GenerateRolesResponse(
             roles=roles,
@@ -332,7 +305,7 @@ async def generate_roles(req: GenerateRolesRequest) -> GenerateRolesResponse:
     except Exception as e:
         import logging
         logging.getLogger("agent_roles").warning("角色生成失败，回退到内置角色: %s", e)
-        rows = list_agent_roles(active_only=True)
+        rows = await list_agent_roles(active_only=True)
         roles = [AgentRole.from_db_row(r) for r in rows]
         return GenerateRolesResponse(
             roles=roles,

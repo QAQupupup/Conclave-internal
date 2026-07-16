@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.db.engine import async_session_factory
@@ -40,6 +39,18 @@ from app.orchestrator.runner import (
     set_state,
     _process_interventions,
 )
+from app.schemas.meeting import (
+    CreateMeetingRequest,
+    CreateMeetingResponse,
+    ControlRequest,
+    RunResponse,
+    BatchDeleteRequest,
+    AddTagRequest,
+    InjectReferenceRequest,
+    InterventionRequest,
+    SetModelRequest,
+    SaveApiKeyRequest,
+)
 from conclave_core.state import apply_signal
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
@@ -52,53 +63,6 @@ _running_tasks: dict[str, asyncio.Task] = {}
 MAX_CONCURRENT_MEETINGS = int(os.environ.get("CONCLAVE_MAX_CONCURRENT", "5"))
 # 信号量控制并发：限制同时运行的会议数量，超出上限的会议排队等待
 _meeting_semaphore = asyncio.Semaphore(MAX_CONCURRENT_MEETINGS)
-
-
-# ---------- 请求/响应模型 ----------
-
-class CreateMeetingRequest(BaseModel):
-    """创建会议请求"""
-    topic: str = Field(..., min_length=1, max_length=500, description="会议议题")
-    deliverable_type: str = Field("prd_openapi", description="产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|code_analysis|tested_system|deployable_service|execution")
-    flow_plan: str = Field("standard", description="执行模式: instant(即时回答)|standard(标准六阶段)|plan(先计划后执行)")
-    debate_depth: str = Field("standard", description="辩论深度: light|standard|deep")
-    role_ids: list[str] = Field(default_factory=list, max_length=50, description="预选角色 ID 列表，为空则自动生成")
-    reference_meeting_ids: list[str] = Field(default_factory=list, max_length=20, description="引用的历史会议 ID 列表")
-    model: str = Field("", max_length=200, description="会议级模型覆盖（格式: provider_id:model_id 或纯 model_id），空=继承 ENV 默认")
-
-
-class CreateMeetingResponse(BaseModel):
-    """创建会议响应"""
-    meeting_id: str
-    topic: str
-    stage: str
-    status: str
-
-
-class ControlRequest(BaseModel):
-    """控场信号请求"""
-    signal: str = Field(..., description="控制信号: pause|resume|abort|inject|loan")
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class RunResponse(BaseModel):
-    """运行结果响应"""
-    meeting_id: str
-    stage: str
-    status: str
-    artifact: dict[str, Any] | None = None
-    messages_count: int = 0
-
-
-class BatchDeleteRequest(BaseModel):
-    """批量删除请求"""
-    meeting_ids: list[str] = Field(..., description="待删除的会议 ID 列表")
-    mode: str = Field("soft", description="删除模式: soft|hard")
-
-
-class AddTagRequest(BaseModel):
-    """添加标签请求"""
-    tag: str = Field(..., min_length=1, max_length=32, description="标签名称")
 
 
 # ---------- 端点 ----------
@@ -150,7 +114,7 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
         },
     )
     # 初始化运行态
-    state = load_or_create(meeting_id, req.topic)
+    state = await load_or_create(meeting_id, req.topic)
     state.deliverable_type = req.deliverable_type
     # 标准化 flow_plan（兼容旧名称 fast/fast_path/deep_think/full）
     from app.orchestrator.instant import normalize_mode
@@ -163,12 +127,12 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     # 加载角色配置：优先使用传入的 role_ids，否则从库中取所有活跃角色
     if req.role_ids:
         from app.routers.agent_roles import _init_builtin_roles
-        _init_builtin_roles()
-        role_rows = get_agent_roles_by_ids(req.role_ids)
+        await _init_builtin_roles()
+        role_rows = await get_agent_roles_by_ids(req.role_ids)
     else:
         from app.routers.agent_roles import _init_builtin_roles
-        _init_builtin_roles()
-        role_rows = list_agent_roles(active_only=True)
+        await _init_builtin_roles()
+        role_rows = await list_agent_roles(active_only=True)
     state.role_configs = role_rows
 
     # team_config 兼容：从 role_configs 构建
@@ -180,7 +144,7 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     # 历史会议引用：存储 ID 并构建参考上下文
     state.reference_meeting_ids = [mid for mid in req.reference_meeting_ids if mid != meeting_id]
     if state.reference_meeting_ids:
-        ref_meetings = get_meetings_by_ids(state.reference_meeting_ids)
+        ref_meetings = await get_meetings_by_ids(state.reference_meeting_ids)
         state.reference_context = _build_reference_context(ref_meetings)
         log_bus.info(
             f"历史会议引用: count={len(ref_meetings)}",
@@ -189,7 +153,7 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
         )
 
     # 持久化
-    save_meeting(
+    await save_meeting(
         meeting_id=meeting_id,
         topic=req.topic,
         status=state.status.value,
@@ -218,7 +182,7 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
 @router.get("/tags")
 async def list_tags() -> dict[str, Any]:
     """列出所有标签及其使用次数"""
-    tags = list_all_tags()
+    tags = await list_all_tags()
     return {"tags": tags, "count": len(tags)}
 
 
@@ -244,7 +208,7 @@ async def batch_delete(req: BatchDeleteRequest) -> dict[str, Any]:
         else:
             safe_ids.append(mid)
 
-    result = batch_delete_meetings(safe_ids, mode=req.mode)
+    result = await batch_delete_meetings(safe_ids, mode=req.mode)
     # 运行中的会议也记入 failed
     result["failed"].extend(skipped)
 
@@ -285,7 +249,7 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
     state = get_state(meeting_id)
     if state is None:
         # 尝试从 SQLite 恢复到内存
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             # 恢复失败，返回 404
             raise HTTPException(status_code=404, detail="会议不存在")
@@ -311,6 +275,71 @@ async def get_meeting_detail(meeting_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/{meeting_id}/report-layout")
+async def get_report_layout(meeting_id: str, type: str | None = None) -> dict[str, Any]:
+    """获取报告布局 spec。
+
+    后端根据 deliverable_type 和 artifact 生成 layout spec，
+    前端按 spec 通用渲染，不再硬编码任何模板。
+
+    参数:
+        meeting_id: 会议 ID
+        type: 可选，指定产出类型。不传则使用会议自身的 deliverable_type。
+    """
+    state = get_state(meeting_id)
+    if state is None:
+        state = await load_or_create(meeting_id, "")
+        if state.topic == "":
+            raise HTTPException(status_code=404, detail="会议不存在")
+
+    # 优先从 artifact 中读取已生成的 layout spec
+    artifact = state.artifact or {}
+    layout_spec = artifact.get("report_layout")
+
+    if layout_spec is None:
+        # layout spec 未生成，实时构建
+        from app.report_layout import build_report_layout
+        from datetime import datetime, timezone
+
+        deliverable_type = type or state.deliverable_type
+        decisions = []
+        if state.decision_record:
+            decisions = state.decision_record.get("decisions", []) if isinstance(state.decision_record, dict) else []
+        adopted_claims = [
+            c.get("text", str(c)) if isinstance(c, dict) else c
+            for c in state.claims
+            if (c.get("adopted", True) if isinstance(c, dict) else True)
+        ]
+        llm_trace_data = {}
+        if state.llm_trace:
+            llm_trace_data = {
+                "total_calls": getattr(state.llm_trace, "total_calls", 0),
+                "success_rate": f"{getattr(state.llm_trace, 'success_count', 0)}/{max(getattr(state.llm_trace, 'total_calls', 1), 1)}",
+                "total_tokens": getattr(state.llm_trace, "total_tokens", 0),
+                "input_tokens": getattr(state.llm_trace, "input_tokens", 0),
+                "output_tokens": getattr(state.llm_trace, "output_tokens", 0),
+            }
+        layout_spec = build_report_layout(
+            deliverable_type=deliverable_type,
+            artifact=artifact,
+            meeting_meta={
+                "meeting_id": meeting_id,
+                "topic": state.clarified_topic or state.topic,
+                "status": state.status.value if hasattr(state.status, "value") else str(state.status),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            confidence=state.confidence_flags,
+            decisions=decisions,
+            adopted_claims=adopted_claims,
+            key_questions=state.key_questions,
+            team_config=state.team_config,
+            conflicts=state.conflicts,
+            llm_trace=llm_trace_data,
+        )
+
+    return layout_spec
+
+
 @router.get("/{meeting_id}/summary")
 async def get_meeting_summary(meeting_id: str) -> dict[str, Any]:
     """获取会议摘要（用于历史会议引用下拉选择器）。
@@ -318,7 +347,7 @@ async def get_meeting_summary(meeting_id: str) -> dict[str, Any]:
     返回简洁的会议摘要，包含 topic、产出、关键问题和仲裁结论。
     不包含原始 LLM trace 和完整消息列表。
     """
-    meeting = get_meeting(meeting_id)
+    meeting = await get_meeting(meeting_id)
     if meeting is None:
         raise HTTPException(status_code=404, detail="会议不存在")
     payload = meeting.get("payload", {})
@@ -336,17 +365,6 @@ async def get_meeting_summary(meeting_id: str) -> dict[str, Any]:
         "flow_plan": payload.get("flow_plan", "full"),
         "decision_record": payload.get("decision_record"),
     }
-
-
-class InjectReferenceRequest(BaseModel):
-    """会议中注入历史会议引用请求"""
-    reference_meeting_ids: list[str] = Field(..., description="要引用的历史会议 ID 列表")
-
-
-class InterventionRequest(BaseModel):
-    """用户介入对话请求"""
-    content: str = Field(..., description="用户输入内容")
-    reply_to_id: str | None = Field(None, description="回复的消息 ID")
 
 
 @router.post("/{meeting_id}/intervene")
@@ -391,7 +409,7 @@ async def intervene_meeting(meeting_id: str, req: InterventionRequest) -> dict[s
     })
 
     # 持久化
-    save_meeting(
+    await save_meeting(
         meeting_id=meeting_id,
         topic=state.topic,
         status=state.status.value,
@@ -437,7 +455,7 @@ async def inject_meeting_reference(meeting_id: str, req: InjectReferenceRequest)
     if not new_ids:
         return {"meeting_id": meeting_id, "injected": 0, "message": "无新增引用会议"}
 
-    ref_meetings = get_meetings_by_ids(new_ids)
+    ref_meetings = await get_meetings_by_ids(new_ids)
     new_context = _build_reference_context(ref_meetings)
 
     # 追加到 reference_meeting_ids 和 reference_context
@@ -458,7 +476,7 @@ async def inject_meeting_reference(meeting_id: str, req: InjectReferenceRequest)
     })
 
     # 持久化
-    save_meeting(
+    await save_meeting(
         meeting_id=meeting_id,
         topic=state.topic,
         status=state.status.value,
@@ -503,7 +521,7 @@ async def list_meetings_with_status(
     - running_count：当前正在运行的会议数
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-    result = query_meetings(q=q, limit=limit, offset=offset, tags=tag_list)
+    result = await query_meetings(q=q, limit=limit, offset=offset, tags=tag_list)
     from app.orchestrator.instant import normalize_mode, FLOW_STANDARD
     items = []
     for m in result["items"]:
@@ -542,7 +560,7 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
     from app.context import get_request_id
 
     # 检查会议是否存在
-    meeting = get_meeting(meeting_id)
+    meeting = await get_meeting(meeting_id)
     if meeting is None:
         raise HTTPException(status_code=404, detail="会议不存在")
 
@@ -551,7 +569,7 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="会议正在运行，无法删除")
 
     if mode == "soft":
-        ok = soft_delete_meeting(meeting_id)
+        ok = await soft_delete_meeting(meeting_id)
         if not ok:
             raise HTTPException(status_code=404, detail="会议不存在")
         log_bus.info(
@@ -565,7 +583,7 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
         return {"meeting_id": meeting_id, "deleted": True, "mode": "soft"}
 
     elif mode == "hard":
-        ok = hard_delete_meeting(meeting_id)
+        ok = await hard_delete_meeting(meeting_id)
         if not ok:
             raise HTTPException(status_code=404, detail="会议不存在")
         log_bus.info(
@@ -579,7 +597,7 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
         return {"meeting_id": meeting_id, "deleted": True, "mode": "hard"}
 
     elif mode == "restore":
-        ok = restore_meeting(meeting_id)
+        ok = await restore_meeting(meeting_id)
         if not ok:
             raise HTTPException(status_code=404, detail="会议不存在或未被软删除")
         log_bus.info(
@@ -596,33 +614,33 @@ async def delete_meeting(meeting_id: str, mode: str = "soft") -> dict[str, Any]:
 @router.get("/{meeting_id}/tags")
 async def get_tags(meeting_id: str) -> dict[str, Any]:
     """取会议的全部标签"""
-    meeting = get_meeting(meeting_id)
+    meeting = await get_meeting(meeting_id)
     if meeting is None:
         raise HTTPException(status_code=404, detail="会议不存在")
-    tags = get_meeting_tags(meeting_id)
+    tags = await get_meeting_tags(meeting_id)
     return {"meeting_id": meeting_id, "tags": tags}
 
 
 @router.post("/{meeting_id}/tags")
 async def add_tag(meeting_id: str, req: AddTagRequest) -> dict[str, Any]:
     """为会议添加标签"""
-    meeting = get_meeting(meeting_id)
+    meeting = await get_meeting(meeting_id)
     if meeting is None:
         raise HTTPException(status_code=404, detail="会议不存在")
     tag = req.tag.strip()
     if not tag:
         raise HTTPException(status_code=400, detail="标签不能为空")
-    added = add_meeting_tag(meeting_id, tag)
+    added = await add_meeting_tag(meeting_id, tag)
     return {"meeting_id": meeting_id, "tag": tag, "added": added}
 
 
 @router.delete("/{meeting_id}/tags/{tag}")
 async def remove_tag(meeting_id: str, tag: str) -> dict[str, Any]:
     """移除会议的某个标签"""
-    meeting = get_meeting(meeting_id)
+    meeting = await get_meeting(meeting_id)
     if meeting is None:
         raise HTTPException(status_code=404, detail="会议不存在")
-    removed = remove_meeting_tag(meeting_id, tag)
+    removed = await remove_meeting_tag(meeting_id, tag)
     if not removed:
         raise HTTPException(status_code=404, detail="标签不存在")
     return {"meeting_id": meeting_id, "tag": tag, "removed": True}
@@ -791,7 +809,7 @@ async def control_meeting(meeting_id: str, req: ControlRequest) -> dict[str, Any
         state = apply_signal(state, req.signal, req.payload)
         set_state(state)
         # 持久化
-        save_meeting(
+        await save_meeting(
             meeting_id=meeting_id,
             topic=state.topic,
             status=state.status.value,
@@ -852,7 +870,7 @@ async def get_trace(meeting_id: str) -> dict[str, Any]:
     state = get_state(meeting_id)
     if state is None:
         # 尝试从 SQLite 恢复到内存
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             # 恢复失败，返回 404
             raise HTTPException(status_code=404, detail="会议不存在")
@@ -877,7 +895,7 @@ async def get_stats(meeting_id: str) -> dict[str, Any]:
     state = get_state(meeting_id)
     if state is None:
         # 尝试从 SQLite 恢复到内存
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             # 恢复失败，返回 404
             raise HTTPException(status_code=404, detail="会议不存在")
@@ -926,7 +944,7 @@ async def get_charter_detail(meeting_id: str) -> dict[str, Any]:
     state = get_state(meeting_id)
     if state is None:
         # 尝试从 SQLite 恢复到内存
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             # 恢复失败，返回 404
             raise HTTPException(status_code=404, detail="会议不存在")
@@ -958,16 +976,16 @@ async def get_events(meeting_id: str, from_seq: int = 0) -> dict[str, Any]:
     state = get_state(meeting_id)
     if state is None:
         # 尝试从 SQLite 恢复到内存
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             # 恢复失败，返回 404
             raise HTTPException(status_code=404, detail="会议不存在")
 
-    events = bus.replay(meeting_id, from_seq)
+    events = await bus.replay(meeting_id, from_seq)
     return {
         "meeting_id": meeting_id,
         "from_seq": from_seq,
-        "last_seq": bus.last_seq(meeting_id),
+        "last_seq": await bus.last_seq(meeting_id),
         "count": len(events),
         "events": [e.model_dump(mode="json") for e in events],
     }
@@ -984,7 +1002,7 @@ async def get_token_budget(meeting_id: str) -> dict[str, Any]:
     """
     # 优先从 DB 重新加载，确保拿到持久化的 llm_trace / cost 等 aux 数据
     # （内存中的 state 在 persist 后 trace 已被清空）
-    state = load_or_create(meeting_id, "")
+    state = await load_or_create(meeting_id, "")
     if state.topic == "":
         raise HTTPException(status_code=404, detail="会议不存在")
 
@@ -1034,7 +1052,7 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
     """
     # 优先从 DB 重新加载，确保拿到持久化的 llm_trace / cost 等 aux 数据
     # （内存中的 state 在 persist 后 trace 已被清空）
-    state = load_or_create(meeting_id, "")
+    state = await load_or_create(meeting_id, "")
     if state.topic == "":
         raise HTTPException(status_code=404, detail="会议不存在")
 
@@ -1042,7 +1060,7 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
     trace_calls = [c.model_dump(mode="json") for c in state.llm_trace.calls]
 
     # 2. 事件历史
-    events = bus.replay(meeting_id, from_seq=0)
+    events = await bus.replay(meeting_id, from_seq=0)
     event_dicts = [e.model_dump(mode="json") for e in events]
     degradation_events = [
         e for e in event_dicts
@@ -1132,7 +1150,7 @@ async def list_attachments(meeting_id: str) -> dict[str, Any]:
     """列出会议产出的附件文件（沙箱执行产出的 PNG/CSV/MD 等）"""
     state = get_state(meeting_id)
     if state is None:
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             raise HTTPException(status_code=404, detail="会议不存在")
     attachments = (state.artifact or {}).get("attachments", [])
@@ -1148,7 +1166,7 @@ async def download_attachment(meeting_id: str, filename: str):
 
     state = get_state(meeting_id)
     if state is None:
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             raise HTTPException(status_code=404, detail="会议不存在")
     attachments = (state.artifact or {}).get("attachments", [])
@@ -1186,14 +1204,6 @@ async def list_skills():
 
 
 # ---------- LLM 模型管理端点 ----------
-
-class SetModelRequest(BaseModel):
-    """设置会议模型请求"""
-    provider_id: str = Field("", description="厂商ID: siliconflow|deepseek|openai|openrouter|custom")
-    model: str = Field("", description="模型ID，如 deepseek-ai/DeepSeek-V3.2")
-    api_key: str = Field("", description="自定义API Key（BYOK），为空则使用默认")
-    base_url: str = Field("", description="自定义Base URL（provider_id=custom时使用）")
-
 
 @router.get("/llm/providers")
 async def get_llm_providers():
@@ -1273,7 +1283,7 @@ async def set_meeting_model(meeting_id: str, req: SetModelRequest):
     state = get_state(meeting_id)
     if state is None:
         # 尝试恢复
-        state = load_or_create(meeting_id, "")
+        state = await load_or_create(meeting_id, "")
         if state.topic == "":
             raise HTTPException(status_code=404, detail="会议不存在")
     # 不允许已结束的会议修改
@@ -1337,15 +1347,6 @@ async def get_meeting_model(meeting_id: str):
 
 
 # ---------- API Key 持久化管理 ----------
-
-class SaveApiKeyRequest(BaseModel):
-    """保存 API Key 请求"""
-    provider: str = Field(..., description="厂商ID")
-    api_key: str = Field(..., description="API Key 明文")
-    name: str = Field(default="default", description="Key别名")
-    base_url: str = Field(default="", description="自定义Base URL")
-    is_default: bool = Field(default=True, description="是否设为默认")
-
 
 @router.get("/llm/keys")
 async def list_saved_keys():

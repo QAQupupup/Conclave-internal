@@ -7,21 +7,13 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
+from app.schemas.captcha import GuardModeRequest, ResolveRequest
 from app.tools.captcha_guard import get_captcha_guard
 
 logger = logging.getLogger("app.routers.captcha")
 
 router = APIRouter(prefix="/api/captcha", tags=["captcha"])
-
-
-class GuardModeRequest(BaseModel):
-    enabled: bool
-
-
-class ResolveRequest(BaseModel):
-    session_id: str
 
 
 @router.get("/status")

@@ -1,0 +1,218 @@
+﻿/* Conclave 前端全局样式：基于《个人签单风格与逻辑规范 v1.0》 */
+/* 设计原则：反装饰功能优先、克制色彩纯色为王、信息密度优先、场景分层各司其职 */
+/* 主题机制：:root 为亮色默认，[data-theme="dark"] 为暗色覆盖，用户可通过 /preferences API 覆盖任意 token */
+/* 主题机制：:root 为亮色默认，[data-theme="dark"] 为暗色覆盖，用户可通过 /preferences API 覆盖任意 token */
+/*
+ * 文件组织（语义分区，物理合并以兼容 PostCSS 8.5+ 的 @import 行为）：
+ *   [1] tokens       : CSS 变量（主题色、间距、字体）   行 4 - 200
+ *   [2] layout       : 全局布局（header/sidebar/main/modal）行 201 - 1145
+ *   [3] components   : 业务组件（面板/按钮/表单/图表/图）   行 1146 - 4035
+ *   [4] landing      : 着陆页特有样式                  行 4036 - end
+ *
+ * v2 备注：原计划拆为 4 个 @import 文件，但 PostCSS 8.5 + Vite 8 在处理 @import 时
+ * 出现 "Unclosed block" 解析错误。改为物理合并 + 用注释分区。
+ * 后续可迁移到 CSS Modules + Tailwind 方案。
+ */
+:root {
+  /* 背景：纯白基底 */
+  --bg: #ffffff;
+  --bg-secondary: #fafafa;
+  --bg-tertiary: #f4f6f8;
+  --bg-elev: #ffffff;
+  --bg-sidebar: #fafafa;
+  --bg-hover: #f4f6f8;
+  --bg-muted: rgba(107, 114, 128, 0.06); /* Notion 柔和表头 */
+  --bg-active: #eef2ff;
+  --bg-code: #f8f9fa;
+
+  /* 边框：1px 细边框 */
+  --border: #e5e7eb;
+  --border-soft: #f3f4f6;
+  --border-strong: #d1d5db;
+
+  /* 文字：冷灰阶 */
+  --text: #111827;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+  --text-faint: #c2c9d1;
+
+  /* 强调：Editorial precision 沉稳靛蓝 (#335c8e)，对齐 conclave-ui-redesign */
+  --accent: #335c8e;
+  --accent-hover: #264670;
+  --accent-light: rgba(51, 92, 142, 0.06);
+  --accent-soft: rgba(51, 92, 142, 0.10);
+  --accent-fg: #ffffff;
+
+  /* 角色色：清晰可辨的中等饱和度 */
+  --role-moderator: #6366f1;      /* 靛蓝 */
+  --role-architect: #8b5cf6;     /* 紫 */
+  --role-engineer: #10b981;      /* 翠绿 */
+  --role-security: #ef4444;      /* 红 */
+  --role-data: #06b6d4;          /* 青 */
+  --role-ux: #f59e0b;            /* 琥珀 */
+  --role-marketing: #ec4899;     /* 粉 */
+  --role-default: #6b7280;        /* 灰 */
+
+  /* 状态色：低饱和语义色（对齐 conclave-ui-redesign） */
+  --success: #2d8a56;
+  --warn: #b87d2b;
+  --danger: #c53030;
+  --info: #335c8e;
+
+  /* S3 语义色块标签：低饱和浅底深字 */
+  --ok-bg: rgba(45, 138, 86, 0.06); --ok-fg: #2d8a56;
+  --warn-bg: rgba(184, 125, 43, 0.06); --warn-fg: #b87d2b;
+  --err-bg: rgba(197, 48, 48, 0.06); --err-fg: #c53030;
+
+  /* YAML 语法高亮配色 */
+  --yaml-key: #4f46e5;
+  --yaml-string: #059669;
+  --yaml-comment: #9ca3af;
+  --yaml-colon: #9ca3af;
+  --yaml-default: #111827;
+
+  /* 间距系统：4/8/12/16/20/24/32/40/48/64 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* 圆角：卡片 8px，标签 4px，胶囊 999px */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* 阴影：无或极轻，禁重阴影 */
+  --shadow-xs: 0 1px 2px rgba(17, 24, 39, 0.04);
+  --shadow-sm: 0 1px 3px rgba(17, 24, 39, 0.06);
+  --shadow-focus: 0 0 0 3px rgba(79, 70, 229, 0.12);
+  --bg-overlay: rgba(15, 20, 25, 0.4); /* modal overlay 背景 */
+
+  /* z-index 层级管理（从低到高） */
+  --z-base: 1;
+  --z-hover: 5;           /* 折叠按钮等微交互 */
+  --z-sticky: 10;         /* 粘性元素（新消息提示） */
+  --z-dropdown: 100;      /* 下拉菜单 */
+  --z-toolbar: 150;       /* 顶部工具栏固定元素 */
+  --z-drawer: 200;        /* 抽屉面板 */
+  --z-tooltip: 300;       /* 工具提示 */
+  --z-modal-mask: 900;    /* Modal 遮罩 */
+  --z-modal: 1000;        /* AntD Modal / 全屏弹窗 */
+  --z-popover: 1050;      /* Popover（需在 Modal 之上） */
+  --z-toast: 2000;        /* Toast/通知 */
+
+  /* 字体：无衬线 + 抗锯齿 */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code",
+    Consolas, "Courier New", monospace;
+
+  /* 过渡：精确快速 — 仅视觉属性，不动画布局属性(width/height/padding/margin)避免抖动 */
+  --transition: color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+               box-shadow 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-transform: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* === 暗色主题：覆盖同名词元，结构不变 === */
+[data-theme="dark"] {
+  --bg: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #1c2128;
+  --bg-elev: #161b22;
+  --bg-sidebar: #0d1117;
+  --bg-hover: #1c2128;
+  --bg-muted: rgba(107, 114, 128, 0.08);
+  --bg-active: #1e293b;
+  --bg-code: #161b22;
+
+  --border: #30363d;
+  --border-soft: #21262d;
+  --border-strong: #484f58;
+
+  --text: #e6edf3;
+  --text-secondary: #9da7b3;
+  --text-muted: #768390;
+  --text-faint: #4a5158;
+
+  --accent: #6b8fc7;
+  --accent-hover: #89a8d4;
+  --accent-light: rgba(107, 143, 199, 0.10);
+  --accent-soft: rgba(107, 143, 199, 0.15);
+  --accent-fg: #0d1117;
+
+  --role-moderator: #a5b4fc;
+  --role-architect: #c4b5fd;
+  --role-engineer: #6ee7b7;
+  --role-security: #fca5a5;
+  --role-data: #67e8f9;
+  --role-ux: #fcd34d;
+  --role-marketing: #f9a8d4;
+  --role-default: #9ca3af;
+
+  --success: #5cb88a;
+  --warn: #d4a05a;
+  --danger: #e07070;
+  --info: #6b8fc7;
+
+  --ok-bg: rgba(92, 184, 138, 0.10); --ok-fg: #5cb88a;
+  --warn-bg: rgba(212, 160, 90, 0.10); --warn-fg: #d4a05a;
+  --err-bg: rgba(224, 112, 112, 0.10); --err-fg: #e07070;
+
+  --yaml-key: #818cf8;
+  --yaml-string: #6ee7b7;
+  --yaml-comment: #768390;
+  --yaml-colon: #768390;
+  --yaml-default: #e6edf3;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-focus: 0 0 0 3px rgba(129, 140, 248, 0.2);
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+code {
+  font-family: var(--font-mono);
+  background: var(--bg-code);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  color: var(--text);
+}
+

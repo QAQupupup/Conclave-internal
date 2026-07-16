@@ -11,9 +11,9 @@ from typing import Any
 import re as _re
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 from app.orchestrator.runner import get_state
+from app.schemas.regression import BaselineRequest, BaselineSummary
 
 router = APIRouter(prefix="/regression", tags=["regression"])
 
@@ -25,24 +25,6 @@ _REGRESSION_DIR: Path = Path(__file__).resolve().parents[2] / "data" / "regressi
 # 可逃出 _REGRESSION_DIR 目录读取任意 JSON（如其他用户的数据）。
 # 限定 baseline_id 仅由 [a-zA-Z0-9-_] 构成，与创建时的 uuid4().hex[:8] 前缀一致。
 _BASELINE_ID_PATTERN = _re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
-
-
-# ---------- 请求/响应模型 ----------
-
-class BaselineRequest(BaseModel):
-    """创建基线请求"""
-    meeting_id: str = Field(..., description="会议 ID")
-
-
-class BaselineSummary(BaseModel):
-    """基线摘要（列表项）"""
-    baseline_id: str
-    created_at: str
-    meeting_id: str
-    topic: str
-    stages_completed: int
-    claims_count: int
-    confidence_all_high: bool
 
 
 # ---------- 指标提取 ----------

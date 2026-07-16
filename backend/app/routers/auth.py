@@ -6,45 +6,24 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
 
 from app.auth import authenticate_user, create_access_token, get_user_by_username
+from app.schemas.auth import LoginRequest, LoginResponse, MeResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["认证"])
-
-
-class LoginRequest(BaseModel):
-    username: str = Field(..., min_length=1, max_length=64, description="用户名")
-    password: str = Field(..., min_length=1, max_length=128, description="密码")
-
-
-class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    user: dict
-
-
-class MeResponse(BaseModel):
-    username: str
-    role: str
-    display_name: str
-    uid: int | None = None
 
 
 @router.post("/login", response_model=LoginResponse)
 async def login(req: LoginRequest, request: Request):
     """用户登录，返回 JWT access token"""
     from app.auth import JWT_EXPIRE_SECONDS
-    import asyncio
     from app.middleware import record_auth_failure, reset_auth_failures, client_ip
 
     client_ip_str = client_ip(request)
 
-    # 在线程池中执行密码验证（PBKDF2 计算较慢，避免阻塞事件循环）
-    loop = asyncio.get_event_loop()
-    user = await loop.run_in_executor(None, authenticate_user, req.username, req.password)
+    # 验证用户名密码（authenticate_user 已迁移到 async，直接 await）
+    user = await authenticate_user(req.username, req.password)
 
     if not user:
         # 记录失败（供限速使用）

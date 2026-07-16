@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.middleware import is_dangerous_command
 from app.observability.log_bus import log_bus
+from app.schemas.workspace import FileWriteRequest, CodeRunRequest, CommandRequest
 from app.sandbox import run_command, run_python, get_status as sandbox_status
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
@@ -69,26 +69,6 @@ def _truncate(data: str) -> str:
     if len(data.encode("utf-8")) > MAX_OUTPUT:
         return data[:MAX_OUTPUT] + "\n... [输出已截断]"
     return data
-
-
-# ---- 请求/响应模型 ----
-
-
-class FileWriteRequest(BaseModel):
-    path: str = Field(..., description="工作区内相对路径")
-    content: str = Field(..., description="文件内容")
-
-
-class CodeRunRequest(BaseModel):
-    code: str = Field(..., description="要执行的 Python 代码")
-    language: str = Field(default="python", description="语言（目前支持 python）")
-    network_level: str = Field(default="L1", description="网络分级：L1=无网络(默认) / L2=限网(pip) / L3=全联网")
-
-
-class CommandRequest(BaseModel):
-    command: str = Field(..., description="要执行的命令")
-    cwd: str = Field(default="", description="工作目录（工作区内相对路径）")
-    network_level: str = Field(default="L2", description="网络分级：L1=无网络 / L2=限网(默认,pip) / L3=全联网")
 
 
 # ---- 文件操作 ----
