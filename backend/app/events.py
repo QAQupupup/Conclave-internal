@@ -44,12 +44,13 @@ class InMemoryEventBus:
     async def publish(self, event: DomainEvent) -> None:
         """发布事件：写入 PostgreSQL + 内存缓存，广播给订阅者"""
         # 持久化到 PostgreSQL 并获取自增 seq
+        # db_legacy 已迁移到 SQLAlchemy async，直接 await
         from app.db_legacy import save_event
         import logging
         logger = logging.getLogger(__name__)
         ts_str = event.ts.isoformat() if hasattr(event.ts, "isoformat") else str(event.ts)
         try:
-            db_seq = save_event(
+            db_seq = await save_event(
                 meeting_id=event.meeting_id,
                 event_type=event.type,
                 payload=event.payload,
@@ -112,41 +113,41 @@ class InMemoryEventBus:
 
         return _unsubscribe
 
-    def history(self, meeting_id: str) -> list[DomainEvent]:
+    async def history(self, meeting_id: str) -> list[DomainEvent]:
         """取某会议已发布事件，优先从内存取，内存空则从 PostgreSQL 恢复"""
         mem_events = self._history.get(meeting_id)
         if mem_events:
             return list(mem_events)
         # 内存无缓存，从 PostgreSQL 恢复
-        return self._restore_from_db(meeting_id)
+        return await self._restore_from_db(meeting_id)
 
-    def replay(self, meeting_id: str, from_seq: int = 0) -> list[DomainEvent]:
+    async def replay(self, meeting_id: str, from_seq: int = 0) -> list[DomainEvent]:
         """增量回放：from_seq=0 返回全部事件，from_seq>0 返回 seq > from_seq 的事件"""
         events = self._history.get(meeting_id)
         if not events:
             # 内存无缓存，从 PostgreSQL 恢复
-            events = self._restore_from_db(meeting_id)
+            events = await self._restore_from_db(meeting_id)
         if from_seq <= 0:
             return list(events)
         return [e for e in events if e.seq > from_seq]
 
-    def last_seq(self, meeting_id: str) -> int:
+    async def last_seq(self, meeting_id: str) -> int:
         """取某会议最后一条事件的 seq，无事件返回 0"""
         events = self._history.get(meeting_id)
         if events:
             return events[-1].seq
         # 内存无缓存，从 PostgreSQL 取
         from app.db_legacy import last_event_seq
-        return last_event_seq(meeting_id)
+        return await last_event_seq(meeting_id)
 
     def clear(self, meeting_id: str) -> None:
         """清理某会议的内存缓存（PostgreSQL 保留）"""
         self._history.pop(meeting_id, None)
 
-    def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
+    async def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
         """从 PostgreSQL 恢复事件到内存缓存（限制最近 _MAX_HISTORY_PER_MEETING 条）"""
         from app.db_legacy import load_events
-        rows = load_events(meeting_id, from_seq=0, limit=self._MAX_HISTORY_PER_MEETING)
+        rows = await load_events(meeting_id, from_seq=0, limit=self._MAX_HISTORY_PER_MEETING)
         events = []
         for row in rows:
             try:

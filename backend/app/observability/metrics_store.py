@@ -122,19 +122,17 @@ class MetricsStore:
                 # 活跃会议数
                 active_meetings = 0
                 try:
-                    from app.db_legacy import _connect, _putconn
-                    conn = _connect()
-                    try:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                "SELECT COUNT(*) AS cnt FROM meetings WHERE status = 'RUNNING'"
-                            )
-                            row = cur.fetchone()
-                        if row:
-                            # RealDictCursor 返回 dict，用 key 访问
-                            active_meetings = row.get("cnt", row.get("count", 0))
-                    finally:
-                        _putconn(conn)
+                    from sqlalchemy import text as _text
+                    from app.db.engine import async_session_factory as _asf
+
+                    async with _asf() as session:
+                        result = await session.execute(
+                            _text("SELECT COUNT(*) AS cnt FROM meetings WHERE status = 'RUNNING'")
+                        )
+                        row = result.mappings().first()
+                    if row:
+                        # RowMapping，用 key 访问
+                        active_meetings = row.get("cnt", row.get("count", 0))
                 except Exception:
                     pass
 

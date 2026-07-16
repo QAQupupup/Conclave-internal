@@ -130,7 +130,7 @@ async def request_network_access(
     expires_at = now + timedelta(seconds=AUTH_TIMEOUT_SECONDS)
 
     # 写入 DB
-    create_auth_request(
+    await create_auth_request(
         request_id=request_id,
         meeting_id=meeting_id,
         stage=stage,
@@ -164,7 +164,7 @@ async def request_network_access(
     # 自动通过
     if AUTO_APPROVE:
         from app.net_auth import review_auth_request
-        review_auth_request(request_id, "approved", "自动通过（AUTO_APPROVE=1）")
+        await review_auth_request(request_id, "approved", "自动通过（AUTO_APPROVE=1）")
         log_bus.info(f"网络授权自动通过: {request_id}", logger="net_auth")
         await bus.publish(make_event(
             "net_auth.reviewed",
@@ -225,7 +225,7 @@ async def _poll_for_review(request_id: str, timeout: int) -> dict[str, Any]:
     """轮询 DB 等待批复结果"""
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
-        req = get_auth_request(request_id)
+        req = await get_auth_request(request_id)
         if req and req["status"] != "pending":
             return req
         await asyncio.sleep(2)

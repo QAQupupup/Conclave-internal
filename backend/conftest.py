@@ -85,16 +85,19 @@ from app.routers import meetings as meetings_mod
 # 每个测试前清空事件表并重置序列，保证事件 seq 从 0 开始
 @pytest.fixture(autouse=True)
 def _reset_event_bus():
-    from app.db_legacy import _connect, _putconn
     try:
-        conn = _connect()
+        import psycopg2
+        raw_url = os.environ.get("DATABASE_URL", "")
+        # asyncpg 风格的 URL 需要转换成 psycopg2 可识别的形式
+        pg_url = raw_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        conn = psycopg2.connect(pg_url)
         try:
+            conn.autocommit = True
             cur = conn.cursor()
             cur.execute("TRUNCATE TABLE events RESTART IDENTITY CASCADE")
-            conn.commit()
             cur.close()
         finally:
-            _putconn(conn)
+            conn.close()
     except Exception:
         pass
     bus._history.clear()

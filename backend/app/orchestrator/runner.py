@@ -264,7 +264,7 @@ class Runner:
                 from datetime import datetime as _dt_fp, timezone as _tz_fp
                 state.completed_at = _dt_fp.now(_tz_fp.utc)
             # 持久化最终状态后返回（不进入六阶段管线）
-            self._persist(state)
+            await self._persist(state)
             reset_meeting_id(mid_token)
             reset_runner_session_id(rsid_token)
             if rid_token is not None:
@@ -291,7 +291,7 @@ class Runner:
                 if should_pause(state):
                     logger.info("会议 %s 已暂停，等待 resume", state.meeting_id)
                     # 等待 resume：迭代一同步实现里直接退出，由 control 接口恢复后再调 run
-                    self._persist(state)
+                    await self._persist(state)
                     return state
 
                 current_stage = state.stage
@@ -322,7 +322,7 @@ class Runner:
                 )
 
                 # 持久化中间态
-                self._persist(state)
+                await self._persist(state)
 
                 # 诊断日志：_persist 完成
                 log_bus.info(
@@ -404,7 +404,7 @@ class Runner:
                 to_stage = state.stage.value
                 if from_stage != to_stage:
                     # 动态路由可能修改了 stage，需要再次持久化确保 DB 与内存一致
-                    self._persist(state)
+                    await self._persist(state)
                     await bus.publish(
                         make_event(
                             "stage.changed",
@@ -431,7 +431,7 @@ class Runner:
             state.error_detail = str(exc)[:2000]
             from datetime import datetime as _dt, timezone as _tz
             state.completed_at = _dt.now(_tz.utc)
-            self._persist(state)
+            await self._persist(state)
 
         logger.info("会议 %s 运行结束: stage=%s, status=%s", state.meeting_id, state.stage.value, state.status.value)
         # 旁路日志：记录 runner session 结束（因果链终点）
@@ -458,23 +458,16 @@ class Runner:
 
         return state
 
-    def _persist(self, state: MeetingState) -> None:
+    async def _persist(self, state: MeetingState) -> None:
         """持久化会议状态与发言到 PostgreSQL
 
-        MeetingState 瘦身优化：大字段（llm_trace, evidence_set,
-        conclusion_chain, borrowed_agents）通过 extract_aux() 分离存储
-        到 meeting_aux 表，主 payload 仅保留轻量字段。
-
-        异常安全：无论 DB 操作是否成功，都确保 inject_aux 被调用，
-        防止内存态 state 丢失 aux 数据。
+        db_legacy 已迁移到 SQLAlchemy async，直接 await 即可，
+        不再需要 asyncio.to_thread 线程隔离。
         """
-        from app.db_legacy import save_meeting_aux
-
-        # 提取 aux 大字段（在 snapshot 之前调用，因为 extract_aux 会清空这些字段）
+        from app.db_legacy import save_meeting, save_meeting_aux, save_message
         aux = state.extract_aux()
         try:
-            # 先保存会议主记录（确保 meetings 表中有记录，满足 meeting_aux 的外键约束）
-            save_meeting(
+            await save_meeting(
                 meeting_id=state.meeting_id,
                 topic=state.topic,
                 status=state.status.value,
@@ -482,16 +475,10 @@ class Runner:
                 created_at=state.created_at,
                 payload=state.snapshot(),
             )
-
-            # 再保存 aux 大字段到独立表（依赖 meetings.id 外键）
-            save_meeting_aux(state.meeting_id, aux)
-
-            # 持久化尚未入库的发言（按 id 去重 upsert）
+            await save_meeting_aux(state.meeting_id, aux)
             for msg in state.messages:
-                save_message(msg)
+                await save_message(msg)
         finally:
-            # 恢复 aux 到内存态，保证 Runner 返回的 state 完整且后续阶段可读取结论链
-            # 使用 finally 确保即使 DB 操作异常，内存态也不会丢失数据
             state.inject_aux(aux)
 
 
@@ -651,22 +638,25 @@ def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = Non
     return state
 
 
-def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
-    """从内存取或新建运行态；内存未命中时从 PostgreSQL 恢复"""
+async def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
+    """从内存取或新建运行态；内存未命中时从 PostgreSQL 恢复
+
+    db_legacy 已迁移到 SQLAlchemy async，直接 await 即可。
+    """
     existing = get_state(meeting_id)
     if existing is not None:
         return existing
     # 尝试从 PostgreSQL 恢复
     from app.db_legacy import get_meeting, get_meeting_aux
-    record = get_meeting(meeting_id)
+    record = await get_meeting(meeting_id)
     if record is not None:
+        aux = await get_meeting_aux(meeting_id)
         payload = record["payload"]
         try:
             state = MeetingState(**payload)
             # 标准化 flow_plan（旧会议可能使用 "full"/"fast_path"/"deep_think" 等旧值）
             state.flow_plan = normalize_mode(state.flow_plan)
             # 从 meeting_aux 表加载大字段并注入（向后兼容：旧会议无 aux 数据时安全跳过）
-            aux = get_meeting_aux(meeting_id)
             if aux:
                 state.inject_aux(aux)
             set_state(state)
@@ -677,7 +667,7 @@ def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None 
     return new_state(meeting_id, topic, doc_summaries)
 
 
-def recover_crashed_meetings() -> list[str]:
+async def recover_crashed_meetings() -> list[str]:
     """崩溃恢复：启动时把 status=running 的会议标记为 paused
 
     进程崩溃时正在运行的会议没有后台 task 继续执行，
@@ -688,7 +678,7 @@ def recover_crashed_meetings() -> list[str]:
     from app.models import MeetingStatus
     from app.observability.log_bus import log_bus
 
-    crashed = recover_running_meetings()
+    crashed = await recover_running_meetings()
     recovered_ids = []
     for record in crashed:
         meeting_id = record["id"]
@@ -701,7 +691,7 @@ def recover_crashed_meetings() -> list[str]:
             # 标准化 flow_plan（旧会议可能使用旧值）
             state.flow_plan = normalize_mode(state.flow_plan)
             # 从 meeting_aux 表恢复大字段（向后兼容）
-            aux = get_meeting_aux(meeting_id)
+            aux = await get_meeting_aux(meeting_id)
             if aux:
                 state.inject_aux(aux)
             state.status = MeetingStatus.PAUSED
@@ -709,7 +699,7 @@ def recover_crashed_meetings() -> list[str]:
             set_state(state)
             # 持久化时分离 aux 大字段（先保存主记录，再保存 aux，满足外键约束）
             persist_aux = state.extract_aux()
-            save_meeting(
+            await save_meeting(
                 state.meeting_id,
                 state.topic,
                 state.status.value,
@@ -717,7 +707,7 @@ def recover_crashed_meetings() -> list[str]:
                 state.created_at,
                 state.snapshot(),
             )
-            save_meeting_aux(meeting_id, persist_aux)
+            await save_meeting_aux(meeting_id, persist_aux)
             recovered_ids.append(meeting_id)
             log_bus.warning(
                 f"崩溃恢复：会议 {meeting_id} 从 running 标记为 paused",

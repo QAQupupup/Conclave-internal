@@ -7,6 +7,8 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.testing.pickleable import User
+from starlette.responses import JSONResponse
 
 from app.db_legacy import init_db
 from app.logging_config import setup_logging
@@ -37,10 +39,10 @@ setup_logging()
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库 + 崩溃恢复 + 后台指标采集"""
     # PostgreSQL 兼容层（db_legacy，逐步迁移到 async Repository）
-    init_db()
-    init_auth_table()
+    await init_db()
+    await init_auth_table()
     # JWT 用户认证系统（建表 + 默认管理员）
-    init_jwt_auth()
+    await init_jwt_auth()
 
     # PostgreSQL 表结构初始化（SQLAlchemy ORM，含记忆子系统表）
     from app.config import settings
@@ -63,7 +65,7 @@ async def lifespan(app: FastAPI):
 
     # 崩溃恢复：把上次未完成的 RUNNING 会议标记为 PAUSED
     from app.orchestrator.runner import recover_crashed_meetings
-    recovered = recover_crashed_meetings()
+    recovered = await recover_crashed_meetings()
     if recovered:
         import logging
         logging.getLogger("lifespan").info("崩溃恢复：%d 个会议标记为 PAUSED", len(recovered))
@@ -173,18 +175,11 @@ def create_app() -> FastAPI:
         checks: dict[str, str] = {}
         _test_mode = os.environ.get("CONCLAVE_TEST_MODE") == "1"
 
-        # 同步 PostgreSQL 兼容层检查
+        # PostgreSQL 兼容层检查
         try:
-            from app.db_legacy import _connect, _putconn
-            conn = _connect()
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT 1")
-                cur.fetchone()
-                cur.close()
-                checks["postgresql"] = "ok"
-            finally:
-                _putconn(conn)
+            async with async_session_factory() as session:
+                await session.execute(text("SELECT 1"))
+            checks["postgresql"] = "ok"
         except Exception as e:
             checks["postgresql"] = f"error: {e}"
 

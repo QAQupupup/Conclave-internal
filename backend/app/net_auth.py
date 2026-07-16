@@ -4,24 +4,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from sqlalchemy import text
 
-from app.db_legacy import _connect, _lock, _putconn
-
-
-def _exec(
-    conn: psycopg2.extensions.connection,
-    sql: str,
-    params: tuple[Any, ...] | list[Any] | None = None,
-) -> psycopg2.extensions.cursor:
-    """创建游标并执行 SQL，返回游标供 fetch。"""
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute(sql, params)
-    return cur
+from app.db.engine import async_session_factory
 
 
-def init_auth_table() -> None:
+async def init_auth_table() -> None:
     """初始化网络授权申请表"""
     ddl_statements = [
         """
@@ -46,17 +34,13 @@ def init_auth_table() -> None:
         "CREATE INDEX IF NOT EXISTS idx_auth_meeting ON net_auth_requests(meeting_id)",
         "CREATE INDEX IF NOT EXISTS idx_auth_status ON net_auth_requests(status)",
     ]
-    with _lock:
-        conn = _connect()
-        try:
-            for stmt in ddl_statements:
-                _exec(conn, stmt)
-            conn.commit()
-        finally:
-            _putconn(conn)
+    async with async_session_factory() as session:
+        for stmt in ddl_statements:
+            await session.execute(text(stmt))
+        await session.commit()
 
 
-def create_auth_request(
+async def create_auth_request(
     request_id: str,
     meeting_id: str,
     stage: str,
@@ -69,136 +53,141 @@ def create_auth_request(
 ) -> None:
     """创建网络授权申请单"""
     now = datetime.now(timezone.utc)
-    with _lock:
-        conn = _connect()
-        try:
-            _exec(conn, 
+    async with async_session_factory() as session:
+        await session.execute(
+            text(
                 """
                 INSERT INTO net_auth_requests
                 (id, meeting_id, stage, code_snippet, requested_level, detected_level,
                  failure_reason, stderr_output, status, created_at, expires_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s)
-                """,
-                (
-                    request_id, meeting_id, stage, code_snippet[:2000],
-                    requested_level, detected_level,
-                    failure_reason, stderr_output[:4000],
-                    now.isoformat(), expires_at.isoformat(),
-                ),
-            )
-            conn.commit()
-        finally:
-            _putconn(conn)
+                VALUES (:id, :meeting_id, :stage, :code_snippet, :requested_level, :detected_level,
+                        :failure_reason, :stderr_output, 'pending', :created_at, :expires_at)
+                """
+            ),
+            {
+                "id": request_id,
+                "meeting_id": meeting_id,
+                "stage": stage,
+                "code_snippet": code_snippet[:2000],
+                "requested_level": requested_level,
+                "detected_level": detected_level,
+                "failure_reason": failure_reason,
+                "stderr_output": stderr_output[:4000],
+                "created_at": now.isoformat(),
+                "expires_at": expires_at.isoformat(),
+            },
+        )
+        await session.commit()
 
 
-def get_auth_request(request_id: str) -> dict[str, Any] | None:
+async def get_auth_request(request_id: str) -> dict[str, Any] | None:
     """取单条申请"""
-    with _lock:
-        conn = _connect()
-        try:
-            row = _exec(conn, 
-                "SELECT * FROM net_auth_requests WHERE id = %s", (request_id,)
-            ).fetchone()
-            return dict(row) if row else None
-        finally:
-            _putconn(conn)
+    async with async_session_factory() as session:
+        result = await session.execute(
+            text("SELECT * FROM net_auth_requests WHERE id = :request_id"),
+            {"request_id": request_id},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
 
 
-def list_auth_requests(
+async def list_auth_requests(
     meeting_id: str | None = None,
     status: str | None = None,
 ) -> list[dict[str, Any]]:
     """列出申请单，可按会议和状态过滤"""
-    with _lock:
-        conn = _connect()
-        try:
-            sql = "SELECT * FROM net_auth_requests"
-            params: list[str] = []
-            conditions: list[str] = []
-            if meeting_id:
-                conditions.append("meeting_id = %s")
-                params.append(meeting_id)
-            if status:
-                conditions.append("status = %s")
-                params.append(status)
-            if conditions:
-                sql += " WHERE " + " AND ".join(conditions)
-            sql += " ORDER BY created_at DESC"
-            rows = _exec(conn, sql, params).fetchall()
-            return [dict(r) for r in rows]
-        finally:
-            _putconn(conn)
+    async with async_session_factory() as session:
+        sql = "SELECT * FROM net_auth_requests"
+        params: dict[str, Any] = {}
+        conditions: list[str] = []
+        if meeting_id:
+            conditions.append("meeting_id = :meeting_id")
+            params["meeting_id"] = meeting_id
+        if status:
+            conditions.append("status = :status")
+            params["status"] = status
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY created_at DESC"
+        result = await session.execute(text(sql), params)
+        rows = result.mappings().all()
+        return [dict(r) for r in rows]
 
 
-def review_auth_request(
+async def review_auth_request(
     request_id: str,
     action: str,
     comment: str = "",
 ) -> dict[str, Any] | None:
     """批复申请单：action=approved/denied"""
     now = datetime.now(timezone.utc)
-    with _lock:
-        conn = _connect()
-        try:
-            _exec(conn, 
+    async with async_session_factory() as session:
+        await session.execute(
+            text(
                 """
                 UPDATE net_auth_requests
-                SET status = %s, review_action = %s, review_comment = %s, reviewed_at = %s, resolved_at = %s
-                WHERE id = %s AND status = 'pending'
-                """,
-                (action, action, comment, now.isoformat(), now.isoformat(), request_id),
-            )
-            conn.commit()
-            row = _exec(conn, 
-                "SELECT * FROM net_auth_requests WHERE id = %s", (request_id,)
-            ).fetchone()
-            return dict(row) if row else None
-        finally:
-            _putconn(conn)
+                SET status = :status, review_action = :review_action, review_comment = :review_comment,
+                    reviewed_at = :reviewed_at, resolved_at = :resolved_at
+                WHERE id = :request_id AND status = 'pending'
+                """
+            ),
+            {
+                "status": action,
+                "review_action": action,
+                "review_comment": comment,
+                "reviewed_at": now.isoformat(),
+                "resolved_at": now.isoformat(),
+                "request_id": request_id,
+            },
+        )
+        await session.commit()
+        result = await session.execute(
+            text("SELECT * FROM net_auth_requests WHERE id = :request_id"),
+            {"request_id": request_id},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
 
 
-def expire_pending_requests() -> list[dict[str, Any]]:
+async def expire_pending_requests() -> list[dict[str, Any]]:
     """将超时未批复的申请单标记为 expired（降级处理）
 
     返回刚过期的申请列表，供调用方做降级执行。
     """
     now = datetime.now(timezone.utc)
-    with _lock:
-        conn = _connect()
-        try:
-            # 查出已过期但 still pending 的
-            rows = _exec(conn, 
+    async with async_session_factory() as session:
+        result = await session.execute(
+            text(
                 """
                 SELECT * FROM net_auth_requests
-                WHERE status = 'pending' AND expires_at < %s
-                """,
-                (now.isoformat(),),
-            ).fetchall()
-            expired = [dict(r) for r in rows]
-            if expired:
-                _exec(conn, 
+                WHERE status = 'pending' AND expires_at < :now
+                """
+            ),
+            {"now": now.isoformat()},
+        )
+        rows = result.mappings().all()
+        expired = [dict(r) for r in rows]
+        if expired:
+            await session.execute(
+                text(
                     """
                     UPDATE net_auth_requests
-                    SET status = 'expired', resolved_at = %s
-                    WHERE status = 'pending' AND expires_at < %s
-                    """,
-                    (now.isoformat(), now.isoformat()),
-                )
-                conn.commit()
-            return expired
-        finally:
-            _putconn(conn)
+                    SET status = 'expired', resolved_at = :now
+                    WHERE status = 'pending' AND expires_at < :now
+                    """
+                ),
+                {"now": now.isoformat()},
+            )
+            await session.commit()
+        return expired
 
 
-def get_pending_for_meeting(meeting_id: str) -> list[dict[str, Any]]:
+async def get_pending_for_meeting(meeting_id: str) -> list[dict[str, Any]]:
     """取某会议的 pending 申请"""
-    with _lock:
-        conn = _connect()
-        try:
-            rows = _exec(conn, 
-                "SELECT * FROM net_auth_requests WHERE meeting_id = %s AND status = 'pending'",
-                (meeting_id,),
-            ).fetchall()
-            return [dict(r) for r in rows]
-        finally:
-            _putconn(conn)
+    async with async_session_factory() as session:
+        result = await session.execute(
+            text("SELECT * FROM net_auth_requests WHERE meeting_id = :meeting_id AND status = 'pending'"),
+            {"meeting_id": meeting_id},
+        )
+        rows = result.mappings().all()
+        return [dict(r) for r in rows]

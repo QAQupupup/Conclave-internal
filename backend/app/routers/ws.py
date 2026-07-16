@@ -162,16 +162,16 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     unsubscribe = bus.subscribe(meeting_id, _on_event)
 
     # 记录订阅时刻的 last_seq，用于区分"回放事件"和"实时事件"
-    subscribe_seq = bus.last_seq(meeting_id)
+    subscribe_seq = await bus.last_seq(meeting_id)
     snapshot_seq = subscribe_seq  # 全量回放时会覆盖为状态捕获点的 seq
 
     if from_seq > 0:
         # 增量回放：客户端已有状态，只推 seq > from_seq 的事件
-        new_events = bus.replay(meeting_id, from_seq)
+        new_events = await bus.replay(meeting_id, from_seq)
         for ev in new_events:
             await _send_event(ws, ev)
         # 记录回放完成时的 last_seq，用于队列补发截止点
-        snapshot_seq = bus.last_seq(meeting_id)
+        snapshot_seq = await bus.last_seq(meeting_id)
         await _send_json(ws, {
             "type": "replay.done", "meeting_id": meeting_id,
             "events": len(new_events), "from_seq": from_seq,
@@ -188,7 +188,7 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         #   4) 发送 snapshot → 5) 发送 replay.done
         #   6) 排空队列：仅补发 seq > snapshot_seq 的事件（快照之后产生的新事件）
         state = get_state(meeting_id)
-        snapshot_seq = bus.last_seq(meeting_id)  # 状态捕获时刻的 last_seq
+        snapshot_seq = await bus.last_seq(meeting_id)  # 状态捕获时刻的 last_seq
         snapshot: dict[str, Any] = state.snapshot() if state else {}
         await _send_json(ws, {"type": "snapshot", "meeting_id": meeting_id, "payload": snapshot})
         await _send_json(ws, {
@@ -239,7 +239,7 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                         set_state(state)
                         # 持久化（与 HTTP control 端点保持一致）
                         try:
-                            save_meeting(
+                            await save_meeting(
                                 meeting_id=meeting_id,
                                 topic=state.topic,
                                 status=state.status.value,

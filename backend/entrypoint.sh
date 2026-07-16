@@ -131,4 +131,4 @@ fi
 chown -R "$APP_UID:$APP_GID" /workspace /app/data 2>/dev/null || true
 
 echo "[entrypoint] Starting uvicorn as $APP_USER (uid=$APP_UID)..."
-exec su -s /bin/bash "$APP_USER" -c "cd /app && exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
+exec su -s /bin/bash "$APP_USER" -c "cd /app && exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --loop uvloop"

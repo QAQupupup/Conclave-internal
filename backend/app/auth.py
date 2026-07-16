@@ -18,6 +18,10 @@ import threading
 import time
 from typing import Any, Optional
 
+from sqlalchemy import text
+
+from app.db.engine import async_session_factory
+
 logger = logging.getLogger(__name__)
 
 # ---- 配置 ----
@@ -146,13 +150,11 @@ _users_lock = threading.RLock()
 _users_cache: dict[str, dict[str, Any]] = {}  # username -> user dict
 
 
-def _init_users_table() -> None:
+async def _init_users_table() -> None:
     """创建 users 表（如不存在）"""
-    from app.db_legacy import _connect, _putconn
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
+    async with async_session_factory() as session:
+        await session.execute(
+            text(
                 """
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -166,93 +168,94 @@ def _init_users_table() -> None:
                 )
                 """
             )
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
-        conn.commit()
-    finally:
-        _putconn(conn)
+        )
+        await session.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+        )
+        await session.commit()
 
 
-def _load_users_from_db() -> None:
+async def _load_users_from_db() -> None:
     """从数据库加载所有用户到内存缓存"""
-    from app.db_legacy import _connect, _putconn
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
+    async with async_session_factory() as session:
+        result = await session.execute(
+            text(
                 "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at FROM users"
             )
-            rows = cur.fetchall()
-        with _users_lock:
-            _users_cache.clear()
-            for row in rows:
-                username = row["username"]
-                _users_cache[username] = {
-                    "id": row["id"],
-                    "username": username,
-                    "password_hash": row["password_hash"],
-                    "role": row["role"],
-                    "display_name": row.get("display_name") or username,
-                    "is_active": bool(row["is_active"]),
-                    "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
-                    "last_login_at": row["last_login_at"].isoformat() if row.get("last_login_at") else None,
-                }
-    finally:
-        _putconn(conn)
+        )
+        rows = result.mappings().all()
+    with _users_lock:
+        _users_cache.clear()
+        for row in rows:
+            username = row["username"]
+            _users_cache[username] = {
+                "id": row["id"],
+                "username": username,
+                "password_hash": row["password_hash"],
+                "role": row["role"],
+                "display_name": row.get("display_name") or username,
+                "is_active": bool(row["is_active"]),
+                "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+                "last_login_at": row["last_login_at"].isoformat() if row.get("last_login_at") else None,
+            }
 
 
-def _create_user_in_db(username: str, password_hash: str, role: str, display_name: str) -> Optional[dict]:
+async def _create_user_in_db(username: str, password_hash: str, role: str, display_name: str) -> Optional[dict]:
     """在数据库中创建用户"""
-    from app.db_legacy import _connect, _putconn
-    conn = _connect()
-    try:
+    async with async_session_factory() as session:
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO users(username, password_hash, role, display_name) VALUES(%s, %s, %s, %s)",
-                    (username, password_hash, role, display_name),
-                )
-            conn.commit()
+            await session.execute(
+                text(
+                    "INSERT INTO users(username, password_hash, role, display_name) "
+                    "VALUES(:username, :password_hash, :role, :display_name)"
+                ),
+                {
+                    "username": username,
+                    "password_hash": password_hash,
+                    "role": role,
+                    "display_name": display_name,
+                },
+            )
+            await session.commit()
         except Exception as e:
-            conn.rollback()
+            await session.rollback()
             logger.warning("Failed to create user %s: %s", username, e)
             return None
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at FROM users WHERE username=%s",
-                (username,),
-            )
-            row = cur.fetchone()
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "username": row["username"],
-            "password_hash": row["password_hash"],
-            "role": row["role"],
-            "display_name": row.get("display_name") or username,
-            "is_active": bool(row["is_active"]),
-            "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
-            "last_login_at": row["last_login_at"].isoformat() if row.get("last_login_at") else None,
-        }
-    finally:
-        _putconn(conn)
+        result = await session.execute(
+            text(
+                "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at "
+                "FROM users WHERE username = :username"
+            ),
+            {"username": username},
+        )
+        row = result.mappings().first()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "password_hash": row["password_hash"],
+        "role": row["role"],
+        "display_name": row.get("display_name") or username,
+        "is_active": bool(row["is_active"]),
+        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+        "last_login_at": row["last_login_at"].isoformat() if row.get("last_login_at") else None,
+    }
 
 
-def _update_last_login(username: str) -> None:
-    from app.db_legacy import _connect, _putconn
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE users SET last_login_at = NOW() WHERE username=%s", (username,))
-        conn.commit()
-    finally:
-        _putconn(conn)
+async def _update_last_login(username: str) -> None:
+    async with async_session_factory() as session:
+        await session.execute(
+            text("UPDATE users SET last_login_at = NOW() WHERE username = :username"),
+            {"username": username},
+        )
+        await session.commit()
 
 
-def init_auth() -> None:
+async def init_auth() -> None:
     """初始化认证系统：建表、加载用户、创建默认管理员"""
-    _init_users_table()
-    _load_users_from_db()
+    await _init_users_table()
+    await _load_users_from_db()
     _ensure_jwt_secret()
 
     # 创建默认管理员
@@ -263,7 +266,7 @@ def init_auth() -> None:
                 DEFAULT_ADMIN_USERNAME,
             )
             pw_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
-            user = _create_user_in_db(
+            user = await _create_user_in_db(
                 username=DEFAULT_ADMIN_USERNAME,
                 password_hash=pw_hash,
                 role="admin",
@@ -273,7 +276,7 @@ def init_auth() -> None:
                 _users_cache[DEFAULT_ADMIN_USERNAME] = user
 
 
-def authenticate_user(username: str, password: str) -> Optional[dict]:
+async def authenticate_user(username: str, password: str) -> Optional[dict]:
     """验证用户名密码，返回用户信息（不含密码哈希）或 None"""
     with _users_lock:
         user = _users_cache.get(username)
@@ -285,7 +288,7 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
         return None
     # 更新最后登录时间
     try:
-        _update_last_login(username)
+        await _update_last_login(username)
     except Exception:
         pass
     # 返回不含密码哈希的副本

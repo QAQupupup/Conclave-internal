@@ -103,25 +103,20 @@ async def _health_checks() -> dict[str, Any]:
     """执行所有基础设施健康检查"""
     checks: dict[str, Any] = {}
 
-    # 同步 PostgreSQL 兼容层检查
+    # PostgreSQL 兼容层检查
     try:
         import time as _time
 
         t0 = _time.monotonic()
-        from app.db_legacy import _connect, _putconn
+        from sqlalchemy import text as _text
+        from app.db.engine import async_session_factory as _asf
 
-        conn = _connect()
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.fetchone()
-            cur.close()
-            checks["postgresql"] = {
-                "status": "ok",
-                "latency_ms": round((_time.monotonic() - t0) * 1000, 1),
-            }
-        finally:
-            _putconn(conn)
+        async with _asf() as session:
+            await session.execute(_text("SELECT 1"))
+        checks["postgresql"] = {
+            "status": "ok",
+            "latency_ms": round((_time.monotonic() - t0) * 1000, 1),
+        }
     except Exception as e:
         checks["postgresql"] = {"status": "error", "message": str(e)[:100]}
 
