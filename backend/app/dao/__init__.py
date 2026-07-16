@@ -1,7 +1,7 @@
-"""兼容 shim：所有函数已迁移到 app.dao 子模块。
+"""DAO 聚合层：统一 re-export 各子模块的全部公开函数。
 
-保留此文件是为了向后兼容 `from app.db_legacy import xxx` 的调用。
-新代码应直接使用 `from app.dao import xxx`。
+保证 `from app.dao import save_meeting` 等顶层 import 可用。
+私有辅助函数（下划线前缀）不在本模块 re-export。
 """
 from __future__ import annotations
 
