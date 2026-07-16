@@ -894,6 +894,53 @@ def health():
             if key in result:
                 state.artifact[key] = result[key]
 
+    # ─── 生成报告布局 spec（report_layout）───
+    # 后端驱动布局：将 artifact 转换为前端可通用渲染的 layout spec
+    # 前端只需按 spec 渲染，不再硬编码任何模板
+    try:
+        from app.report_layout import build_report_layout
+        meeting_meta = {
+            "meeting_id": state.meeting_id,
+            "topic": state.clarified_topic or state.topic,
+            "status": state.status.value if hasattr(state.status, "value") else str(state.status),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # 从 state 提取上下文数据供 layout builder 使用
+        decisions = []
+        if state.decision_record:
+            decisions = state.decision_record.get("decisions", []) if isinstance(state.decision_record, dict) else []
+        adopted_claims = [
+            c.get("text", str(c)) if isinstance(c, dict) else c
+            for c in state.claims
+            if (c.get("adopted", True) if isinstance(c, dict) else True)
+        ]
+        llm_trace_data = {}
+        if state.llm_trace:
+            llm_trace_data = {
+                "total_calls": getattr(state.llm_trace, "total_calls", 0),
+                "success_rate": f"{getattr(state.llm_trace, 'success_count', 0)}/{max(getattr(state.llm_trace, 'total_calls', 1), 1)}",
+                "total_tokens": getattr(state.llm_trace, "total_tokens", 0),
+                "input_tokens": getattr(state.llm_trace, "input_tokens", 0),
+                "output_tokens": getattr(state.llm_trace, "output_tokens", 0),
+            }
+        layout_spec = build_report_layout(
+            deliverable_type=state.deliverable_type,
+            artifact=state.artifact or {},
+            meeting_meta=meeting_meta,
+            confidence=state.confidence_flags,
+            decisions=decisions,
+            adopted_claims=adopted_claims,
+            key_questions=state.key_questions,
+            team_config=state.team_config,
+            conflicts=state.conflicts,
+            llm_trace=llm_trace_data,
+        )
+        # 将 layout spec 存入 artifact，前端通过 API 获取
+        state.artifact["report_layout"] = layout_spec
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"[report_layout] 生成布局 spec 失败，前端将回退到本地 demo: {e}")
+
     # 统一收尾：锁定结论、发布事件、漂移检查、设置终态
     from app.orchestrator.stage_runners import run_produce
     return await run_produce(state, confidence)

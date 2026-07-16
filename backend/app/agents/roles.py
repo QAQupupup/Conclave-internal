@@ -5,22 +5,16 @@
 # 设计模式：Facade —— 旧的 Agent 接口保留，实际计算委托 compute.py。
 from __future__ import annotations
 
-from enum import Enum
 from typing import TYPE_CHECKING
 
 from app.agents import llm as llm_mod
 from app.agents.llm import LLMClient
+# 统一单一数据源：re-export app.models.Role（7 角色）
+# 消除历史上 agents/roles.Role（3 角色）与 models.Role（7 角色）不一致的漂移
+from app.models import Role
 
 if TYPE_CHECKING:
     pass
-
-
-class Role(str, Enum):
-    """会议中可用的角色（与前端 types/events.ts 保持一致）"""
-
-    MODERATOR = "moderator"
-    PRODUCT_ARCHITECT = "product_architect"
-    ENGINEER = "engineer"
 
 
 class Agent:

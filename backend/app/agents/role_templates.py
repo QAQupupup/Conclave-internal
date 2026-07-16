@@ -98,6 +98,18 @@ ROLE_LIBRARY: dict[str, RoleTemplate] = {
             "决策偏置：重用户视角。"
         ),
     ),
+    "marketing_expert": RoleTemplate(
+        role_id="marketing_expert",
+        display_name="市场专家",
+        perspective="市场定位、用户增长、商业价值、竞争差异化",
+        evidence_preference="goals",
+        risk_appetite="aggressive",
+        default_stance="market-first",
+        prompt_template=(
+            "你是市场专家。关注市场定位、用户增长、商业价值与竞争差异化。"
+            "决策偏置：先看市场价值与增长空间，重商业可行性；适度激进。"
+        ),
+    ),
 }
 
 
