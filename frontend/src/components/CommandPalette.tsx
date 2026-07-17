@@ -1,9 +1,22 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useApp, type ViewName } from '../state/AppContext';
+import { useNavigate } from 'react-router-dom';
+import { useApp } from '../state/AppContext';
 import { CMDK_ITEMS, type CmdkAction } from '../data/mock';
 
+const NAV_ROUTES: Record<string, string> = {
+  landing: '/',
+  board: '/board',
+  meeting: '/meeting',
+  report: '/report',
+  models: '/models',
+  monitor: '/monitor',
+  topology: '/topology',
+  settings: '/settings',
+};
+
 export default function CommandPalette() {
-  const { cmdkOpen, closeCmdk, setView, toggleTheme, toggleLog } = useApp();
+  const { cmdkOpen, closeCmdk, toggleTheme, toggleLog } = useApp();
+  const navigate = useNavigate();
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,8 +41,8 @@ export default function CommandPalette() {
   if (!cmdkOpen) return null;
 
   const exec = (action: CmdkAction) => {
-    const nav: CmdkAction[] = ['landing', 'board', 'meeting', 'report', 'models', 'monitor', 'topology', 'settings'];
-    if (nav.includes(action)) setView(action as ViewName);
+    const route = NAV_ROUTES[action];
+    if (route) navigate(route);
     else if (action === 'toggleTheme') toggleTheme();
     else if (action === 'toggleLog') toggleLog();
     closeCmdk();

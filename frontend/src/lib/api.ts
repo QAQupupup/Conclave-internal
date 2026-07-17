@@ -5,7 +5,7 @@ import type { ConclaveUser } from './auth';
 
 const API_BASE = ''; // 同源
 
-/** 401 时触发（App 层注册为打开登录弹窗） */
+/** 401 时触发（App 层注册为全局认证过期处理） */
 let unauthorizedHandler: (() => void) | null = null;
 export function onUnauthorized(fn: () => void): void {
   unauthorizedHandler = fn;
@@ -13,7 +13,7 @@ export function onUnauthorized(fn: () => void): void {
 
 export interface ApiOptions extends RequestInit {
   headers?: Record<string, string>;
-  /** 静默模式：401 时不弹登录窗，仅抛错由调用方 catch 回退 mock */
+  /** 静默模式：401 时仍触发全局 authExpired，但不抛错（调用方 catch 后回退 mock） */
   silent?: boolean;
 }
 
@@ -28,12 +28,9 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
     const res = await fetch(API_BASE + path, { ...opts, headers });
     if (res.status === 401) {
       clearToken();
-      // 静默模式不触发登录弹窗（后台数据加载回退 mock 即可）；
-      // 非静默模式（用户主动操作）才弹窗提示
-      if (!opts.silent) {
-        commitLogout();
-        unauthorizedHandler?.();
-      }
+      // 全局 401 拦截器总是触发（token 过期是全局事件，与 silent 无关）
+      // AppContext 的 handler 内部有去重，并发 401 只触发一次
+      unauthorizedHandler?.();
       throw new Error('未登录或登录已过期');
     }
     if (!res.ok) {

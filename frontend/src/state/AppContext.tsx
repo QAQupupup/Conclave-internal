@@ -5,9 +5,8 @@ import {
 import { subscribeAuth, getAuthUser, commitLogout, type ConclaveUser } from '../lib/auth';
 import { onUnauthorized, apiMe, apiListMeetings, apiCreateMeeting, apiRunMeeting, apiGetMeeting, apiControlMeeting, apiIntervene } from '../lib/api';
 import { MeetingWsClient, connectSystemWs, STAGE_KEYS } from '../lib/ws';
-import { MEETINGS as MOCK_MEETINGS, MESSAGES as MOCK_MESSAGES, STAGES } from '../data/mock';
+import { MEETINGS as MOCK_MEETINGS, STAGES } from '../data/mock';
 
-export type ViewName = 'landing' | 'board' | 'meeting' | 'report' | 'models' | 'monitor' | 'topology' | 'settings';
 export type LogLevel = 'ALL' | 'INFO' | 'DEBUG' | 'WARN' | 'ERROR' | 'info' | 'debug' | 'warning' | 'error';
 export type CtxType = 'overview' | 'evidence' | 'artifact' | 'token' | 'model';
 
@@ -41,15 +40,14 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 interface AppApi {
-  view: ViewName;
-  setView: (v: ViewName) => void;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
   user: ConclaveUser | null;
+  setUser: (u: ConclaveUser | null) => void;
+  authChecked: boolean;
+  authExpired: boolean;
+  clearAuthExpired: () => void;
   logout: () => void;
-  loginOpen: boolean;
-  openLogin: () => void;
-  closeLogin: () => void;
   logOpen: boolean;
   toggleLog: () => void;
   logFilter: string;
@@ -87,11 +85,11 @@ export function useApp(): AppApi {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [view, setViewRaw] = useState<ViewName>('landing');
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme')) === 'dark' ? 'dark' : 'light');
-  const [user, setUser] = useState<ConclaveUser | null>(getAuthUser());
-  const [loginOpen, setLoginOpen] = useState(false);
+  const [user, setUserState] = useState<ConclaveUser | null>(getAuthUser());
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authExpired, setAuthExpired] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logFilter, setLogFilter] = useState('ALL');
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -102,6 +100,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [meeting, setMeeting] = useState<MeetingState>(INITIAL_MEETING);
 
   const wsRef = useRef<MeetingWsClient | null>(null);
+  // 全局 401 去重：并发请求只触发一次 authExpired
+  const authExpiredFired = useRef(false);
 
   /* ── 日志 ── */
   const appendLog = useCallback((msg: string, level: string = 'info') => {
@@ -121,18 +121,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /* ── 视图切换（切换时收起上下文面板） ── */
-  const setView = useCallback((v: ViewName) => {
-    setViewRaw(v);
-    setCtx((c) => ({ ...c, open: false }));
-  }, []);
-
   /* ── 认证 ── */
-  const openLogin = useCallback(() => setLoginOpen(true), []);
-  const closeLogin = useCallback(() => setLoginOpen(false), []);
-  const logout = useCallback(() => { commitLogout(); setViewRaw('landing'); }, []);
-  useEffect(() => subscribeAuth(setUser), []);
-  useEffect(() => { onUnauthorized(() => setLoginOpen(true)); }, []);
+  const setUser = useCallback((u: ConclaveUser | null) => setUserState(u), []);
+  const clearAuthExpired = useCallback(() => {
+    setAuthExpired(false);
+    authExpiredFired.current = false;
+  }, []);
+  const logout = useCallback(() => {
+    commitLogout();
+    setUserState(null);
+  }, []);
+  useEffect(() => subscribeAuth(setUserState), []);
+
+  /* ── 全局 401 拦截器（去重） ──
+   * 任意 API 请求收到 401 → 标记 authExpired（仅首次触发）
+   * App 根层监听 authExpired → 弹"会话过期"提示 → 跳转登录页（带 redirect）
+   * 后续并发的 401 不会重复触发（authExpiredFired 去重） */
+  useEffect(() => {
+    onUnauthorized(() => {
+      if (authExpiredFired.current) return;
+      authExpiredFired.current = true;
+      commitLogout();
+      setUserState(null);
+      setAuthExpired(true);
+    });
+  }, []);
 
   /* ── 命令面板 ── */
   const openCmdk = useCallback(() => setCmdkOpen(true), []);
@@ -218,7 +231,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const e = msg.payload || {};
           appendLog(e.message || e.msg || '', e.level || 'info');
         },
-        onAuthRequired: () => setLoginOpen(true),
+        onAuthRequired: () => {
+          if (!authExpiredFired.current) {
+            authExpiredFired.current = true;
+            commitLogout();
+            setUserState(null);
+            setAuthExpired(true);
+          }
+        },
       });
     }
     return wsRef.current;
@@ -250,7 +270,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [appendLog]);
 
   const openMeeting = useCallback(async (id: string) => {
-    setViewRaw('meeting');
     setMeeting((m) => ({ ...m, currentMeetingId: id, messages: [] }));
     connectMeeting(id);
     await loadMeetingDetail(id);
@@ -266,7 +285,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       connectMeeting(meetingId);
       await apiRunMeeting(meetingId);
       appendLog('会议已启动，观察实时进度', 'info');
-      setViewRaw('meeting');
       return meetingId;
     } catch (e: any) {
       appendLog('启动会议失败: ' + e.message, 'error');
@@ -316,19 +334,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [meeting.currentMeetingId, appendLog]);
 
-  /* ── 启动时：检查登录、连系统 WS、拉看板 ── */
+  /* ── 启动时：验证 token（仅一次） ── */
   useEffect(() => {
     (async () => {
       const token = localStorage.getItem('conclave_token');
       if (token) {
         const u = await apiMe();
-        if (u) { setUser(u); refreshBoard(); }
-        else { commitLogout(); setUser(null); }
+        if (u) { setUserState(u); refreshBoard(); }
+        else { commitLogout(); setUserState(null); }
       }
+      setAuthChecked(true);
     })();
     const disconnect = connectSystemWs({ onMeetingsChanged: () => refreshBoard() });
     return () => { disconnect(); wsRef.current?.disconnect(); };
-  }, [refreshBoard]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── 会议运行计时器 ── */
   useEffect(() => {
@@ -339,8 +359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api: AppApi = useMemo(() => ({
-    view, setView, theme, toggleTheme, user, logout,
-    loginOpen, openLogin, closeLogin,
+    theme, toggleTheme, user, setUser, authChecked, authExpired, clearAuthExpired, logout,
     logOpen, toggleLog: () => setLogOpen((o) => !o), logFilter, setLogFilter, logs, appendLog, clearLogs,
     cmdkOpen, openCmdk, closeCmdk,
     ctx, openCtx, closeCtx,
@@ -349,7 +368,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     meeting, startMeeting, openMeeting, pauseMeeting, abortMeeting, toggleIntervene, sendIntervention,
     statusText, stageName,
   }), [
-    view, setView, theme, toggleTheme, user, logout, loginOpen, openLogin, closeLogin,
+    theme, toggleTheme, user, setUser, authChecked, authExpired, clearAuthExpired, logout,
     logOpen, logFilter, logs, appendLog, clearLogs, cmdkOpen, openCmdk, closeCmdk,
     ctx, openCtx, closeCtx, selectedType, meetings, refreshBoard,
     meeting, startMeeting, openMeeting, pauseMeeting, abortMeeting, toggleIntervene, sendIntervention,

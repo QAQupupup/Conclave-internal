@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
 import { PROVIDERS, MODEL_CATALOG, STAGE_MODELS } from '../data/mock';
 import { apiGetProviders, apiGetModels } from '../lib/api';
@@ -19,7 +20,8 @@ const FILTER_CHIPS: { key: FilterCat; label: string }[] = [
 ];
 
 export default function Models() {
-  const { appendLog, setView } = useApp();
+  const { appendLog } = useApp();
+  const navigate = useNavigate();
 
   // 数据：默认使用 mock，API 成功则覆盖
   const [providers, setProviders] = useState<Provider[]>(PROVIDERS);
@@ -156,7 +158,7 @@ export default function Models() {
               {activeProvider.hasKey ? 'API Key 已配置' : '未配置 Key'}
               <span
                 className="provider-key-btn"
-                onClick={() => setView('settings')}
+                onClick={() => navigate('/settings')}
               >
                 {activeProvider.hasKey ? '更换 Key' : '配置 Key'}
               </span>

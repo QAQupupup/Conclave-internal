@@ -12,6 +12,8 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  // MPA 模式：portal(index.html)、app.html、demo.html 各自独立入口
+  appType: 'mpa',
   build: {
     outDir: 'dist',
     rollupOptions: {
@@ -20,6 +22,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // 确保刷新 /app/board 等前端路由时返回 app.html
+    // Vite dev 默认对 .html 入口做 history fallback
     proxy: {
       '/meetings': 'http://localhost:8000',
       '/workspace': 'http://localhost:8000',

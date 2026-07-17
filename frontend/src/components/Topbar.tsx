@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
 
 export default function Topbar() {
-  const { theme, toggleTheme, toggleLog, setView, openCmdk, openLogin, user, logout } = useApp();
+  const { theme, toggleTheme, toggleLog, openCmdk, user, logout } = useApp();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -39,14 +41,14 @@ export default function Topbar() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4" /></svg>
           )}
         </button>
-        <button className="icon-btn" onClick={() => setView('settings')} title="设置">
+        <button className="icon-btn" onClick={() => navigate('/settings')} title="设置">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="3.5" /><path d="M5 21c0-4 3-6 7-6s7 2 7 6" /></svg>
         </button>
         <div style={{ position: 'relative' }} ref={menuRef}>
           <button
             className="icon-btn user-btn"
             id="user-btn"
-            onClick={() => (user ? setMenuOpen((o) => !o) : openLogin())}
+            onClick={() => (user ? setMenuOpen((o) => !o) : navigate('/login'))}
             title="用户"
           >
             {user ? (
@@ -65,7 +67,7 @@ export default function Topbar() {
                   <div className="user-menu-role">{user.role || 'user'}</div>
                 </div>
               </div>
-              <div className="user-menu-item" onClick={() => { logout(); setMenuOpen(false); }}>退出登录</div>
+              <div className="user-menu-item" onClick={() => { logout(); setMenuOpen(false); navigate('/login'); }}>退出登录</div>
             </div>
           )}
         </div>

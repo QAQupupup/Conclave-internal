@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
 
 type SortKey = 'date' | 'status' | 'title';
@@ -12,7 +13,8 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 export default function Board() {
-  const { meetings, refreshBoard, openMeeting, statusText, setView } = useApp();
+  const { meetings, refreshBoard, openMeeting, statusText } = useApp();
+  const navigate = useNavigate();
 
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<SortKey>('date');
@@ -73,7 +75,7 @@ export default function Board() {
             <span>{SORT_LABELS[sort]}</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
           </div>
-          <button className="new-btn" onClick={() => setView('landing')}>新建会议</button>
+          <button className="new-btn" onClick={() => navigate('/')}>新建会议</button>
         </div>
       </div>
       <div id="board-list">
@@ -83,7 +85,7 @@ export default function Board() {
           </div>
         ) : (
           pageItems.map((m: any) => (
-            <div className="list-item" key={m.id} onClick={() => openMeeting(m.id)}>
+            <div className="list-item" key={m.id} onClick={() => { openMeeting(m.id); navigate(`/meeting/${m.id}`); }}>
               <span className="list-item-title">{m.title}</span>
               <span
                 className="list-item-topic"

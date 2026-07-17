@@ -30,10 +30,16 @@ ul{list-style:none}
 }
 
 /* ═══ Layout ═══ */
-.app{display:grid;grid-template-columns:64px 1fr;grid-template-rows:52px 1fr;grid-template-areas:"top top" "nav main";height:100vh}
+/* .app 为两行网格：topbar 占首行，app-body 占次行。
+ * 注意：React 结构里 NavRail 与 main 被包在 .app-body 内，
+ * 故 .app 不能再用 "nav main" 双列 areas（那样 .app-body 会被塞进 64px 的 nav 列，
+ * 导致主内容区被挤压、与侧栏互相遮挡）。改由 .app-body 自身做 64px+1fr 双列。 */
+.app{display:grid;grid-template-rows:52px 1fr;height:100vh}
+.app-body{display:grid;grid-template-columns:64px 1fr;grid-template-areas:"nav main";overflow:hidden;min-height:0}
+.app-main{grid-area:main;overflow-y:auto;overflow-x:hidden;min-width:0}
 
 /* ═══ Top bar ═══ */
-.topbar{grid-area:top;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--line);background:var(--bg);z-index:10}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--line);background:var(--bg);z-index:10}
 .brand{display:flex;align-items:center;gap:10px}
 .brand-dot{width:7px;height:7px;border-radius:50%;background:var(--text);flex-shrink:0}
 .brand-name{font-family:var(--serif);font-size:15px;font-weight:400;letter-spacing:0.02em;color:var(--text)}
@@ -769,6 +775,16 @@ ul{list-style:none}
   .report-code-collapsible .report-code-block::after{display:none}
 }
 .conn-status{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* ═══ Login page (route-based) ═══ */
+.login-page{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg-2)}
+.login-card{width:360px;max-width:calc(100vw - 48px);background:var(--bg);border:1px solid var(--line-2);border-radius:14px;padding:36px 32px}
+.login-brand{display:flex;align-items:center;gap:8px;margin-bottom:24px}
+.login-title{font-family:var(--serif);font-size:20px;font-weight:400;color:var(--text);margin-bottom:24px}
+.login-form{display:flex;flex-direction:column;gap:14px}
+.login-submit{width:100%;padding:10px;margin-top:4px}
+.login-back{text-align:center;font-size:13px;color:var(--text-3);text-decoration:none;margin-top:8px}
+.login-back:hover{color:var(--accent-2)}
 
 /* ═══ Responsive ═══ */
 @media(max-width:1024px){

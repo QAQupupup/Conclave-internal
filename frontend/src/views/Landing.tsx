@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
 import { REPORT_TYPES } from '../data/reportData';
 
 export default function Landing() {
+  const navigate = useNavigate();
   const {
     meetings,
     selectedType,
@@ -28,7 +30,7 @@ export default function Landing() {
     setSubmitting(true);
     try {
       const id = await startMeeting(value, selectedType);
-      if (id) setTopic('');
+      if (id) { setTopic(''); navigate(`/meeting/${id}`); }
     } finally {
       setSubmitting(false);
     }
@@ -87,7 +89,7 @@ export default function Landing() {
             </div>
           ) : (
             recent.map((m: any) => (
-              <div className="list-item" key={m.id} onClick={() => openMeeting(m.id)}>
+              <div className="list-item" key={m.id} onClick={() => { openMeeting(m.id); navigate(`/meeting/${m.id}`); }}>
                 <span className="list-item-title">{m.title}</span>
                 <span className="list-item-status">
                   <span className={`status-dot ${m.status}`} />

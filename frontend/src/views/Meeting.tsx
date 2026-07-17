@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { useApp } from '../state/AppContext';
 import { STAGES, ROLES, MESSAGES, type MeetingMessage } from '../data/mock';
 import { REPORT_TYPES } from '../data/reportData';
@@ -11,10 +12,21 @@ const TYPE_LABELS: Record<string, string> = Object.fromEntries(
 const STAGE_TIMES = ['14:00', '14:08', '14:50', '15:02', '待定', '待定'];
 
 export default function Meeting() {
-  const { meeting, setView, statusText, stageName, toggleIntervene, sendIntervention, appendLog } = useApp();
+  const { meeting, statusText, stageName, toggleIntervene, sendIntervention, appendLog, openMeeting } = useApp();
+  const navigate = useNavigate();
+  const { id } = useParams();
   const [expanded, setExpanded] = useState<Set<number>>(new Set([meeting.stage]));
   const [interveneText, setInterveneText] = useState('');
   const [sending, setSending] = useState(false);
+
+  // 路由参数驱动：刷新 /meeting/:id 或直接进入该 URL 时，
+  // 按 URL 中的 id 加载会议详情，避免依赖内存状态（刷新即丢失）。
+  useEffect(() => {
+    if (id && id !== meeting.currentMeetingId) {
+      openMeeting(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const source: any[] = meeting.messages.length ? meeting.messages : MESSAGES;
   const elapsedMin = Math.floor(meeting.elapsed / 60);
@@ -46,7 +58,7 @@ export default function Meeting() {
 
   return (
     <div className="view active" id="view-meeting">
-      <div className="meeting-back" onClick={() => setView('board')}>
+      <div className="meeting-back" onClick={() => navigate('/board')}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
         看板
       </div>

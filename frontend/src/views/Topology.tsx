@@ -42,7 +42,7 @@ export default function Topology() {
 
       {/* Topology SVG */}
       <div className="topology-canvas" id="topology-canvas">
-        <svg className="topology-svg" viewBox="0 0 720 400">
+        <svg className="topology-svg" viewBox="0 0 720 380">
           {/* Links */}
           {links.map((l) => (
             <g key={l.key}>

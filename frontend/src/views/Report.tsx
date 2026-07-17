@@ -4,6 +4,7 @@
  * className 与原 HTML / global.css 保持一致。 */
 
 import { useEffect, useRef, useState, Fragment } from 'react';
+import { useParams } from 'react-router-dom';
 import {
   getReportLayout,
   type ReportLayout,
@@ -636,7 +637,8 @@ function getDataForType(type: string): any {
  * ════════════════════════════════════════════════════════════════ */
 
 export default function Report() {
-  const { meeting, appendLog } = useApp();
+  const { meeting, appendLog, openMeeting } = useApp();
+  const { id: routeId } = useParams();
   const [currentReportType, setCurrentReportType] = useState<string>(meeting.type || 'prd_openapi');
   const [remoteLayout, setRemoteLayout] = useState<ReportLayout | null>(null);
   const [showBackTop, setShowBackTop] = useState(false);
@@ -644,6 +646,15 @@ export default function Report() {
   const [slideIndex, setSlideIndex] = useState(0);
   const docRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  /* 路由参数驱动：刷新 /report/:id 或直接进入该 URL 时，
+   * 按 URL 中的 id 加载会议，使 currentMeetingId 与 URL 一致（刷新不丢失）。 */
+  useEffect(() => {
+    if (routeId && routeId !== meeting.currentMeetingId) {
+      openMeeting(routeId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeId]);
 
   /* 进入视图时尝试获取真实布局，失败回退本地 */
   useEffect(() => {
