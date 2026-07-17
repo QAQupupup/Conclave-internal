@@ -463,7 +463,19 @@ async def ensure_pricing_loaded() -> None:
         logger.info(f"从缓存加载了 {len(cached)} 个模型定价")
         return
 
-    asyncio.create_task(_refresh_pricing_async())
+    task = asyncio.create_task(_refresh_pricing_async())
+
+    def _on_pricing_task_done(t: asyncio.Task) -> None:
+        try:
+            exc = t.exception()
+            if exc:
+                logger.error(f"定价刷新后台任务失败: {exc}", exc_info=exc)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    task.add_done_callback(_on_pricing_task_done)
 
 
 async def _refresh_pricing_async() -> None:

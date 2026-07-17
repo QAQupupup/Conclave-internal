@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.db.engine import async_session_factory
 from app.db.models import CostRecordModel
+from app.utils.tasks import create_supervised_task
 from app.db_legacy import (
     add_meeting_tag,
     batch_delete_meetings,
@@ -427,8 +428,7 @@ async def intervene_meeting(meeting_id: str, req: InterventionRequest) -> dict[s
     )
 
     # 立即触发主持人回复（后台任务），不等待 runner 循环中当前节点完成
-    import asyncio
-    asyncio.create_task(_process_interventions(state))
+    create_supervised_task(_process_interventions(state), name=f"interventions-{state.meeting_id[:8]}")
 
     return {
         "meeting_id": meeting_id,
@@ -718,7 +718,7 @@ async def run_meeting(meeting_id: str) -> dict[str, Any]:
             "request_id": get_request_id(),
         },
     )
-    task = asyncio.create_task(_run_meeting_bg(meeting_id))
+    task = create_supervised_task(_run_meeting_bg(meeting_id), name=f"meeting-{meeting_id[:8]}")
     _running_tasks[meeting_id] = task
     return {
         "meeting_id": meeting_id,
@@ -1306,13 +1306,12 @@ async def set_meeting_model(meeting_id: str, req: SetModelRequest):
     if req.api_key and req.provider_id:
         try:
             from app.services.key_store import save_api_key
-            import asyncio
-            asyncio.create_task(save_api_key(
+            create_supervised_task(save_api_key(
                 provider=req.provider_id,
                 api_key=req.api_key,
                 base_url=req.base_url or "",
                 is_default=True,
-            ))
+            ), name=f"save-key-{req.provider_id}")
         except Exception:
             pass  # 持久化失败不影响主流程
     from app.observability.log_bus import log_bus

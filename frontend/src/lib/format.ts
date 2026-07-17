@@ -43,11 +43,22 @@ export function sanitizeRich(html: string): string {
       // 白名单标签：过滤危险属性
       [...el.attributes].forEach((attr) => {
         const name = attr.name.toLowerCase();
-        const val = attr.value || '';
+        const val = (attr.value || '').trim();
         if (name.startsWith('on') || name === 'style' || name === 'srcset') {
           el.removeAttribute(attr.name);
-        } else if ((name === 'href' || name === 'src') && /^\s*javascript:/i.test(val)) {
-          el.removeAttribute(attr.name);
+        } else if (name === 'href' || name === 'src') {
+          // [前端审查修复] 仅允许安全协议，阻止 javascript:/data:/vbscript:/blob: 等
+          const lower = val.toLowerCase().replace(/\s+/g, '');
+          const isSafe =
+            val.startsWith('#') ||
+            val.startsWith('/') ||
+            /^https?:\/\//i.test(val) ||
+            /^mailto:/i.test(val) ||
+            /^tel:/i.test(val);
+          // 空 href 允许（用于按钮样式的 <a>）
+          if (val !== '' && !isSafe) {
+            el.removeAttribute(attr.name);
+          }
         } else if (!RICH_ATTR_WHITELIST.has(attr.name.toUpperCase())) {
           el.removeAttribute(attr.name);
         }

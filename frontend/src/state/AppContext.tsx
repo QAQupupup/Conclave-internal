@@ -2,7 +2,7 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode,
 } from 'react';
-import { subscribeAuth, getAuthUser, commitLogout, type ConclaveUser } from '../lib/auth';
+import { subscribeAuth, getAuthUser, commitLogout, getToken, type ConclaveUser } from '../lib/auth';
 import { onUnauthorized, apiMe, apiListMeetings, apiCreateMeeting, apiRunMeeting, apiGetMeeting, apiControlMeeting, apiIntervene } from '../lib/api';
 import { MeetingWsClient, connectSystemWs, STAGE_KEYS } from '../lib/ws';
 import { MEETINGS as MOCK_MEETINGS, STAGES } from '../data/mock';
@@ -130,7 +130,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     commitLogout();
     setUserState(null);
-  }, []);
+    // [前端审查修复] 登出时断开 WS 连接，重置会议状态，清空日志
+    if (wsRef.current) {
+      wsRef.current.disconnect();
+      wsRef.current = null;
+    }
+    setMeeting((m) => ({
+      ...INITIAL_MEETING,
+      messages: [], conflicts: [], claims: [], confidence: [],
+      elapsed: 0, stage: 0, status: '', currentMeetingId: null,
+      title: '', topic: '', borrowRequest: null,
+    }));
+    clearLogs();
+  }, [clearLogs]);
   useEffect(() => subscribeAuth(setUserState), []);
 
   /* ── 全局 401 拦截器（去重） ──
@@ -143,6 +155,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       authExpiredFired.current = true;
       commitLogout();
       setUserState(null);
+      // [前端审查修复] 401 时同样断开 WS，重置会议状态
+      if (wsRef.current) { wsRef.current.disconnect(); wsRef.current = null; }
+      setMeeting((m) => ({
+        ...INITIAL_MEETING,
+        messages: [], conflicts: [], claims: [], confidence: [],
+        elapsed: 0, stage: 0, status: '', currentMeetingId: null,
+        title: '', topic: '', borrowRequest: null,
+      }));
       setAuthExpired(true);
     });
   }, []);
@@ -355,7 +375,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* ── 启动时：验证 token（仅一次） ── */
   useEffect(() => {
     (async () => {
-      const token = localStorage.getItem('conclave_token');
+      const token = getToken();
       if (token) {
         const u = await apiMe();
         if (u) { setUserState(u); refreshBoard(); }

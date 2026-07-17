@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from typing import Any
@@ -15,19 +16,30 @@ from app.orchestrator.runner import get_state, set_state
 from conclave_core.state import apply_signal
 from app.db_legacy import save_meeting
 
-router = APIRouter()
+logger = logging.getLogger("ws")
 
-# API 认证 token（与 middleware.py 共用同一环境变量）
-# [CON-03/CON-08 修复] 改为共享 dev token（不再单独读取 env）
+router = APIRouter()
 
 # WS 推送配额：每连接每分钟最多 N 条事件，防止恶意/异常客户端撑爆带宽
 WS_MAX_EVENTS_PER_MIN = int(os.environ.get("CONCLAVE_WS_RATE_LIMIT", "600"))
+# [M-04 修复] WS 入站消息配额：每连接每分钟最多 N 条客户端消息，防 DoS
+WS_MAX_INBOUND_PER_MIN = int(os.environ.get("CONCLAVE_WS_INBOUND_RATE", "120"))
 # WS 队列最大长度：防止慢客户端导致内存无限堆积
 WS_QUEUE_MAXSIZE = int(os.environ.get("CONCLAVE_WS_QUEUE_MAX", "500"))
-_ws_event_log: dict[str, list[float]] = {}  # client_ip -> [timestamp]
+_ws_event_log: dict[str, list[float]] = {}
 _ws_event_lock = asyncio.Lock()
 # 批量发送配置：同一帧内到达的事件最多等待 BATCH_MAX_WAIT 秒后合并发送
 WS_BATCH_MAX_WAIT = float(os.environ.get("CONCLAVE_WS_BATCH_WAIT", "0.05"))  # 50ms
+
+
+def _ws_client_ip(ws: WebSocket) -> str:
+    """提取 WebSocket 客户端 IP"""
+    xff = ws.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    if ws.client:
+        return ws.client.host
+    return "unknown"
 
 
 def _check_ws_token(ws: WebSocket) -> dict | None:
@@ -36,33 +48,90 @@ def _check_ws_token(ws: WebSocket) -> dict | None:
     HTTP 中间件无法拦截 WebSocket，需在 accept 前手动检查。
     支持 query 参数 ?token=<token>（浏览器 WebSocket API 无法设 header）。
     返回用户信息 dict 或 None。
-    测试模式下关闭认证，返回 dev 用户。
+
+    [C-03 修复] 测试模式要求双重条件（APP_ENV=test + CONCLAVE_TEST_DISABLE_AUTH=1），
+    与 HTTP 中间件保持一致，防止生产环境误设一个环境变量就绕过 WS 认证。
     """
-    if os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
+    if os.environ.get("APP_ENV") == "test" and os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
         return {"username": "test", "role": "admin", "uid": None}
 
     token = ws.query_params.get("token", "")
+    # [C-04 修复] 同时支持 Authorization header（虽然浏览器WS API无法设置，但非浏览器客户端可以）
+    if not token:
+        auth_header = ws.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
     return verify_ws_token(token)
 
 
-async def _check_ws_event_rate(client_ip: str) -> tuple[bool, str]:
-    """WS 事件推送速率限制。
+def _check_meeting_access(user: dict, meeting_id: str) -> tuple[bool, str]:
+    """检查用户是否有权访问指定会议。
+
+    [H-02 修复] 原实现没有任何权限校验，任何已认证用户都能连接任意会议的 WS，
+    导致越权读取其他用户的会议内容、发送控制信号。
+    权限规则：
+    - admin 角色可访问所有会议
+    - 会议不存在时，允许任何已认证用户访问（会议创建场景）
+    - 会议存在时，普通用户必须是 owner 或参与者
 
     Returns:
         (allowed, reason)
     """
+    if not user:
+        return False, "未认证"
+    role = user.get("role", "")
+    if role == "admin":
+        return True, "admin"
+    username = user.get("username", "")
+    state = get_state(meeting_id)
+    if state is None:
+        # 会议不存在，允许创建者连接
+        return True, "create"
+    # 检查 owner
+    owner = getattr(state, "owner", None) or (state.snapshot().get("owner") if hasattr(state, "snapshot") else None)
+    if owner and owner == username:
+        return True, "owner"
+    # 检查参与者列表
+    participants = []
+    if hasattr(state, "participants"):
+        participants = list(state.participants)
+    elif hasattr(state, "snapshot"):
+        snap = state.snapshot() or {}
+        participants = snap.get("participants", []) or []
+    if username in participants:
+        return True, "participant"
+    return False, "无权访问该会议"
+
+
+async def _check_ws_event_rate(client_key: str) -> tuple[bool, str]:
+    """WS 出站事件推送速率限制（按连接key）。"""
     async with _ws_event_lock:
         now = time.monotonic()
-        log = _ws_event_log.setdefault(client_ip, [])
+        log = _ws_event_log.setdefault(client_key, [])
         log[:] = [t for t in log if now - t < 60.0]
-        # 清理空列表，防止字典只增不减
         if not log:
-            _ws_event_log.pop(client_ip, None)
-            log = _ws_event_log.setdefault(client_ip, [])
+            _ws_event_log.pop(client_key, None)
+            log = _ws_event_log.setdefault(client_key, [])
         if len(log) >= WS_MAX_EVENTS_PER_MIN:
             return False, f"WS 推送超过每分钟 {WS_MAX_EVENTS_PER_MIN} 条"
         log.append(now)
         return True, "ok"
+
+
+class WsInboundRateLimiter:
+    """[M-04 修复] WS 入站消息速率限制器（每连接独立窗口）"""
+
+    def __init__(self, max_per_min: int = WS_MAX_INBOUND_PER_MIN):
+        self.max = max_per_min
+        self._timestamps: list[float] = []
+
+    def check(self) -> bool:
+        now = time.monotonic()
+        self._timestamps[:] = [t for t in self._timestamps if now - t < 60.0]
+        if len(self._timestamps) >= self.max:
+            return False
+        self._timestamps.append(now)
+        return True
 
 
 async def _send_event(ws: WebSocket, event: DomainEvent) -> None:
@@ -74,6 +143,13 @@ async def _send_json(ws: WebSocket, payload: dict) -> None:
     await ws.send_text(json.dumps(payload, ensure_ascii=False, default=str))
 
 
+async def _ws_close_error(ws: WebSocket, code: int, reason: str, payload: dict) -> None:
+    """辅助函数：accept -> 发送错误 -> 关闭"""
+    await ws.accept()
+    await _send_json(ws, payload)
+    await ws.close(code=code, reason=reason)
+
+
 @router.websocket("/ws/meetings/{meeting_id}")
 async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     """会议 WebSocket
@@ -82,55 +158,51 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     - 之后每有事件就推送
     - 接收 control.signal 转发给 Orchestrator
     - from_seq > 0 时跳过 snapshot，只推 seq > from_seq 的增量事件（断线重连）
-    - token 通过 ?token=<token> query 参数传递
-    - [CON-08 修复] 加心跳（ping/pong 每 30s）+ 推送速率限制 + 接入统一速率限制
+    - token 通过 ?token=<token> query 参数或 Authorization: Bearer header 传递
+    - [H-02 修复] 加会议访问权限校验
+    - [M-04 修复] 加入站消息速率限制
     """
     # 认证：HTTP 中间件不拦截 WS，需在 accept 前手动检查
-    if not _check_ws_token(ws):
-        await ws.accept()
-        await _send_json(ws, {
-            "type": "error", "meeting_id": meeting_id,
-            "message": "未授权：请先登录",
+    user = _check_ws_token(ws)
+    if not user:
+        await _ws_close_error(ws, 4401, "Unauthorized", {
+            "type": "error", "meeting_id": meeting_id, "message": "未授权：请先登录",
         })
-        await ws.close(code=4401, reason="Unauthorized")
         return
 
-    # 速率限制（接入层与 HTTP 共享）
-    # 提取客户端 IP：WebSocket 头取 X-Forwarded-For 或 fallback 到 ws.client
-    fake_request_ip = ws.headers.get("x-forwarded-for")
-    if fake_request_ip:
-        client_ip = fake_request_ip.split(",")[0].strip()
-    elif ws.client:
-        client_ip = ws.client.host
-    else:
-        client_ip = "unknown"
-
-    ok, reason = _check_rate_limit(client_ip, is_failed_attempt=False)
-    if not ok:
-        await ws.accept()
-        await _send_json(ws, {
-            "type": "error", "meeting_id": meeting_id,
-            "message": f"速率限制：{reason}",
+    # [H-02 修复] 权限校验
+    allowed, reason = _check_meeting_access(user, meeting_id)
+    if not allowed:
+        await _ws_close_error(ws, 4403, "Forbidden", {
+            "type": "error", "meeting_id": meeting_id, "message": reason,
         })
-        await ws.close(code=4429, reason="Too Many Requests")
+        logger.warning("WS 权限拒绝: user=%s meeting=%s reason=%s", user.get("username"), meeting_id, reason)
+        return
+
+    # 接入层速率限制
+    client_ip = _ws_client_ip(ws)
+    ok, rate_reason = _check_rate_limit(client_ip, is_failed_attempt=False)
+    if not ok:
+        await _ws_close_error(ws, 4429, "Too Many Requests", {
+            "type": "error", "meeting_id": meeting_id, "message": f"速率限制：{rate_reason}",
+        })
         return
 
     await ws.accept()
 
+    # 连接 key（IP + meeting_id 用于出站限流）
+    conn_key = f"{client_ip}:{meeting_id}"
+    # [M-04 修复] 入站速率限制器
+    inbound_limiter = WsInboundRateLimiter()
+
     # ---- 心跳任务：每 30s 发 ping，断连则关闭 ----
-    # [CON-08 修复] 之前没有心跳，僵尸连接会无限保留服务端资源
     HEARTBEAT_INTERVAL = 30.0
 
     async def _heartbeat_loop() -> None:
         try:
             while True:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
-                # 发送 application-level ping（与协议层 ping 不同，更兼容浏览器 WS API）
-                await _send_json(ws, {
-                    "type": "ping",
-                    "meeting_id": meeting_id,
-                    "ts": time.time(),
-                })
+                await _send_json(ws, {"type": "ping", "meeting_id": meeting_id, "ts": time.time()})
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
         except Exception:
@@ -138,11 +210,7 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
-    # 先订阅事件队列，再回放历史——避免回放与订阅之间的竞态丢事件
-    # 竞态根因：如果先 replay 再 subscribe，replay 之后 publish 的事件
-    # 不在 replay 列表中也不触发订阅者，永久丢失。
-    # 修复：先 subscribe 到队列，replay 期间产生的新事件进入队列，
-    # replay 完成后从队列补发，保证无遗漏。
+    # 先订阅事件队列，再回放历史（避免竞态丢事件）
     queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue(maxsize=WS_QUEUE_MAXSIZE)
     _dropped_count = 0
 
@@ -151,7 +219,6 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         try:
             queue.put_nowait(event)
         except asyncio.QueueFull:
-            # 队列满时丢弃最旧事件，腾出空间放新事件
             try:
                 queue.get_nowait()
                 queue.put_nowait(event)
@@ -161,16 +228,13 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
 
     unsubscribe = bus.subscribe(meeting_id, _on_event)
 
-    # 记录订阅时刻的 last_seq，用于区分"回放事件"和"实时事件"
     subscribe_seq = await bus.last_seq(meeting_id)
-    snapshot_seq = subscribe_seq  # 全量回放时会覆盖为状态捕获点的 seq
+    snapshot_seq = subscribe_seq
 
     if from_seq > 0:
-        # 增量回放：客户端已有状态，只推 seq > from_seq 的事件
         new_events = await bus.replay(meeting_id, from_seq)
         for ev in new_events:
             await _send_event(ws, ev)
-        # 记录回放完成时的 last_seq，用于队列补发截止点
         snapshot_seq = await bus.last_seq(meeting_id)
         await _send_json(ws, {
             "type": "replay.done", "meeting_id": meeting_id,
@@ -178,66 +242,65 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
             "last_seq": snapshot_seq,
         })
     else:
-        # 完整回放：仅发送 snapshot（快照已包含完整状态：messages/conflicts/evidence/artifact 等），
-        # 不再额外重放历史事件——历史事件中的 agent.spoke 等内容已反映在 snapshot 中，
-        # 重复发送会导致前端出现重复消息。
-        #
-        # 正确顺序（避免竞态）：
-        #   1) 已在上方 subscribe 到事件队列
-        #   2) 取当前状态 → 3) 立即记录 snapshot_seq（状态对应的最后事件序号）
-        #   4) 发送 snapshot → 5) 发送 replay.done
-        #   6) 排空队列：仅补发 seq > snapshot_seq 的事件（快照之后产生的新事件）
         state = get_state(meeting_id)
-        snapshot_seq = await bus.last_seq(meeting_id)  # 状态捕获时刻的 last_seq
+        snapshot_seq = await bus.last_seq(meeting_id)
         snapshot: dict[str, Any] = state.snapshot() if state else {}
         await _send_json(ws, {"type": "snapshot", "meeting_id": meeting_id, "payload": snapshot})
         await _send_json(ws, {
             "type": "replay.done", "meeting_id": meeting_id,
-            "events": 0, "from_seq": 0,
-            "last_seq": snapshot_seq,
+            "events": 0, "from_seq": 0, "last_seq": snapshot_seq,
         })
 
-    # 确定补发截止序号：全量回放用 snapshot_seq（状态捕获点），增量回放用 subscribe_seq
     drain_cutoff_seq = snapshot_seq if from_seq == 0 else subscribe_seq
-
-    # 补发队列中已积累的、截止序号之后的新事件
     while not queue.empty():
         ev = await queue.get()
         if ev is not None and ev.seq > drain_cutoff_seq:
             await _send_event(ws, ev)
 
     try:
-        # 同时监听队列推送与客户端消息
         while True:
-            # 先非阻塞处理队列
             if not queue.empty():
                 ev = await queue.get()
                 if ev is None:
                     break
-                # 推送速率限制
-                ev_ok, _ = await _check_ws_event_rate(client_ip)
+                ev_ok, _ = await _check_ws_event_rate(conn_key)
                 if ev_ok:
                     await _send_event(ws, ev)
                 continue
-            # 用 wait_for 超时轮询客户端消息，避免永久阻塞队列
             try:
                 raw = await asyncio.wait_for(ws.receive_text(), timeout=0.2)
-                # 客户端 pong：仅记日志，不做处理
                 if raw.strip() == "pong":
                     continue
+                # [M-04 修复] 入站消息速率限制
+                if not inbound_limiter.check():
+                    await _send_json(ws, {
+                        "type": "error", "meeting_id": meeting_id,
+                        "message": f"发送消息过快，限制为每分钟 {WS_MAX_INBOUND_PER_MIN} 条",
+                    })
+                    continue
                 msg = json.loads(raw)
-                # pong 字段
                 if msg.get("type") == "pong":
                     continue
+                # [H-02 补充] 只有 admin 或会议 owner 才能发送控制信号
                 if msg.get("type") == "control.signal" or "signal" in msg:
                     signal = msg.get("signal", "")
                     payload = msg.get("payload", {})
-                    # 转发给 Orchestrator
+                    # 二次校验：非 admin 用户发送控制信号时必须是 owner
+                    current_state = get_state(meeting_id)
+                    if current_state is not None and user.get("role") != "admin":
+                        owner = getattr(current_state, "owner", None) or (
+                            current_state.snapshot().get("owner") if hasattr(current_state, "snapshot") else None
+                        )
+                        if owner and owner != user.get("username"):
+                            await _send_json(ws, {
+                                "type": "error", "meeting_id": meeting_id,
+                                "message": "仅会议创建者或管理员可发送控制信号",
+                            })
+                            continue
                     state = get_state(meeting_id)
                     if state is not None:
                         state = apply_signal(state, signal, payload)
                         set_state(state)
-                        # 持久化（与 HTTP control 端点保持一致）
                         try:
                             await save_meeting(
                                 meeting_id=meeting_id,
@@ -248,19 +311,14 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                                 payload=state.snapshot(),
                             )
                         except Exception:
-                            pass  # 持久化失败不影响信号处理
-                        # 广播 control.signal 事件，让其他订阅者感知
+                            pass
                         try:
-                            await bus.publish(
-                                make_event(
-                                    "control.signal",
-                                    meeting_id,
-                                    {"signal": signal, "status": state.status.value, "payload": payload},
-                                )
-                            )
+                            await bus.publish(make_event(
+                                "control.signal", meeting_id,
+                                {"signal": signal, "status": state.status.value, "payload": payload},
+                            ))
                         except Exception:
                             pass
-                        # 借调相关信号发布专门事件，让前端实时更新
                         try:
                             if signal == "approve_borrow":
                                 await bus.publish(make_event("borrow.approved_by_user", meeting_id, {
@@ -285,7 +343,6 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                                 }))
                         except Exception:
                             pass
-                        # 回执
                         await _send_json(ws, {
                             "type": "control.ack", "meeting_id": meeting_id,
                             "signal": signal, "status": state.status.value,
@@ -295,14 +352,15 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
             except WebSocketDisconnect:
                 break
             except json.JSONDecodeError:
-                await _send_json(ws, {"type": "error", "meeting_id": meeting_id,
-                                       "message": "无效的 JSON"})
+                if not inbound_limiter.check():
+                    continue
+                await _send_json(ws, {"type": "error", "meeting_id": meeting_id, "message": "无效的 JSON"})
     except WebSocketDisconnect:
         pass
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         try:
             await _send_json(ws, {"type": "error", "meeting_id": meeting_id, "message": str(e)})
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     finally:
         heartbeat_task.cancel()
@@ -311,51 +369,49 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         except asyncio.CancelledError:
             pass
         unsubscribe()
+        # 清理出站限流记录
+        async with _ws_event_lock:
+            _ws_event_log.pop(conn_key, None)
 
 
 @router.websocket("/ws/system")
 async def system_ws(ws: WebSocket) -> None:
-    """系统级 WebSocket：广播 system.* 事件（如会议列表变更、标签变更等）
+    """系统级 WebSocket：广播 system.* 事件
 
-    [CON-20 修复] 旧版 TaskBoard/DashboardView/MeetingSidebar/TokenPanel 用 5-10s
-    setInterval 轮询 REST 端点，造成：
-    1) 服务端反复查询 DB，浪费 IO
-    2) 客户端反馈延迟（用户新建会议 5-10s 后才在侧栏出现）
-    3) 轮询心跳被 Connection-Limit 计入，认证失败的 IP 误封禁
-
-    改为：后端在 meetings 创建/删除/标签更新后 publish system.meetings.changed，
-    前端 useSystemWebSocket 订阅后立即刷新。
+    [H-02 修复] 系统 WS 仅允许 admin 角色连接。普通用户连接 /ws/system 可以监听
+    全局事件（会议列表变更、服务部署状态、网络认证状态等），属于越权信息泄露。
     """
-    # 认证
-    if not _check_ws_token(ws):
-        await ws.accept()
-        await _send_json(ws, {"type": "error", "message": "未授权"})
-        await ws.close(code=4401, reason="Unauthorized")
+    user = _check_ws_token(ws)
+    if not user:
+        await _ws_close_error(ws, 4401, "Unauthorized", {"type": "error", "message": "未授权"})
         return
 
-    # 接入层速率限制（与 meeting_ws 一致）
-    fake_request_ip = ws.headers.get("x-forwarded-for")
-    if fake_request_ip:
-        client_ip = fake_request_ip.split(",")[0].strip()
-    elif ws.client:
-        client_ip = ws.client.host
-    else:
-        client_ip = "unknown"
+    # [H-02 修复] /ws/system 仅管理员可连接（涉及系统级事件广播）
+    if user.get("role") != "admin":
+        await _ws_close_error(ws, 4403, "Forbidden", {
+            "type": "error", "message": "仅管理员可连接系统 WS",
+        })
+        logger.warning("WS /ws/system 权限拒绝: user=%s role=%s", user.get("username"), user.get("role"))
+        return
+
+    client_ip = _ws_client_ip(ws)
     ok, reason = _check_rate_limit(client_ip, is_failed_attempt=False)
     if not ok:
-        await ws.accept()
-        await _send_json(ws, {"type": "error", "message": f"速率限制：{reason}"})
-        await ws.close(code=4429, reason="Too Many Requests")
+        await _ws_close_error(ws, 4429, "Too Many Requests", {
+            "type": "error", "message": f"速率限制：{reason}",
+        })
         return
 
     await ws.accept()
+
+    conn_key = f"{client_ip}:system"
+    inbound_limiter = WsInboundRateLimiter(max_per_min=60)  # 系统 WS 入站更严格
 
     queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue(maxsize=WS_QUEUE_MAXSIZE)
     _sys_dropped = 0
 
     async def _on_event(event: DomainEvent) -> None:
         nonlocal _sys_dropped
-        # 接受 system.* 和 captcha.* / net_auth.* / service.* 事件
         if event.type.startswith("system.") or event.type.startswith("captcha.") \
                 or event.type.startswith("net_auth.") or event.type.startswith("service."):
             try:
@@ -368,10 +424,8 @@ async def system_ws(ws: WebSocket) -> None:
                 except Exception:
                     pass
 
-    # 订阅通配（bus 已实现 * 通配订阅）
     unsubscribe = bus.subscribe("*", _on_event)
 
-    # 心跳
     async def _heartbeat_loop() -> None:
         try:
             while True:
@@ -391,11 +445,19 @@ async def system_ws(ws: WebSocket) -> None:
                 ev = await queue.get()
                 if ev is None:
                     break
-                await _send_event(ws, ev)
+                ev_ok, _ = await _check_ws_event_rate(conn_key)
+                if ev_ok:
+                    await _send_event(ws, ev)
                 continue
             try:
                 raw = await asyncio.wait_for(ws.receive_text(), timeout=0.2)
                 if raw.strip() == "pong":
+                    continue
+                if not inbound_limiter.check():
+                    await _send_json(ws, {
+                        "type": "error",
+                        "message": f"发送消息过快，限制为每分钟 60 条",
+                    })
                     continue
                 msg = json.loads(raw) if raw else {}
                 if msg.get("type") == "pong":
@@ -404,6 +466,8 @@ async def system_ws(ws: WebSocket) -> None:
                 continue
             except WebSocketDisconnect:
                 break
+            except json.JSONDecodeError:
+                continue
     except WebSocketDisconnect:
         pass
     finally:
@@ -413,3 +477,5 @@ async def system_ws(ws: WebSocket) -> None:
         except asyncio.CancelledError:
             pass
         unsubscribe()
+        async with _ws_event_lock:
+            _ws_event_log.pop(conn_key, None)

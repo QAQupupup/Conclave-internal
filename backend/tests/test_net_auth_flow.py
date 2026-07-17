@@ -119,14 +119,14 @@ class TestDetermineNeededLevel:
 
 class TestAuthRequestCRUD:
 
-    def test_create_and_get(self):
+    async def test_create_and_get(self):
         """创建申请单并查询"""
-        init_auth_table()
+        await init_auth_table()
         rid = f"auth-crud-{uuid.uuid4().hex[:8]}"
         now = datetime.now(timezone.utc)
         expires = now + timedelta(seconds=120)
 
-        create_auth_request(
+        await create_auth_request(
             request_id=rid,
             meeting_id="mtg-crud-test",
             stage="produce",
@@ -138,19 +138,19 @@ class TestAuthRequestCRUD:
             expires_at=expires,
         )
 
-        req = get_auth_request(rid)
+        req = await get_auth_request(rid)
         assert req is not None
         assert req["id"] == rid
         assert req["meeting_id"] == "mtg-crud-test"
         assert req["status"] == "pending"
         assert req["requested_level"] == "L3"
 
-    def test_list_by_meeting(self):
+    async def test_list_by_meeting(self):
         """按会议 ID 过滤列表"""
-        init_auth_table()
+        await init_auth_table()
         mid = f"mtg-list-{uuid.uuid4().hex[:8]}"
         for i in range(3):
-            create_auth_request(
+            await create_auth_request(
                 request_id=f"auth-list-{mid}-{i}",
                 meeting_id=mid,
                 stage="produce",
@@ -162,14 +162,14 @@ class TestAuthRequestCRUD:
                 expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
             )
 
-        reqs = list_auth_requests(meeting_id=mid)
+        reqs = await list_auth_requests(meeting_id=mid)
         assert len(reqs) >= 3
 
-    def test_list_by_status(self):
+    async def test_list_by_status(self):
         """按状态过滤列表"""
-        init_auth_table()
+        await init_auth_table()
         rid = f"auth-status-{uuid.uuid4().hex[:8]}"
-        create_auth_request(
+        await create_auth_request(
             request_id=rid,
             meeting_id=f"mtg-status-{uuid.uuid4().hex[:8]}",
             stage="produce",
@@ -181,14 +181,14 @@ class TestAuthRequestCRUD:
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
         )
 
-        pending = list_auth_requests(status="pending")
+        pending = await list_auth_requests(status="pending")
         assert any(r["id"] == rid for r in pending)
 
-    def test_review_approved(self):
+    async def test_review_approved(self):
         """批复：批准"""
-        init_auth_table()
+        await init_auth_table()
         rid = f"auth-approve-{uuid.uuid4().hex[:8]}"
-        create_auth_request(
+        await create_auth_request(
             request_id=rid,
             meeting_id=f"mtg-approve-{uuid.uuid4().hex[:8]}",
             stage="produce",
@@ -200,17 +200,17 @@ class TestAuthRequestCRUD:
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
         )
 
-        result = review_auth_request(rid, "approved", "同意，继续执行")
+        result = await review_auth_request(rid, "approved", "同意，继续执行")
         assert result["status"] == "approved"
         assert result["review_action"] == "approved"
         assert result["review_comment"] == "同意，继续执行"
         assert result["reviewed_at"] is not None
 
-    def test_review_denied(self):
+    async def test_review_denied(self):
         """批复：拒绝"""
-        init_auth_table()
+        await init_auth_table()
         rid = f"auth-deny-{uuid.uuid4().hex[:8]}"
-        create_auth_request(
+        await create_auth_request(
             request_id=rid,
             meeting_id=f"mtg-deny-{uuid.uuid4().hex[:8]}",
             stage="produce",
@@ -222,14 +222,14 @@ class TestAuthRequestCRUD:
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
         )
 
-        result = review_auth_request(rid, "denied", "不允许访问外部网络")
+        result = await review_auth_request(rid, "denied", "不允许访问外部网络")
         assert result["status"] == "denied"
 
-    def test_review_already_reviewed(self):
+    async def test_review_already_reviewed(self):
         """重复批复：已批复的申请不能再批复"""
-        init_auth_table()
+        await init_auth_table()
         rid = f"auth-double-{uuid.uuid4().hex[:8]}"
-        create_auth_request(
+        await create_auth_request(
             request_id=rid,
             meeting_id=f"mtg-double-{uuid.uuid4().hex[:8]}",
             stage="produce",
@@ -242,17 +242,17 @@ class TestAuthRequestCRUD:
         )
 
         # 第一次批复
-        review_auth_request(rid, "approved", "ok")
+        await review_auth_request(rid, "approved", "ok")
         # 第二次批复（应无效，返回原始记录但 status 不变）
-        result = review_auth_request(rid, "denied", "changed mind")
+        result = await review_auth_request(rid, "denied", "changed mind")
         assert result["status"] == "approved"  # 仍是第一次的结果
 
-    def test_expire_pending(self):
+    async def test_expire_pending(self):
         """过期检查：超时的 pending 申请标记为 expired"""
-        init_auth_table()
+        await init_auth_table()
         rid = f"auth-expire-{uuid.uuid4().hex[:8]}"
         # 创建一个已过期的申请
-        create_auth_request(
+        await create_auth_request(
             request_id=rid,
             meeting_id=f"mtg-expire-{uuid.uuid4().hex[:8]}",
             stage="produce",
@@ -264,18 +264,18 @@ class TestAuthRequestCRUD:
             expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),  # 已过期
         )
 
-        expired = expire_pending_requests()
+        expired = await expire_pending_requests()
         assert any(e["id"] == rid for e in expired)
 
-        req = get_auth_request(rid)
+        req = await get_auth_request(rid)
         assert req["status"] == "expired"
 
-    def test_get_pending_for_meeting(self):
+    async def test_get_pending_for_meeting(self):
         """获取某会议的 pending 申请"""
-        init_auth_table()
+        await init_auth_table()
         rid = f"auth-pending-{uuid.uuid4().hex[:8]}"
         mid = f"mtg-pending-{uuid.uuid4().hex[:8]}"
-        create_auth_request(
+        await create_auth_request(
             request_id=rid,
             meeting_id=mid,
             stage="produce",
@@ -287,7 +287,7 @@ class TestAuthRequestCRUD:
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
         )
 
-        pending = get_pending_for_meeting(mid)
+        pending = await get_pending_for_meeting(mid)
         assert len(pending) >= 1
         assert all(p["status"] == "pending" for p in pending)
 
@@ -302,7 +302,7 @@ class TestAuthFlow:
         import app.net_auth_manager as nam
         monkeypatch.setattr(nam, "AUTO_APPROVE", True)
 
-        init_auth_table()
+        await init_auth_table()
         result = await request_network_access(
             meeting_id="mtg-auto-approve",
             stage="produce",
@@ -317,7 +317,8 @@ class TestAuthFlow:
         assert "request_id" in result
 
         # DB 应有 approved 记录
-        req = get_auth_request(result["request_id"])
+        req = await get_auth_request(result["request_id"])
+        assert req is not None
         assert req["status"] == "approved"
         assert "自动通过" in req["review_comment"]
 
@@ -327,7 +328,7 @@ class TestAuthFlow:
         monkeypatch.setattr(nam, "AUTO_APPROVE", False)
         monkeypatch.setattr(nam, "AUTH_TIMEOUT_SECONDS", 2)  # 2 秒超时
 
-        init_auth_table()
+        await init_auth_table()
         result = await request_network_access(
             meeting_id="mtg-timeout-test",
             stage="produce",
@@ -346,7 +347,7 @@ class TestAuthFlow:
         monkeypatch.setattr(nam, "AUTO_APPROVE", False)
         monkeypatch.setattr(nam, "AUTH_TIMEOUT_SECONDS", 30)
 
-        init_auth_table()
+        await init_auth_table()
 
         # 异步发起申请
         task = asyncio.create_task(request_network_access(
@@ -362,9 +363,9 @@ class TestAuthFlow:
         await asyncio.sleep(1)
 
         # 查 pending 并批准
-        pending = get_pending_for_meeting("mtg-manual-test")
+        pending = await get_pending_for_meeting("mtg-manual-test")
         assert len(pending) >= 1
-        reviewed = review_auth_request(pending[0]["id"], "approved", "手动批准")
+        reviewed = await review_auth_request(pending[0]["id"], "approved", "手动批准")
         assert reviewed["status"] == "approved"
 
         # 等待申请方收到结果
@@ -377,7 +378,7 @@ class TestAuthFlow:
         monkeypatch.setattr(nam, "AUTO_APPROVE", False)
         monkeypatch.setattr(nam, "AUTH_TIMEOUT_SECONDS", 30)
 
-        init_auth_table()
+        await init_auth_table()
 
         task = asyncio.create_task(request_network_access(
             meeting_id="mtg-deny-flow",
@@ -390,8 +391,9 @@ class TestAuthFlow:
 
         await asyncio.sleep(1)
 
-        pending = get_pending_for_meeting("mtg-deny-flow")
-        review_auth_request(pending[0]["id"], "denied", "不允许联网")
+        pending = await get_pending_for_meeting("mtg-deny-flow")
+        assert len(pending) >= 1
+        await review_auth_request(pending[0]["id"], "denied", "不允许联网")
 
         result = await task
         assert result["approved"] is False

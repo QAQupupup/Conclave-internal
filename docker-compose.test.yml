@@ -1,4 +1,4 @@
-﻿# ===== Conclave 后端测试 Docker Compose =====
+# ===== Conclave 后端测试 Docker Compose =====
 # 专用测试栈：PostgreSQL + Redis + Qdrant + backend(pytest)
 # 使用与开发栈错开的端口，避免本地冲突。
 #
@@ -81,6 +81,7 @@ services:
       REDIS_URL: redis://redis-test:6379/0
       CONCLAVE_QDRANT_URL: http://qdrant-test:6333
       CONCLAVE_TEST_MODE: "1"
+      APP_ENV: "test"
       CONCLAVE_TEST_DISABLE_AUTH: "1"
       CONCLAVE_MEMORY_DISABLED: "1"
       CONCLAVE_DISABLE_SANDBOX_WARMUP: "1"

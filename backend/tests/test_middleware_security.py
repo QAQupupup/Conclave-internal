@@ -111,10 +111,11 @@ class TestApiTokenAuth:
         assert r.status_code == 401
         assert "未授权" in r.json()["detail"]
 
-    def test_token_via_query_param(self, client):
-        """通过 ?token= 查询参数传递 token 也应认证通过。"""
+    def test_token_via_query_param_rejected(self, client):
+        """[C-04] HTTP 请求不再接受 ?token= 查询参数（防 token 在 URL/日志/Referer 中泄露），应返回 401。
+        WebSocket 升级请求由 ws router 自行处理 query 参数（浏览器 WS API 限制无法设置 Header）。"""
         r = client.get("/secure", params={"token": "secret-test-token"})
-        assert r.status_code == 200
+        assert r.status_code == 401
 
     def test_empty_bearer_token_returns_401(self, client):
         """空 Bearer token 应返回 401。"""

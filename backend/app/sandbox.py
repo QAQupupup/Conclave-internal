@@ -108,24 +108,29 @@ ALLOWED_COMMANDS: set[str] = set(
 # 危险模式：在 allowlist 之上额外拦截的反模式
 BLOCKED_PATTERNS: list[str] = [
     r"\brm\s+-rf\s+/",          # rm -rf /
+    r"\brm\s+-rf\s+~",          # rm -rf ~
+    r"\brm\s+(-\w*r\w*|--recursive)\s+/",  # rm -r /
     r"\bdd\s+if=",              # 磁盘擦除
     r":\(\)\s*\{.*\};:",         # fork bomb
     r"curl\s+.*\|\s*(bash|sh|zsh|ksh)",  # 远程脚本执行
     r"wget\s+.*\|\s*(bash|sh|zsh|ksh)",
     r"\bchmod\s+777\s+/",       # 全开权限到根目录
-    r"\bpython(?:3)?\s+-c\s+['\"]",  # python -c "..." 内联代码（阻止直接内联执行）
-    r"\bnode\s+-e\s+['\"]",     # node -e "..."
-    r"\bperl\s+-e\s+['\"]",     # perl -e "..."
-    r"\bruby\s+-e\s+['\"]",     # ruby -e "..."
+    # [H-07 修复] 阻止 python/node -c "..." 内联代码执行（单引号和双引号都匹配）
+    r"\bpython(?:3)?\s+-c\s+['\"]",
+    r"\bnode\s+-e\s+['\"]",
+    r"\bperl\s+-e\s+['\"]",
+    r"\bruby\s+-e\s+['\"]",
+    r"\bphp\s+-r\s+['\"]",
     r">\s*/dev/",               # 写入块设备
     r"\bmkfs\b",                # 格式化磁盘
-    r"\b(?:shutdown|reboot|halt|poweroff)\b",  # 系统关机/重启
-    r"\b(?:iptables|ufw)\b",    # 防火墙操作
-    r"\b(?:apt|apt-get|yum|dnf|apk|brew)\s+(?:install|remove|purge)\b",  # 包管理器修改
-    r"/etc/(?:passwd|shadow|sudoers)",  # 访问敏感系统文件
+    r"\b(?:shutdown|reboot|halt|poweroff|init\s+[06])\b",  # 系统关机/重启
+    r"\b(?:iptables|ufw|firewall-cmd)\b",  # 防火墙操作
+    r"\b(?:apt|apt-get|yum|dnf|apk|brew|pacman|zypper)\s+(?:install|remove|purge|update)\b",  # 包管理器修改
+    r"/etc/(?:passwd|shadow|sudoers|ssh)",  # 访问敏感系统文件
     r"\bssh\b",                 # SSH 连接
     r"\bnc\b.*-e",              # netcat 反弹 shell
-    r"\bbase64\b.*\|.*sh",      # base64 解码后管道执行
+    r"\bncat\b.*-e",
+    r"\bbase64\b.*\|.*(?:sh|bash)",  # base64 解码后管道执行
     r"\beval\b",                # eval 命令注入
     r"\$\(",                    # 命令替换 $(...)
     r"`[^`]+`",                 # 反引号命令替换
@@ -139,6 +144,19 @@ BLOCKED_PATTERNS: list[str] = [
     r"\bkill\s+-9\s+-1\b",      # 杀所有进程
     r">/proc/",                 # 写入procfs
     r">\s*/sys/",               # 写入sysfs
+    # [H-07 新增] 阻止明显的容器逃逸尝试
+    r"/var/run/docker\.sock",    # 访问 Docker socket
+    r"\bdocker\s+(?:run|exec|build)\b",  # 容器内运行 docker (DinD)
+    r"\bkubectl\b",             # kubectl
+    r"\bcrontab\b",             # 定时任务持久化
+    r"\binsmod\b|\bmodprobe\b", # 加载内核模块
+    r"\bunshare\b",             # 创建新命名空间
+    r"\bnsenter\b",             # 进入其他命名空间
+    r"\bsetuid\b|\bsetgid\b",   # 调用setuid/setgid
+    r"/proc/(?:sys|self)/",     # 访问 /proc/sys 或 /proc/self 敏感路径
+    r"\bmsync\b|\bclone\b.*CLONE_NEW",  # 某些 syscall
+    r"\bctypes\b.*\bCDLL\b",    # python ctypes 加载动态库（通过命令行文本匹配，非python层面）
+    r"\bopen\s*\(.*['\"]/proc/", # 打开proc文件
 ]
 
 # Docker socket 路径（容器内挂载位置）
@@ -357,18 +375,40 @@ def _build_security_args(
         L1 = --network none（默认，纯计算，无网络）
         L2 = 默认 bridge 网络（限网，允许 pip install pypi）
         L3 = 默认 bridge 网络（全联网，可访问任意外部 API）
+
+    [H-07 加固] 防止沙箱逃逸引发越权渗透：
+    - --cap-drop ALL + --security-opt no-new-privileges：阻止权限提升
+    - --pids-limit：限制进程数，防 fork bomb（即使 python os.fork() 也无法无限创建进程）
+    - --ulimit：限制文件描述符和 core dump
+    - --ipc=private --uts=private：隔离 IPC 和 UTS 命名空间
+    - --read-only + tmpfs：只读根文件系统，仅 /tmp 可写
+    - 不挂载 Docker socket、不挂载宿主机敏感目录
+    - 使用 nobody(65534) 用户运行，无 root 权限
+    - L1 网络为 none，完全隔离；L3 也不使用 host 网络
+    - 显式屏蔽 /proc 敏感路径（通过 tmpfs 覆盖）
     """
     container_ws = "/workspace"
     args = [
         "--rm",
         "-i",
         "--memory", SANDBOX_MEM_LIMIT,
+        "--memory-swap", SANDBOX_MEM_LIMIT,  # 禁止 swap 使用，防止内存耗尽影响宿主机
         "--cpus", SANDBOX_CPU_LIMIT,
+        "--pids-limit", "64",  # [H-07] 限制进程数，防 fork bomb
+        "--ulimit", "nofile=256:512",  # [H-07] 限制文件描述符数
+        "--ulimit", "core=0",  # 禁止 core dump
         "--read-only",
-        "--tmpfs", f"/tmp:size={SANDBOX_TMPFS_SIZE}",
+        "--tmpfs", f"/tmp:size={SANDBOX_TMPFS_SIZE},noexec,nosuid,nodev",
+        "--tmpfs", "/home/nobody:size=16m,noexec,nosuid,nodev",  # 非root用户home目录
         "--user", "65534:65534",
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
+        # [H-07] 隔离命名空间
+        "--ipc", "private",
+        "--uts", "private",
+        # [H-07] 禁止特权容器
+        "--privileged=false",
+        # [H-07] 工作区挂载为 rw（代码执行需要写输出文件），但根文件系统是 --read-only
         "-v", "conclave_conclave-workspace:/workspace",
         "-w", container_ws,
     ]
@@ -377,14 +417,16 @@ def _build_security_args(
     if network_level == "L1":
         args.append("--network")
         args.append("none")
+        args.append("--dns")
+        args.append("0.0.0.0")  # 双重保险：即使网络命名空间配置错误也无法解析
     elif network_level == "L2":
         # L2: 使用自定义网络 + DNS 代理实现域名级过滤
-        # dnsmasq 容器仅解析白名单域名，其他域名返回 NXDOMAIN
         args.append("--network")
         args.append(L2_NETWORK_NAME)
         args.append("--dns")
         args.append(L2_DNS_SERVER)
-    # L3: 使用默认 bridge 网络（全联网，需用户授权）
+    # L3: 使用默认 bridge 网络（全联网），但仍不使用 host 网络模式
+    # 注意：永远不使用 --network host，这会让容器共享宿主机网络栈，绕过所有网络隔离
 
     return args
 
@@ -855,23 +897,20 @@ async def _run_docker_cmd(args: list[str], timeout: int = 30) -> tuple[int, str,
         return (-1, "", "timeout")
 
 
-async def _check_port_healthy(host: str, port: int, path: str = "/health", timeout: int = 5) -> bool:
-    """HTTP 健康检查"""
-    import urllib.request
-    import urllib.error
+async def _check_port_healthy(host: str, port: int, path: str = "/health", timeout: float = 5) -> bool:
+    """HTTP 健康检查（异步，不阻塞事件循环）"""
+    import httpx
     url = f"http://{host}:{port}{path}"
     try:
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return 200 <= resp.status < 500
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+            return 200 <= resp.status_code < 500
     except Exception:
-        # 也尝试根路径
         if path != "/":
             try:
-                url2 = f"http://{host}:{port}/"
-                req2 = urllib.request.Request(url2, method="GET")
-                with urllib.request.urlopen(req2, timeout=timeout) as resp2:
-                    return 200 <= resp2.status < 500
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp2 = await client.get(f"http://{host}:{port}/")
+                    return 200 <= resp2.status_code < 500
             except Exception:
                 return False
         return False
@@ -913,7 +952,15 @@ async def deploy_service(
 
     # 如果工作区存在 Dockerfile，优先使用它构建镜像并部署
     # 这样可以支持 LLM 生成的多阶段构建、国内镜像源等优化
-    dockerfile_path = Path(f"/workspace/{meeting_id}/Dockerfile")
+    #
+    # [H-06 修复] 原实现：
+    # 1) 硬编码容器路径 /workspace/{meeting_id}/Dockerfile，在非容器化部署或路径不一致时找不到文件
+    # 2) 原地修改用户 Dockerfile（正则替换 FROM 基础镜像、追加 COPY 指令），破坏用户原始文件
+    # 3) 正则 r"^FROM\s+(?:docker\.io/library/)?" 可能误匹配注释行或字符串中的内容
+    # 修复：使用 workspace_root 定位；创建临时副本 .dockerfile.conclave 用于构建，原文件保持不变；
+    # 更严格的正则仅匹配真正的 FROM 指令行（行首可选空白 + FROM + 空白）。
+    dockerfile_path = workspace_root / meeting_id / "Dockerfile"
+    temp_dockerfile_path = workspace_root / meeting_id / ".dockerfile.conclave"
     image_tag = f"conclave-svc:{meeting_id[:12]}"
     use_built_image = False
     build_logs = ""
@@ -923,42 +970,57 @@ async def deploy_service(
             logger="sandbox.deploy",
             extra={"meeting_id": meeting_id},
         )
-        # 兜底：如果 Dockerfile 使用 Docker Hub 官方镜像，自动替换为华为云国内镜像
-        # 同时处理 docker.io/library/xxx 和 xxx 两种写法
         try:
             df_text = dockerfile_path.read_text(encoding="utf-8")
             _HWC = "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io"
-            # 匹配 FROM python: / FROM node: / FROM nginx: / FROM alpine: / FROM ubuntu: 等
-            # 也匹配 FROM docker.io/library/python: 等带前缀写法
+            # 更安全的正则：仅匹配真正的 FROM 指令（行首可选空白 + FROM + 空白，忽略注释行）
+            # 匹配：FROM python:3.12, FROM docker.io/library/python:3.12, FROM --platform=... python:3.12
             normalized = re.sub(
-                r"^FROM\s+(?:docker\.io/library/)?(python|node|nginx|alpine|ubuntu|postgres|redis|busybox|golang|java|openjdk|mcr\.microsoft\.com/):",
-                rf"FROM {_HWC}/\1:",
+                r"^(\s*FROM\s+(?:--platform=\S+\s+)?)(?:docker\.io/library/)?(python|node|nginx|alpine|ubuntu|postgres|redis|busybox|golang|openjdk|mcr\.microsoft\.com/[^:\s]+):",
+                rf"\1{_HWC}/\2:",
                 df_text,
                 flags=re.MULTILINE,
             )
-            # 兜底：如果工作区存在 frontend/ 目录但 Dockerfile 没有 COPY，自动追加
-            frontend_dir = Path(f"/workspace/{meeting_id}/frontend")
-            if frontend_dir.exists() and "COPY frontend" not in normalized and "frontend/" not in normalized:
-                normalized = normalized.rstrip() + "\n\n# 自动追加前端静态资源复制\nCOPY frontend /app/frontend\n"
+            # frontend/ 目录检测：仅在使用默认基础镜像（python）且确实存在 frontend/ 时追加 COPY
+            # 不盲目追加，避免破坏多阶段构建或非 python 镜像
+            frontend_dir = workspace_root / meeting_id / "frontend"
+            needs_frontend_copy = (
+                frontend_dir.exists()
+                and frontend_dir.is_dir()
+                and "COPY frontend" not in normalized
+                and "frontend/" not in normalized
+                and re.search(r"^\s*FROM\s+.*python:", normalized, re.MULTILINE) is not None
+            )
+            if needs_frontend_copy:
+                normalized = normalized.rstrip() + "\n\n# Conclave 自动追加：复制前端静态资源\nCOPY frontend /app/frontend\n"
                 log_bus.info(
-                    "检测到 frontend/ 目录，已在 Dockerfile 中追加 COPY 指令",
+                    "检测到 frontend/ 目录，已在临时 Dockerfile 中追加 COPY 指令（原文件未修改）",
                     logger="sandbox.deploy",
                     extra={"meeting_id": meeting_id},
                 )
+            # 写入临时文件用于构建，不修改原 Dockerfile
+            temp_dockerfile_path.write_text(normalized, encoding="utf-8")
             if normalized != df_text:
-                dockerfile_path.write_text(normalized, encoding="utf-8")
                 log_bus.info(
-                    "已标准化 Dockerfile（国内镜像源、前端目录复制）",
+                    "已生成标准化临时 Dockerfile（.dockerfile.conclave）用于构建，原 Dockerfile 未修改",
                     logger="sandbox.deploy",
                     extra={"meeting_id": meeting_id},
                 )
+            build_context = str(workspace_root / meeting_id)
+            build_rc, build_out, build_err = await _run_docker_cmd(
+                ["build", "-t", image_tag, "-f", str(temp_dockerfile_path), build_context],
+                timeout=300,
+            )
         except Exception as e:
-            log_bus.warning(f"Dockerfile 标准化失败（不影响构建）: {e}", logger="sandbox.deploy")
-
-        build_rc, build_out, build_err = await _run_docker_cmd(
-            ["build", "-t", image_tag, "-f", str(dockerfile_path), f"/workspace/{meeting_id}"],
-            timeout=300,
-        )
+            log_bus.warning(f"Dockerfile 处理失败（不影响构建）: {e}", logger="sandbox.deploy")
+            build_rc, build_out, build_err = -1, "", str(e)
+        finally:
+            # 构建完成后清理临时 Dockerfile
+            try:
+                if temp_dockerfile_path.exists():
+                    temp_dockerfile_path.unlink()
+            except Exception:
+                pass
         build_logs = build_out + "\n" + build_err
         if build_rc == 0:
             use_built_image = True

@@ -38,8 +38,12 @@ export default function Login() {
   useEffect(() => {
     if (user && loginSuccess) {
       const redirect = params.get('redirect');
-      // redirect 存在则回原页面；否则跳应用首页（空串 = index 路由）
-      navigate(redirect || '', { replace: true });
+      // [前端审查修复] 防止开放重定向：只允许同站点相对路径（/ 开头且非 //）
+      const safeRedirect =
+        redirect && redirect.startsWith('/') && !redirect.startsWith('//')
+          ? redirect
+          : '';
+      navigate(safeRedirect, { replace: true });
       setLoginSuccess(false);
     }
   }, [user, loginSuccess, params, navigate]);

@@ -62,6 +62,9 @@ os.environ.setdefault("CONCLAVE_RATE_LIMIT_FAIL_PER_MIN", "100000")
 # 测试模式标记
 os.environ.setdefault("CONCLAVE_TEST_MODE", "1")
 
+# [测试审查修复] 中间件和 WS 认证要求 APP_ENV=test AND CONCLAVE_TEST_DISABLE_AUTH=1 双重条件
+# 之前只设置了 CONCLAVE_TEST_DISABLE_AUTH，导致测试模式认证绕过未生效
+os.environ.setdefault("APP_ENV", "test")
 # 测试模式关闭认证，避免每个 client fixture 都需携带 token
 os.environ.setdefault("CONCLAVE_TEST_DISABLE_AUTH", "1")
 
