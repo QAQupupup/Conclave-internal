@@ -113,6 +113,25 @@ ul{list-style:none}
 .new-btn{font-size:13px;color:var(--accent);padding:6px 16px;border:1px solid var(--accent);border-radius:6px;transition:all .15s}
 .new-btn:hover{background:var(--accent-soft)}
 
+/* ═══ Board table (Notion 风格：中性灰表头、浅灰行线、grid 固定列宽) ═══ */
+.board-view{max-width:1100px}
+.board-table{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.board-row{display:grid;grid-template-columns:minmax(0,1fr) 120px 90px 120px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s}
+.board-row:last-child{border-bottom:none}
+.board-row:hover{background:var(--hover)}
+.board-row-head{background:var(--bg-2);cursor:default;font-size:12px;color:var(--text-3);font-weight:600;letter-spacing:.02em}
+.board-row-head:hover{background:var(--bg-2)}
+.board-cell{min-width:0}
+.board-cell-title{display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.board-cell-main{font-size:14px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board-cell-sub{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board-cell-status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)}
+.board-cell-progress{font-family:var(--mono);font-size:11px;color:var(--text-3)}
+.board-cell-date{font-family:var(--mono);font-size:11px;color:var(--text-3);text-align:right}
+.board-empty{padding:64px 0;text-align:center}
+.board-empty-title{font-size:14px;color:var(--text-2)}
+.board-empty-sub{font-size:12px;color:var(--text-3);opacity:.7;margin-top:4px}
+
 /* ═══ Pagination ═══ */
 .pagination{display:flex;align-items:center;justify-content:space-between;margin-top:32px;padding-top:20px;border-top:1px solid var(--line)}
 .page-nums{display:flex;align-items:center;gap:4px}
@@ -782,8 +801,46 @@ ul{list-style:none}
 .login-back:hover{color:var(--accent-2)}
 
 /* ═══ Responsive ═══ */
+/* 平板（≤1024px）：侧栏收窄，内容 padding 减小，Board 列宽紧凑 */
 @media(max-width:1024px){
+  .app{grid-template-columns:56px 1fr}
   .view{padding:32px 24px}
+  .board-view{max-width:100%}
+  .board-row{grid-template-columns:minmax(0,1fr) 100px 70px 100px;padding:10px 12px}
   .ctx-panel{width:100%}
   .topbar-search{width:140px}
+}
+
+/* 手机（≤768px）：侧栏转为底部导航条，内容区全宽，表格转卡片式 */
+@media(max-width:768px){
+  .app{grid-template-columns:1fr;grid-template-rows:52px 1fr 56px;grid-template-areas:"top" "main" "nav"}
+  .nav-rail{flex-direction:row;justify-content:space-around;height:56px;border-right:none;border-top:1px solid var(--line);position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--bg)}
+  .nav-rail-spacer{display:none}
+  .nav-rail-item{width:48px;height:48px}
+  .nav-rail-item svg{width:22px;height:22px}
+  .meeting-toolbar{display:none}
+  .content{padding-bottom:56px}
+  .view{padding:20px 16px}
+  .board-header{flex-direction:column;align-items:flex-start;gap:16px}
+  .board-controls{width:100%;flex-wrap:wrap}
+  .board-search input{width:140px}
+  /* 表格转卡片式：每行变成带分隔线的卡片，列名用 data-label 或隐藏表头 */
+  .board-table{border:none;border-radius:0}
+  .board-row-head{display:none}
+  .board-row{grid-template-columns:1fr;padding:14px 0;border-bottom:1px solid var(--line)}
+  .board-row:hover{background:transparent;margin:0 -16px;padding:14px 16px}
+  .board-cell-status,.board-cell-progress,.board-cell-date{
+    display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-top:6px
+  }
+  .board-cell-date{justify-content:flex-end}
+  .board-cell-date::before{content:'创建：';color:var(--text-3)}
+  .pagination{flex-direction:column;gap:12px;align-items:center}
+  .topbar-search{display:none}
+}
+
+/* 小屏手机（≤480px）：进一步紧凑 */
+@media(max-width:480px){
+  .view{padding:16px 12px}
+  .board-search input{width:120px}
+  .login-card{padding:24px 20px}
 }

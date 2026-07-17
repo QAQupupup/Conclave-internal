@@ -159,8 +159,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshBoard = useCallback(async () => {
     try {
       const data = await apiListMeetings('', 20, 0, true);
-      const list = Array.isArray(data) ? data : (data?.items || data?.meetings || []);
-      if (list.length) setMeetings(list);
+      const raw = Array.isArray(data) ? data : (data?.items || data?.meetings || []);
+      // 后端 stage key → 中文短名（后端用 intra_team/cross_team/evidence_check，前端 STAGES 用 intra/cross/evidence）
+      const stageLabel: Record<string, string> = {
+        clarify: '澄清', intra: '讨论', intra_team: '讨论',
+        cross: '辩论', cross_team: '辩论',
+        evidence: '校验', evidence_check: '校验',
+        arbitrate: '仲裁', produce: '产出',
+      };
+      // 后端字段 → 前端字段映射，保证 Board 表格能正确渲染
+      const list = raw.map((m: any) => ({
+        id: m.id || m.meeting_id,
+        title: m.title || m.topic || '未命名议题',
+        topic: m.topic || '',
+        status: m.status || 'pending',
+        date: m.date || (m.created_at ? m.created_at.slice(0, 16).replace('T', ' ') : '—'),
+        progress: m.progress || stageLabel[m.stage] || (m.stage ? m.stage : '—'),
+        is_running: !!m.is_running,
+        tags: m.tags || [],
+      }));
+      setMeetings(list);
     } catch (e: any) {
       appendLog('刷新会议列表失败: ' + e.message, 'warning');
     }

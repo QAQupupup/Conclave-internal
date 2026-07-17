@@ -58,7 +58,7 @@ export default function Board() {
   }
 
   return (
-    <div className="view active" id="view-board">
+    <div className="view active board-view" id="view-board">
       <div className="board-header">
         <div className="page-title">会议看板</div>
         <div className="board-controls">
@@ -78,34 +78,48 @@ export default function Board() {
           <button className="new-btn" onClick={() => navigate('/')}>新建会议</button>
         </div>
       </div>
-      <div id="board-list">
-        {pageItems.length === 0 ? (
-          <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
+
+      {pageItems.length === 0 ? (
+        <div className="board-empty">
+          <div className="board-empty-title">
             {filter.trim() ? `未找到匹配「${filter.trim()}」的会议` : '暂无会议记录'}
-            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-              {filter.trim() ? '尝试更换关键词或清除筛选' : '点击右上角「新建会议」开始'}
-            </div>
           </div>
-        ) : (
-          pageItems.map((m: any) => (
-            <div className="list-item" key={m.id} onClick={() => { openMeeting(m.id); navigate(`/meeting/${m.id}`); }}>
-              <span className="list-item-title">{m.title}</span>
-              <span
-                className="list-item-topic"
-                style={{ fontSize: 12, color: 'var(--text-3)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              >
-                {m.topic}
+          <div className="board-empty-sub">
+            {filter.trim() ? '尝试更换关键词或清除筛选' : '点击右上角「新建会议」开始'}
+          </div>
+        </div>
+      ) : (
+        <div className="board-table" id="board-list">
+          {/* 表头行：中性灰底，列宽与数据行一致 */}
+          <div className="board-row board-row-head">
+            <span className="board-cell board-cell-title">议题</span>
+            <span className="board-cell board-cell-status">状态</span>
+            <span className="board-cell board-cell-progress">进度</span>
+            <span className="board-cell board-cell-date">创建时间</span>
+          </div>
+          {pageItems.map((m: any) => (
+            <div
+              className="board-row"
+              key={m.id}
+              onClick={() => { openMeeting(m.id); navigate(`/meeting/${m.id}`); }}
+            >
+              <span className="board-cell board-cell-title">
+                <span className="board-cell-main">{m.title}</span>
+                {m.topic && (
+                  <span className="board-cell-sub">{m.topic}</span>
+                )}
               </span>
-              <span className="list-item-status">
+              <span className="board-cell board-cell-status">
                 <span className={`status-dot ${m.status}`} />
                 {statusText(m.status)}
               </span>
-              <span className="list-item-progress">{m.progress || ''}</span>
-              <span className="list-item-date">{m.date}</span>
+              <span className="board-cell board-cell-progress">{m.progress || '—'}</span>
+              <span className="board-cell board-cell-date">{m.date}</span>
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
+
       <div className="pagination" id="board-pagination">
         {totalPages <= 1 ? (
           <>
