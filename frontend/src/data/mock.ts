@@ -352,16 +352,16 @@ interface TopologyNode {
 }
 
 export const TOPOLOGY_NODES: TopologyNode[] = [
-  { id: 'frontend', x: 300, y: 30, w: 120, h: 40, label: 'Frontend', sub: 'nginx :5173' },
-  { id: 'backend', x: 300, y: 120, w: 120, h: 40, label: 'Backend', sub: 'FastAPI :8000' },
-  { id: 'postgres', x: 40, y: 210, w: 120, h: 40, label: 'PostgreSQL', sub: ':5432' },
-  { id: 'redis', x: 200, y: 210, w: 120, h: 40, label: 'Redis', sub: ':6379' },
-  { id: 'qdrant', x: 360, y: 210, w: 120, h: 40, label: 'Qdrant', sub: ':6333' },
-  { id: 'socket-proxy', x: 540, y: 120, w: 120, h: 40, label: 'Docker Proxy', sub: ':2375' },
-  { id: 'sandbox-l1', x: 540, y: 210, w: 120, h: 40, label: 'Sandbox L1', sub: '--network none' },
-  { id: 'llm', x: 40, y: 320, w: 120, h: 40, label: 'SiliconFlow', sub: 'api.siliconflow.cn' },
-  { id: 'dns', x: 300, y: 320, w: 120, h: 40, label: 'DNS Proxy', sub: 'dnsmasq' },
-  { id: 'sandbox-l2', x: 540, y: 320, w: 120, h: 40, label: 'Sandbox L2', sub: 'DNS过滤' },
+  { id: 'frontend', x: 300, y: 40, w: 120, h: 40, label: 'Frontend', sub: 'nginx :5173' },
+  { id: 'backend', x: 300, y: 130, w: 120, h: 40, label: 'Backend', sub: 'FastAPI :8000' },
+  { id: 'postgres', x: 60, y: 220, w: 120, h: 40, label: 'PostgreSQL', sub: ':5432' },
+  { id: 'redis', x: 220, y: 220, w: 120, h: 40, label: 'Redis', sub: ':6379' },
+  { id: 'qdrant', x: 380, y: 220, w: 120, h: 40, label: 'Qdrant', sub: ':6333' },
+  { id: 'socket-proxy', x: 540, y: 130, w: 120, h: 40, label: 'Docker Proxy', sub: ':2375' },
+  { id: 'sandbox-l1', x: 540, y: 220, w: 120, h: 40, label: 'Sandbox L1', sub: '--network none' },
+  { id: 'sandbox-l2', x: 540, y: 300, w: 120, h: 40, label: 'Sandbox L2', sub: 'DNS过滤' },
+  { id: 'dns', x: 380, y: 300, w: 120, h: 40, label: 'DNS Proxy', sub: 'dnsmasq' },
+  { id: 'llm', x: 300, y: 320, w: 120, h: 40, label: 'SiliconFlow', sub: 'api.siliconflow.cn' },
 ];
 
 interface TopologyLink {
