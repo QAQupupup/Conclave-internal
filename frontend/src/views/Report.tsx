@@ -51,25 +51,64 @@ function ParagraphBlock({ data }: { data: any }) {
 
 function ListBlock({ data }: { data: any }) {
   const items: any[] = data?.items || [];
+  // 提取文本：处理三种情况
+  // 1. 字符串且非 dict → 直接用
+  // 2. 字符串但形如 Python dict（后端 str(claim_obj) 导致）→ 正则提取 claim 字段
+  // 3. 对象 → 取 .claim 或 .text 字段
+  const extractText = (it: any): string => {
+    if (typeof it === 'string') {
+      // 后端 bug：claim 对象被 str() 转成 "{'claim': '...', 'risk_level': None, ...}" 字符串
+      // 前端兜底：正则提取 'claim' 字段的值
+      const dictMatch = it.match(/^\{['"]claim['"]:\s*['"](.+?)['"],/s);
+      if (dictMatch) return dictMatch[1];
+      return it;
+    }
+    if (it && typeof it === 'object') return it.claim || it.text || it.content || it.summary || '';
+    return String(it || '');
+  };
   if (data?.ordered) {
     return (
       <ol className="report-num-list" style={{ counterReset: 'report-counter' }}>
-        {items.map((it, i) => <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeRich(String(it)) }} />)}
+        {items.map((it, i) => <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeRich(extractText(it)) }} />)}
       </ol>
     );
   }
   return (
     <ul className="report-list">
-      {items.map((it, i) => <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeRich(String(it)) }} />)}
+      {items.map((it, i) => <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeRich(extractText(it)) }} />)}
     </ul>
   );
 }
 
 function FindingsBlock({ data }: { data: any }) {
   const items: any[] = data?.items || [];
+  // 提取文本：处理 dict 字符串（后端 str(claim_obj)）和对象两种情况
+  const extractText = (it: any): string => {
+    if (typeof it === 'string') {
+      const dictMatch = it.match(/^\{['"]claim['"]:\s*['"](.+?)['"],/s);
+      if (dictMatch) return dictMatch[1];
+      return it;
+    }
+    if (it && typeof it === 'object') return it.claim || it.text || it.content || it.summary || it.detail || '';
+    return String(it || '');
+  };
   return (
     <div className="report-findings-list">
-      {items.map((f, i) => (
+      {items.map((f, i) => {
+        // 兼容后端返回的 claim 对象
+        if (typeof f === 'object' && f.claim) {
+          return (
+            <div className="report-finding-card" key={i}>
+              <div className="report-finding-topic">
+                {f.agent_role ? `${f.agent_role}: ` : ''}
+                <TraceTag trace={f.id} />
+              </div>
+              <div className="report-finding-detail" dangerouslySetInnerHTML={{ __html: sanitizeRich(f.claim) }} />
+              {f.risk_level && <div className="report-finding-sources"><span style={{ color: 'var(--text-3)' }}>风险</span> <span className="report-finding-source">{f.risk_level}</span></div>}
+            </div>
+          );
+        }
+        return (
         <div className="report-finding-card" key={i}>
           {f.num ? <div className="report-finding-num">{f.num}</div> : null}
           <div className="report-finding-topic">{f.topic || ''} <TraceTag trace={f.trace} /></div>
@@ -82,7 +121,8 @@ function FindingsBlock({ data }: { data: any }) {
             </div>
           ) : null}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -363,16 +403,27 @@ const CONF_LABELS: Record<string, string> = {
   evidence_check: '校验', arbitrate: '仲裁', produce: '产出',
 };
 
-function ReportHeader({ title, subtitle }: { title: string; subtitle: string }) {
+function ReportHeader({ title, subtitle, meeting }: { title: string; subtitle: string; meeting: any }) {
+  // 优先使用当前会议的真实数据，REPORT_DATA 仅作兜底
   const r = REPORT_DATA;
+  const meetingId = meeting?.currentMeetingId || r.meetingId;
+  const meetingStatus = meeting?.status || r.status;
+  const statusLabel = meetingStatus === 'done' ? '已完成' :
+    meetingStatus === 'running' ? '进行中' :
+    meetingStatus === 'failed' ? '失败' :
+    meetingStatus === 'aborted' ? '已中止' : r.status;
+  const generatedAt = meeting?.startTime
+    ? new Date(meeting.startTime).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/\//g, '-')
+    : '2026-07-16 15:08';
+
   return (
     <>
       <div className="report-title">{title}</div>
       <div className="report-subtitle">{subtitle}</div>
       <div className="report-meta-line">
-        <span>会议 {r.meetingId}</span>
-        <span>状态 {r.status}</span>
-        <span>生成于 2026-07-16 15:08</span>
+        <span>会议 {meetingId}</span>
+        <span>状态 {statusLabel}</span>
+        <span>生成于 {generatedAt}</span>
       </div>
       <div className="report-confidence">
         {Object.entries(r.confidence).map(([k, v]) => (
@@ -733,19 +784,34 @@ export default function Report() {
             {t.label}
           </span>
         ))}
+        {meeting.currentMeetingId && (
+          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-3)' }}>
+            当前会议：{meeting.title || meeting.currentMeetingId}
+          </span>
+        )}
       </div>
 
+      {/* 无会议选中时的提示 */}
+      {!meeting.currentMeetingId && (
+        <div className="board-empty" style={{ margin: '40px 0' }}>
+          <div className="board-empty-title">未选择会议</div>
+          <div className="board-empty-sub">请从会议看板选择一场会议后查看报告</div>
+        </div>
+      )}
+
       {/* 报告内容 */}
+      {meeting.currentMeetingId && (
       <div id="report-content">
         <div className="report-doc" ref={docRef}>
           <ReportActionsBar typeLabel={typeLabel} onPresent={openPresentation} onMarkdown={exportMd} onHtml={exportHtml} />
-          <ReportHeader title={layout.title || REPORT_DATA.artifact.prd.title} subtitle={layout.subtitle || REPORT_DATA.clarifiedTopic} />
+          <ReportHeader title={layout.title || meeting.title || REPORT_DATA.artifact.prd.title} subtitle={layout.subtitle || meeting.title || REPORT_DATA.clarifiedTopic} meeting={meeting} />
           <ReportToc items={tocItems} />
           {sections.map((sec, i) => <Section key={i} index={i} section={sec} />)}
           <ReportAppendix secNum={sections.length + 1} />
           <ReportRating />
         </div>
       </div>
+      )}
 
       {/* 返回顶部 */}
       <div className={`report-back-top ${showBackTop ? 'show' : ''}`} id="report-back-top" onClick={scrollToTop} title="返回顶部">
@@ -764,7 +830,7 @@ export default function Report() {
             <div>
               {/* 封面 */}
               <div className={`report-presentation-slide ${slideIndex === 0 ? 'active' : ''}`}>
-                <ReportHeader title={layout.title || REPORT_DATA.artifact.prd.title} subtitle={layout.subtitle || REPORT_DATA.clarifiedTopic} />
+                <ReportHeader title={layout.title || meeting.title || REPORT_DATA.artifact.prd.title} subtitle={layout.subtitle || meeting.title || REPORT_DATA.clarifiedTopic} meeting={meeting} />
               </div>
               {/* 目录 */}
               <div className={`report-presentation-slide ${slideIndex === 1 ? 'active' : ''}`}>

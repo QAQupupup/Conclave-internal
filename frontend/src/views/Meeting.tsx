@@ -36,6 +36,8 @@ export default function Meeting() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set([meeting.stage]));
   const [interveneText, setInterveneText] = useState('');
   const [sending, setSending] = useState(false);
+  // claim 溯源预览：点击 claim-xxx 标签时显示对应发言片段
+  const [claimPreview, setClaimPreview] = useState<{ claimId: string; role: string; stage: string; snippet: string } | null>(null);
 
   // 路由参数驱动：刷新 /meeting/:id 或直接进入该 URL 时，
   // 按 URL 中的 id 加载会议详情，避免依赖内存状态（刷新即丢失）。
@@ -48,6 +50,43 @@ export default function Meeting() {
 
   const source: any[] = meeting.messages.length ? meeting.messages : MESSAGES;
   const elapsedMin = Math.floor(meeting.elapsed / 60);
+
+  // claim 溯源：点击 msg-body 内的 claim-xxx 标签，查找对应发言片段
+  const onMsgBodyClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains('ck-claim-ref')) return;
+    const claimId = target.getAttribute('data-claim-id');
+    if (!claimId) return;
+
+    // 在所有发言中查找包含该 claim ID 的消息
+    const found = source.find((m: any) => {
+      const content = m.content || m.text || '';
+      const refs = [...(m.claim_refs || []), ...(m.refs || [])];
+      return content.includes(claimId) || refs.includes(claimId);
+    });
+
+    if (found) {
+      const roleKey = found.agent_role || found.role || found.speaker || 'moderator';
+      const role = (ROLES as any)[roleKey] || { name: roleKey };
+      const content = found.content || found.text || '';
+      // 提取 claim 上下文片段：claim 所在行 ±前后各一行
+      const lines = content.split('\n');
+      const lineIdx = lines.findIndex((l: string) => l.includes(claimId));
+      let snippet: string;
+      if (lineIdx >= 0) {
+        const start = Math.max(0, lineIdx);
+        const end = Math.min(lines.length, lineIdx + 2);
+        snippet = lines.slice(start, end).join('\n');
+      } else {
+        // claim 在 refs 里，不在正文里，取前 200 字
+        snippet = content.substring(0, 200);
+      }
+      const stageName_ = STAGES.find((s) => s.key === found.stage)?.name || found.stage || '';
+      setClaimPreview({ claimId, role: role.name, stage: stageName_, snippet });
+    } else {
+      setClaimPreview({ claimId, role: '未知', stage: '', snippet: '未在当前会议发言中找到该论断的来源片段' });
+    }
+  };
 
   const toggleStage = (i: number) => {
     setExpanded((prev) => {
@@ -135,7 +174,7 @@ export default function Meeting() {
                             <span className="msg-role" style={{ color: role.color }}>{role.name}</span>
                             <span className="msg-time">{timeStr}</span>
                           </div>
-                          <div className="msg-body" dangerouslySetInnerHTML={{ __html: sanitizeRich(content) }} />
+                          <div className="msg-body" onClick={onMsgBodyClick} dangerouslySetInnerHTML={{ __html: sanitizeRich(content) }} />
                           {(refs.length > 0 || risk) && (
                             <div className="msg-refs">
                               {refs.length > 0 && (<><span style={{ color: 'var(--text-3)' }}>参考</span>{' '}{refs.map((r: string, ri: number) => <span className="msg-ref" key={ri}>{r}</span>)}</>)}
@@ -191,6 +230,23 @@ export default function Meeting() {
           </button>
         </div>
       </div>
+
+      {/* claim 溯源预览弹窗 */}
+      {claimPreview && (
+        <div className="claim-preview-overlay" onClick={() => setClaimPreview(null)}>
+          <div className="claim-preview-card" onClick={(e) => e.stopPropagation()}>
+            <div className="claim-preview-head">
+              <span className="claim-preview-id">{claimPreview.claimId}</span>
+              <button className="claim-preview-close" onClick={() => setClaimPreview(null)}>×</button>
+            </div>
+            <div className="claim-preview-meta">
+              {claimPreview.role && <span className="claim-preview-role">{claimPreview.role}</span>}
+              {claimPreview.stage && <span className="claim-preview-stage">{claimPreview.stage}</span>}
+            </div>
+            <div className="claim-preview-snippet" dangerouslySetInnerHTML={{ __html: sanitizeRich(claimPreview.snippet) }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

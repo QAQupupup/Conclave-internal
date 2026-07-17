@@ -104,8 +104,8 @@ export function formatMessageContent(text: string): string {
   // [主持人] / [系统] 等方括号角色前缀 → 高亮
   s = s.replace(/^\[([^\]]{2,8})\]\s*/g, '<span class="ck-role-prefix">$1</span> ');
 
-  // claim-xxxxxx → 论断引用标签（8位以上十六进制）
-  s = s.replace(/(claim-[a-f0-9]{6,12})/g, '<span class="ck-claim-ref">$1</span>');
+  // claim-xxxxxx → 论断引用标签（可点击溯源）
+  s = s.replace(/(claim-[a-f0-9]{6,12})/g, '<span class="ck-claim-ref" data-claim-id="$1">$1</span>');
 
   // 换行处理
   s = s.replace(/\n/g, '<br>');
