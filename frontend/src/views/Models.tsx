@@ -158,7 +158,7 @@ export default function Models() {
               {activeProvider.hasKey ? 'API Key 已配置' : '未配置 Key'}
               <span
                 className="provider-key-btn"
-                onClick={() => navigate('/settings')}
+                onClick={() => navigate(`/settings?provider=${activeProvider.id}`)}
               >
                 {activeProvider.hasKey ? '更换 Key' : '配置 Key'}
               </span>

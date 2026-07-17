@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
 import { apiGetKeys, apiSaveKey, apiGetPreferences, apiSetPreference } from '../lib/api';
+import { PROVIDERS } from '../data/mock';
 
 interface LlmKey {
   provider?: string;
   name?: string;
 }
 
-const KEY_PROVIDERS: { value: string; label: string }[] = [
-  { value: 'doubao', label: '豆包' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'azure', label: 'Azure' },
-];
+// 复用模型中心的 provider 列表，避免两处不同步
+const KEY_PROVIDERS: { value: string; label: string }[] = PROVIDERS.map((p) => ({
+  value: p.id,
+  label: p.name,
+}));
 
 export default function Settings() {
   const { theme, toggleTheme, logOpen, toggleLog, appendLog } = useApp();
@@ -29,12 +29,20 @@ export default function Settings() {
   const [prefsError, setPrefsError] = useState<string | null>(null);
 
   // 添加 Key 表单
+  const [searchParams] = useSearchParams();
+  const initialProvider = searchParams.get('provider') || KEY_PROVIDERS[0].value;
   const [showForm, setShowForm] = useState(false);
-  const [formProvider, setFormProvider] = useState(KEY_PROVIDERS[0].value);
+  const [formProvider, setFormProvider] = useState(initialProvider);
   const [formName, setFormName] = useState('');
   const [formKey, setFormKey] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // 从模型中心跳转过来时（带 provider 参数），自动展开表单
+  useEffect(() => {
+    const p = searchParams.get('provider');
+    if (p) setShowForm(true);
+  }, [searchParams]);
 
   // 进入视图时加载已有 key 与偏好，失败显示错误但不抛错（静默模式不弹登录窗）
   useEffect(() => {
