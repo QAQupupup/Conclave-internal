@@ -306,7 +306,9 @@ async def get_report_layout(meeting_id: str, type: str | None = None) -> dict[st
         if state.decision_record:
             decisions = state.decision_record.get("decisions", []) if isinstance(state.decision_record, dict) else []
         adopted_claims = [
-            c.get("text", str(c)) if isinstance(c, dict) else c
+            c.get("claim") or c.get("text") or ""
+            if isinstance(c, dict)
+            else c
             for c in state.claims
             if (c.get("adopted", True) if isinstance(c, dict) else True)
         ]
