@@ -19,26 +19,28 @@ const RICH_ATTR_WHITELIST = new Set(['HREF', 'CLASS']);
 
 /**
  * 富文本白名单 sanitize：消息内容等本就含 <p>/<strong> 的场景。
- * 允许的标签仅保留，其余标签转义；危险属性（on*、style、javascript:）一律移除。
+ * 允许的标签保留为真正的 HTML 元素（渲染生效），其余标签转义为纯文本；
+ * 危险属性（on*、style、javascript:）一律移除。
+ * 文本节点上应用 Conclave 语义标记（[fact]/claim-xxx 等）。
  * 返回可安全注入 innerHTML 的 HTML 字符串。
- *
- * 在 sanitize 之前会先调用 formatMessageContent 解析 Conclave 语义标记。
  */
 export function sanitizeRich(html: string): string {
   if (!html) return '';
-  // 先解析 Conclave 语义标记（[fact]/[assumption]/[meta]/[doc:]/[risk:]/claim-）
-  const formatted = formatMessageContent(html);
+  // 用 DOM 解析原始 HTML，让 <p>/<strong> 等成为真正的元素节点
   const tmp = document.createElement('div');
-  tmp.innerHTML = formatted;
+  tmp.innerHTML = html;
+
   const walk = (node: Node) => {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const el = node as Element;
       const tag = el.nodeName;
       if (!RICH_TAG_WHITELIST.has(tag)) {
+        // 非白名单标签：提取纯文本内容替换（保持内容，去掉标签壳）
         const text = document.createTextNode(el.textContent || '');
         el.replaceWith(text);
         return;
       }
+      // 白名单标签：过滤危险属性
       [...el.attributes].forEach((attr) => {
         const name = attr.name.toLowerCase();
         const val = attr.value || '';
@@ -50,6 +52,25 @@ export function sanitizeRich(html: string): string {
           el.removeAttribute(attr.name);
         }
       });
+    } else if (node.nodeType === Node.TEXT_NODE) {
+      // 文本节点：应用 Conclave 语义标记（[fact]/claim-xxx/[risk:x] 等）
+      // formatMessageContent 内部会 escHtml，安全无注入风险
+      const text = node.textContent || '';
+      if (text) {
+        const formatted = formatMessageContent(text);
+        // 若有 Conclave 标记被替换（结果与纯转义不同），用新节点替换
+        if (formatted !== escHtml(text)) {
+          const wrapper = document.createElement('span');
+          wrapper.innerHTML = formatted;
+          const parent = node.parentNode;
+          if (parent) {
+            while (wrapper.firstChild) {
+              parent.insertBefore(wrapper.firstChild, node);
+            }
+            parent.removeChild(node);
+          }
+        }
+      }
     }
     if (node.childNodes && node.childNodes.length) {
       [...node.childNodes].forEach(walk);
