@@ -361,7 +361,7 @@ export const TOPOLOGY_NODES: TopologyNode[] = [
   { id: 'sandbox-l1', x: 540, y: 220, w: 120, h: 40, label: 'Sandbox L1', sub: '--network none' },
   { id: 'sandbox-l2', x: 540, y: 300, w: 120, h: 40, label: 'Sandbox L2', sub: 'DNS过滤' },
   { id: 'dns', x: 380, y: 300, w: 120, h: 40, label: 'DNS Proxy', sub: 'dnsmasq' },
-  { id: 'llm', x: 300, y: 320, w: 120, h: 40, label: 'SiliconFlow', sub: 'api.siliconflow.cn' },
+  { id: 'llm', x: 300, y: 370, w: 120, h: 40, label: 'SiliconFlow', sub: 'api.siliconflow.cn' },
 ];
 
 interface TopologyLink {

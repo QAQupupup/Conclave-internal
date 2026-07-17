@@ -11,6 +11,22 @@ export default function Topology() {
     return m;
   }, []);
 
+  // 节点互斥校验：检测任意两节点矩形是否相交（含 4px 安全间距）
+  // 开发期在控制台输出重叠警告，保证 SVG 节点之间始终有互斥区
+  useMemo(() => {
+    const GAP = 4;
+    for (let i = 0; i < TOPOLOGY_NODES.length; i++) {
+      for (let j = i + 1; j < TOPOLOGY_NODES.length; j++) {
+        const a = TOPOLOGY_NODES[i], b = TOPOLOGY_NODES[j];
+        const overlap = a.x < b.x + b.w + GAP && a.x + a.w + GAP > b.x &&
+                        a.y < b.y + b.h + GAP && a.y + a.h + GAP > b.y;
+        if (overlap) {
+          console.warn(`[Topology] 节点互斥违规: ${a.label} 与 ${b.label} 区域重叠`);
+        }
+      }
+    }
+  }, []);
+
   // 预计算连线 path 与中点圆，避免渲染时重复运算
   const links = useMemo(() => {
     return TOPOLOGY_LINKS.map((l, idx) => {
@@ -42,7 +58,7 @@ export default function Topology() {
 
       {/* Topology SVG */}
       <div className="topology-canvas" id="topology-canvas">
-        <svg className="topology-svg" viewBox="0 0 720 400">
+        <svg className="topology-svg" viewBox="0 0 720 420">
           {/* Links */}
           {links.map((l) => (
             <g key={l.key}>

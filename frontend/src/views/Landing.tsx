@@ -86,6 +86,7 @@ export default function Landing() {
           {recent.length === 0 ? (
             <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
               暂无最近会议
+              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>在上方输入议题，创建第一场会议</div>
             </div>
           ) : (
             recent.map((m: any) => (

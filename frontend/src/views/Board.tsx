@@ -81,7 +81,10 @@ export default function Board() {
       <div id="board-list">
         {pageItems.length === 0 ? (
           <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
-            未找到匹配的会议
+            {filter.trim() ? `未找到匹配「${filter.trim()}」的会议` : '暂无会议记录'}
+            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+              {filter.trim() ? '尝试更换关键词或清除筛选' : '点击右上角「新建会议」开始'}
+            </div>
           </div>
         ) : (
           pageItems.map((m: any) => (

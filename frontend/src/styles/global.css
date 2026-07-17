@@ -93,7 +93,8 @@ ul{list-style:none}
 .status-dot.running{background:var(--dot-running)}
 .status-dot.done{background:var(--dot-done)}
 .status-dot.paused{background:var(--dot-paused)}
-.status-dot.error{background:var(--dot-error)}
+.status-dot.error,.status-dot.failed{background:var(--dot-error)}
+.status-dot.aborted,.status-dot.pending,.status-dot.created{background:var(--text-3)}
 .list-item-progress{font-family:var(--mono);font-size:11px;color:var(--text-3);white-space:nowrap}
 .list-item-date{font-family:var(--mono);font-size:11px;color:var(--text-3);white-space:nowrap;min-width:80px;text-align:right}
 
