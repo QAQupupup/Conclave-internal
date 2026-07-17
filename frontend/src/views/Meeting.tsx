@@ -8,8 +8,26 @@ import { sanitizeRich, formatTime } from '../lib/format';
 const TYPE_LABELS: Record<string, string> = Object.fromEntries(
   REPORT_TYPES.map((t) => [t.id, t.label]),
 );
+// 兜底：后端可能返回未在 REPORT_TYPES 中定义的类型
+const TYPE_FALLBACK: Record<string, string> = {
+  research_report: '调研报告',
+  deployable_service: '可部署服务',
+  prd_openapi: 'PRD + OpenAPI',
+  design_doc: '设计文档',
+  comprehensive: '综合报告',
+  business_report: '商业报告',
+  code_analysis: '代码分析',
+  tested_system: '可测试系统',
+  execution: '执行方案',
+};
 
-const STAGE_TIMES = ['14:00', '14:08', '14:50', '15:02', '待定', '待定'];
+// 阶段时间不再写死，改为动态计算占位（后端未返回各阶段时间戳）
+// 已完成阶段显示"已完成"，进行中阶段显示"进行中"，未开始阶段显示"待定"
+function stageTimeLabel(si: number, currentStage: number): string {
+  if (si < currentStage) return '已完成';
+  if (si === currentStage) return '进行中';
+  return '待定';
+}
 
 export default function Meeting() {
   const { meeting, statusText, stageName, toggleIntervene, sendIntervention, appendLog, openMeeting } = useApp();
@@ -72,7 +90,7 @@ export default function Meeting() {
           <span className={`status-dot ${meeting.status || 'running'}`}></span>
           <span>{statusText(meeting.status || 'running')}{meeting.stage < STAGES.length ? ` · ${stageName(STAGES[meeting.stage].key)}阶段` : ''}</span>
         </div>
-        <div className="meeting-meta-item">产出类型 {TYPE_LABELS[meeting.type] || meeting.type}</div>
+        <div className="meeting-meta-item">产出类型 {TYPE_LABELS[meeting.type] || TYPE_FALLBACK[meeting.type] || meeting.type || '—'}</div>
       </div>
 
       {meeting.borrowRequest && (
@@ -97,7 +115,7 @@ export default function Meeting() {
               <div className="stage-header" onClick={() => toggleStage(si)}>
                 <svg className="stage-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
                 <span className="stage-name">{stage.name}</span>
-                <span className="stage-time">{STAGE_TIMES[si]}</span>
+                <span className="stage-time">{stageTimeLabel(si, meeting.stage)}</span>
                 <span className="stage-status"><span className={`status-dot ${dotCls}`}></span>{statusTxt}</span>
               </div>
               {isOpen && (
@@ -137,6 +155,12 @@ export default function Meeting() {
                         <span className="msg-role" style={{ color: 'var(--r-moderator)', fontSize: 13, fontWeight: 500 }}>主持人</span>
                         <div className="typing-dots"><span className="typing-dot"></span><span className="typing-dot"></span><span className="typing-dot"></span></div>
                         <span className="typing-text">正在总结校验结果…</span>
+                      </div>
+                    )}
+                    {si === meeting.stage && meeting.status === 'failed' && (
+                      <div className="msg-typing" style={{ color: 'var(--danger)' }}>
+                        <span className="msg-role" style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 500 }}>系统</span>
+                        <span className="typing-text">本阶段执行失败，部分 Agent 可能已降级到占位输出</span>
                       </div>
                     )}
                   </div>

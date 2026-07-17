@@ -10,11 +10,26 @@ type Roles = Record<string, Role>;
 export const ROLES: Roles = {
   moderator: { name: '主持人', color: 'var(--r-moderator)' },
   architect: { name: '架构师', color: 'var(--r-architect)' },
+  technical_architect: { name: '技术架构师', color: 'var(--r-architect)' },
+  system_architect: { name: '系统架构师', color: 'var(--r-architect)' },
   engineer: { name: '工程师', color: 'var(--r-engineer)' },
+  backend_engineer: { name: '后端开发工程师', color: 'var(--r-engineer)' },
+  frontend_engineer: { name: '前端开发工程师', color: 'var(--r-engineer)' },
+  devops_engineer: { name: '运维工程师', color: 'var(--r-engineer)' },
   security: { name: '安全专家', color: 'var(--r-security)' },
+  security_expert: { name: '安全专家', color: 'var(--r-security)' },
   ux: { name: 'UX设计师', color: 'var(--r-ux)' },
+  ux_designer: { name: 'UX设计师', color: 'var(--r-ux)' },
   data: { name: '数据工程师', color: 'var(--r-data)' },
+  data_engineer: { name: '数据工程师', color: 'var(--r-data)' },
   marketing: { name: '市场专家', color: 'var(--r-marketing)' },
+  product_architect: { name: '产品负责人', color: 'var(--r-marketing)' },
+  product_manager: { name: '产品经理', color: 'var(--r-marketing)' },
+  business_strategist: { name: '商业战略分析师', color: 'var(--r-marketing)' },
+  oss_ecosystem_expert: { name: '开源生态专家', color: 'var(--r-data)' },
+  industry_advisor: { name: '行业应用顾问', color: 'var(--r-ux)' },
+  meta: { name: '元认知', color: 'var(--text-3)' },
+  meta_cognition: { name: '元认知', color: 'var(--text-3)' },
 };
 
 /* ═══ Stages ═══ */
@@ -26,9 +41,9 @@ interface Stage {
 
 export const STAGES: Stage[] = [
   { key: 'clarify', name: '澄清', short: '澄清' },
-  { key: 'intra', name: '队内讨论', short: '讨论' },
-  { key: 'cross', name: '跨队辩论', short: '辩论' },
-  { key: 'evidence', name: '证据校验', short: '校验' },
+  { key: 'intra_team', name: '队内讨论', short: '讨论' },
+  { key: 'cross_team', name: '跨队辩论', short: '辩论' },
+  { key: 'evidence_check', name: '证据校验', short: '校验' },
   { key: 'arbitrate', name: '仲裁裁决', short: '仲裁' },
   { key: 'produce', name: '产出交付', short: '产出' },
 ];
