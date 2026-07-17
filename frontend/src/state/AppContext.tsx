@@ -145,7 +145,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* ── 看板 ── */
   const refreshBoard = useCallback(async () => {
     try {
-      const data = await apiListMeetings();
+      const data = await apiListMeetings('', 20, 0, true);
       const list = Array.isArray(data) ? data : (data?.items || data?.meetings || []);
       if (list.length) setMeetings(list);
     } catch (e: any) {

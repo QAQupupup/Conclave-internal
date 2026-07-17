@@ -29,7 +29,7 @@ export default function Monitor() {
     let cancelled = false;
     (async () => {
       try {
-        const data: any = await apiGetMetrics();
+        const data: any = await apiGetMetrics(true);
         if (cancelled || !data || typeof data !== 'object') return;
         setMetrics((prev) =>
           prev.map((m) => {

@@ -652,7 +652,7 @@ export default function Report() {
     let cancelled = false;
     (async () => {
       try {
-        const spec = await apiGetReportLayout(id, currentReportType);
+        const spec = await apiGetReportLayout(id, currentReportType, true);
         if (!cancelled && spec && spec.sections) setRemoteLayout(spec as ReportLayout);
       } catch {
         if (!cancelled) {

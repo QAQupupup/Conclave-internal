@@ -36,12 +36,12 @@ export default function Settings() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // 进入视图时加载已有 key 与偏好，失败显示错误但不抛错
+  // 进入视图时加载已有 key 与偏好，失败显示错误但不抛错（静默模式不弹登录窗）
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data: any = await apiGetKeys();
+        const data: any = await apiGetKeys(true);
         const list = Array.isArray(data) ? data : (data?.keys ?? []);
         if (!cancelled) setKeys(list as LlmKey[]);
       } catch (e: any) {
@@ -50,7 +50,7 @@ export default function Settings() {
         if (!cancelled) setKeysLoading(false);
       }
       try {
-        const data: any = await apiGetPreferences();
+        const data: any = await apiGetPreferences(true);
         if (!cancelled) setPrefs((data && typeof data === 'object') ? data : {});
       } catch (e: any) {
         if (!cancelled) setPrefsError('加载失败: ' + (e?.message || '未知错误'));
@@ -64,7 +64,7 @@ export default function Settings() {
 
   async function reloadKeys() {
     try {
-      const data: any = await apiGetKeys();
+      const data: any = await apiGetKeys(true);
       const list = Array.isArray(data) ? data : (data?.keys ?? []);
       setKeys(list as LlmKey[]);
       setKeysError(null);
@@ -140,7 +140,7 @@ export default function Settings() {
             <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>切换界面明暗主题</div>
           </div>
           <button className="ctrl-btn" onClick={toggleTheme}>
-            {theme === 'dark' ? '切换到浅色' : '切换'}
+            {theme === 'dark' ? '切换到浅色' : '切换到深色'}
           </button>
         </div>
 

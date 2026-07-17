@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { useApp } from '../state/AppContext';
 import { STAGES, ROLES, MESSAGES, type MeetingMessage } from '../data/mock';
+import { REPORT_TYPES } from '../data/reportData';
 import { sanitizeRich, formatTime } from '../lib/format';
+
+const TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  REPORT_TYPES.map((t) => [t.id, t.label]),
+);
 
 const STAGE_TIMES = ['14:00', '14:08', '14:50', '15:02', '待定', '待定'];
 
@@ -55,7 +60,7 @@ export default function Meeting() {
           <span className={`status-dot ${meeting.status || 'running'}`}></span>
           <span>{statusText(meeting.status || 'running')}{meeting.stage < STAGES.length ? ` · ${stageName(STAGES[meeting.stage].key)}阶段` : ''}</span>
         </div>
-        <div className="meeting-meta-item">产出类型 {meeting.type}</div>
+        <div className="meeting-meta-item">产出类型 {TYPE_LABELS[meeting.type] || meeting.type}</div>
       </div>
 
       {meeting.borrowRequest && (

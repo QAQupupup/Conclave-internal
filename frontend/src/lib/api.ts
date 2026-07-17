@@ -13,6 +13,8 @@ export function onUnauthorized(fn: () => void): void {
 
 export interface ApiOptions extends RequestInit {
   headers?: Record<string, string>;
+  /** 静默模式：401 时不弹登录窗，仅抛错由调用方 catch 回退 mock */
+  silent?: boolean;
 }
 
 export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -26,8 +28,12 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
     const res = await fetch(API_BASE + path, { ...opts, headers });
     if (res.status === 401) {
       clearToken();
-      commitLogout();
-      unauthorizedHandler?.();
+      // 静默模式不触发登录弹窗（后台数据加载回退 mock 即可）；
+      // 非静默模式（用户主动操作）才弹窗提示
+      if (!opts.silent) {
+        commitLogout();
+        unauthorizedHandler?.();
+      }
       throw new Error('未登录或登录已过期');
     }
     if (!res.ok) {
@@ -52,7 +58,7 @@ export async function apiLogin(username: string, password: string) {
 }
 export async function apiMe(): Promise<ConclaveUser | null> {
   try {
-    return await api<ConclaveUser>('/auth/me');
+    return await api<ConclaveUser>('/auth/me', { silent: true });
   } catch {
     return null;
   }
@@ -83,12 +89,12 @@ export async function apiCreateMeeting(topic: string, deliverableType: string, o
     }),
   });
 }
-export async function apiListMeetings(q = '', limit = 20, offset = 0) {
+export async function apiListMeetings(q = '', limit = 20, offset = 0, silent = false) {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   params.set('limit', String(limit));
   params.set('offset', String(offset));
-  return api(`/meetings?${params}`);
+  return api(`/meetings?${params}`, { silent });
 }
 export async function apiGetMeeting(meetingId: string) {
   return api(`/meetings/${meetingId}`);
@@ -111,9 +117,9 @@ export async function apiIntervene(meetingId: string, content: string, replyToId
     body: JSON.stringify({ content, reply_to_id: replyToId }),
   });
 }
-export async function apiGetReportLayout(meetingId: string, deliverableType?: string) {
+export async function apiGetReportLayout(meetingId: string, deliverableType?: string, silent = false) {
   const typeParam = deliverableType ? `?type=${deliverableType}` : '';
-  return api(`/meetings/${meetingId}/report-layout${typeParam}`);
+  return api(`/meetings/${meetingId}/report-layout${typeParam}`, { silent });
 }
 export async function apiGetTrace(meetingId: string) {
   return api(`/meetings/${meetingId}/trace`);
@@ -131,30 +137,30 @@ export async function apiGenerateRoles(topic: string) {
 }
 
 /* ═══ Metrics API ═══ */
-export async function apiGetMetrics() {
-  return api('/metrics');
+export async function apiGetMetrics(silent = false) {
+  return api('/metrics', { silent });
 }
 export async function apiGetMetricsHistory(minutes = 60) {
   return api(`/metrics/history?minutes=${minutes}`);
 }
 
 /* ═══ Preferences API ═══ */
-export async function apiGetPreferences() {
-  return api('/preferences/');
+export async function apiGetPreferences(silent = false) {
+  return api('/preferences/', { silent });
 }
 export async function apiSetPreference(key: string, value: any) {
   return api(`/preferences/${key}`, { method: 'PUT', body: JSON.stringify({ value }) });
 }
 
 /* ═══ LLM API ═══ */
-export async function apiGetProviders() {
-  return api('/meetings/llm/providers');
+export async function apiGetProviders(silent = false) {
+  return api('/meetings/llm/providers', { silent });
 }
-export async function apiGetModels() {
-  return api('/meetings/llm/models');
+export async function apiGetModels(silent = false) {
+  return api('/meetings/llm/models', { silent });
 }
-export async function apiGetKeys() {
-  return api('/meetings/llm/keys');
+export async function apiGetKeys(silent = false) {
+  return api('/meetings/llm/keys', { silent });
 }
 export async function apiSaveKey(provider: string, name: string, key: string) {
   return api('/meetings/llm/keys', {

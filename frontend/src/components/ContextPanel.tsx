@@ -1,9 +1,14 @@
 import { useApp } from '../state/AppContext';
-import { ROLES, MODELS } from '../data/mock';
+import { ROLES, MODELS, STAGES } from '../data/mock';
+import { REPORT_TYPES } from '../data/reportData';
 
 const TITLES: Record<string, string> = {
   overview: '议题概览', evidence: '证据库', artifact: '产出物', token: 'Token与成本', model: '模型调度',
 };
+
+const TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  REPORT_TYPES.map((t) => [t.id, t.label]),
+);
 
 const EVIDENCE = ['规格 §3.2', 'martinfowler.com', 'arxiv:1706.04024', 'owasp.org/ms-top10', 'debezium.io', 'microservices.io', 'linkerd.io'];
 const TOKEN_STATS: [string, string][] = [
@@ -11,9 +16,18 @@ const TOKEN_STATS: [string, string][] = [
   ['安全专家', '6,540'], ['UX设计师', '4,210'], ['数据工程师', '5,106'], ['市场专家', '4,000'], ['预估成本', '¥0.34'],
 ];
 
+function fmtElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}分${String(s).padStart(2, '0')}秒`;
+}
+
 export default function ContextPanel() {
-  const { ctx, closeCtx } = useApp();
+  const { ctx, closeCtx, meeting, stageName, statusText } = useApp();
   if (!ctx.open) return null;
+
+  const stageIdx = Math.min(meeting.stage, STAGES.length - 1);
+  const typeLabel = TYPE_LABELS[meeting.type] || meeting.type;
 
   return (
     <div className="ctx-panel open" id="ctx-panel">
@@ -26,10 +40,11 @@ export default function ContextPanel() {
       <div className="ctx-panel-body">
         {ctx.type === 'overview' && (
           <>
-            <div className="ctx-field"><div className="ctx-label">议题</div><div className="ctx-value">将现有单体电商平台迁移至微服务架构</div></div>
-            <div className="ctx-field"><div className="ctx-label">产出类型</div><div className="ctx-value">PRD文档</div></div>
-            <div className="ctx-field"><div className="ctx-label">当前阶段</div><div className="ctx-value">证据校验 · 第 4 / 6 阶段</div></div>
-            <div className="ctx-field"><div className="ctx-label">已运行</div><div className="ctx-value" style={{ fontFamily: 'var(--mono)' }}>32分14秒</div></div>
+            <div className="ctx-field"><div className="ctx-label">议题</div><div className="ctx-value">{meeting.title}</div></div>
+            <div className="ctx-field"><div className="ctx-label">产出类型</div><div className="ctx-value">{typeLabel}</div></div>
+            <div className="ctx-field"><div className="ctx-label">当前阶段</div><div className="ctx-value">{stageName(STAGES[stageIdx].key)} · 第 {stageIdx + 1} / {STAGES.length} 阶段</div></div>
+            <div className="ctx-field"><div className="ctx-label">已运行</div><div className="ctx-value" style={{ fontFamily: 'var(--mono)' }}>{fmtElapsed(meeting.elapsed)}</div></div>
+            <div className="ctx-field"><div className="ctx-label">状态</div><div className="ctx-value">{statusText(meeting.status || 'running')}</div></div>
             <div className="ctx-field">
               <div className="ctx-label">参会角色</div>
               <div className="ctx-roles">
@@ -60,7 +75,7 @@ export default function ContextPanel() {
         {ctx.type === 'artifact' && (
           <>
             <div className="ctx-field"><div className="ctx-label">产出状态</div><div className="ctx-value" style={{ color: 'var(--text-3)' }}>尚未生成 · 等待仲裁和产出阶段</div></div>
-            <div className="ctx-field"><div className="ctx-label">预期产出</div><div className="ctx-value">PRD文档 · 包含迁移路径、分期方案、风险评估</div></div>
+            <div className="ctx-field"><div className="ctx-label">预期产出</div><div className="ctx-value">{typeLabel} · 包含迁移路径、分期方案、风险评估</div></div>
           </>
         )}
         {ctx.type === 'token' && TOKEN_STATS.map(([label, val]) => (

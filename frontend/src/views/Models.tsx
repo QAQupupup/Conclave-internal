@@ -19,7 +19,7 @@ const FILTER_CHIPS: { key: FilterCat; label: string }[] = [
 ];
 
 export default function Models() {
-  const { appendLog } = useApp();
+  const { appendLog, setView } = useApp();
 
   // 数据：默认使用 mock，API 成功则覆盖
   const [providers, setProviders] = useState<Provider[]>(PROVIDERS);
@@ -36,7 +36,7 @@ export default function Models() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await apiGetProviders();
+        const data = await apiGetProviders(true);
         const list = Array.isArray(data) ? data : (data as any)?.providers;
         if (!cancelled && Array.isArray(list) && list.length) {
           // 仅在返回结构可识别时覆盖，避免破坏渲染
@@ -47,7 +47,7 @@ export default function Models() {
         if (!cancelled) appendLog?.('模型 Provider 拉取失败，使用本地数据', 'debug');
       }
       try {
-        const data = await apiGetModels();
+        const data = await apiGetModels(true);
         const list = Array.isArray(data) ? data : (data as any)?.models;
         if (!cancelled && Array.isArray(list) && list.length) {
           setCatalog(list as ModelCatalogItem[]);
@@ -156,7 +156,7 @@ export default function Models() {
               {activeProvider.hasKey ? 'API Key 已配置' : '未配置 Key'}
               <span
                 className="provider-key-btn"
-                onClick={() => alert('BYOK配置面板（原型）')}
+                onClick={() => setView('settings')}
               >
                 {activeProvider.hasKey ? '更换 Key' : '配置 Key'}
               </span>
