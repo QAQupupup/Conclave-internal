@@ -87,6 +87,26 @@ a{color:inherit;text-decoration:none}
 .portal-theme:hover{color:var(--text);border-color:var(--accent-2)}
 .portal-theme svg{width:18px;height:18px}
 
+/* ═══ Backend-not-ready modal ═══ */
+.modal-overlay{position:fixed;inset:0;z-index:1000;background:rgba(15,15,15,.45);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s ease}
+.modal-overlay.show{opacity:1;pointer-events:auto}
+.modal-card{width:380px;max-width:calc(100vw - 48px);background:var(--bg);border:1px solid var(--line-2);border-radius:14px;padding:28px 28px 24px;transform:translateY(12px);transition:transform .25s cubic-bezier(.4,0,.2,1);box-shadow:0 16px 48px rgba(0,0,0,.12)}
+.modal-overlay.show .modal-card{transform:translateY(0)}
+.modal-icon{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(220,80,80,.08);color:#d65050;margin-bottom:16px}
+.modal-icon svg{width:24px;height:24px}
+.modal-title{font-family:var(--serif);font-size:18px;font-weight:400;color:var(--text);margin-bottom:8px}
+.modal-desc{font-size:13px;color:var(--text-2);line-height:1.8;margin-bottom:22px}
+.modal-retry{font-size:12px;color:var(--text-3);margin-top:14px;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px}
+.modal-retry-btn{color:var(--accent-2);cursor:pointer;font-weight:500}
+.modal-retry-btn:hover{text-decoration:underline}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px}
+.modal-btn{padding:8px 20px;border-radius:8px;font-size:13px;font-weight:500;transition:all .2s}
+.modal-btn.primary{background:var(--accent-2);color:#fff}
+.modal-btn.primary:hover{background:var(--accent)}
+.modal-btn.ghost{border:1px solid var(--line-2);color:var(--text-2)}
+.modal-btn.ghost:hover{border-color:var(--accent-2);color:var(--accent-2)}
+.entry-checking{opacity:.6;pointer-events:none}
+
 /* ═══ Responsive ═══ */
 @media(max-width:680px){
   .portal-cards{flex-direction:column;width:100%;max-width:320px}
@@ -108,6 +128,26 @@ a{color:inherit;text-decoration:none}
 
 <div class="portal-bg"></div>
 
+<!-- Backend-not-ready modal -->
+<div class="modal-overlay" id="backend-modal">
+  <div class="modal-card">
+    <div class="modal-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>
+    </div>
+    <div class="modal-title">后端服务未启动</div>
+    <div class="modal-desc">无法连接到 Conclave 后端服务。请检查后端服务是否正常运行，或联系管理员。</div>
+    <div class="modal-actions">
+      <button class="modal-btn ghost" onclick="closeBackendModal()">知道了</button>
+      <button class="modal-btn primary" onclick="retryEnterSystem()">重新检测</button>
+    </div>
+    <div class="modal-retry" id="modal-retry-hint" style="display:none">
+      <span class="spinner" style="display:inline-block;width:12px;height:12px;border:2px solid var(--line-2);border-top-color:var(--accent-2);border-radius:50%;animation:spin .7s linear infinite"></span>
+      正在检测后端服务…
+    </div>
+  </div>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+
 <div class="portal">
 
   <!-- Brand -->
@@ -122,7 +162,7 @@ a{color:inherit;text-decoration:none}
 
   <!-- Entry cards -->
   <div class="portal-cards">
-    <div class="portal-card" onclick="location.href='/app'">
+    <div class="portal-card" id="entry-system" onclick="enterSystem()">
       <div class="portal-card-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/>
@@ -199,6 +239,66 @@ function toggleTheme(){
   try{localStorage.setItem('conclave_theme',next)}catch(e){}
 }
 (function(){try{const t=localStorage.getItem('conclave_theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+
+/* ═══ 后端健康检查 ═══
+ * 点击"进入系统"时先检测后端 /health；
+ * 后端未连接或未就绪则弹窗提示，不进入系统、不回退演示模式。
+ * "查看演示"入口仍直接跳转 /demo（纯前端 mock，无需后端）。
+ */
+function checkBackendReady(timeoutMs){
+  return new Promise(function(resolve){
+    var ctrl=new AbortController();
+    var timer=setTimeout(function(){ctrl.abort();},timeoutMs||5000);
+    fetch('/health',{signal:ctrl.signal,cache:'no-store',headers:{'Accept':'application/json'}})
+      .then(function(res){
+        clearTimeout(timer);
+        if(!res.ok){resolve('error');return;}
+        // 校验响应体为真正的健康检查 JSON（含 status 字段），
+        // 而非 SPA 回退返回的 index.html（dev/preview 环境会把未知路径回退到 HTML）。
+        res.json().then(function(d){
+          resolve(d && typeof d.status==='string' ? d.status : 'error');
+        }).catch(function(){resolve('error');});
+      })
+      .catch(function(){clearTimeout(timer);resolve('error');});
+  });
+}
+
+function showBackendModal(){document.getElementById('backend-modal').classList.add('show');}
+function closeBackendModal(){document.getElementById('backend-modal').classList.remove('show');}
+
+function enterSystem(){
+  var card=document.getElementById('entry-system');
+  var btn=card.querySelector('.portal-card-btn');
+  var original=btn.innerHTML;
+  card.classList.add('entry-checking');
+  btn.innerHTML='正在检测服务…';
+  checkBackendReady(5000).then(function(status){
+    card.classList.remove('entry-checking');
+    btn.innerHTML=original;
+    if(status==='error'){
+      showBackendModal();
+    }else{
+      location.href='/app';
+    }
+  });
+}
+
+function retryEnterSystem(){
+  var hint=document.getElementById('modal-retry-hint');
+  hint.style.display='flex';
+  checkBackendReady(5000).then(function(status){
+    hint.style.display='none';
+    if(status==='error'){
+      // 保持弹窗，提示仍未就绪
+      var desc=document.querySelector('.modal-desc');
+      if(desc && desc.dataset.retried){desc.textContent='后端服务仍未就绪，请确认服务已启动后再试，或联系管理员。';}
+      desc.dataset.retried='1';
+    }else{
+      closeBackendModal();
+      location.href='/app';
+    }
+  });
+}
 </script>
 </body>
 </html>
