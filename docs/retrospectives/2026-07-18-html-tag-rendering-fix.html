@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>修复报告 - HTML 标签渲染修复 - 2026-07-18</title>
+  <style>
+    :root {
+      --bg: #fafaf9;
+      --surface: #ffffff;
+      --border: #e7e5e4;
+      --text: #1c1917;
+      --text-2: #57534e;
+      --text-3: #a8a29e;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --red: #dc2626;
+      --red-soft: #fee2e2;
+      --green: #16a34a;
+      --green-soft: #dcfce7;
+      --orange: #ea580c;
+      --orange-soft: #fed7aa;
+      --code-bg: #f5f5f4;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 40px 20px;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    .report-header { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; margin-bottom: 24px; }
+    .report-header h1 { font-size: 24px; margin-bottom: 8px; }
+    .report-header .subtitle { color: var(--text-2); font-size: 14px; margin-bottom: 16px; }
+    .report-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--text-2); }
+    .report-meta span { display: inline-flex; align-items: center; gap: 4px; }
+    .report-meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .report-chain { margin-top: 12px; font-size: 13px; color: var(--text-3); }
+    .report-chain a { color: var(--accent); text-decoration: none; }
+    .report-chain a:hover { text-decoration: underline; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+    .stat-card .num { font-size: 28px; font-weight: 700; }
+    .stat-card .label { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+    .stat-card.p1 .num { color: var(--orange); }
+    .stat-card.p2 .num { color: var(--accent); }
+    .stat-card.p0 .num { color: var(--red); }
+    .stat-card.p3 .num { color: var(--text-3); }
+    section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; }
+    section h2 { font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    section h3 { font-size: 15px; margin: 20px 0 8px; }
+    .bug-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    .bug-card .bug-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .badge-p1 { background: var(--orange-soft); color: var(--orange); }
+    .badge-p2 { background: var(--accent-soft); color: var(--accent); }
+    .badge-fixed { background: var(--green-soft); color: var(--green); }
+    .bug-detail { font-size: 14px; color: var(--text-2); }
+    .bug-detail strong { color: var(--text); }
+    .bug-detail .field { margin-bottom: 8px; }
+    .bug-detail .field-label { font-weight: 600; color: var(--text); display: inline-block; min-width: 70px; }
+    pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 13px; line-height: 1.5; margin: 8px 0; }
+    code { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
+    .commit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .commit-table th, .commit-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    .commit-table th { color: var(--text-3); font-weight: 600; }
+    .commit-table code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
+    .pattern-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .pattern-table th, .pattern-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    .pattern-table th { color: var(--text-3); font-weight: 600; }
+    .lesson-list { list-style: none; }
+    .lesson-list li { padding: 8px 0; padding-left: 20px; position: relative; font-size: 14px; color: var(--text-2); }
+    .lesson-list li::before { content: '▸'; position: absolute; left: 0; color: var(--accent); }
+    .verify-list { list-style: none; }
+    .verify-list li { padding: 6px 0; padding-left: 24px; position: relative; font-size: 14px; }
+    .verify-list li::before { content: '✓'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+    .verify-list li.fail::before { content: '✗'; color: var(--red); }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header class="report-header">
+    <h1>HTML 标签渲染修复报告</h1>
+    <p class="subtitle">修复 sanitizeRich 白名单 HTML 标签被当作纯文本展示的问题</p>
+    <div class="report-meta">
+      <span>📅 2026年7月18日</span>
+      <span>🔖 Commit区间: <code>03ea80c</code> → <code>f3134c6</code></span>
+      <span>🔧 0个P0 / 1个P1 / 1个P2修复</span>
+      <span>📝 完整追溯文档</span>
+    </div>
+    <div class="report-chain">
+      上一轮修复: <a href="./2026-07-17-frontend-auth-router-refactor.html"><code>72cb55c</code> → <code>4974c5c</code></a>
+    </div>
+  </header>
+
+  <section class="stats-grid" style="background:none;border:none;padding:0;">
+    <div class="stat-card p0"><div class="num">0</div><div class="label">P0 阻断</div></div>
+    <div class="stat-card p1"><div class="num">1</div><div class="label">P1 严重</div></div>
+    <div class="stat-card p2"><div class="num">1</div><div class="label">P2 中等</div></div>
+    <div class="stat-card p3"><div class="num">0</div><div class="label">P3 轻微</div></div>
+  </section>
+
+  <section>
+    <h2>1. 问题概述</h2>
+    <p style="font-size:14px;color:var(--text-2);">用户反馈会议页面中消息内容的 <code>&lt;p&gt;</code>、<code>&lt;strong&gt;</code> 等 HTML 标签被当作纯文本直接展示（如 <code>&lt;p&gt;各位专家好&lt;/p&gt;</code> 原样显示），而非渲染成段落和加粗效果。这是一个影响阅读体验的显示缺陷。</p>
+    <div style="margin-top:12px;font-size:14px;color:var(--text-2);">
+      <strong>影响范围：</strong>Meeting 页消息正文、Report 页富文本块（执行摘要、关键问题、团队配置等）、claim 溯源预览弹窗——所有使用 <code>sanitizeRich</code> 的位置均受影响。
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Commit 区间详情</h2>
+    <table class="commit-table">
+      <thead><tr><th>Hash</th><th>描述</th></tr></thead>
+      <tbody>
+        <tr><td><code>03ea80c</code></td><td>起始 Commit（refactor: replace type chips with dropdown selector）</td></tr>
+        <tr><td><code>f3134c6</code></td><td>fix(frontend): render whitelisted HTML tags as real elements instead of escaped text</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>3. 修复详情</h2>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p1">P1</span>
+        <span class="badge badge-fixed">已修复</span>
+        <strong>HTML 标签被当作纯文本展示，白名单形同虚设</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">现象：</span>消息内容中的 <code>&lt;p&gt;</code>、<code>&lt;strong&gt;</code> 等标签在页面上原样显示为文本字符串，没有渲染成段落间距和加粗效果。</div>
+        <div class="field"><span class="field-label">根因：</span><code>sanitizeRich</code> 函数在处理内容时，第一步调用了 <code>formatMessageContent</code>，而该函数内部第 84 行执行了 <code>escHtml(text)</code>——把所有 <code>&lt;</code> 转成了 <code>&amp;lt;</code>。之后将转义后的字符串赋给 <code>tmp.innerHTML</code> 时，浏览器看到的是 <code>&amp;lt;p&amp;gt;</code>，将其当作文本节点而非 HTML 元素。因此 <code>RICH_TAG_WHITELIST</code>（包含 P、STRONG 等）的 <code>has(tag)</code> 判断永远匹配不到真正的元素节点，白名单完全失效。</div>
+        <div class="field"><span class="field-label">修复方式：</span>重构 <code>sanitizeRich</code> 的处理顺序：
+          <pre><code>// 修复前（错误）：
+const formatted = formatMessageContent(html); // escHtml 把 < 转成 &lt;
+tmp.innerHTML = formatted; // 浏览器当成文本，白名单失效
+
+// 修复后（正确）：
+tmp.innerHTML = html; // 先让 DOM 解析真正的 HTML 元素
+// walk 时：白名单元素保留并过滤属性，非白名单元素提取文本
+// 对文本节点调用 formatMessageContent 处理 Conclave 语义标记</code></pre>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>frontend/src/lib/format.ts</code></div>
+        <div class="field"><span class="field-label">验证方式：</span>浏览器 JS 注入 <code>&lt;p&gt;测试&lt;strong&gt;加粗&lt;/strong&gt;&lt;/p&gt;</code>，确认 <code>&lt;p&gt;</code> 和 <code>&lt;strong&gt;</code> 被渲染为真正的 DOM 元素（<code>querySelectorAll('p').length === 1</code>）。</div>
+      </div>
+    </div>
+
+  </section>
+
+  <section>
+    <h2>4. 根因归类</h2>
+    <table class="pattern-table">
+      <thead><tr><th>错误模式</th><th>描述</th><th>预防措施</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>转义顺序错误</td>
+          <td>sanitize 函数在 DOM 解析前先做了全局 escHtml，导致白名单标签也变成转义文本，白名单机制完全失效</td>
+          <td>sanitize 应先让 DOM 解析原始 HTML，在元素节点层面做白名单过滤；escHtml 只用于纯文本节点的内容处理</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>5. 经验沉淀与改进建议</h2>
+    <ul class="lesson-list">
+      <li>sanitize 与 escHtml 的职责必须分离：sanitize 负责元素级白名单过滤，escHtml 负责文本节点级转义，两者不能在 DOM 解析前叠加使用</li>
+      <li>Conclave 语义标记（<code>[fact]</code>、<code>claim-xxx</code> 等）只在文本节点上处理，不干扰 HTML 元素结构</li>
+      <li>建议增加单元测试覆盖 <code>sanitizeRich</code>：输入含 HTML 标签的字符串，断言输出中白名单标签被保留为真正元素、非白名单标签被移除、Conclave 标记被正确转换</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. 遗留问题</h2>
+    <ul class="lesson-list">
+      <li>后端返回的会议消息内容目前是纯文本，不含 HTML 标签；mock 数据（<code>MESSAGES</code>）含 HTML 标签。需确认后端 LLM 产出的消息内容是否应包含 HTML 标签，统一数据契约</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>7. 验证结果</h2>
+    <ul class="verify-list">
+      <li>Docker 镜像构建成功（<code>docker compose build frontend</code>）</li>
+      <li>容器启动正常</li>
+      <li>浏览器 JS 验证：注入 <code>&lt;p&gt;...&lt;strong&gt;...&lt;/strong&gt;...&lt;/p&gt;</code> 后，<code>querySelectorAll('p').length === 2</code>，<code>querySelectorAll('strong').length === 1</code>——标签被正确渲染为 DOM 元素</li>
+      <li>视觉确认：加粗效果和段落间距生效</li>
+    </ul>
+  </section>
+
+</div>
+</body>
+</html>
