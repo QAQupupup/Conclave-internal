@@ -772,20 +772,23 @@ export default function Report() {
 
   return (
     <>
-      {/* 报告类型栏 */}
+      {/* 报告类型栏：下拉选择器，紧凑不换行 */}
       <div className="report-type-bar" id="report-type-bar">
         <span className="report-type-label">产出类型</span>
-        {REPORT_TYPES.map(t => (
-          <span
-            key={t.id}
-            className={`report-type-chip ${t.id === currentReportType ? 'active' : ''}`}
-            onClick={() => handleSwitchType(t.id)}
+        <div className="report-type-select-wrap">
+          <select
+            className="report-type-select"
+            value={currentReportType}
+            onChange={(e) => handleSwitchType(e.target.value)}
           >
-            {t.label}
-          </span>
-        ))}
+            {REPORT_TYPES.map(t => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </select>
+          <svg className="report-type-select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
         {meeting.currentMeetingId && (
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-3)' }}>
+          <span className="report-type-meeting">
             当前会议：{meeting.title || meeting.currentMeetingId}
           </span>
         )}

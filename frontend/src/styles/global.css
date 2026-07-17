@@ -500,12 +500,14 @@ ul{list-style:none}
 
 /* ═══ Report ═══ */
 .report-doc{max-width:720px;margin:0 auto;padding-bottom:80px}
-.report-type-bar{display:flex;align-items:center;flex-wrap:wrap;gap:0;max-width:720px;margin:0 auto 32px;padding-bottom:16px;border-bottom:1px solid var(--line)}
-.report-type-label{font-family:var(--serif);font-size:12px;color:var(--text-3);margin-right:16px;white-space:nowrap}
-.report-type-chip{padding:4px 12px;font-size:12px;color:var(--text-3);cursor:pointer;transition:color .15s;position:relative;white-space:nowrap}
-.report-type-chip:not(:last-child)::after{content:'·';position:absolute;right:-2px;color:var(--line-2)}
-.report-type-chip:hover{color:var(--text)}
-.report-type-chip.active{color:var(--text);font-weight:500}
+.report-type-bar{display:flex;align-items:center;gap:12px;max-width:720px;margin:0 auto 32px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.report-type-label{font-family:var(--serif);font-size:12px;color:var(--text-3);white-space:nowrap}
+.report-type-select-wrap{position:relative;display:inline-flex;align-items:center}
+.report-type-select{appearance:none;-webkit-appearance:none;-moz-appearance:none;background:transparent;border:1px solid var(--line-2);border-radius:6px;padding:5px 32px 5px 12px;font-size:13px;color:var(--text);cursor:pointer;outline:none;transition:border-color .15s;font-family:inherit}
+.report-type-select:hover{border-color:var(--text-3)}
+.report-type-select:focus{border-color:var(--accent)}
+.report-type-select-arrow{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-3);pointer-events:none}
+.report-type-meeting{margin-left:auto;font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px}
 .report-actions{display:flex;align-items:center;gap:8px;margin-bottom:32px;padding-bottom:16px;border-bottom:1px solid var(--line)}
 .report-actions .ctrl-btn{font-size:12px;padding:4px 12px}
 .report-meta-line{font-family:var(--mono);font-size:11px;color:var(--text-3);line-height:2;margin-bottom:24px}
