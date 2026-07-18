@@ -3,7 +3,7 @@
  * 布局驱动渲染器 + 演示模式 + 导出（Markdown / HTML）。
  * className 与原 HTML / global.css 保持一致。 */
 
-import { useEffect, useRef, useState, Fragment } from 'react';
+import { useEffect, useRef, useState, Fragment, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   getReportLayout,
@@ -403,36 +403,37 @@ const CONF_LABELS: Record<string, string> = {
   evidence_check: '校验', arbitrate: '仲裁', produce: '产出',
 };
 
-function ReportHeader({ title, subtitle, meeting }: { title: string; subtitle: string; meeting: any }) {
-  // 优先使用当前会议的真实数据，REPORT_DATA 仅作兜底
-  const r = REPORT_DATA;
-  const meetingId = meeting?.currentMeetingId || r.meetingId;
-  const meetingStatus = meeting?.status || r.status;
+function ReportHeader({ title, subtitle, meeting, confidence }: { title: string; subtitle: string; meeting: any; confidence?: Record<string, string> }) {
+  const meetingId = meeting?.currentMeetingId || meeting?.id || '--';
+  const meetingStatus = meeting?.status;
   const statusLabel = meetingStatus === 'done' ? '已完成' :
     meetingStatus === 'running' ? '进行中' :
     meetingStatus === 'failed' ? '失败' :
-    meetingStatus === 'aborted' ? '已中止' : r.status;
+    meetingStatus === 'aborted' ? '已中止' :
+    meetingStatus === 'paused' ? '已暂停' : '准备中';
   const generatedAt = meeting?.startTime
     ? new Date(meeting.startTime).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/\//g, '-')
-    : '2026-07-16 15:08';
+    : '--';
 
   return (
     <>
-      <div className="report-title">{title}</div>
-      <div className="report-subtitle">{subtitle}</div>
+      <div className="report-title">{title || '报告'}</div>
+      <div className="report-subtitle">{subtitle || ''}</div>
       <div className="report-meta-line">
         <span>会议 {meetingId}</span>
         <span>状态 {statusLabel}</span>
         <span>生成于 {generatedAt}</span>
       </div>
-      <div className="report-confidence">
-        {Object.entries(r.confidence).map(([k, v]) => (
-          <span className="conf-item" key={k}>
-            <span className="conf-dot" style={{ background: v === 'high' ? 'var(--dot-done)' : 'var(--dot-paused)' }} />
-            {CONF_LABELS[k] || k} {v}
-          </span>
-        ))}
-      </div>
+      {confidence && Object.keys(confidence).length > 0 && (
+        <div className="report-confidence">
+          {Object.entries(confidence).map(([k, v]) => (
+            <span className="conf-item" key={k}>
+              <span className="conf-dot" style={{ background: v === 'high' ? 'var(--dot-done)' : 'var(--dot-paused)' }} />
+              {CONF_LABELS[k] || k} {v}
+            </span>
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -457,18 +458,18 @@ function ReportToc({ items, onJump }: { items: string[]; onJump?: (i: number) =>
   );
 }
 
-function ReportAppendix({ secNum, withId = true }: { secNum?: number; withId?: boolean }) {
-  const r = REPORT_DATA;
+function ReportAppendix({ secNum, withId = true, trace }: { secNum?: number; withId?: boolean; trace?: Record<string, any> }) {
   const id = withId ? (secNum ? `sec-${secNum}` : 'report-appendix') : undefined;
+  const t = trace || {};
   return (
     <div className="report-appendix" id={id}>
       <div className="report-appendix-title">附录 — 执行追踪</div>
       <div className="report-trace">
-        <div className="report-trace-row"><span className="report-trace-label">LLM 调用次数</span><span className="report-trace-value">{r.llmTrace.totalCalls}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">成功率</span><span className="report-trace-value">{r.llmTrace.successRate}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">总 Token</span><span className="report-trace-value">{r.llmTrace.totalTokens}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">输入 Token</span><span className="report-trace-value">{r.llmTrace.inputTokens}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">输出 Token</span><span className="report-trace-value">{r.llmTrace.outputTokens}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">LLM 调用次数</span><span className="report-trace-value">{t.totalCalls ?? '--'}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">成功率</span><span className="report-trace-value">{t.successRate ?? '--'}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">总 Token</span><span className="report-trace-value">{t.totalTokens ?? '--'}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">输入 Token</span><span className="report-trace-value">{t.inputTokens ?? '--'}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">输出 Token</span><span className="report-trace-value">{t.outputTokens ?? '--'}</span></div>
       </div>
     </div>
   );
@@ -707,34 +708,44 @@ export default function Report() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeId]);
 
-  /* 进入视图时尝试获取真实布局，失败回退本地 */
+  /* 进入视图时尝试获取真实布局 */
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [layoutLoading, setLayoutLoading] = useState(false);
+
+  const fetchLayout = useCallback(async (meetingId: string, reportType: string) => {
+    setLayoutLoading(true);
+    setLayoutError(null);
+    try {
+      const spec = await apiGetReportLayout(meetingId, reportType, false);
+      if (spec && spec.sections) {
+        setRemoteLayout(spec as ReportLayout);
+      } else {
+        setRemoteLayout(null);
+      }
+    } catch (e: any) {
+      setRemoteLayout(null);
+      setLayoutError(e.message || '报告加载失败');
+    } finally {
+      setLayoutLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const id = meeting.currentMeetingId;
     if (!id) { setRemoteLayout(null); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const spec = await apiGetReportLayout(id, currentReportType, true);
-        if (!cancelled && spec && spec.sections) setRemoteLayout(spec as ReportLayout);
-      } catch {
-        if (!cancelled) {
-          setRemoteLayout(null);
-          appendLog('报告布局获取失败，使用本地演示数据', 'warning');
-        }
-      }
-    })();
-    return () => { cancelled = true; };
+    fetchLayout(id, currentReportType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meeting.currentMeetingId]);
+  }, [meeting.currentMeetingId, currentReportType, fetchLayout]);
 
   const handleSwitchType = (id: string) => {
     setCurrentReportType(id);
-    setRemoteLayout(null); // 切换类型后使用本地演示布局
+    // 切换类型时触发重新请求，不清空为演示数据
   };
 
-  const dataObj = getDataForType(currentReportType);
-  const layout: ReportLayout = remoteLayout ?? getReportLayout(currentReportType, dataObj);
-  const sections = layout.sections || [];
+  // 布局选择：优先远程真实布局；否则基于会议快照渲染（如有产出）；否则显示空状态
+  const dataObj = null; // 不再使用假数据填充
+  const layout: ReportLayout | null = remoteLayout;
+  const sections = layout?.sections || [];
   const tocItems = sections.map(s => s.title);
   const typeLabel = REPORT_TYPES.find(t => t.id === currentReportType)?.label || currentReportType;
 
@@ -766,9 +777,9 @@ export default function Report() {
   }, [slideIndex, presentation]);
 
   const scrollToTop = () => document.querySelector('.content')?.scrollTo({ top: 0, behavior: 'smooth' });
-  const openPresentation = () => { setSlideIndex(0); setPresentation(true); };
-  const exportMd = () => exportReportMarkdown(layout);
-  const exportHtml = () => exportReportHtml(docRef.current, layout);
+  const openPresentation = () => { if (layout) { setSlideIndex(0); setPresentation(true); } };
+  const exportMd = () => { if (layout) exportReportMarkdown(layout); };
+  const exportHtml = () => { if (layout && docRef.current) exportReportHtml(docRef.current, layout); };
 
   return (
     <>
@@ -805,14 +816,43 @@ export default function Report() {
       {/* 报告内容 */}
       {meeting.currentMeetingId && (
       <div id="report-content">
+        {layoutLoading && !layout && (
+          <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-3)' }}>
+            加载报告中...
+          </div>
+        )}
+        {!layoutLoading && layoutError && !layout && (
+          <div className="board-empty" style={{ margin: '40px 0' }}>
+            <div className="board-empty-title">报告加载失败</div>
+            <div className="board-empty-sub">{layoutError}</div>
+            <button className="btn btn-ghost" onClick={() => fetchLayout(meeting.currentMeetingId!, currentReportType)} style={{ marginTop: 16 }}>重试</button>
+          </div>
+        )}
+        {!layoutLoading && !layoutError && !layout && (
+          <div className="board-empty" style={{ margin: '40px 0' }}>
+            <div className="board-empty-title">报告尚未生成</div>
+            <div className="board-empty-sub">
+              {meeting.status === 'running' || meeting.status === 'pending'
+                ? '会议正在进行中，产出完成后可查看报告'
+                : '该会议暂无报告产出'}
+            </div>
+          </div>
+        )}
+        {layout && (
         <div className="report-doc" ref={docRef}>
           <ReportActionsBar typeLabel={typeLabel} onPresent={openPresentation} onMarkdown={exportMd} onHtml={exportHtml} />
-          <ReportHeader title={layout.title || meeting.title || REPORT_DATA.artifact.prd.title} subtitle={layout.subtitle || meeting.title || REPORT_DATA.clarifiedTopic} meeting={meeting} />
+          <ReportHeader
+            title={layout.title || meeting.title || ''}
+            subtitle={layout.subtitle || ''}
+            meeting={meeting}
+            confidence={layout.confidence}
+          />
           <ReportToc items={tocItems} />
           {sections.map((sec, i) => <Section key={i} index={i} section={sec} />)}
-          <ReportAppendix secNum={sections.length + 1} />
+          <ReportAppendix secNum={sections.length + 1} trace={layout.trace} />
           <ReportRating />
         </div>
+        )}
       </div>
       )}
 
@@ -833,7 +873,14 @@ export default function Report() {
             <div>
               {/* 封面 */}
               <div className={`report-presentation-slide ${slideIndex === 0 ? 'active' : ''}`}>
-                <ReportHeader title={layout.title || meeting.title || REPORT_DATA.artifact.prd.title} subtitle={layout.subtitle || meeting.title || REPORT_DATA.clarifiedTopic} meeting={meeting} />
+                {layout && (
+                  <ReportHeader
+                    title={layout.title || meeting.title || ''}
+                    subtitle={layout.subtitle || ''}
+                    meeting={meeting}
+                    confidence={layout.confidence}
+                  />
+                )}
               </div>
               {/* 目录 */}
               <div className={`report-presentation-slide ${slideIndex === 1 ? 'active' : ''}`}>
@@ -847,7 +894,7 @@ export default function Report() {
               ))}
               {/* 附录 + 评分 */}
               <div className={`report-presentation-slide ${slideIndex === 2 + sections.length ? 'active' : ''}`}>
-                <ReportAppendix withId={false} />
+                {layout && <ReportAppendix withId={false} trace={layout.trace} />}
                 <ReportRating />
               </div>
             </div>

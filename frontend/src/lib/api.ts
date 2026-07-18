@@ -140,6 +140,12 @@ export async function apiGetMetrics(silent = false) {
 export async function apiGetMetricsHistory(minutes = 60) {
   return api(`/metrics/history?minutes=${minutes}`);
 }
+export async function apiGetHealth() {
+  return api('/metrics/health');
+}
+export async function apiGetSecurityEvents(limit = 50) {
+  return api(`/audit/security-events?limit=${limit}`);
+}
 
 /* ═══ Preferences API ═══ */
 export async function apiGetPreferences(silent = false) {

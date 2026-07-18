@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
 
 export default function Topbar() {
-  const { theme, toggleTheme, toggleLog, openCmdk, user, logout } = useApp();
+  const { theme, toggleTheme, toggleLog, openCmdk, user, logout, demoMode, exitDemo } = useApp();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -24,6 +24,24 @@ export default function Topbar() {
       <div className="brand">
         <span className="brand-dot"></span>
         <span className="brand-name">Conclave</span>
+        {demoMode && (
+          <span
+            style={{
+              marginLeft: 12,
+              padding: '2px 8px',
+              fontSize: 11,
+              borderRadius: 4,
+              background: 'var(--accent-bg, rgba(250, 173, 20, 0.12))',
+              color: 'var(--accent, #faad14)',
+              border: '1px solid var(--accent, #faad14)',
+              cursor: 'pointer',
+            }}
+            onClick={() => { exitDemo(); navigate('/login'); }}
+            title="点击退出演示模式，前往登录"
+          >
+            演示模式
+          </span>
+        )}
       </div>
       <div className="topbar-right">
         <div className="topbar-search" onClick={openCmdk} style={{ cursor: 'pointer' }}>
@@ -48,7 +66,10 @@ export default function Topbar() {
           <button
             className="icon-btn user-btn"
             id="user-btn"
-            onClick={() => (user ? setMenuOpen((o) => !o) : navigate('/login'))}
+            onClick={() => {
+              if (demoMode) { navigate('/login'); return; }
+              if (user) { setMenuOpen((o) => !o); } else { navigate('/login'); }
+            }}
             title="用户"
           >
             {user ? (
@@ -56,7 +77,7 @@ export default function Topbar() {
             ) : (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
             )}
-            <span>{user ? (user.display_name || user.username) : '登录'}</span>
+            <span>{user ? (user.display_name || user.username) : (demoMode ? '登录' : '登录')}</span>
           </button>
           {menuOpen && user && (
             <div className="user-menu-popup" style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0 }}>

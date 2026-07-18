@@ -3,17 +3,35 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
 // Conclave 前端 React 工程配置
-// 入口为 app.html（对应 nginx 的 /app 路由）。portal(index.html) 与 demo.html
-// 放在 public/ 下，构建时原样拷贝到 dist 根，由 nginx 分别在 / 与 /demo 提供。
+// 入口为 app.html（对应 nginx 的 /app 路由）。
+// dev 模式下通过中间件实现 /app/* 路径回退到 app.html（historyApiFallback）。
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Dev 模式 history fallback：所有 /app 开头的非文件请求回退到 app.html
+    {
+      name: 'conclave-app-fallback',
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          const url = req.url || '/';
+          // 只处理 /app 开头，且不是静态资源（不含 .）且不是 API/WebSocket 代理路径
+          if (
+            url.startsWith('/app') &&
+            !url.includes('.') &&
+            !url.startsWith('/app.html')
+          ) {
+            req.url = '/app.html';
+          }
+          next();
+        });
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
     },
   },
-  // MPA 模式：portal(index.html)、app.html、demo.html 各自独立入口
-  appType: 'mpa',
   build: {
     outDir: 'dist',
     rollupOptions: {
@@ -22,8 +40,6 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // 确保刷新 /app/board 等前端路由时返回 app.html
-    // Vite dev 默认对 .html 入口做 history fallback
     proxy: {
       '/meetings': 'http://localhost:8000',
       '/workspace': 'http://localhost:8000',
@@ -35,6 +51,12 @@ export default defineConfig({
       '/llm': 'http://localhost:8000',
       '/auth': 'http://localhost:8000',
       '/metrics': 'http://localhost:8000',
+      '/audit': 'http://localhost:8000',
+      '/debug': 'http://localhost:8000',
+      '/captcha': 'http://localhost:8000',
+      '/config': 'http://localhost:8000',
+      '/documents': 'http://localhost:8000',
+      '/net-auth': 'http://localhost:8000',
     },
   },
   test: {

@@ -26,6 +26,8 @@ export interface ReportLayout {
   title?: string;
   subtitle?: string;
   sections: ReportSection[];
+  confidence?: Record<string, string>;
+  trace?: Record<string, unknown>;
 }
 
 /* ═══ Layout Spec Generator ═══ */

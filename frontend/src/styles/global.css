@@ -138,8 +138,9 @@ ul{list-style:none}
 .page-num{padding:4px 10px;font-size:13px;color:var(--text-3);cursor:pointer;transition:color .15s;border-radius:4px}
 .page-num:hover{color:var(--text);background:var(--hover)}
 .page-num.active{color:var(--text);font-weight:600}
-.page-arrow{padding:4px 8px;color:var(--text-3);cursor:pointer;transition:color .15s}
-.page-arrow:hover{color:var(--text)}
+.page-arrow{padding:4px 8px;color:var(--text-3);cursor:pointer;transition:color .15s;border-radius:4px}
+.page-arrow:hover{color:var(--text);background:var(--hover)}
+.page-arrow.disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
 .page-size{font-size:12px;color:var(--text-3)}
 
 /* ═══ Meeting detail ═══ */
@@ -233,8 +234,14 @@ ul{list-style:none}
 .msg-risk-low .msg-risk-dot{background:#52c41a}
 .msg-actions{display:flex;gap:4px;margin-top:10px;opacity:0;transition:opacity .15s}
 .msg:hover .msg-actions{opacity:1}
-.msg-action{font-size:12px;color:var(--text-3);cursor:pointer;transition:color .15s;padding:2px 6px;border-radius:4px}
-.msg-action:hover{color:var(--text);background:var(--hover)}
+.msg-action-btn{background:none;border:none;font-size:12px;color:var(--text-3);cursor:pointer;transition:all .15s;padding:2px 8px;border-radius:4px;font-family:inherit}
+.msg-action-btn:hover{color:var(--text);background:var(--hover)}
+.msg-empty{padding:24px 0;text-align:center;font-size:13px;color:var(--text-3);font-style:italic}
+.msg-focused{background:var(--accent-soft);border-radius:6px;margin:0 -12px;padding:20px 12px;animation:msg-focus-pulse 1.5s ease}
+.msg-intervention{border-left:3px solid var(--accent);padding-left:16px}
+.msg-user{background:var(--bg-2);border-radius:6px;padding:16px;margin:0 -8px}
+.msg-user .msg-role{color:var(--accent) !important}
+@keyframes msg-focus-pulse{0%{background:var(--accent-soft)}100%{background:transparent}}
 .msg-typing{padding:20px 0;display:flex;align-items:center;gap:10px}
 .typing-dots{display:flex;gap:4px}
 .typing-dot{width:5px;height:5px;border-radius:50%;background:var(--text-3);animation:typingBlink 1.4s infinite}
@@ -244,10 +251,14 @@ ul{list-style:none}
 
 /* ═══ Meeting controls ═══ */
 .meeting-controls{display:flex;align-items:center;gap:6px;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
-.ctrl-btn{display:flex;align-items:center;gap:6px;padding:6px 14px;font-size:13px;color:var(--text-2);border:1px solid var(--line-2);border-radius:6px;transition:all .15s}
-.ctrl-btn:hover{color:var(--text);border-color:var(--text-3);background:var(--hover)}
+.ctrl-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;font-size:13px;color:var(--text-2);background:var(--bg);border:1px solid var(--line-2);border-radius:6px;transition:all .15s;cursor:pointer;font-family:inherit}
+.ctrl-btn:hover:not(:disabled){color:var(--text);border-color:var(--text-3);background:var(--hover)}
+.ctrl-btn:disabled{opacity:.5;cursor:not-allowed}
 .ctrl-btn svg{width:13px;height:13px}
-.ctrl-btn.danger:hover{color:var(--dot-error);border-color:var(--dot-error)}
+.ctrl-btn.primary{background:var(--text);color:var(--bg);border-color:var(--text)}
+.ctrl-btn.primary:hover:not(:disabled){background:var(--text-2);border-color:var(--text-2)}
+.ctrl-btn.danger{background:#dc2626;color:#fff;border-color:#dc2626}
+.ctrl-btn.danger:hover:not(:disabled){background:#b91c1c;border-color:#b91c1c}
 
 /* ═══ Context panel (slide-in) ═══ */
 .ctx-panel{position:fixed;top:52px;right:0;bottom:0;width:400px;background:var(--bg);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .25s ease;z-index:20;overflow-y:auto;box-shadow:-4px 0 24px rgba(0,0,0,0.03)}
@@ -328,7 +339,7 @@ ul{list-style:none}
 .user-avatar.large{width:36px;height:36px;font-size:16px}
 .user-name{font-size:13px}
 
-.user-menu-popup{position:fixed;z-index:300;background:var(--bg);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);min-width:200px}
+.user-menu-popup{position:absolute;z-index:300;background:var(--bg);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);min-width:200px}
 .user-menu-header{display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid var(--line)}
 .user-menu-name{font-size:14px;font-weight:600}
 .user-menu-role{font-size:12px;color:var(--text-3)}
@@ -473,8 +484,7 @@ ul{list-style:none}
 .conn-port{font-family:var(--mono);font-size:11px;color:var(--text-3);margin-left:auto}
 
 /* ═══ Meeting toolbar (fixed right rail) ═══ */
-.meeting-toolbar{position:fixed;top:52px;right:0;bottom:0;width:48px;display:none;flex-direction:column;align-items:center;padding:16px 0;gap:4px;border-left:1px solid var(--line);background:var(--bg);z-index:15}
-.meeting-toolbar.show{display:flex}
+.meeting-toolbar{position:fixed;top:52px;right:0;bottom:0;width:48px;display:flex;flex-direction:column;align-items:center;padding:16px 0;gap:4px;border-left:1px solid var(--line);background:var(--bg);z-index:15}
 .toolbar-group{display:flex;flex-direction:column;align-items:center;gap:4px}
 .toolbar-divider{width:20px;height:1px;background:var(--line);margin:8px 0}
 .toolbar-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:10px;color:var(--text-3);transition:color .15s,background .15s;position:relative;cursor:pointer}
@@ -873,3 +883,33 @@ ul{list-style:none}
   .board-search input{width:120px}
   .login-card{padding:24px 20px}
 }
+
+/* ═══ Toast 通知系统 ═══ */
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:1000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{pointer-events:auto;display:flex;align-items:center;gap:10px;background:var(--surface,#fff);border:1px solid var(--line);border-radius:8px;padding:10px 14px;box-shadow:0 4px 12px rgba(0,0,0,0.08);font-size:13px;min-width:240px;max-width:380px;animation:toast-in .2s ease-out}
+.toast-icon{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.toast-success .toast-icon{background:#dcfce7;color:#16a34a}
+.toast-error .toast-icon{background:#fee2e2;color:#dc2626}
+.toast-warning .toast-icon{background:#fed7aa;color:#ea580c}
+.toast-info .toast-icon{background:#dbeafe;color:#2563eb}
+.toast-msg{flex:1;color:var(--text);line-height:1.5}
+.toast-close{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:16px;padding:0 2px;line-height:1}
+.toast-close:hover{color:var(--text)}
+@keyframes toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ═══ Modal 对话框 ═══ */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:200;display:flex;align-items:center;justify-content:center;animation:modal-fade-in .15s ease-out}
+.modal-card{background:var(--bg,#fff);border:1px solid var(--line);border-radius:12px;padding:24px 28px;min-width:360px;max-width:480px;box-shadow:0 12px 40px rgba(0,0,0,0.12);animation:modal-slide-in .2s ease-out}
+.modal-title{font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px}
+.modal-msg{font-size:14px;color:var(--text-2);line-height:1.7;margin-bottom:20px}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px}
+.ctrl-btn.danger{background:#dc2626;color:#fff;border-color:#dc2626}
+.ctrl-btn.danger:hover{background:#b91c1c}
+@keyframes modal-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes modal-slide-in{from{opacity:0;transform:translateY(-8px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+
+/* ═══ Error Boundary ═══ */
+.error-boundary{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:40px}
+.error-boundary-icon{width:48px;height:48px;border-radius:50%;background:#fee2e2;color:#dc2626;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;margin-bottom:16px}
+.error-boundary-title{font-size:18px;font-weight:600;color:var(--text);margin-bottom:8px}
+.error-boundary-msg{font-size:14px;color:var(--text-2);margin-bottom:20px;max-width:400px}

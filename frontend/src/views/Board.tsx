@@ -130,7 +130,7 @@ export default function Board() {
           <>
             <div className="page-nums">
               <span
-                className="page-arrow"
+                className={`page-arrow${currentPage <= 1 ? ' disabled' : ''}`}
                 onClick={() => { if (currentPage > 1) setPage(currentPage - 1); }}
               >
                 ‹
@@ -145,7 +145,7 @@ export default function Board() {
                 </span>
               ))}
               <span
-                className="page-arrow"
+                className={`page-arrow${currentPage >= totalPages ? ' disabled' : ''}`}
                 onClick={() => { if (currentPage < totalPages) setPage(currentPage + 1); }}
               >
                 ›

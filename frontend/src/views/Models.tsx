@@ -1,11 +1,41 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
-import { PROVIDERS, MODEL_CATALOG, STAGE_MODELS } from '../data/mock';
 import { apiGetProviders, apiGetModels } from '../lib/api';
+import { PROVIDERS as MOCK_PROVIDERS, MODEL_CATALOG as MOCK_CATALOG } from '../data/mock';
 
-type Provider = typeof PROVIDERS[number];
-type ModelCatalogItem = typeof MODEL_CATALOG[number];
+interface Provider {
+  id: string;
+  name: string;
+  hasKey?: boolean;
+  balance?: string;
+  currency?: string;
+  baseUrl?: string;
+  models?: number;
+  pricingNote?: string;
+}
+
+interface ModelCatalogItem {
+  id: string;
+  name: string;
+  provider: string;
+  desc?: string;
+  input?: number;
+  output?: number;
+  recommended?: boolean;
+  cat?: string;
+  score?: number;
+  tier?: string;
+}
+
+// 基础 Provider 列表（配置性质，仅用于初始展示结构，实际数据从 API 覆盖）
+const BASE_PROVIDERS: Provider[] = [
+  { id: 'siliconflow', name: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1' },
+  { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1' },
+  { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
+  { id: 'qwen', name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { id: 'zhipu', name: '智谱 AI', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+];
 
 const PAGE_SIZE = 10;
 
@@ -19,57 +49,122 @@ const FILTER_CHIPS: { key: FilterCat; label: string }[] = [
   { key: 'embedding', label: '向量' },
 ];
 
+// 阶段定义（配置常量，非业务数据）
+const STAGES = [
+  { key: 'clarify', name: '澄清', en: 'clarify' },
+  { key: 'intra', name: '团队内讨论', en: 'intra_team' },
+  { key: 'cross', name: '跨组辩论', en: 'cross_team' },
+  { key: 'evidence', name: '证据校验', en: 'evidence_check' },
+  { key: 'arbitrate', name: '仲裁', en: 'arbitrate' },
+  { key: 'produce', name: '产出', en: 'produce' },
+];
+
 export default function Models() {
-  const { appendLog } = useApp();
+  const { toast, demoMode } = useApp();
   const navigate = useNavigate();
 
-  // 数据：默认使用 mock，API 成功则覆盖
-  const [providers, setProviders] = useState<Provider[]>(PROVIDERS);
-  const [catalog, setCatalog] = useState<ModelCatalogItem[]>(MODEL_CATALOG);
+  const [providers, setProviders] = useState<Provider[]>(BASE_PROVIDERS);
+  const [catalog, setCatalog] = useState<ModelCatalogItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // 本地交互状态
-  const [currentProvider, setCurrentProvider] = useState<string>('siliconflow');
+  const [currentProvider, setCurrentProvider] = useState<string>('');
   const [modelSearch, setModelSearch] = useState('');
   const [modelFilter, setModelFilter] = useState<FilterCat>('all');
   const [modelPage, setModelPage] = useState(1);
 
-  // 进入视图时尝试拉取真实数据，失败回退 mock（不让请求失败导致空白）
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
+      setError(null);
+
+      // 演示模式：使用 mock 数据
+      if (demoMode) {
+        const mockProviders: Provider[] = MOCK_PROVIDERS.map((p: any) => ({
+          id: p.id, name: p.name, hasKey: true, balance: '演示', currency: 'CNY',
+          baseUrl: p.base_url || '', models: MOCK_CATALOG.filter((m: any) => m.provider === p.id).length,
+          pricingNote: '演示数据',
+        }));
+        const mockCatalog: ModelCatalogItem[] = MOCK_CATALOG.map((m: any) => ({
+          id: m.id, name: m.name, provider: m.provider, desc: m.desc || '',
+          input: m.input || 0, output: m.output || 0, recommended: !!m.recommended,
+          cat: m.cat || 'all', score: m.score, tier: m.tier || '',
+        }));
+        if (!cancelled) {
+          setProviders(mockProviders);
+          setCatalog(mockCatalog);
+          if (!currentProvider && mockProviders[0]) setCurrentProvider(mockProviders[0].id);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const errors: string[] = [];
+
       try {
-        const data = await apiGetProviders(true);
+        const data = await apiGetProviders(false);
         const list = Array.isArray(data) ? data : (data as any)?.providers;
         if (!cancelled && Array.isArray(list) && list.length) {
-          // 仅在返回结构可识别时覆盖，避免破坏渲染
-          setProviders(list as Provider[]);
+          // 合并基础信息
+          const merged = list.map((p: any) => ({
+            id: p.id,
+            name: p.name || p.id,
+            hasKey: !!p.has_key || !!p.hasKey,
+            balance: p.balance,
+            currency: p.currency || 'CNY',
+            baseUrl: p.base_url || p.baseUrl,
+            models: p.model_count || p.models || 0,
+            pricingNote: p.pricing_note || '',
+          }));
+          setProviders(merged);
+          if (!currentProvider && merged[0]) setCurrentProvider(merged[0].id);
         }
       } catch (e: any) {
-        // 静默回退 mock
-        if (!cancelled) appendLog?.('模型 Provider 拉取失败，使用本地数据', 'debug');
+        errors.push(`Provider: ${e.message}`);
       }
+
       try {
-        const data = await apiGetModels(true);
+        const data = await apiGetModels(false);
         const list = Array.isArray(data) ? data : (data as any)?.models;
         if (!cancelled && Array.isArray(list) && list.length) {
-          setCatalog(list as ModelCatalogItem[]);
+          setCatalog(list.map((m: any) => ({
+            id: m.id,
+            name: m.name || m.id,
+            provider: m.provider,
+            desc: m.desc || '',
+            input: m.input_price ?? m.input ?? 0,
+            output: m.output_price ?? m.output ?? 0,
+            recommended: !!m.recommended,
+            cat: m.cat || m.category || 'all',
+            score: m.score,
+            tier: m.tier || '',
+          })));
         }
       } catch (e: any) {
-        if (!cancelled) appendLog?.('模型列表拉取失败，使用本地数据', 'debug');
+        errors.push(`模型列表: ${e.message}`);
+      }
+
+      if (!cancelled) {
+        if (errors.length) {
+          setError(errors.join('; '));
+          toast('模型数据加载失败: ' + errors.join('; '), 'error', 5000);
+        }
+        setLoading(false);
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [demoMode]);
 
   const activeProvider = providers.find((p) => p.id === currentProvider) || providers[0];
 
-  // 过滤 + 搜索
   const filteredModels = useMemo(() => {
     let models = catalog.filter((m) => m.provider === currentProvider);
     if (modelFilter !== 'all') {
       models = models.filter((m) => {
         if (modelFilter === 'recommended') return !!m.recommended;
+        if (modelFilter === 'free') return (m.input ?? 0) === 0 && (m.output ?? 0) === 0;
         return m.cat === modelFilter;
       });
     }
@@ -82,7 +177,6 @@ export default function Models() {
     return models;
   }, [catalog, currentProvider, modelFilter, modelSearch]);
 
-  // 分页
   const totalPages = Math.max(1, Math.ceil(filteredModels.length / PAGE_SIZE));
   const currentPage = Math.min(modelPage, totalPages);
   const start = (currentPage - 1) * PAGE_SIZE;
@@ -103,12 +197,39 @@ export default function Models() {
     setModelPage(1);
   }
 
+  // 从真实模型列表计算各阶段推荐模型（简单策略：推荐标记 > 价格最低）
+  const stageModelRows = useMemo(() => {
+    return STAGES.map(stage => {
+      // 优先取 recommended 标记的模型
+      const recommended = catalog.find(m => m.recommended && m.cat !== 'embedding');
+      const byProvider = catalog.filter(m => m.provider === currentProvider);
+      const selected = recommended || byProvider[0] || null;
+      return {
+        ...stage,
+        model: selected ? selected.name : '未配置',
+        score: selected?.score ?? '-',
+        cost: selected ? `¥${selected.input ?? 0}/¥${selected.output ?? 0}` : '-',
+        reason: selected ? (selected.desc || '') : '请先配置 Provider 和 API Key',
+      };
+    });
+  }, [catalog, currentProvider]);
+
   return (
     <div className="view active" id="view-models">
       <div className="page-title" style={{ marginBottom: 8 }}>模型中心</div>
-      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 32 }}>
-        接入硅基流动等 OpenAI 兼容接口，检索可用模型并配置阶段分配
+      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: error ? 12 : 32 }}>
+        接入 OpenAI 兼容接口，检索可用模型并配置阶段分配
       </div>
+
+      {error && (
+        <div style={{
+          padding: '10px 14px', background: 'var(--bg-elevated)', borderRadius: 6,
+          border: '1px solid var(--error, #e74c3c)', color: 'var(--error, #e74c3c)',
+          fontSize: 12, marginBottom: 20,
+        }}>
+          数据加载失败: {error}
+        </div>
+      )}
 
       {/* Provider tabs */}
       <div className="provider-tabs" id="provider-tabs">
@@ -134,21 +255,23 @@ export default function Models() {
             <div className="provider-balance">
               <span className="balance-label">账户余额</span>
               <span className="balance-value">
-                {activeProvider.balance}
-                <span className="balance-currency"> {activeProvider.currency}</span>
+                {activeProvider.balance != null ? activeProvider.balance : '--'}
+                {activeProvider.currency && (
+                  <span className="balance-currency"> {activeProvider.currency}</span>
+                )}
               </span>
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-3)' }}>
               <div>
                 Base URL{' '}
                 <span style={{ fontFamily: 'var(--mono)', color: 'var(--text-2)' }}>
-                  {activeProvider.baseUrl}
+                  {activeProvider.baseUrl || '--'}
                 </span>
               </div>
               <div style={{ marginTop: 2 }}>
                 可用模型{' '}
                 <span style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>
-                  {activeProvider.models}
+                  {activeProvider.models ?? '--'}
                 </span>{' '}
                 个
               </div>
@@ -172,7 +295,7 @@ export default function Models() {
                 textAlign: 'right',
               }}
             >
-              {activeProvider.pricingNote}
+              {activeProvider.pricingNote || ''}
             </div>
           </div>
         )}
@@ -205,13 +328,17 @@ export default function Models() {
 
       {/* Model list */}
       <div id="model-list">
-        {pageItems.length === 0 ? (
+        {loading && pageItems.length === 0 ? (
           <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
-            该Provider下未找到匹配模型
+            加载模型列表...
+          </div>
+        ) : pageItems.length === 0 ? (
+          <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
+            {catalog.length === 0 ? '暂无模型数据，请先配置 API Key' : '该Provider下未找到匹配模型'}
           </div>
         ) : (
           pageItems.map((m) => {
-            const isFree = m.input === 0 && m.output === 0;
+            const isFree = (m.input ?? 0) === 0 && (m.output ?? 0) === 0;
             const priceStr = isFree ? (
               <span className="free">免费</span>
             ) : (
@@ -246,7 +373,7 @@ export default function Models() {
                   <span style={{ color: 'var(--text-3)', fontSize: 10 }}> /M</span>
                 </span>
                 <span className={`model-item-tier${m.recommended ? ' recommended' : ''}`}>
-                  {m.tier}
+                  {m.tier || '-'}
                 </span>
               </div>
             );
@@ -285,14 +412,14 @@ export default function Models() {
       <div style={{ marginTop: 48 }}>
         <div className="page-title" style={{ fontSize: 16, marginBottom: 4 }}>阶段模型分配</div>
         <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 20 }}>
-          为六阶段会议管线配置默认模型，基于基准测试推荐最优组合
+          会议管线各阶段使用的模型（从已配置 Provider 的模型列表中选取）
         </div>
         <div id="stage-model-config">
-          {STAGE_MODELS.map((s, i) => (
-            <div className="stage-model-row" key={s.stageEn + i}>
+          {stageModelRows.map((s) => (
+            <div className="stage-model-row" key={s.key}>
               <div>
-                <div className="stage-model-label">{s.stage}</div>
-                <div className="stage-model-label-en">@{s.stageEn}</div>
+                <div className="stage-model-label">{s.name}</div>
+                <div className="stage-model-label-en">@{s.en}</div>
               </div>
               <div className="stage-model-select">{s.model}</div>
               <span className="stage-model-score">{s.score}分</span>
@@ -302,31 +429,6 @@ export default function Models() {
               </div>
             </div>
           ))}
-        </div>
-        <div
-          style={{
-            marginTop: 16,
-            padding: '16px 0',
-            borderTop: '1px solid var(--line)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 24,
-            fontSize: 13,
-            color: 'var(--text-3)',
-          }}
-        >
-          <span>
-            预估单轮成本{' '}
-            <span style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>¥0.97</span>
-          </span>
-          <span>
-            10轮预估{' '}
-            <span style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>¥9.70</span>
-          </span>
-          <span>
-            对比全 GLM-5.2{' '}
-            <span style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>节省 63%</span>
-          </span>
         </div>
       </div>
     </div>

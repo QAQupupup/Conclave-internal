@@ -782,9 +782,27 @@ ul{list-style:none}
   .ctx-panel{width:100%}
   .topbar-search{width:140px}
 }
+
+/* ═══ Demo 模式警示横幅 ═══ */
+.demo-banner{position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#d97706,#b45309);color:#fff;padding:8px 24px;display:flex;align-items:center;justify-content:center;gap:16px;font-size:13px;font-weight:500;letter-spacing:.02em;box-shadow:0 2px 8px rgba(180,83,9,.25)}
+.demo-banner-icon{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.15);padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.demo-banner-text{opacity:.95}
+.demo-banner-btn{background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:#fff;padding:4px 14px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;margin-left:8px}
+.demo-banner-btn:hover{background:rgba(255,255,255,.35);border-color:rgba(255,255,255,.5)}
+.app{margin-top:36px}
 </style>
 </head>
 <body>
+<!-- Demo 模式警示横幅：明确告知用户这是模拟演示，非真实系统 -->
+<div class="demo-banner">
+  <span class="demo-banner-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:12px;height:12px"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    DEMO
+  </span>
+  <span class="demo-banner-text">您正在查看演示模式，所有数据均为模拟数据，不连接真实后端</span>
+  <button class="demo-banner-btn" onclick="location.href='/'">返回首页</button>
+  <button class="demo-banner-btn" onclick="location.href='/app/login'">进入真实系统</button>
+</div>
 <div class="app">
 
 <!-- ═══ Top bar ═══ -->

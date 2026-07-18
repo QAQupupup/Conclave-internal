@@ -1,141 +1,260 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useApp } from '../state/AppContext';
-import { HEALTH_CHECKS, METRICS, CIRCUIT_BREAKER, EVENTS } from '../data/mock';
-import { apiGetMetrics } from '../lib/api';
+import { apiGetMetrics, apiGetHealth, apiGetSecurityEvents } from '../lib/api';
+import { HEALTH_CHECKS as MOCK_HEALTH, METRICS as MOCK_METRICS, EVENTS as MOCK_EVENTS } from '../data/mock';
 
-type Metric = typeof METRICS[number];
-
-function cbDotClass(indicator: string): string {
-  if (indicator === 'closed') return 'closed';
-  if (indicator === 'half_open') return 'half_open';
-  if (indicator === 'open') return 'open';
-  return '';
+interface HealthCheck {
+  name: string;
+  status: 'ok' | 'error' | 'unavailable';
+  latency_ms?: number;
+  message?: string;
 }
 
-function cbText(indicator: string): string | null {
-  if (indicator === 'closed') return '正常';
-  if (indicator === 'half_open') return '半开';
-  if (indicator === 'open') return '熔断';
-  return null;
+interface MetricCard {
+  label: string;
+  value: string;
+  unit: string;
+  trend: string;
+}
+
+interface SecurityEvent {
+  id: number;
+  timestamp: string;
+  category: string;
+  action: string;
+  username: string;
+  status: string;
+  details: any;
+}
+
+const HEALTH_LABELS: Record<string, { name: string; desc: string }> = {
+  postgresql: { name: 'PostgreSQL', desc: '主数据库' },
+  qdrant: { name: 'Qdrant', desc: '向量数据库' },
+  docker: { name: 'Docker', desc: '沙箱运行时' },
+};
+
+function statusDotClass(status: string): string {
+  if (status === 'ok') return 'done';
+  if (status === 'unavailable') return 'pending';
+  return 'error';
+}
+
+function statusText(status: string): string {
+  if (status === 'ok') return 'ok';
+  if (status === 'unavailable') return '未配置';
+  return 'error';
+}
+
+function formatTime(ts: string): string {
+  try {
+    return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
+  } catch {
+    return ts.slice(11, 19);
+  }
 }
 
 export default function Monitor() {
-  const { appendLog } = useApp();
+  const { toast, demoMode } = useApp();
 
-  // 指标：默认 mock，API 成功覆盖对应项；失败回退 mock
-  const [metrics, setMetrics] = useState<Metric[]>(METRICS);
+  const [healthChecks, setHealthChecks] = useState<HealthCheck[]>([]);
+  const [metrics, setMetrics] = useState<MetricCard[]>([]);
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    // 演示模式：直接使用 mock 数据
+    if (demoMode) {
+      setHealthChecks(MOCK_HEALTH.map((h: any) => ({
+        name: h.name, status: h.status === 'healthy' ? 'ok' : (h.status === 'unavailable' ? 'unavailable' : 'error'),
+        latency_ms: h.latency, message: h.message,
+      })));
+      setMetrics(MOCK_METRICS.map((m: any) => ({ label: m.label, value: m.value, unit: m.unit || '', trend: m.trend || '' })));
+      setEvents(MOCK_EVENTS.map((e: any, i: number) => ({
+        id: i, timestamp: e.time || new Date().toISOString(),
+        category: e.category || 'system', action: e.action || e.event || '',
+        username: e.user || 'demo', status: e.status || 'info', details: {},
+      })));
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    setError(null);
+    try {
+      const [healthData, metricsData, eventsData] = await Promise.allSettled([
+        apiGetHealth(),
+        apiGetMetrics(false),
+        apiGetSecurityEvents(20),
+      ]);
+
+      // 处理健康检查
+      if (healthData.status === 'fulfilled' && healthData.value) {
+        const checks: HealthCheck[] = Object.entries(healthData.value).map(([key, val]: [string, any]) => ({
+          name: HEALTH_LABELS[key]?.name || key,
+          status: val?.status || 'error',
+          latency_ms: val?.latency_ms,
+          message: val?.message,
+        }));
+        // 添加 LLM 熔断器状态（从 metrics 获取）
+        setHealthChecks(checks);
+      }
+
+      // 处理指标
+      if (metricsData.status === 'fulfilled' && metricsData.value) {
+        const m = metricsData.value;
+        const cards: MetricCard[] = [
+          { label: '会议总数', value: String(m.meetings_total ?? '-'), unit: '', trend: `运行中 ${m.active_meetings ?? 0}` },
+          { label: 'LLM 调用次数', value: String(m.llm_calls_total ?? '-'), unit: '', trend: `失败 ${m.llm_calls_failed ?? 0} 次` },
+          { label: '平均响应耗时', value: m.avg_response_ms != null ? `${Math.round(m.avg_response_ms)}` : '-', unit: 'ms', trend: '' },
+          { label: 'WS 连接数', value: String(m.ws_connections ?? '-'), unit: '', trend: '' },
+          { label: '沙箱运行中', value: String(m.running_sandboxes ?? '-'), unit: '', trend: '' },
+          { label: '审计事件', value: String(m.audit_events_today ?? '-'), unit: '', trend: '今日' },
+        ];
+        setMetrics(cards);
+      }
+
+      // 处理安全/系统事件
+      if (eventsData.status === 'fulfilled' && eventsData.value) {
+        const allEvents = [
+          ...(eventsData.value.security_events || []),
+          ...(eventsData.value.system_errors || []),
+        ].sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 20);
+        setEvents(allEvents);
+      }
+
+      const anyFailed = [healthData, metricsData, eventsData].some(r => r.status === 'rejected');
+      if (anyFailed && healthChecks.length === 0) {
+        // 至少有一个请求失败但健康检查也没拿到
+        const failedReasons = [healthData, metricsData, eventsData]
+          .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+          .map(r => r.reason?.message || '未知错误')
+          .join('; ');
+        setError(failedReasons || '部分数据加载失败');
+      }
+    } catch (e: any) {
+      setError(e.message || '加载监控数据失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [demoMode]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data: any = await apiGetMetrics(true);
-        if (cancelled || !data || typeof data !== 'object') return;
-        setMetrics((prev) =>
-          prev.map((m) => {
-            // 用真实数据覆盖语义对应的指标显示
-            if (m.label === '运行中会议' && data.active_meetings != null) {
-              return { ...m, value: String(data.active_meetings) };
-            }
-            if (m.label === '会议总数' && data.meetings_total != null) {
-              return { ...m, value: String(data.meetings_total) };
-            }
-            if (m.label === '今日Token消耗' && data.llm_calls_total != null) {
-              return { ...m, trend: `累计 ${data.llm_calls_total} 次调用` };
-            }
-            return m;
-          }),
-        );
-      } catch (e: any) {
-        // 静默回退 mock，不抛错
-        if (!cancelled) appendLog?.('监控指标拉取失败，使用本地数据', 'debug');
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    loadData();
+    // 每 10 秒自动刷新
+    const timer = setInterval(loadData, 10000);
+    return () => clearInterval(timer);
+  }, [loadData, demoMode]);
+
+  if (loading && healthChecks.length === 0 && metrics.length === 0) {
+    return (
+      <div className="view active" id="view-monitor">
+        <div className="page-title" style={{ marginBottom: 8 }}>监控面板</div>
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-3)' }}>
+          正在加载监控数据...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="view active" id="view-monitor">
-      <div className="page-title" style={{ marginBottom: 8 }}>监控面板</div>
-      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 32 }}>
-        系统健康状态、资源占用、LLM 熔断器、实时指标
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div className="page-title" style={{ marginBottom: 0 }}>监控面板</div>
+        <button className="btn btn-ghost" onClick={loadData} style={{ fontSize: 12 }}>刷新</button>
       </div>
+      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: error ? 12 : 32 }}>
+        系统健康状态、资源占用、实时指标
+      </div>
+
+      {error && (
+        <div style={{
+          padding: '10px 14px', background: 'var(--bg-elevated)', borderRadius: 6,
+          border: '1px solid var(--error, #e74c3c)', color: 'var(--error, #e74c3c)',
+          fontSize: 12, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span>⚠️</span>
+          <span>部分监控数据加载失败: {error}</span>
+        </div>
+      )}
 
       {/* Health overview */}
       <div className="monitor-section-title">组件健康</div>
-      <div id="health-list">
-        {HEALTH_CHECKS.map((h, i) => {
-          const isCb = h.name === 'LLM 熔断器';
-          const dotCls = isCb ? 'done' : h.status === 'ok' ? 'done' : 'error';
-          const statusText = isCb ? 'closed (正常)' : h.status === 'ok' ? 'ok' : 'error';
-          return (
-            <div className="health-item" key={h.name + i}>
+      {healthChecks.length === 0 ? (
+        <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 13, textAlign: 'center' }}>
+          暂无健康检查数据
+        </div>
+      ) : (
+        <div id="health-list">
+          {healthChecks.map((h) => (
+            <div className="health-item" key={h.name}>
               <div className="health-name">{h.name}</div>
               <div className="health-desc">
-                {h.desc}
-                <br />
-                <span style={{ color: 'var(--text-3)', fontSize: 11 }}>{h.detail}</span>
+                {HEALTH_LABELS[h.name]?.desc || ''}
+                {h.message && (
+                  <>
+                    <br />
+                    <span style={{ color: 'var(--text-3)', fontSize: 11 }}>{h.message}</span>
+                  </>
+                )}
               </div>
-              <div className="health-latency">{h.latency}</div>
+              <div className="health-latency">
+                {h.latency_ms != null && h.latency_ms > 0 ? `${h.latency_ms}ms` : '-'}
+              </div>
               <div className="health-status">
-                <span className={`status-dot ${dotCls}`} />
-                {statusText}
+                <span className={`status-dot ${statusDotClass(h.status)}`} />
+                {statusText(h.status)}
               </div>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Metrics */}
       <div className="monitor-section-title" style={{ marginTop: 40 }}>运行指标</div>
-      <div className="metric-grid" id="metric-grid">
-        {metrics.map((m, i) => (
-          <div className="metric-card" key={m.label + i}>
-            <div className="metric-label">{m.label}</div>
-            <div className="metric-value">
-              {m.value}
-              <span className="metric-unit">{m.unit}</span>
+      {metrics.length === 0 ? (
+        <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 13, textAlign: 'center' }}>
+          暂无指标数据
+        </div>
+      ) : (
+        <div className="metric-grid" id="metric-grid">
+          {metrics.map((m) => (
+            <div className="metric-card" key={m.label}>
+              <div className="metric-label">{m.label}</div>
+              <div className="metric-value">
+                {m.value}
+                <span className="metric-unit">{m.unit}</span>
+              </div>
+              <div className="metric-trend">{m.trend}</div>
             </div>
-            <div className="metric-trend">{m.trend}</div>
-            <div className="metric-bar">
-              <div className="metric-bar-fill" style={{ width: `${m.bar * 100}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {/* LLM circuit breaker */}
-      <div className="monitor-section-title" style={{ marginTop: 40 }}>LLM 熔断器</div>
-      <div id="circuit-breaker">
-        {CIRCUIT_BREAKER.map((cb, i) => {
-          const dotText = cbText(cb.indicator);
-          return (
-            <div className="cb-state" key={cb.label + i}>
-              <span className="cb-label">{cb.label}</span>
-              <span className="cb-value">{cb.value}</span>
-              {dotText && (
-                <span className="cb-state-indicator">
-                  <span className={`cb-dot ${cbDotClass(cb.indicator)}`} />
-                  {dotText}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Recent events */}
+      {/* Recent events (from audit log) */}
       <div className="monitor-section-title" style={{ marginTop: 40 }}>近期事件</div>
-      <div id="event-list">
-        {EVENTS.map((e, i) => (
-          <div className="event-item" key={e.time + i}>
-            <span className="event-time">{e.time}</span>
-            <span className={`event-level ${e.level}`}>{e.level}</span>
-            <span className="event-msg">{e.msg}</span>
-          </div>
-        ))}
-      </div>
+      {events.length === 0 ? (
+        <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 13, textAlign: 'center' }}>
+          暂无事件记录
+        </div>
+      ) : (
+        <div id="event-list">
+          {events.map((e) => {
+            const isError = e.status === 'error' || e.status === 'failure' || e.status === 'blocked' || e.status === 'denied';
+            const isWarn = e.status === 'warning';
+            const level = isError ? 'error' : isWarn ? 'warn' : 'info';
+            return (
+              <div className="event-item" key={e.id}>
+                <span className="event-time">{formatTime(e.timestamp)}</span>
+                <span className={`event-level ${level}`}>{level}</span>
+                <span className="event-msg">
+                  [{e.category}] {e.action}
+                  {e.username && e.username !== '-' && ` - ${e.username}`}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -17,7 +17,7 @@ import { apiLogin } from '../lib/api';
 export default function Login() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { user, setUser } = useApp();
+  const { user, setUser, enterDemo } = useApp();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -64,6 +64,11 @@ export default function Login() {
     }
   };
 
+  const handleDemo = () => {
+    enterDemo();
+    navigate('/', { replace: true });
+  };
+
   return (
     <div className="login-page">
       <div className="login-card">
@@ -94,6 +99,18 @@ export default function Login() {
           {error && <div className="modal-error">{error}</div>}
           <button className="ctrl-btn primary login-submit" disabled={loading} onClick={submit}>
             {loading ? '登录中...' : '登录'}
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>或</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
+          </div>
+          <button
+            className="ctrl-btn"
+            onClick={handleDemo}
+            style={{ background: 'transparent', border: '1px solid var(--line)' }}
+          >
+            进入演示（模拟数据）
           </button>
           <Link to="/" className="login-back">返回首页</Link>
         </div>

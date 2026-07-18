@@ -2,18 +2,21 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
 import { apiGetKeys, apiSaveKey, apiGetPreferences, apiSetPreference } from '../lib/api';
-import { PROVIDERS } from '../data/mock';
 
 interface LlmKey {
   provider?: string;
   name?: string;
 }
 
-// 复用模型中心的 provider 列表，避免两处不同步
-const KEY_PROVIDERS: { value: string; label: string }[] = PROVIDERS.map((p) => ({
-  value: p.id,
-  label: p.name,
-}));
+// Key 配置支持的 LLM Provider 列表（配置常量，非业务数据）
+const KEY_PROVIDERS: { value: string; label: string }[] = [
+  { value: 'siliconflow', label: '硅基流动' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'qwen', label: '通义千问' },
+  { value: 'zhipu', label: '智谱 AI' },
+  { value: 'custom', label: '自定义 (OpenAI兼容)' },
+];
 
 export default function Settings() {
   const { theme, toggleTheme, logOpen, toggleLog, appendLog } = useApp();

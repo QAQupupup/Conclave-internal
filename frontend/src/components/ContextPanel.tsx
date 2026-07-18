@@ -1,5 +1,6 @@
+import { useState, useEffect } from 'react';
 import { useApp } from '../state/AppContext';
-import { ROLES, MODELS, STAGES } from '../data/mock';
+import { ROLES, STAGES } from '../data/mock';
 import { REPORT_TYPES } from '../data/reportData';
 
 const TITLES: Record<string, string> = {
@@ -10,13 +11,8 @@ const TYPE_LABELS: Record<string, string> = Object.fromEntries(
   REPORT_TYPES.map((t) => [t.id, t.label]),
 );
 
-const EVIDENCE = ['规格 §3.2', 'martinfowler.com', 'arxiv:1706.04024', 'owasp.org/ms-top10', 'debezium.io', 'microservices.io', 'linkerd.io'];
-const TOKEN_STATS: [string, string][] = [
-  ['总消耗', '48,213'], ['主持人', '8,420'], ['架构师', '12,105'], ['工程师', '7,832'],
-  ['安全专家', '6,540'], ['UX设计师', '4,210'], ['数据工程师', '5,106'], ['市场专家', '4,000'], ['预估成本', '¥0.34'],
-];
-
 function fmtElapsed(sec: number): string {
+  if (!sec || sec < 0) return '—';
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}分${String(s).padStart(2, '0')}秒`;
@@ -24,10 +20,42 @@ function fmtElapsed(sec: number): string {
 
 export default function ContextPanel() {
   const { ctx, closeCtx, meeting, stageName, statusText } = useApp();
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  // 本地 elapsed 计算（同 Meeting 视图）
+  useEffect(() => {
+    if (!meeting.startedAt || (meeting.status !== 'running' && meeting.status !== 'paused')) {
+      setElapsedSec(0);
+      return;
+    }
+    const tick = () => setElapsedSec(Math.floor((Date.now() - meeting.startedAt!) / 1000));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [meeting.startedAt, meeting.status]);
+
   if (!ctx.open) return null;
 
   const stageIdx = Math.min(meeting.stage, STAGES.length - 1);
   const typeLabel = TYPE_LABELS[meeting.type] || meeting.type;
+
+  // 从真实消息中提取参与角色和证据
+  const activeSpeakers = new Set<string>();
+  const evidenceRefs = new Set<string>();
+  let totalChars = 0;
+  meeting.messages.forEach((m) => {
+    const role = m.speaker_role || m.speaker;
+    if (role) activeSpeakers.add(role);
+    totalChars += m.content?.length || 0;
+    // 提取证据引用（简单提取 URL 和 § 引用）
+    const urlMatches = m.content?.match(/https?:\/\/[^\s)）]+/g) || [];
+    urlMatches.forEach((u) => evidenceRefs.add(u));
+    const docMatches = m.content?.match(/[§#][\w.]+/g) || [];
+    docMatches.forEach((d) => evidenceRefs.add(d));
+  });
+
+  const isRunning = meeting.status === 'running' || meeting.status === 'paused';
+  const isDone = meeting.status === 'done' || meeting.status === 'aborted' || meeting.status === 'failed';
 
   return (
     <div className="ctx-panel open" id="ctx-panel">
@@ -40,33 +68,42 @@ export default function ContextPanel() {
       <div className="ctx-panel-body">
         {ctx.type === 'overview' && (
           <>
-            <div className="ctx-field"><div className="ctx-label">议题</div><div className="ctx-value">{meeting.title}</div></div>
-            <div className="ctx-field"><div className="ctx-label">产出类型</div><div className="ctx-value">{typeLabel}</div></div>
-            <div className="ctx-field"><div className="ctx-label">当前阶段</div><div className="ctx-value">{stageName(STAGES[stageIdx].key)} · 第 {stageIdx + 1} / {STAGES.length} 阶段</div></div>
-            <div className="ctx-field"><div className="ctx-label">已运行</div><div className="ctx-value" style={{ fontFamily: 'var(--mono)' }}>{fmtElapsed(meeting.elapsed)}</div></div>
-            <div className="ctx-field"><div className="ctx-label">状态</div><div className="ctx-value">{statusText(meeting.status || 'running')}</div></div>
+            <div className="ctx-field"><div className="ctx-label">议题</div><div className="ctx-value">{meeting.title || '—'}</div></div>
+            <div className="ctx-field"><div className="ctx-label">产出类型</div><div className="ctx-value">{typeLabel || '—'}</div></div>
+            <div className="ctx-field"><div className="ctx-label">当前阶段</div><div className="ctx-value">{stageName(STAGES[stageIdx]?.key) || '—'} · 第 {stageIdx + 1} / {STAGES.length} 阶段</div></div>
+            <div className="ctx-field"><div className="ctx-label">已运行</div><div className="ctx-value" style={{ fontFamily: 'var(--mono)' }}>{isRunning ? fmtElapsed(elapsedSec) : statusText(meeting.status || 'pending')}</div></div>
+            <div className="ctx-field"><div className="ctx-label">状态</div><div className="ctx-value">{statusText(meeting.status || 'pending')}</div></div>
+            <div className="ctx-field"><div className="ctx-label">消息数</div><div className="ctx-value" style={{ fontFamily: 'var(--mono)' }}>{meeting.messages.length} 条</div></div>
             <div className="ctx-field">
-              <div className="ctx-label">参会角色</div>
+              <div className="ctx-label">参会角色（{activeSpeakers.size}）</div>
               <div className="ctx-roles">
-                {Object.entries(ROLES).map(([k, r]) => (
-                  <div className="ctx-role" key={k}>
-                    <span className="ctx-role-dot" style={{ background: r.color }}></span>
-                    <span className="ctx-role-name">{r.name}</span>
-                    <span className="ctx-role-status">{k === 'moderator' ? '主持' : '已发言'}</span>
-                  </div>
-                ))}
+                {Object.entries(ROLES).map(([k, r]) => {
+                  const hasSpoken = activeSpeakers.has(k) || activeSpeakers.has(r.name);
+                  return (
+                    <div className="ctx-role" key={k} style={{ opacity: hasSpoken ? 1 : 0.4 }}>
+                      <span className="ctx-role-dot" style={{ background: r.color }}></span>
+                      <span className="ctx-role-name">{r.name}</span>
+                      <span className="ctx-role-status">{hasSpoken ? '已发言' : '等待中'}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </>
         )}
         {ctx.type === 'evidence' && (
           <>
-            <div className="ctx-field"><div className="ctx-label">证据列表 · {EVIDENCE.length}条</div></div>
-            {EVIDENCE.map((r, i) => (
-              <div key={r} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
-                <div style={{ fontSize: 13, color: 'var(--text)' }}>{r}</div>
+            <div className="ctx-field"><div className="ctx-label">证据引用 · {evidenceRefs.size}条</div></div>
+            {evidenceRefs.size === 0 && (
+              <div style={{ padding: '12px 0', fontSize: 13, color: 'var(--text-3)', fontStyle: 'italic' }}>
+                暂未提取到证据引用
+              </div>
+            )}
+            {[...evidenceRefs].slice(0, 50).map((ref, i) => (
+              <div key={ref} style={{ padding: '10px 0', borderBottom: '1px solid var(--line)', fontSize: 13 }}>
+                <div style={{ color: 'var(--text)', wordBreak: 'break-all' }}>{ref}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4, fontFamily: 'var(--mono)' }}>
-                  来源: {i < 2 ? '文档' : i < 5 ? 'Web搜索' : '已验证'} · 可信度: {i < 2 ? '高' : i < 5 ? '中' : '高'}
+                  #{i + 1} · 来源: 会议讨论
                 </div>
               </div>
             ))}
@@ -74,16 +111,31 @@ export default function ContextPanel() {
         )}
         {ctx.type === 'artifact' && (
           <>
-            <div className="ctx-field"><div className="ctx-label">产出状态</div><div className="ctx-value" style={{ color: 'var(--text-3)' }}>尚未生成 · 等待仲裁和产出阶段</div></div>
-            <div className="ctx-field"><div className="ctx-label">预期产出</div><div className="ctx-value">{typeLabel} · 包含迁移路径、分期方案、风险评估</div></div>
+            <div className="ctx-field">
+              <div className="ctx-label">产出状态</div>
+              <div className="ctx-value" style={{ color: isDone ? 'var(--text)' : 'var(--text-3)' }}>
+                {isDone ? '已完成' : meeting.status === 'running' ? '生成中…' : '等待中'}
+              </div>
+            </div>
+            <div className="ctx-field"><div className="ctx-label">预期产出</div><div className="ctx-value">{typeLabel || '—'}</div></div>
+            <div className="ctx-field"><div className="ctx-label">输出字符</div><div className="ctx-value" style={{ fontFamily: 'var(--mono)' }}>{totalChars.toLocaleString()} 字</div></div>
           </>
         )}
-        {ctx.type === 'token' && TOKEN_STATS.map(([label, val]) => (
-          <div className="ctx-stat" key={label}><span className="ctx-stat-label">{label}</span><span className="ctx-stat-value">{val}</span></div>
-        ))}
-        {ctx.type === 'model' && MODELS.map((m: any) => (
-          <div className="ctx-stat" key={m.id}><span className="ctx-stat-label">{m.name}</span><span className="ctx-stat-value">{m.tag}</span></div>
-        ))}
+        {ctx.type === 'token' && (
+          <>
+            <div className="ctx-stat"><span className="ctx-stat-label">消息条数</span><span className="ctx-stat-value">{meeting.messages.length}</span></div>
+            <div className="ctx-stat"><span className="ctx-stat-label">总字符数</span><span className="ctx-stat-value">{totalChars.toLocaleString()}</span></div>
+            <div className="ctx-stat"><span className="ctx-stat-label">已运行</span><span className="ctx-stat-value" style={{ fontFamily: 'var(--mono)' }}>{fmtElapsed(elapsedSec)}</span></div>
+            <div style={{ padding: '16px 0', fontSize: 12, color: 'var(--text-3)', borderTop: '1px solid var(--line)', marginTop: 8 }}>
+              详细 Token 成本统计将在后端 metrics API 完善后展示
+            </div>
+          </>
+        )}
+        {ctx.type === 'model' && (
+          <div style={{ padding: '16px 0', fontSize: 12, color: 'var(--text-3)' }}>
+            模型调度与成本统计随会议运行实时更新
+          </div>
+        )}
       </div>
     </div>
   );

@@ -23,11 +23,18 @@ function wsBackoffDelay(attempt: number): number {
   return exp + Math.floor(Math.random() * 1000); // 0-1000ms 抖动
 }
 
-function wsUrl(path: string): string {
+function wsUrl(path: string, params?: Record<string, string | number>): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const token = getToken();
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${proto}//${location.host}${path}${tokenParam}`;
+  const search = new URLSearchParams();
+  if (token) search.set('token', token);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== 0 && v !== '') search.set(k, String(v));
+    }
+  }
+  const qs = search.toString();
+  return `${proto}//${location.host}${path}${qs ? '?' + qs : ''}`;
 }
 
 /** 后端 Stage 枚举（与 models.py Stage 对齐） */
@@ -73,18 +80,19 @@ export class MeetingWsClient {
   private destroyed = false;
   /** 是否由用户主动关闭（logout/disconnect），不触发重连 */
   private intentionalClose = false;
+  /** 上次收到的事件 seq，用于断线重连时增量回放 */
+  private lastSeq = 0;
 
   constructor(private handlers: MeetingWsHandlers) {}
 
   connect(meetingId: string): void {
-    // [严重bug修复] 原代码先设 destroyed=false，再调用 disconnect()（内部设回 true），
-    // 导致 scheduleReconnect() 永远直接返回，重连完全失效。
-    // 正确顺序：先 disconnect() 清理旧连接（清理方法不再修改 destroyed 标志），再设标志位。
     this.intentionalClose = false;
     this.disconnect({ silent: true });
     this.destroyed = false;
     this.meetingId = meetingId;
     this.attempts = 0;
+    // 新会议首次连接，重置 lastSeq 以获取完整 snapshot
+    this.lastSeq = 0;
     this.createConnection();
   }
 
@@ -92,7 +100,10 @@ export class MeetingWsClient {
     const mid = this.meetingId;
     if (!mid || this.destroyed) return;
     try {
-      this.ws = new WebSocket(wsUrl(`/ws/meetings/${mid}`));
+      // 重连时带上 lastSeq 以获取增量回放（首次连接 lastSeq=0 获取完整 snapshot）
+      const params: Record<string, string | number> = {};
+      if (this.lastSeq > 0) params.from_seq = this.lastSeq;
+      this.ws = new WebSocket(wsUrl(`/ws/meetings/${mid}`, params));
     } catch (e) {
       console.warn('[WS] 创建连接失败，将重试:', e);
       this.scheduleReconnect();
@@ -214,6 +225,11 @@ export class MeetingWsClient {
     let msg: WsMessage;
     try { msg = JSON.parse(ev.data); } catch { return; }
     if (!msg || !msg.type) return;
+    // 追踪 seq 号用于断线重连增量回放
+    if (typeof msg.seq === 'number' && msg.seq > this.lastSeq) this.lastSeq = msg.seq;
+    if (msg.type === 'replay.done' && typeof msg.last_seq === 'number') {
+      this.lastSeq = Math.max(this.lastSeq, msg.last_seq);
+    }
     const h = this.handlers;
     switch (msg.type) {
       case 'snapshot': h.onSnapshot?.(msg.payload || {}); break;
@@ -232,7 +248,7 @@ export class MeetingWsClient {
       case 'produce.progress': h.onProduceProgress?.(msg); break;
       case 'produce.degradation': h.onProduceDegradation?.(msg); break;
       case 'log.entry': h.onLogEntry?.(msg); break;
-      case 'pong': /* 心跳响应，已在 resetHeartbeatTimeout 中处理 */ break;
+      case 'pong': break;
       case 'ping': this.send({ type: 'pong' }); break;
       case 'error':
         if (msg.message && /未授权|未认证|401/i.test(String(msg.message))) {

@@ -1,87 +1,133 @@
-import { useMemo } from 'react';
-import { TOPOLOGY_NODES, TOPOLOGY_LINKS, NETWORK_LAYERS, CONNECTIONS } from '../data/mock';
+import { useEffect, useState, useMemo } from 'react';
+import { useApp } from '../state/AppContext';
+import { apiGetHealth } from '../lib/api';
 
-type TopologyNode = typeof TOPOLOGY_NODES[number];
+interface HealthItem {
+  key: string;
+  name: string;
+  sub: string;
+  status: 'ok' | 'error' | 'unavailable';
+  latency_ms?: number;
+  message?: string;
+}
+
+const CORE_SERVICES: Omit<HealthItem, 'latency_ms' | 'message'>[] = [
+  { key: 'frontend', name: 'Frontend', sub: 'Static Assets', status: 'ok' },
+  { key: 'backend', name: 'Backend', sub: 'FastAPI :8000', status: 'ok' },
+];
+
+const NETWORK_LAYERS = [
+  { name: 'L1 - 无网络', desc: '沙箱默认级别，完全隔离外网', tag: '默认' },
+  { name: 'L2 - 限网', desc: '仅允许访问 PyPI / npm 等包管理白名单', tag: '代码执行' },
+  { name: 'L3 - 全联网', desc: '需网络认证审批后开放', tag: '需审批' },
+];
 
 export default function Topology() {
-  // 节点坐标映射，用于连线计算
-  const nodeMap = useMemo(() => {
-    const m: Record<string, TopologyNode> = {};
-    TOPOLOGY_NODES.forEach((n) => { m[n.id] = n; });
-    return m;
-  }, []);
+  const { demoMode } = useApp();
+  const [health, setHealth] = useState<Record<string, any>>({});
+  const [loading, setLoading] = useState(true);
 
-  // 节点互斥校验：检测任意两节点矩形是否相交（含 4px 安全间距）
-  // 开发期在控制台输出重叠警告，保证 SVG 节点之间始终有互斥区
-  useMemo(() => {
-    const GAP = 4;
-    for (let i = 0; i < TOPOLOGY_NODES.length; i++) {
-      for (let j = i + 1; j < TOPOLOGY_NODES.length; j++) {
-        const a = TOPOLOGY_NODES[i], b = TOPOLOGY_NODES[j];
-        const overlap = a.x < b.x + b.w + GAP && a.x + a.w + GAP > b.x &&
-                        a.y < b.y + b.h + GAP && a.y + a.h + GAP > b.y;
-        if (overlap) {
-          console.warn(`[Topology] 节点互斥违规: ${a.label} 与 ${b.label} 区域重叠`);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        if (demoMode) {
+          // 演示模式：构造模拟健康状态
+          const mock: Record<string, any> = {
+            postgresql: { status: 'ok', latency_ms: 8 },
+            qdrant: { status: 'ok', latency_ms: 12 },
+            docker: { status: 'ok', latency_ms: 25 },
+          };
+          if (mounted) setHealth(mock);
+        } else {
+          const data = await apiGetHealth();
+          if (mounted && data) setHealth(data);
         }
+      } catch {
+        // 健康检查加载失败，显示基本结构
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [demoMode]);
+
+  // 合并基础服务 + 数据库/基础设施健康状态
+  const nodes: HealthItem[] = useMemo(() => {
+    const list: HealthItem[] = CORE_SERVICES.map(s => ({ ...s, latency_ms: undefined, message: undefined }));
+    // 添加从健康检查得到的服务
+    const nameMap: Record<string, { name: string; sub: string }> = {
+      postgresql: { name: 'PostgreSQL', sub: 'DB :5432' },
+      qdrant: { name: 'Qdrant', sub: 'Vector :6333' },
+      docker: { name: 'Docker', sub: 'Sandbox Runtime' },
+    };
+    for (const [key, info] of Object.entries(health)) {
+      if (nameMap[key]) {
+        list.push({
+          key,
+          name: nameMap[key].name,
+          sub: nameMap[key].sub,
+          status: (info as any)?.status || 'error',
+          latency_ms: (info as any)?.latency_ms,
+          message: (info as any)?.message,
+        });
       }
     }
-  }, []);
+    return list;
+  }, [health]);
 
-  // 预计算连线 path 与中点圆，避免渲染时重复运算
-  const links = useMemo(() => {
-    return TOPOLOGY_LINKS.map((l, idx) => {
-      const f = nodeMap[l.from];
-      const t = nodeMap[l.to];
-      if (!f || !t) return null;
-      const x1 = f.x + f.w / 2;
-      const y1 = f.y + f.h;
-      const x2 = t.x + t.w / 2;
-      const y2 = t.y;
-      const midY = (y1 + y2) / 2;
-      const d = `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`;
-      return {
-        key: `${l.from}-${l.to}-${idx}`,
-        d,
-        type: l.type,
-        midX: (x1 + x2) / 2,
-        midY,
-      };
-    }).filter(Boolean) as { key: string; d: string; type: string; midX: number; midY: number }[];
-  }, [nodeMap]);
+  // 连线：backend -> postgresql/qdrant/docker
+  const connections = useMemo(() => {
+    const conns: { from: string; to: string; port: string; status: string }[] = [];
+    for (const node of nodes) {
+      if (node.key === 'backend' || node.key === 'frontend') continue;
+      conns.push({
+        from: 'Backend',
+        to: node.name,
+        port: '',
+        status: node.status,
+      });
+    }
+    conns.unshift({ from: 'Frontend', to: 'Backend', port: ':8000', status: 'ok' });
+    return conns;
+  }, [nodes]);
 
   return (
     <div className="view active" id="view-topology">
       <div className="page-title" style={{ marginBottom: 8 }}>组件联通</div>
       <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 32 }}>
-        Docker 容器拓扑、网络隔离架构、服务间依赖关系
+        服务依赖、网络隔离架构、实时健康状态
       </div>
 
-      {/* Topology SVG */}
-      <div className="topology-canvas" id="topology-canvas">
-        <svg className="topology-svg" viewBox="0 0 720 420">
-          {/* Links */}
-          {links.map((l) => (
-            <g key={l.key}>
-              <path className={`topo-link ${l.type}`} d={l.d} />
-              <circle cx={l.midX} cy={l.midY} r={2} fill="var(--dot-done)" />
-            </g>
+      {/* 服务状态列表 */}
+      <div className="monitor-section-title">服务状态</div>
+      {loading ? (
+        <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 13, textAlign: 'center' }}>
+          加载中...
+        </div>
+      ) : (
+        <div id="health-list">
+          {nodes.map((n) => (
+            <div className="health-item" key={n.key}>
+              <div className="health-name">{n.name}</div>
+              <div className="health-desc">{n.sub}</div>
+              <div className="health-latency">
+                {n.latency_ms != null && n.latency_ms > 0 ? `${n.latency_ms}ms` : '-'}
+              </div>
+              <div className="health-status">
+                <span className={`status-dot ${n.status === 'ok' ? 'done' : n.status === 'unavailable' ? 'pending' : 'error'}`} />
+                {n.status === 'ok' ? 'ok' : n.status === 'unavailable' ? '未配置' : 'error'}
+              </div>
+            </div>
           ))}
-          {/* Nodes */}
-          {TOPOLOGY_NODES.map((n) => (
-            <g className="topo-node" key={n.id}>
-              <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={4} />
-              <text x={n.x + n.w / 2} y={n.y + 16}>{n.label}</text>
-              <text className="sub" x={n.x + n.w / 2} y={n.y + 30}>{n.sub}</text>
-            </g>
-          ))}
-        </svg>
-      </div>
+        </div>
+      )}
 
       {/* Network layers */}
       <div className="monitor-section-title" style={{ marginTop: 40 }}>网络隔离层级</div>
       <div id="network-layers">
-        {NETWORK_LAYERS.map((l, i) => (
-          <div className="network-layer" key={l.name + i}>
+        {NETWORK_LAYERS.map((l) => (
+          <div className="network-layer" key={l.name}>
             <div className="network-layer-name">{l.name}</div>
             <div className="network-layer-desc">{l.desc}</div>
             <span className="network-layer-tag">{l.tag}</span>
@@ -91,17 +137,23 @@ export default function Topology() {
 
       {/* Connection detail */}
       <div className="monitor-section-title" style={{ marginTop: 40 }}>服务连接</div>
-      <div id="connection-list">
-        {CONNECTIONS.map((conn, i) => (
-          <div className="connection-item" key={conn.from + conn.to + i}>
-            <span className="conn-status status-dot done" />
-            <span className="conn-from">{conn.from}</span>
-            <span className="conn-arrow">→</span>
-            <span className="conn-to">{conn.to}</span>
-            <span className="conn-port">{conn.port}</span>
-          </div>
-        ))}
-      </div>
+      {connections.length === 0 ? (
+        <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 13, textAlign: 'center' }}>
+          暂无连接数据
+        </div>
+      ) : (
+        <div id="connection-list">
+          {connections.map((conn, i) => (
+            <div className="connection-item" key={`${conn.from}-${conn.to}-${i}`}>
+              <span className={`conn-status status-dot ${conn.status === 'ok' ? 'done' : conn.status === 'unavailable' ? 'pending' : 'error'}`} />
+              <span className="conn-from">{conn.from}</span>
+              <span className="conn-arrow">→</span>
+              <span className="conn-to">{conn.to}</span>
+              {conn.port && <span className="conn-port">{conn.port}</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
