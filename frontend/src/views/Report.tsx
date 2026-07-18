@@ -28,6 +28,8 @@ import {
 } from '../lib/format';
 import { useApp } from '../state/AppContext';
 import { apiGetReportLayout } from '../lib/api';
+import ServiceViewer from '../components/ServiceViewer';
+import PhasedProgress from '../components/PhasedProgress';
 
 /* ════════════════════════════════════════════════════════════════
  *  Block 渲染器（15 种 + raw/unknown 兜底）
@@ -172,22 +174,22 @@ function CodeBlock({ data }: { data: any }) {
 function ApiTableBlock({ data }: { data: any }) {
   const endpoints: string[] = data?.endpoints || [];
   return (
-    <div className="report-api-table">
+    <div className="sc-api-table">
       {endpoints.map((ep, i) => {
         const m = String(ep).match(/^(GET|POST|PUT|PATCH|DELETE)\s+(\S+)\s*[-—]?\s*(.*)$/);
         if (m) {
           return (
-            <div className="report-api-row" key={i}>
-              <span className={`report-api-method ${m[1]}`}>{m[1]}</span>
-              <span className="report-api-path">{m[2]}</span>
-              {m[3] ? <span className="report-api-desc">{m[3]}</span> : null}
+            <div className="sc-api-row" key={i}>
+              <span className={`sc-api-method ${m[1]}`}>{m[1]}</span>
+              <span className="sc-api-path">{m[2]}</span>
+              {m[3] ? <span className="sc-api-desc">{m[3]}</span> : null}
             </div>
           );
         }
         return (
-          <div className="report-api-row" key={i}>
-            <span className="report-api-method GET">—</span>
-            <span className="report-api-path">{ep}</span>
+          <div className="sc-api-row" key={i}>
+            <span className="sc-api-method GET">—</span>
+            <span className="sc-api-path">{ep}</span>
           </div>
         );
       })}
@@ -198,15 +200,15 @@ function ApiTableBlock({ data }: { data: any }) {
 function KpiGridBlock({ data }: { data: any }) {
   const items: any[] = data?.items || [];
   return (
-    <div className="report-kpi-grid">
+    <div className="sc-kpi-grid">
       {items.map((k, i) => (
-        <div className="report-kpi" key={i}>
-          <div className="report-kpi-label">{k.label || ''}</div>
-          <div className="report-kpi-value">
+        <div className="sc-kpi" key={i}>
+          <div className="sc-kpi-label">{k.label || ''}</div>
+          <div className="sc-kpi-value">
             {k.value || ''}
-            {k.unit ? <span className="report-kpi-trend" style={{ fontSize: '13px', marginLeft: '4px' }}>{k.unit}</span> : null}
+            {k.unit ? <span className="sc-kpi-trend" style={{ fontSize: '13px', marginLeft: '4px' }}>{k.unit}</span> : null}
           </div>
-          <div className="report-kpi-trend">{k.trend || ''}</div>
+          <div className={`sc-kpi-trend ${k.trend?.includes('↑') || k.trend?.includes('+') ? 'up' : k.trend?.includes('↓') || k.trend?.includes('-') ? 'down' : ''}`}>{k.trend || ''}</div>
         </div>
       ))}
     </div>
@@ -285,22 +287,24 @@ function TestGroup({ group, items }: { group: string; items: any[] }) {
   const [collapsed, setCollapsed] = useState(false);
   const allPass = items.every(t => t.result === 'pass');
   return (
-    <div className={`report-test-group ${collapsed ? 'collapsed' : ''}`}>
-      <div className="report-test-group-header" onClick={() => setCollapsed(c => !c)}>
+    <div className={`sc-test-group ${collapsed ? 'collapsed' : ''}`}>
+      <div className="sc-test-group-header" onClick={() => setCollapsed(c => !c)}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round"><path d="M6 9l6 6 6-6" /></svg>
-        <span>{group}</span>
-        <span className="report-test-group-count">{items.length} 项</span>
-        <span className="report-test-group-stats">{allPass ? '全部通过' : '有失败'}</span>
+        <span className="sc-test-group-name">{group}</span>
+        <span className="sc-test-group-count">{items.length} 项</span>
+        <span className={`sc-test-group-badge ${allPass ? 'pass' : 'fail'}`}>{allPass ? '全部通过' : '有失败'}</span>
       </div>
-      <div className="report-test-group-body">
-        {items.map((t, i) => (
-          <div className="report-deploy-test" key={i}>
-            <span className="report-test-name">{t.name}</span>
-            <span className={`report-test-result ${t.result}`}>{String(t.result).toUpperCase()}</span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: '11px', color: 'var(--text-3)' }}>{t.time}</span>
-          </div>
-        ))}
-      </div>
+      {!collapsed && (
+        <div className="sc-test-group-body">
+          {items.map((t, i) => (
+            <div className="sc-test-item" key={i}>
+              <span className="sc-test-item-name">{t.name}</span>
+              <span className={`sc-test-item-result ${t.result}`}>{String(t.result).toUpperCase()}</span>
+              <span className="sc-test-item-time">{t.time || ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -323,9 +327,23 @@ function TestGroupsBlock({ data }: { data: any }) {
 function FileTreeBlock({ data }: { data: any }) {
   const items: any[] = data?.items || [];
   return (
-    <div className="report-file-tree">
+    <div className="sc-file-tree">
+      <div className="sc-file-tree-header">项目结构</div>
       {items.map((f, i) => (
-        <div className={f.type === 'dir' ? 'dir' : 'file'} style={{ paddingLeft: `${(f.indent || 0) * 20}px` }} key={i}>{f.name || ''}</div>
+        <div
+          className={f.type === 'dir' ? 'sc-file-tree-item dir' : 'sc-file-tree-item'}
+          style={{ paddingLeft: `${14 + (f.indent || 0) * 14}px` }}
+          key={i}
+        >
+          <svg className="ft-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+            {f.type === 'dir' ? (
+              <path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+            ) : (
+              <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>
+            )}
+          </svg>
+          {f.name || ''}
+        </div>
       ))}
     </div>
   );
@@ -369,6 +387,82 @@ function AttachmentsBlock({ data }: { data: any }) {
   );
 }
 
+/* ════════════════════════════════════════════════════════════════
+ *  专业化查看器（shadcn风格）
+ * ════════════════════════════════════════════════════════════════ */
+
+function ServiceViewerBlock({ data }: { data: any }) {
+  const appCode = data?.app_code || '';
+  const title = data?.title || '项目预览';
+  const port = data?.port || undefined;
+  const runCommand = data?.run_command || '';
+  const fileCount = data?.file_count || 0;
+
+  // 顶部信息条（shadcn card风格）
+  return (
+    <div style={{ margin: '12px 0' }}>
+      {data?.complexity && (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+          <span className="sc-badge sc-badge-outline">{title}</span>
+          <span className="sc-badge sc-badge-secondary">{fileCount > 0 ? `${fileCount} 文件` : ''}</span>
+          {data.complexity && (
+            <span className={`sc-badge ${data.complexity === 'large' ? 'sc-badge-warning' : data.complexity === 'medium' ? 'sc-badge-info' : 'sc-badge-success'}`}>
+              {data.complexity === 'large' ? '大型' : data.complexity === 'medium' ? '中型' : data.complexity === 'small' ? '小型' : '微服务'}
+            </span>
+          )}
+        </div>
+      )}
+      <ServiceViewer appCode={appCode} title={title} port={port} runCommand={runCommand} />
+    </div>
+  );
+}
+
+function CodeCardBlock({ data }: { data: any }) {
+  const code: string = data?.code || '';
+  const lang: string = (data?.lang || 'TEXT').toUpperCase();
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = () => {
+    if ((navigator as any).clipboard?.writeText) {
+      (navigator as any).clipboard.writeText(code).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+    }
+  };
+
+  // 简易语法高亮
+  const html = lang === 'DOCKER' ? highlightDockerfile(code)
+    : lang === 'YAML' ? highlightYamlReport(code)
+      : escHtml(code);
+
+  return (
+    <div className="sc-code-card">
+      <div className="sc-code-card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="sc-code-card-chrome"><span /><span /><span /></div>
+          <span className="sc-code-card-lang">{lang}</span>
+        </div>
+        <button className={`sc-code-card-copy ${copied ? 'copied' : ''}`} onClick={onCopy}>
+          {copied ? '✓ 已复制' : '复制'}
+        </button>
+      </div>
+      <pre><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
+    </div>
+  );
+}
+
+function PhasedPipelineBlock({ data }: { data: any }) {
+  return (
+    <PhasedProgress
+      percent={data?.percent || 0}
+      currentStage={data?.current_stage || null}
+      stageMessage={data?.message || ''}
+      completedStages={data?.completed || []}
+    />
+  );
+}
+
 /** Block 分发器 */
 function renderBlock(block: ReportBlock): JSX.Element {
   switch (block.type) {
@@ -376,6 +470,8 @@ function renderBlock(block: ReportBlock): JSX.Element {
     case 'list': return <ListBlock data={block.data} />;
     case 'findings': return <FindingsBlock data={block.data} />;
     case 'code': return <CodeBlock data={block.data} />;
+    case 'code_card': return <CodeCardBlock data={block.data} />;
+    case 'service_viewer': return <ServiceViewerBlock data={block.data} />;
     case 'api_table': return <ApiTableBlock data={block.data} />;
     case 'kpi_grid': return <KpiGridBlock data={block.data} />;
     case 'conflicts': return <ConflictsBlock data={block.data} />;
@@ -387,6 +483,7 @@ function renderBlock(block: ReportBlock): JSX.Element {
     case 'field': return <FieldBlock data={block.data} />;
     case 'team_config': return <TeamConfigBlock data={block.data} />;
     case 'attachments': return <AttachmentsBlock data={block.data} />;
+    case 'phased_pipeline': return <PhasedPipelineBlock data={block.data} />;
     case 'raw':
       return <div className="report-p" style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: sanitizeRich(block.data?.text || '') }} />;
     default:

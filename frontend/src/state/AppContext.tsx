@@ -398,6 +398,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         onProduceProgress: (msg) => {
           const p = msg.payload || {};
           if (p.message) appendLog(p.message, 'info', 'produce');
+          // 派发window事件，供PhasedProgress组件监听
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('produce-progress', { detail: p }));
+          }
         },
         onProduceDegradation: (msg) => {
           appendLog(`产出降级: ${msg.payload?.reason || '未知原因'}`, 'warning', 'produce');

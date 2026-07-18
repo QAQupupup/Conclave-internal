@@ -667,6 +667,23 @@ def _build_deployable_service_layout(artifact: dict, ctx: dict) -> dict:
     meta = ctx["meeting_meta"]
     sections = [
         {
+            "id": "service_viewer",
+            "title": "代码预览",
+            "blocks": [
+                {
+                    "type": "service_viewer",
+                    "data": {
+                        "title": ds.get("title", prd.get("title", "")),
+                        "port": ds.get("port", 8000),
+                        "run_command": ds.get("run_command", ""),
+                        "app_code": ds.get("static_files") or ds.get("app_code", ""),
+                        "file_count": ds.get("phased_generation", {}).get("file_count", 0),
+                        "complexity": ds.get("complexity_level", ""),
+                    },
+                }
+            ],
+        },
+        {
             "id": "deploy_status",
             "title": "部署状态",
             "blocks": _build_deploy_status_blocks(deployment, exec_result),

@@ -360,7 +360,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             logger="orchestrator.nodes.produce",
         )
 
-    # 带一致性自检的 LLM 调用
+    # 定义单次LLM调用函数（供非deployable_service类型和fallback使用）
     async def call_fn(anchor: str) -> dict[str, Any]:
         # 合并迭代反馈anchor + 跨会议baseline
         combined_anchor = anchor
@@ -393,7 +393,61 @@ async def produce_node(state: MeetingState) -> MeetingState:
             )
         return resp.result
 
-    result, confidence = await _run_with_consistency(state, "produce", call_fn)
+    # === 分阶段生成管线：deployable_service 使用7阶段子管线替代单次LLM调用 ===
+    if state.deliverable_type == "deployable_service":
+        from app.orchestrator.phased_generation import generate_deployable_service_phased
+        _lb.info(
+            "produce: 启用分阶段生成管线（工业级服务生成升级）",
+            logger="orchestrator.nodes.produce",
+        )
+        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                "启动分阶段代码生成管线：规划→规格→测试→骨架→模块→前端→整合")
+
+        # 合并anchor上下文
+        extra_anchor_parts = []
+        if iteration_anchor:
+            extra_anchor_parts.append(iteration_anchor)
+        if baseline_anchor:
+            extra_anchor_parts.append(baseline_anchor)
+        extra_anchor = "\n".join(extra_anchor_parts) if extra_anchor_parts else ""
+
+        async def _phased_progress(stage_name: str, message: str, percent: int) -> None:
+            """子阶段进度回调"""
+            await _emit_progress(state, f"phased_{stage_name}", message, percent)
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"[{stage_name}] {message}")
+
+        try:
+            phased_result = await generate_deployable_service_phased(
+                decision=state.decision_record or {},
+                evidence_summary=evidence_summary,
+                extra_anchor=extra_anchor,
+                progress_cb=_phased_progress,
+            )
+            result = phased_result.to_result_dict()
+            confidence = "high"
+            _lb.info(
+                f"produce: 分阶段生成完成 — "
+                f"title={phased_result.plan.title}, "
+                f"modules={len(phased_result.plan.modules)}, "
+                f"files={sum(len(v) for v in [phased_result.scaffold_files, phased_result.backend_files, phased_result.frontend_files])}, "
+                f"complexity={phased_result.plan.complexity_level}",
+                logger="orchestrator.nodes.produce",
+            )
+            await _emit_progress(state, "phased_done", "分阶段生成完成", 95)
+        except Exception as pe:
+            _lb.error(
+                f"produce: 分阶段生成失败，回退到单次LLM调用: {pe}",
+                logger="orchestrator.nodes.produce",
+                exc_info=True,
+            )
+            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                    f"分阶段生成异常({type(pe).__name__})，回退到传统生成模式")
+            # 回退到原来的单次LLM调用
+            result, confidence = await _run_with_consistency(state, "produce", call_fn)
+
+    else:
+        # 非deployable_service类型使用原有单次LLM调用
+        result, confidence = await _run_with_consistency(state, "produce", call_fn)
 
     # 内容完整性校验：检查关键字段是否为空
     # 一致性检查只验证结果不与已锁定结论矛盾，不验证内容是否为空

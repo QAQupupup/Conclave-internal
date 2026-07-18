@@ -339,6 +339,47 @@ class BusinessReportResult(BaseModel):
     business_report: BusinessReportArtifact
 
 
+# ---------- 分阶段生成子阶段 schemas ----------
+class PhasedModuleDef(BaseModel):
+    """架构规划中的模块定义"""
+    model_config = _SCHEMA_CONFIG
+    name: str
+    resource: str = ""
+    description: str = ""
+    has_crud: bool = True
+    api_endpoints: list[str] = Field(default_factory=list)
+    data_fields: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PhasedPlanResult(BaseModel):
+    """Phase 1: 架构规划输出"""
+    model_config = _SCHEMA_CONFIG
+    title: str
+    description: str = ""
+    complexity_level: str = "medium"
+    tech_stack: list[str] = Field(default_factory=list)
+    port: int = 8000
+    needs_frontend: bool = True
+    needs_database: bool = True
+    db_type: str = "postgresql"
+    has_auth: bool = False
+    run_command: str = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    modules: list[PhasedModuleDef] = Field(default_factory=list)
+
+
+class PhasedFilesResult(BaseModel):
+    """Phase 3-6: 通用文件输出"""
+    model_config = _SCHEMA_CONFIG
+    files: dict[str, str] = Field(default_factory=dict)
+
+
+class PhasedSpecsResult(BaseModel):
+    """Phase 2: OpenAPI+PRD输出"""
+    model_config = _SCHEMA_CONFIG
+    prd: Optional[PRDResult] = None
+    openapi: str = ""
+
+
 # ---------- schema_hint -> 模型映射 ----------
 # RealLLM.complete() 依据 schema_hint 选择对应模型做 model_validate。
 # produce 阶段使用 (stage, subtype) 二级键：produce_{deliverable_type}
@@ -357,6 +398,13 @@ SCHEMA_MAP: dict[str, type[BaseModel]] = {
     "produce_comprehensive": ComprehensiveResult,
     "produce_research_report": ResearchReportResult,
     "produce_business_report": BusinessReportResult,
+    # 分阶段生成子阶段
+    "phased_plan": PhasedPlanResult,
+    "phased_specs": PhasedSpecsResult,
+    "phased_tests": PhasedFilesResult,
+    "phased_scaffold": PhasedFilesResult,
+    "phased_module": PhasedFilesResult,
+    "phased_frontend": PhasedFilesResult,
     # 向后兼容：纯 "produce" 映射到默认 PRD 模型
     "produce": ProduceResult,
 }

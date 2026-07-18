@@ -5,6 +5,7 @@ import { STAGES, ROLES } from '../data/mock';
 import { REPORT_TYPES } from '../data/reportData';
 import { sanitizeRich, formatTime } from '../lib/format';
 import { useToast } from '../components/Toast';
+import PhasedProgress, { usePhasedProgress } from '../components/PhasedProgress';
 
 const TYPE_LABELS: Record<string, string> = Object.fromEntries(
   REPORT_TYPES.map((t) => [t.id, t.label]),
@@ -49,6 +50,9 @@ export default function Meeting() {
   const [sending, setSending] = useState(false);
   const [claimPreview, setClaimPreview] = useState<{ claimId: string; role: string; stage: string; snippet: string } | null>(null);
   const [focusedMsgId, setFocusedMsgId] = useState<string | null>(null);
+
+  // 分阶段生成进度（仅deployable_service类型激活）
+  const phased = usePhasedProgress(meeting.currentMeetingId || undefined);
 
   // 本地 elapsed 计算：基于 startedAt 时间戳，避免 context 每秒重渲染
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -293,11 +297,24 @@ export default function Meeting() {
                       );
                     })}
                     {si === meeting.stage && meeting.status === 'running' && (
-                      <div className="msg-typing">
-                        <span className="msg-role" style={{ color: 'var(--r-moderator)', fontSize: 13, fontWeight: 500 }}>主持人</span>
-                        <div className="typing-dots"><span className="typing-dot"></span><span className="typing-dot"></span><span className="typing-dot"></span></div>
-                        <span className="typing-text">{TYPING_TEXT[currentStageKey] || '处理中…'}</span>
-                      </div>
+                      <>
+                        {/* 分阶段生成管线进度（deployable_service类型） */}
+                        {stage.key === 'produce' && meeting.type === 'deployable_service' && phased.currentStage && (
+                          <div style={{ margin: '8px 0' }}>
+                            <PhasedProgress
+                              currentStage={phased.currentStage}
+                              stageMessage={phased.stageMessage}
+                              percent={phased.percent}
+                              completedStages={phased.completedStages}
+                            />
+                          </div>
+                        )}
+                        <div className="msg-typing">
+                          <span className="msg-role" style={{ color: 'var(--r-moderator)', fontSize: 13, fontWeight: 500 }}>主持人</span>
+                          <div className="typing-dots"><span className="typing-dot"></span><span className="typing-dot"></span><span className="typing-dot"></span></div>
+                          <span className="typing-text">{TYPING_TEXT[currentStageKey] || '处理中…'}</span>
+                        </div>
+                      </>
                     )}
                     {si === meeting.stage && meeting.status === 'paused' && (
                       <div className="msg-typing" style={{ color: 'var(--text-3)' }}>
