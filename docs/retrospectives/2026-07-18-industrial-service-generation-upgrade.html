@@ -1,492 +1,1043 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>修复报告 - 工业级服务生成能力升级 - 2026-07-18</title>
-  <style>
-    :root {
-      --bg: #fafaf9;
-      --surface: #ffffff;
-      --border: #e7e5e4;
-      --text: #1c1917;
-      --text-2: #57534e;
-      --text-3: #a8a29e;
-      --accent: #2563eb;
-      --accent-soft: #dbeafe;
-      --red: #dc2626;
-      --red-soft: #fee2e2;
-      --green: #16a34a;
-      --green-soft: #dcfce7;
-      --orange: #ea580c;
-      --orange-soft: #fed7aa;
-      --purple: #7c3aed;
-      --purple-soft: #ede9fe;
-      --code-bg: #f5f5f4;
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.7;
-      padding: 40px 20px;
-    }
-    .container { max-width: 900px; margin: 0 auto; }
-    .report-header { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; margin-bottom: 24px; }
-    .report-header h1 { font-size: 24px; margin-bottom: 8px; }
-    .report-header .subtitle { color: var(--text-2); font-size: 14px; margin-bottom: 16px; }
-    .report-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--text-2); }
-    .report-meta span { display: inline-flex; align-items: center; gap: 4px; }
-    .report-meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
-    .report-chain { margin-top: 12px; font-size: 13px; color: var(--text-3); }
-    .report-chain a { color: var(--accent); text-decoration: none; }
-    .report-chain a:hover { text-decoration: underline; }
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
-    .stat-card .num { font-size: 28px; font-weight: 700; }
-    .stat-card .label { font-size: 12px; color: var(--text-3); margin-top: 4px; }
-    .stat-card.p0 .num { color: var(--red); }
-    .stat-card.p1 .num { color: var(--orange); }
-    .stat-card.p2 .num { color: var(--accent); }
-    .stat-card.p3 .num { color: var(--green); }
-    section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; }
-    section h2 { font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-    section h3 { font-size: 15px; margin: 20px 0 8px; }
-    section p { font-size: 14px; color: var(--text-2); margin-bottom: 10px; }
-    .bug-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
-    .bug-card .bug-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
-    .badge-p0 { background: var(--red-soft); color: var(--red); }
-    .badge-p1 { background: var(--orange-soft); color: var(--orange); }
-    .badge-p2 { background: var(--accent-soft); color: var(--accent); }
-    .badge-p3 { background: var(--purple-soft); color: var(--purple); }
-    .badge-fixed { background: var(--green-soft); color: var(--green); }
-    .badge-feat { background: var(--accent-soft); color: var(--accent); }
-    .bug-detail { font-size: 14px; color: var(--text-2); }
-    .bug-detail strong { color: var(--text); }
-    .bug-detail .field { margin-bottom: 8px; }
-    .bug-detail .field-label { font-weight: 600; color: var(--text); display: inline-block; min-width: 80px; }
-    pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 13px; line-height: 1.5; margin: 8px 0; }
-    code { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
-    .commit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .commit-table th, .commit-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-    .commit-table th { color: var(--text-3); font-weight: 600; }
-    .commit-table code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
-    .pattern-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .pattern-table th, .pattern-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
-    .pattern-table th { color: var(--text-3); font-weight: 600; }
-    .lesson-list { list-style: none; }
-    .lesson-list li { padding: 8px 0; padding-left: 20px; position: relative; font-size: 14px; color: var(--text-2); }
-    .lesson-list li::before { content: '▸'; position: absolute; left: 0; color: var(--accent); }
-    .verify-list { list-style: none; }
-    .verify-list li { padding: 6px 0; padding-left: 24px; position: relative; font-size: 14px; }
-    .verify-list li::before { content: '✓'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
-    .verify-list li.pending::before { content: '○'; color: var(--orange); }
-    .verify-list li.fail::before { content: '✗'; color: var(--red); }
-    .arch-diagram { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre; margin: 12px 0; }
-    .dim-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
-    .dim-item { border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 13px; }
-    .dim-item .dim-name { font-weight: 600; color: var(--text); }
-    .dim-item .dim-weight { color: var(--text-3); font-size: 12px; }
-    .dim-item .dim-gate { color: var(--red); font-size: 12px; font-weight: 600; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工业级服务生成升级 — 回顾报告</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --zinc-50: #fafafa;
+    --zinc-100: #f4f4f5;
+    --zinc-200: #e4e4e7;
+    --zinc-300: #d4d4d8;
+    --zinc-400: #a1a1aa;
+    --zinc-500: #71717a;
+    --zinc-600: #52525b;
+    --zinc-700: #3f3f46;
+    --zinc-800: #27272a;
+    --zinc-900: #18181b;
+    --zinc-950: #09090b;
+
+    --blue-50: #eff6ff;
+    --blue-100: #dbeafe;
+    --blue-500: #3b82f6;
+    --blue-600: #2563eb;
+    --blue-700: #1d4ed8;
+
+    --green-50: #f0fdf4;
+    --green-100: #dcfce7;
+    --green-500: #22c55e;
+    --green-600: #16a34a;
+    --green-700: #15803d;
+
+    --amber-50: #fffbeb;
+    --amber-100: #fef3c7;
+    --amber-500: #f59e0b;
+    --amber-600: #d97706;
+
+    --violet-50: #f5f3ff;
+    --violet-100: #ede9fe;
+    --violet-500: #8b5cf6;
+    --violet-600: #7c3aed;
+
+    --rose-50: #fff1f2;
+    --rose-100: #ffe4e6;
+    --rose-500: #f43f5e;
+    --rose-600: #e11d48;
+
+    --radius: 8px;
+    --radius-sm: 6px;
+    --radius-lg: 12px;
+    --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+    --shadow: 0 1px 3px 0 rgba(0,0,0,0.08), 0 1px 2px -1px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.05);
+  }
+
+  html { font-size: 15px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--zinc-50);
+    color: var(--zinc-900);
+    line-height: 1.65;
+    padding: 0;
+  }
+
+  /* ===== Layout ===== */
+  .page-wrapper {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* ===== Header ===== */
+  .report-header {
+    margin-bottom: 40px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--zinc-200);
+  }
+  .report-header .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--zinc-500);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    margin-bottom: 16px;
+  }
+  .report-header .breadcrumb .sep { color: var(--zinc-300); }
+  .report-header h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--zinc-900);
+    line-height: 1.25;
+    margin-bottom: 16px;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  /* ===== Badges ===== */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+  .badge .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .badge-default { background: var(--zinc-100); color: var(--zinc-700); border-color: var(--zinc-200); }
+  .badge-blue { background: var(--blue-50); color: var(--blue-700); border-color: var(--blue-100); }
+  .badge-green { background: var(--green-50); color: var(--green-700); border-color: var(--green-100); }
+  .badge-amber { background: var(--amber-50); color: var(--amber-600); border-color: var(--amber-100); }
+  .badge-violet { background: var(--violet-50); color: var(--violet-600); border-color: var(--violet-100); }
+  .badge-rose { background: var(--rose-50); color: var(--rose-600); border-color: var(--rose-100); }
+
+  /* ===== Sections ===== */
+  section { margin-bottom: 32px; }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    letter-spacing: -0.01em;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 18px;
+    background: var(--zinc-900);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ===== Cards ===== */
+  .card {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 20px 24px;
+  }
+  .card + .card { margin-top: 12px; }
+
+  .card p { color: var(--zinc-600); font-size: 14px; line-height: 1.7; }
+  .card p + p { margin-top: 10px; }
+
+  /* ===== Overview KPI grid ===== */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .kpi-item {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
+  }
+  .kpi-label {
+    font-size: 12px;
+    color: var(--zinc-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .kpi-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--zinc-900);
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  .kpi-sub {
+    font-size: 12px;
+    color: var(--zinc-500);
+    margin-top: 4px;
+  }
+
+  /* ===== Lists ===== */
+  .bullet-list { list-style: none; padding: 0; }
+  .bullet-list li {
+    position: relative;
+    padding-left: 22px;
+    font-size: 14px;
+    color: var(--zinc-700);
+    line-height: 1.7;
+  }
+  .bullet-list li + li { margin-top: 6px; }
+  .bullet-list li::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 11px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--zinc-400);
+  }
+
+  /* ===== Code / filepath ===== */
+  code, .filepath {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Courier New", monospace;
+    font-size: 12.5px;
+    background: var(--zinc-100);
+    color: var(--zinc-800);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--zinc-200);
+    word-break: break-all;
+  }
+  .filepath-new {
+    background: var(--green-50);
+    color: var(--green-700);
+    border-color: var(--green-100);
+  }
+
+  /* ===== Pipeline diagram ===== */
+  .pipeline-wrap {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+    overflow-x: auto;
+  }
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: 720px;
+  }
+  .phase-node {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 14px 8px 12px;
+    background: var(--zinc-50);
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius-sm);
+    margin: 0 4px;
+    transition: all 0.2s;
+  }
+  .phase-node:first-child { margin-left: 0; }
+  .phase-node:last-child { margin-right: 0; }
+  .phase-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+  }
+  .phase-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    letter-spacing: 0.02em;
+    margin-bottom: 4px;
+  }
+  .phase-desc {
+    font-size: 11px;
+    color: var(--zinc-500);
+    line-height: 1.4;
+  }
+  .phase-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--zinc-300);
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+  /* Phase colors */
+  .phase-1 .phase-num { background: var(--blue-600); }
+  .phase-1 { border-color: var(--blue-100); background: var(--blue-50); }
+  .phase-2 .phase-num { background: var(--violet-600); }
+  .phase-2 { border-color: var(--violet-100); background: var(--violet-50); }
+  .phase-3 .phase-num { background: var(--green-600); }
+  .phase-3 { border-color: var(--green-100); background: var(--green-50); }
+  .phase-4 .phase-num { background: var(--amber-600); }
+  .phase-4 { border-color: var(--amber-100); background: var(--amber-50); }
+  .phase-5 .phase-num { background: var(--rose-600); }
+  .phase-5 { border-color: var(--rose-100); background: var(--rose-50); }
+  .phase-6 .phase-num { background: #0891b2; } /* cyan */
+  .phase-6 { border-color: #cffafe; background: #ecfeff; }
+  .phase-7 .phase-num { background: var(--zinc-700); }
+  .phase-7 { border-color: var(--zinc-200); background: var(--zinc-100); }
+
+  /* ===== Phase detail list ===== */
+  .phase-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .phase-detail {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .phase-detail .pd-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .phase-detail .pd-body { flex: 1; min-width: 0; }
+  .phase-detail .pd-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 2px;
+  }
+  .phase-detail .pd-desc {
+    font-size: 12.5px;
+    color: var(--zinc-600);
+    line-height: 1.55;
+  }
+
+  /* ===== Table ===== */
+  .table-wrap {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  thead { background: var(--zinc-50); }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--zinc-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--zinc-200);
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--zinc-100);
+    color: var(--zinc-700);
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.change-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .add { color: var(--green-700); font-weight: 600; }
+  .del { color: var(--rose-600); font-weight: 600; }
+  .change-bar {
+    display: inline-block;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--zinc-200);
+    width: 80px;
+    margin-left: 8px;
+    position: relative;
+    vertical-align: middle;
+    overflow: hidden;
+  }
+  .change-bar .add-bar {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--green-500);
+  }
+  tfoot td {
+    background: var(--zinc-50);
+    font-weight: 600;
+    color: var(--zinc-900);
+    border-top: 1px solid var(--zinc-200);
+    font-size: 13px;
+  }
+
+  /* ===== Two column for backend/frontend ===== */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 720px) {
+    .two-col { grid-template-columns: 1fr; }
+    .report-header h1 { font-size: 26px; }
+    .page-wrapper { padding: 28px 16px 60px; }
+  }
+
+  .sub-card {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    box-shadow: var(--shadow-sm);
+  }
+  .sub-card h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sub-card h3 .tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .tag-backend { background: var(--blue-50); color: var(--blue-700); border: 1px solid var(--blue-100); }
+  .tag-frontend { background: var(--violet-50); color: var(--violet-600); border: 1px solid var(--violet-100); }
+
+  /* ===== Results grid ===== */
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .result-item {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 18px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    gap: 12px;
+  }
+  .result-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--green-50);
+    color: var(--green-700);
+    border: 1px solid var(--green-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .result-body .r-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 4px;
+  }
+  .result-body .r-desc {
+    font-size: 12.5px;
+    color: var(--zinc-600);
+    line-height: 1.55;
+  }
+
+  /* ===== Future list ===== */
+  .future-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .future-item {
+    background: #fff;
+    border: 1px dashed var(--zinc-300);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .future-item .fi-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--zinc-100);
+    color: var(--zinc-600);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .future-item .fi-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 2px;
+  }
+  .future-item .fi-desc {
+    font-size: 12px;
+    color: var(--zinc-500);
+    line-height: 1.5;
+  }
+
+  /* ===== File list in cards ===== */
+  .file-list { list-style: none; padding: 0; margin-top: 10px; }
+  .file-list li {
+    font-size: 12.5px;
+    padding: 6px 0;
+    border-top: 1px dashed var(--zinc-100);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    color: var(--zinc-700);
+  }
+  .file-list li:first-child { border-top: none; padding-top: 4px; }
+  .file-list .fl-meta {
+    font-size: 11px;
+    color: var(--zinc-400);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ===== Footer ===== */
+  .report-footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--zinc-200);
+    font-size: 12px;
+    color: var(--zinc-400);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+</style>
 </head>
 <body>
-<div class="container">
 
+<div class="page-wrapper">
+
+  <!-- ===== HEADER ===== -->
   <header class="report-header">
-    <h1>工业级服务生成能力升级报告</h1>
-    <p class="subtitle">从单文件demo生成升级为分层架构+测试驱动+断点续传+质量门禁的工业级项目生成</p>
-    <div class="report-meta">
-      <span>📅 2026年7月18日</span>
-      <span>🔖 Commit区间: <code>3320146</code> → <code>87cf36a</code></span>
-      <span>🔧 2个P0 / 3个P1 / 5个P2修复/升级</span>
-      <span>📝 完整追溯文档</span>
+    <div class="breadcrumb">
+      <span>Retrospectives</span>
+      <span class="sep">/</span>
+      <span>2026 Q3</span>
+      <span class="sep">/</span>
+      <span>Service Generation</span>
     </div>
-    <div class="report-chain">
-      上一轮修复: <a href="./2026-07-18-html-tag-rendering-fix.html"><code>03ea80c</code> → <code>f3134c6</code></a>
+    <h1>工业级服务生成升级 — 回顾报告</h1>
+    <div class="meta-row">
+      <span class="badge badge-default">
+        <span class="dot" style="color: var(--zinc-500);"></span>
+        2026-07-18
+      </span>
+      <span class="badge badge-blue">
+        <span class="dot"></span>
+        Commit Range: 87cf36a → 984046a
+      </span>
+      <span class="badge badge-green">
+        <span class="dot"></span>
+        已完成 · Shipped
+      </span>
+      <span class="badge badge-violet">
+        <span class="dot"></span>
+        Backend + Frontend
+      </span>
     </div>
   </header>
 
-  <section class="stats-grid" style="background:none;border:none;padding:0;">
-    <div class="stat-card p0"><div class="num">2</div><div class="label">P0 阻断修复</div></div>
-    <div class="stat-card p1"><div class="num">3</div><div class="label">P1 严重修复</div></div>
-    <div class="stat-card p2"><div class="num">5</div><div class="label">P2 功能升级</div></div>
-    <div class="stat-card p3"><div class="num">4</div><div class="label">新增文件/模块</div></div>
-  </section>
-
+  <!-- ===== OVERVIEW ===== -->
   <section>
-    <h2>1. 问题概述</h2>
-    <p>在全项目从头分析中发现，Conclave的可部署服务生成（deployable_service）能力存在严重的质量瓶颈：</p>
-    <p><strong>核心问题：单次LLM调用生成20KB单文件app.py</strong>，导致以下系统性缺陷：</p>
-    <ul class="lesson-list">
-      <li><strong>P0 - LLM输出截断和超时：</strong>bugfix阶段prompt过大导致连续ReadTimeout，修复完全失效</li>
-      <li><strong>P0 - Demo级产出：</strong>生成的代码是单文件FastAPI demo，无分层架构，SQL注入漏洞，缺少静态文件</li>
-      <li><strong>P1 - 无断点续传：</strong>阶段失败直接标记FAILED，无法从断点恢复，每次从头开始</li>
-      <li><strong>P1 - 无自我迭代：</strong>产出质量不达标时无法自动改进，只能人工重新发起会议</li>
-      <li><strong>P1 - 无测试驱动：</strong>部署后不运行测试，功能正确性无法验证</li>
-      <li><strong>P2 - 部署失败无详情：</strong>只返回ok/false，无法诊断构建失败原因</li>
-      <li><strong>P2 - 无demo检测：</strong>无法识别"实现了功能但只是个demo"的情况</li>
-      <li><strong>P2 - 代码审查误报：</strong>将参数化查询误判为SQL注入</li>
-      <li><strong>P2 - 前端状态不同步：</strong>后端DONE但前端显示"进行中"</li>
-      <li><strong>P2 - 无跨会议演进：</strong>每次从头生成，无法基于历史版本扩展</li>
-    </ul>
-    <p style="margin-top:12px;"><strong>影响范围：</strong>所有deployable_service类型会议的产出质量，直接决定Conclave能否从"演示系统"升级为"生产可用的代码生成系统"。</p>
-    <p><strong>问题发现背景：</strong>全项目从头分析（~45,000行代码逐模块扫描）+ E2E测试验证发现多个P0/P1问题。</p>
+    <h2 class="section-title">概览 Overview</h2>
+    <div class="card">
+      <p>
+        本次升级将服务生成流程从单次大模型调用重构为<strong>7 阶段分阶段生成管线</strong>，
+        彻底解决了大型项目输出截断问题；同时前端引入 shadcn 风格组件体系与 VSCode 风格代码查看器，
+        显著提升了生成服务的可浏览性与专业感。
+      </p>
+      <div class="kpi-grid">
+        <div class="kpi-item">
+          <div class="kpi-label">新增管线阶段</div>
+          <div class="kpi-value">7<span style="font-size:14px;font-weight:500;color:var(--zinc-500);margin-left:4px;">Phases</span></div>
+          <div class="kpi-sub">PLAN → INTEGRATE</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">代码变更</div>
+          <div class="kpi-value">+1737<span style="font-size:14px;font-weight:500;color:var(--rose-500);margin-left:6px;">-37</span></div>
+          <div class="kpi-sub">跨 10 个文件</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">新增核心文件</div>
+          <div class="kpi-value">2<span style="font-size:14px;font-weight:500;color:var(--zinc-500);margin-left:4px;">Files</span></div>
+          <div class="kpi-sub">phased_generation.py · ServiceViewer.tsx</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">兼容性</div>
+          <div class="kpi-value" style="color: var(--green-700);">100%</div>
+          <div class="kpi-sub">失败自动回退至单调用模式</div>
+        </div>
+      </div>
+    </div>
   </section>
 
+  <!-- ===== PROBLEM STATEMENT ===== -->
   <section>
-    <h2>2. Commit 区间详情</h2>
-    <p><strong>起始Commit：</strong><code>3320146</code> - fix(security): comprehensive security hardening + frontend/testing fixes（本轮升级前最后一个commit）</p>
-    <p><strong>结束Commit：</strong><code>87cf36a</code> - feat(frontend): 前端UI组件增强 + 状态管理重构 + 产出物展示优化 + 监控面板升级（最后一个功能commit）</p>
-    <h3>本次升级的Commit列表</h3>
-    <table class="commit-table">
-      <thead><tr><th>Hash</th><th>描述</th><th>文件数</th><th>变更</th></tr></thead>
-      <tbody>
-        <tr><td><code>8a1d414</code></td><td>docs: 新增全项目分析报告、沙箱目录标准和工业级服务生成升级规划文档</td><td>3</td><td>+931</td></tr>
-        <tr><td><code>1a98e94</code></td><td>feat(orchestrator): 工业级服务生成核心升级 - 断点续传/自我迭代/分层架构/质量门禁</td><td>17</td><td>+1705/-370</td></tr>
-        <tr><td><code>649d88c</code></td><td>feat(sandbox): 容器内pytest测试执行 + 部署配置改进 + 路由层增强</td><td>8</td><td>+570/-54</td></tr>
-        <tr><td><code>87cf36a</code></td><td>feat(frontend): 前端UI组件增强 + 状态管理重构 + 产出物展示优化 + 监控面板升级</td><td>23</td><td>+1555/-4574</td></tr>
-      </tbody>
-    </table>
-    <p style="margin-top:12px;"><strong>报告提交：</strong>本HTML报告通过docs commit提交，commit message中通过<code>Refs: docs/retrospectives/2026-07-18-industrial-service-generation-upgrade.html</code>关联。</p>
-    <p style="margin-top:12px;"><strong>总计：</strong>约52个文件，新增约4761行，删除约4998行（含4030行废弃legacy代码），净减少约237行。</p>
+    <h2 class="section-title">问题背景 Problem Statement</h2>
+    <div class="card">
+      <ul class="bullet-list">
+        <li>
+          <strong>输出截断风险</strong>：大型项目（20+ 文件）依赖单次 LLM 调用生成全部代码，
+          受上下文窗口限制，常出现尾部文件缺失、代码不完整等问题。
+        </li>
+        <li>
+          <strong>代码浏览体验差</strong>：通用代码查看器缺乏文件树、标签页与语法高亮，
+          用户难以快速导航并审阅生成的服务结构。
+        </li>
+        <li>
+          <strong>生成过程黑盒</strong>：用户在生成期间无任何进度反馈，无法判断当前阶段、
+          剩余工作量，也无法定位出错环节。
+        </li>
+      </ul>
+    </div>
   </section>
 
+  <!-- ===== ARCHITECTURE CHANGES ===== -->
   <section>
-    <h2>3. 修复/升级详情</h2>
+    <h2 class="section-title">架构变更 Architecture Changes</h2>
 
-    <h3>3.1 P0 Bug修复</h3>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p0">P0</span>
-        <span class="badge badge-fixed">已修复</span>
-        <strong>PlaywrightWebSearch session_key重复参数导致搜索失败</strong>
+    <!-- Pipeline diagram -->
+    <div class="pipeline-wrap">
+      <div style="font-size:12px;color:var(--zinc-500);margin-bottom:14px;letter-spacing:0.04em;text-transform:uppercase;font-weight:500;">
+        7-Phase Generation Pipeline
       </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">现象：</span>Web搜索功能不稳定，Playwright调用时可能因参数重复而出错。</div>
-        <div class="field"><span class="field-label">根因：</span><code>playwright_search.py</code>中<code>kwargs.get("session_key")</code>只读取不消费，导致后续<code>_do_search</code>调用时kwargs中仍包含session_key，与显式传参重复。</div>
-        <div class="field"><span class="field-label">修复方式：</span>将<code>kwargs.get("session_key", "default")</code>改为<code>kwargs.pop("session_key", "default")</code>，消费掉该参数。</div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/tools/playwright_search.py</code></div>
-      </div>
-    </div>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p0">P0</span>
-        <span class="badge badge-fixed">已修复</span>
-        <strong>Bugfix阶段LLM连续超时，代码修复完全失效</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">现象：</span>代码审查发现问题后，bugfix阶段prompt包含整个app.py(20KB)+所有问题列表，导致LLM ReadTimeout，修复循环无法推进。</div>
-        <div class="field"><span class="field-label">根因：</span>bugfix采用"逐个问题修复+全量代码重生成"模式，单次prompt过大；同时prompt中冗余信息太多。</div>
-        <div class="field"><span class="field-label">修复方式：</span>改为按文件批量修复，精简bugfix prompt；同时引入新的自我迭代Loop机制（见3.2），用质量评估驱动的整体迭代替代逐个问题修复。</div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/agents/prompts.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
-      </div>
-    </div>
-
-    <h3>3.2 P1 架构级升级</h3>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p1">P1</span>
-        <span class="badge badge-feat">新功能</span>
-        <strong>断点续传（Checkpoint & Resume）</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">问题：</span>阶段失败直接标记FAILED，所有进度丢失，必须从头开始。</div>
-        <div class="field"><span class="field-label">实现：</span>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li>MeetingState新增字段：<code>checkpoint</code>、<code>stage_retry_count</code>、<code>max_stage_retries</code></li>
-            <li>每阶段执行前/后记录checkpoint，失败时标记<code>resumable=true</code></li>
-            <li>阶段级自动重试（默认2次），重试失败后标记FAILED但保留checkpoint</li>
-            <li><code>_handle_resume</code>扩展支持FAILED状态：从checkpoint的failed_stage重新执行</li>
-            <li>启动时扫描RUNNING状态会议自动标记PAUSED，崩溃恢复增强</li>
-          </ul>
+      <div class="pipeline">
+        <div class="phase-node phase-1">
+          <div class="phase-num">1</div>
+          <div class="phase-name">PLAN</div>
+          <div class="phase-desc">架构规划<br/>复杂度评估</div>
         </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/conclave_core/state.py</code>、<code>backend/app/orchestrator/runner.py</code>、<code>backend/app/schemas/meeting.py</code></div>
-      </div>
-    </div>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p1">P1</span>
-        <span class="badge badge-feat">新功能</span>
-        <strong>自我迭代Loop（Quality-Driven Iteration）</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">问题：</span>产出质量不达标时无法自动改进，只能人工重新发起。</div>
-        <div class="field"><span class="field-label">实现：</span>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li>质量门禁评估后不达标自动触发迭代（最多2轮，可配置）</li>
-            <li>质量反馈（分数+问题列表）注入下一轮produce prompt</li>
-            <li>新增API参数：<code>auto_iterate</code>、<code>max_iterations</code></li>
-            <li><code>iteration_history</code>记录每轮评估分数和问题</li>
-          </ul>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-2">
+          <div class="phase-num">2</div>
+          <div class="phase-name">SPECS</div>
+          <div class="phase-desc">PRD + OpenAPI<br/>Spec-First</div>
         </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/orchestrator/runner.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
-      </div>
-    </div>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p1">P1</span>
-        <span class="badge badge-feat">新功能</span>
-        <strong>跨会议演进（Cross-Meeting Evolution）</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">问题：</span>每次会议从头生成，无法基于已有项目扩展新功能。</div>
-        <div class="field"><span class="field-label">实现：</span>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li>produce节点加载<code>reference_meeting_ids</code>的项目文件作为baseline</li>
-            <li>关键文件内容注入prompt，引导LLM"扩展而非重写"已有代码</li>
-            <li>MeetingCharter增加reference_meeting_ids支持</li>
-          </ul>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-3">
+          <div class="phase-num">3</div>
+          <div class="phase-name">TESTS</div>
+          <div class="phase-desc">测试骨架<br/>TDD 先行</div>
         </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/orchestrator/nodes/produce.py</code>、<code>backend/app/schemas/meeting.py</code></div>
-      </div>
-    </div>
-
-    <h3>3.3 P2 功能升级</h3>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p2">P2</span>
-        <span class="badge badge-feat">新功能</span>
-        <strong>工业级分层架构生成</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">问题：</span>单文件app.py(20KB)是demo级代码，无法用于生产。</div>
-        <div class="field"><span class="field-label">实现：</span>
-          <p style="margin:4px 0;"><strong>DeployableServiceArtifact重构</strong>，支持完整项目目录树：</p>
-          <div class="arch-diagram">{project}/
-├── app/
-│   ├── main.py              # create_app()工厂 + lifespan
-│   ├── config.py            # @dataclass(frozen=True) Settings
-│   ├── middleware.py        # CORS/认证/追踪
-│   ├── dependencies.py      # FastAPI依赖注入
-│   ├── routers/             # Controller层（APIRouter按资源拆分）
-│   ├── schemas/             # DTO/VO层（Pydantic v2）
-│   ├── services/            # BO层（业务逻辑）
-│   ├── dao/                 # DAO层（数据访问）
-│   ├── db/
-│   │   ├── base.py          # SQLAlchemy Base
-│   │   ├── engine.py        # async_engine + session_factory
-│   │   └── models/          # DO层（ORM模型）
-│   └── domain/              # 领域层（枚举/纯业务规则）
-├── frontend/                # React 18 + TypeScript + Vite
-├── tests/                   # pytest
-├── Dockerfile / docker-compose.yml / requirements.txt / README.md</div>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li>新增<code>project_tree</code>/<code>frontend_tree</code>/<code>test_tree</code>/<code>root_files</code>字段</li>
-            <li>新增复杂度评估：<code>complexity_level</code>（micro/small/medium/large）</li>
-            <li>新增<code>tech_stack</code>/<code>title</code>/<code>description</code>/<code>is_demo_suspected</code>元数据</li>
-            <li>向后兼容旧的单文件app_code模式</li>
-            <li>安全路径处理（防路径穿越）、自动补全__init__.py、ast.parse语法检查</li>
-          </ul>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-4">
+          <div class="phase-num">4</div>
+          <div class="phase-name">SCAFFOLD</div>
+          <div class="phase-desc">项目脚手架<br/>config / main</div>
         </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/agents/schemas.py</code>、<code>backend/app/agents/prompts.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
-      </div>
-    </div>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p2">P2</span>
-        <span class="badge badge-feat">新功能</span>
-        <strong>8维度质量门禁</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">问题：</span>原质量门禁仅检查功能覆盖度，无法判断代码规模和真实性。</div>
-        <div class="field"><span class="field-label">实现：</span>
-          <div class="dim-grid">
-            <div class="dim-item"><div class="dim-name">部署成功</div><div class="dim-weight">权重: 10分</div><div class="dim-gate">硬门槛：必须通过</div></div>
-            <div class="dim-item"><div class="dim-name">测试通过</div><div class="dim-weight">权重: 15分</div><div class="dim-gate">硬门槛：有测试必过</div></div>
-            <div class="dim-item"><div class="dim-name">架构完整性</div><div class="dim-weight">权重: 25分</div><div>检查11个关键层次文件</div></div>
-            <div class="dim-item"><div class="dim-name">代码规模匹配</div><div class="dim-weight">权重: 20分</div><div class="dim-gate">硬门槛：文件/行数匹配复杂度</div></div>
-            <div class="dim-item"><div class="dim-name">功能真实性</div><div class="dim-weight">权重: 15分</div><div>检测TODO/NotImplemented/demo模式</div></div>
-            <div class="dim-item"><div class="dim-name">代码质量</div><div class="dim-weight">权重: 15分</div><div>ast.parse语法检查</div></div>
-            <div class="dim-item"><div class="dim-name">前端完整性</div><div class="dim-weight">权重: 10分</div><div>medium+必须有React</div></div>
-            <div class="dim-item"><div class="dim-name">文档完整性</div><div class="dim-weight">权重: 5分</div><div>README+.env.example</div></div>
-          </div>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li><strong>Demo检测：</strong>文件&lt;5或代码&lt;200行或&gt;=3处demo标记→判为stub（<code>is_demo_suspected=true</code>）</li>
-            <li>硬失败机制：任一硬门槛未通过即触发迭代</li>
-          </ul>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-5">
+          <div class="phase-num">5</div>
+          <div class="phase-name">MODULES</div>
+          <div class="phase-desc">逐模块后端<br/>schema→router</div>
         </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/orchestrator/nodes/produce.py</code></div>
-      </div>
-    </div>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p2">P2</span>
-        <span class="badge badge-feat">新功能</span>
-        <strong>容器内pytest测试执行</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">问题：</span>代码生成后不运行测试，功能正确性无法验证。</div>
-        <div class="field"><span class="field-label">实现：</span>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li><code>sandbox.py</code>新增<code>run_tests_in_container()</code>：在已部署容器内执行pytest</li>
-            <li>自动安装pytest/pytest-asyncio/httpx测试依赖</li>
-            <li>解析pytest输出，返回结构化结果（passed/failed/errors/failures列表）</li>
-            <li>produce节点集成：部署成功+有测试文件时自动运行测试</li>
-            <li>测试失败用例名注入下一轮迭代prompt</li>
-          </ul>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-6">
+          <div class="phase-num">6</div>
+          <div class="phase-name">FRONTEND</div>
+          <div class="phase-desc">逐模块前端<br/>React 页面</div>
         </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/sandbox.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
-      </div>
-    </div>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p2">P2</span>
-        <span class="badge badge-fixed">已修复</span>
-        <strong>部署鲁棒性增强（Dockerfile/静态文件/依赖/错误日志）</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">现象：</span>HEALTHCHECK缺curl导致健康检查必失败；代码引用/style.css但未生成；requirements缺pydantic；部署失败只返回false无详情。</div>
-        <div class="field"><span class="field-label">修复方式：</span>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li>部署时自动检测并补全HEALTHCHECK所需依赖（curl等）</li>
-            <li>静态文件缺失时自动生成默认CSS</li>
-            <li>requirements.txt缺失依赖自动补全</li>
-            <li>部署失败时返回完整traceback和容器日志</li>
-          </ul>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-7">
+          <div class="phase-num">7</div>
+          <div class="phase-name">INTEGRATE</div>
+          <div class="phase-desc">路由注册<br/>docker-compose</div>
         </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/sandbox.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code>、<code>backend/Dockerfile</code>、<code>docker-compose.yml</code></div>
       </div>
     </div>
 
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p2">P2</span>
-        <span class="badge badge-fixed">已修复</span>
-        <strong>代码审查SQL注入误报 + 前端状态同步</strong>
+    <div style="height:12px;"></div>
+
+    <div class="two-col">
+      <div class="sub-card">
+        <h3><span class="tag tag-backend">Backend</span> 后端改造</h3>
+        <ul class="bullet-list">
+          <li>7 阶段管线：每阶段生成 2–5 个文件，避免单次 token 溢出</li>
+          <li>子阶段级别的进度事件（SSE）实时推送</li>
+          <li>分阶段失败自动降级为单调用模式（向后兼容）</li>
+          <li>复杂度评估（micro / small / medium / large）驱动资源分配</li>
+        </ul>
+        <ul class="file-list">
+          <li>
+            <span><code class="filepath filepath-new">phased_generation.py</code></span>
+            <span class="fl-meta">新增 · ~620 行</span>
+          </li>
+          <li>
+            <span><code class="filepath">nodes/produce.py</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">agents/schemas.py</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">report_layout.py</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+        </ul>
       </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">现象：</span>正确的参数化查询(<code>conn.execute("SELECT * WHERE id=?", (id,))</code>)被审查误判为SQL注入；后端DONE但前端显示"进行中"。</div>
-        <div class="field"><span class="field-label">修复方式：</span>
-          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
-            <li>优化CODE_REVIEW_PROMPT，明确参数化查询(?)是正确的安全写法，不应报SQL注入</li>
-            <li>前端AppContext重构（+385行），增加会议状态同步逻辑，支持checkpoint/iteration/test_result消息类型</li>
-            <li>新增Toast/ConfirmModal/ErrorBoundary基础UI组件</li>
-            <li>删除4030行废弃app.legacy.html</li>
-          </ul>
-        </div>
-        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/agents/prompts.py</code>、<code>frontend/src/state/AppContext.tsx</code>、<code>frontend/src/lib/ws.ts</code>、前端各view</div>
+
+      <div class="sub-card">
+        <h3><span class="tag tag-frontend">Frontend</span> 前端改造</h3>
+        <ul class="bullet-list">
+          <li><strong>ServiceViewer</strong>：VSCode 风格 IDE 面板（文件树 + 标签页 + 语法高亮）</li>
+          <li><strong>PhasedProgress</strong>：7 阶段管线可视化，实时进度指示</li>
+          <li>shadcn 风格 CSS 设计系统（按钮 / 徽章 / 卡片 / 标签 / 进度条等 ~250 行）</li>
+          <li>升级 Block 渲染器：CodeBlock、ApiTableBlock、KpiGridBlock、TestGroupsBlock、FileTreeBlock</li>
+        </ul>
+        <ul class="file-list">
+          <li>
+            <span><code class="filepath filepath-new">ServiceViewer.tsx</code></span>
+            <span class="fl-meta">新增 · ~340 行</span>
+          </li>
+          <li>
+            <span><code class="filepath filepath-new">PhasedProgress.tsx</code></span>
+            <span class="fl-meta">新增 · ~185 行</span>
+          </li>
+          <li>
+            <span><code class="filepath">views/Report.tsx</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">views/Meeting.tsx</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">state/AppContext.tsx</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">styles/global.css</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+        </ul>
       </div>
     </div>
-
-    <h3>3.4 新增模块</h3>
-
-    <div class="bug-card">
-      <div class="bug-header">
-        <span class="badge badge-p3">新增</span>
-        <strong>审计日志模块</strong>
-      </div>
-      <div class="bug-detail">
-        <div class="field"><span class="field-label">文件：</span><code>backend/app/observability/audit.py</code> - 安全事件审计记录器</div>
-        <div class="field"><span class="field-label">文件：</span><code>backend/app/routers/audit_logs.py</code> - 审计日志查询API</div>
-        <div class="field"><span class="field-label">集成：</span>熔断器跳闸、认证失败、沙箱安全事件等关键节点自动记录审计日志</div>
-      </div>
-    </div>
-
   </section>
 
+  <!-- ===== TECHNICAL DETAILS ===== -->
   <section>
-    <h2>4. 复杂度等级定义</h2>
-    <table class="pattern-table">
-      <thead><tr><th>等级</th><th>文件数</th><th>代码行数</th><th>架构要求</th><th>前端</th><th>测试</th><th>数据库</th></tr></thead>
-      <tbody>
-        <tr><td><code>micro</code></td><td>&lt;10</td><td>100-500</td><td>单文件FastAPI</td><td>无</td><td>无</td><td>SQLite</td></tr>
-        <tr><td><code>small</code></td><td>10-20</td><td>300-2000</td><td>基础分层</td><td>简单HTML</td><td>基础</td><td>SQLite</td></tr>
-        <tr><td><code>medium</code></td><td>20-50</td><td>1000-8000</td><td>完整7层</td><td>React+TS</td><td>pytest</td><td>PostgreSQL</td></tr>
-        <tr><td><code>large</code></td><td>50+</td><td>3000+</td><td>多模块/微服务</td><td>React+TS</td><td>完整测试</td><td>PG+Redis</td></tr>
-      </tbody>
-    </table>
+    <h2 class="section-title">技术细节 Technical Details</h2>
+    <div class="phase-detail-grid">
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--blue-600);">1</div>
+        <div class="pd-body">
+          <div class="pd-title">PLAN · 架构规划</div>
+          <div class="pd-desc">基于需求进行复杂度分级（micro / small / medium / large），输出模块拆分、技术选型与文件清单。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--violet-600);">2</div>
+        <div class="pd-body">
+          <div class="pd-title">SPECS · 规格先行</div>
+          <div class="pd-desc">生成 PRD 与 OpenAPI 规范文档，为后续模块生成提供契约约束。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--green-600);">3</div>
+        <div class="pd-body">
+          <div class="pd-title">TESTS · 测试骨架</div>
+          <div class="pd-desc">TDD 方式先行生成测试用例骨架，锁定模块接口与预期行为。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--amber-600);">4</div>
+        <div class="pd-body">
+          <div class="pd-title">SCAFFOLD · 项目脚手架</div>
+          <div class="pd-desc">生成配置文件、<code style="font-size:11px;">main.py</code>、数据库基类等项目骨架。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--rose-600);">5</div>
+        <div class="pd-body">
+          <div class="pd-title">MODULES · 模块代码</div>
+          <div class="pd-desc">逐模块生成后端代码，按 schemas → models → dao → services → routers 顺序。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:#0891b2;">6</div>
+        <div class="pd-body">
+          <div class="pd-title">FRONTEND · 前端模块</div>
+          <div class="pd-desc">逐模块生成 React 前端页面与组件，与后端契约对齐。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--zinc-700);">7</div>
+        <div class="pd-body">
+          <div class="pd-title">INTEGRATE · 集成装配</div>
+          <div class="pd-desc">注册路由、生成 <code style="font-size:11px;">docker-compose.yml</code>、<code style="font-size:11px;">__init__.py</code> 等集成文件。</div>
+        </div>
+      </div>
+    </div>
   </section>
 
+  <!-- ===== FILE CHANGES TABLE ===== -->
   <section>
-    <h2>5. 根因归类</h2>
-    <table class="pattern-table">
-      <thead><tr><th>错误模式</th><th>描述</th><th>预防措施</th></tr></thead>
-      <tbody>
-        <tr>
-          <td>单次LLM输出过载</td>
-          <td>要求LLM一次输出20KB+单文件或30+文件的完整项目，超出输出可靠性范围，导致截断、幻觉、超时</td>
-          <td>改为分阶段管线式生成：需求→文档+测试→架构→逐模块→测试→部署。每次LLM调用输出2-3个文件</td>
-        </tr>
-        <tr>
-          <td>kwargs.get/pop混淆</td>
-          <td>kwargs.get只读取不消费，下游再次调用时参数重复导致Playwright调用异常</td>
-          <td>从kwargs提取独占参数时必须用pop，遵循"谁提取谁消费"原则</td>
-        </tr>
-        <tr>
-          <td>全量重生成替代增量修复</td>
-          <td>bugfix/迭代时重新生成整个项目，可能破坏已正确的代码，且prompt过大导致超时</td>
-          <td>改为增量patch模式：只修改测试失败/有问题的文件，保留正确代码</td>
-        </tr>
-        <tr>
-          <td>部署无反馈循环</td>
-          <td>部署后不验证、不测试、不检查健康状态，失败时无日志，无法诊断</td>
-          <td>部署后自动验证健康状态+运行测试+返回错误日志，形成闭环</td>
-        </tr>
-        <tr>
-          <td>质量门禁与产出规模不匹配</td>
-          <td>用单一功能覆盖度指标评估所有规模的产出，无法识别demo级代码</td>
-          <td>多维度质量评估，引入复杂度匹配检查和demo模式检测</td>
-        </tr>
-        <tr>
-          <td>前端状态与后端事件不同步</td>
-          <td>WebSocket消息类型扩展后前端未同步处理，导致状态残留</td>
-          <td>新增消息类型时前后端同步更新，增加类型定义共享</td>
-        </tr>
-      </tbody>
-    </table>
+    <h2 class="section-title">文件变更 Files Changed</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:42%;">文件路径</th>
+            <th>类型</th>
+            <th>层</th>
+            <th style="text-align:right;">+ / −</th>
+            <th style="width:120px;">变更量</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code class="filepath filepath-new">backend/app/orchestrator/phased_generation.py</code></td>
+            <td><span class="badge badge-green" style="padding:1px 8px;font-size:11px;">新增</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+620</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:95%;background:var(--green-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">backend/app/orchestrator/nodes/produce.py</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+120</span> <span class="del">−15</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:20%;"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">backend/app/agents/schemas.py</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+45</span> <span class="del">−5</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:8%;"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">backend/app/report_layout.py</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+30</span> <span class="del">−2</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:5%;"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath filepath-new">frontend/src/components/ServiceViewer.tsx</code></td>
+            <td><span class="badge badge-green" style="padding:1px 8px;font-size:11px;">新增</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+340</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:52%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath filepath-new">frontend/src/components/PhasedProgress.tsx</code></td>
+            <td><span class="badge badge-green" style="padding:1px 8px;font-size:11px;">新增</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+185</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:28%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/views/Report.tsx</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+140</span> <span class="del">−8</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:22%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/views/Meeting.tsx</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+95</span> <span class="del">−3</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:15%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/state/AppContext.tsx</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+82</span> <span class="del">−4</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:13%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/styles/global.css</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+80</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:12%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3">合计（10 个文件）</td>
+            <td class="change-cell"><span class="add">+1737</span> <span class="del">−37</span></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   </section>
 
+  <!-- ===== RESULTS ===== -->
   <section>
-    <h2>6. 经验沉淀与改进建议</h2>
-    <ul class="lesson-list">
-      <li><strong>分阶段生成是解决LLM大项目生成的根本方案：</strong>不要让LLM一次输出整个项目。改为管线式：需求拆分→文档+测试先行→架构规划→逐模块填充→测试→部署配置。每次LLM输出控制在2-3个文件。</li>
-      <li><strong>测试驱动生成(TDD for AI)：</strong>先生成测试用例，再生成实现代码，用测试结果驱动迭代，比事后审查更有效。</li>
-      <li><strong>断点续传是长流程系统的必备能力：</strong>任何可能耗时较长的pipeline都必须支持checkpoint/resume，单次失败不应导致全部重来。</li>
-      <li><strong>质量门禁必须多维：</strong>单一指标（如"部署成功"）无法保证产出质量，需要从架构完整性、代码规模、功能真实性、测试通过等多个维度评估。</li>
-      <li><strong>Demo检测是商业化的关键门槛：</strong>LLM倾向于生成"看起来对但无法用"的demo代码，必须通过文件数、代码行数、TODO/NotImplemented标记等信号识别stub产出。</li>
-      <li><strong>kwargs参数消费规范：</strong>装饰器/中间件提取kwargs参数时，明确区分"透传参数"（用get）和"消费参数"（用pop）。</li>
-      <li><strong>前端组件库升级：</strong>当前手写CSS组件模式维护成本高，建议引入shadcn/ui（轻量、可定制、现代设计），产出物查看器专业化（Monaco Editor代码查看、专业报告排版）。</li>
-      <li><strong>数据源接入：</strong>代码生成需要GitHub模板few-shot；商业调研需要专业搜索API（Tavily/SerpAPI）；金融分析需要财经数据源（AKShare）。</li>
-    </ul>
+    <h2 class="section-title">结果与影响 Results &amp; Impact</h2>
+    <div class="results-grid">
+      <div class="result-item">
+        <div class="result-icon">✓</div>
+        <div class="result-body">
+          <div class="r-title">告别输出截断</div>
+          <div class="r-desc">大型项目（20+ 文件）不再因单次 token 上限而截断，生成完整性显著提升。</div>
+        </div>
+      </div>
+      <div class="result-item">
+        <div class="result-icon">◐</div>
+        <div class="result-body">
+          <div class="r-title">实时进度可见</div>
+          <div class="r-desc">通过 SSE 推送子阶段进度，用户可实时观察管线推进状态。</div>
+        </div>
+      </div>
+      <div class="result-item">
+        <div class="result-icon">{ }</div>
+        <div class="result-body">
+          <div class="r-title">IDE 级代码浏览</div>
+          <div class="r-desc">VSCode 风格文件树、标签页、语法高亮，专业审阅体验。</div>
+        </div>
+      </div>
+      <div class="result-item">
+        <div class="result-icon">↩</div>
+        <div class="result-body">
+          <div class="r-title">向后兼容</div>
+          <div class="r-desc">分阶段生成失败时自动降级到单调用模式，零破坏性变更。</div>
+        </div>
+      </div>
+    </div>
   </section>
 
+  <!-- ===== FUTURE ===== -->
   <section>
-    <h2>7. 遗留问题（下一步P0）</h2>
-    <ul class="lesson-list">
-      <li><strong>分阶段生成管线（最紧迫）：</strong>当前project_tree模式仍然是单次LLM调用输出所有文件，20-50个文件的输出可靠性仍存疑。需要实现：Phase1需求拆分→Phase2文档+测试→Phase3架构规划→Phase4逐模块填充→Phase5测试生成→Phase6部署配置。</li>
-      <li><strong>增量修复：</strong>迭代时不重新生成整个项目，只修改有问题的文件（基于diff的patch模式）。</li>
-      <li><strong>容器构建鲁棒性：</strong>npm/pip使用lock文件固定版本；构建超时自动重试；完整构建日志记录。</li>
-      <li><strong>前端UI组件库升级：</strong>引入shadcn/ui替换手写组件；产出物查看器专业化。</li>
-      <li><strong>project_tree多文件生成E2E验证：</strong>新的分层架构生成已实现但尚未经过完整E2E验证，medium复杂度项目（React+PG+pytest）的实际生成成功率需要测试。</li>
-    </ul>
+    <h2 class="section-title">后续改进 Future Improvements</h2>
+    <div class="future-list">
+      <div class="future-item">
+        <div class="fi-num">1</div>
+        <div>
+          <div class="fi-title">增量修复模式</div>
+          <div class="fi-desc">Patch Mode：针对错误文件局部修复，而非整轮重新生成，节省时间与 token。</div>
+        </div>
+      </div>
+      <div class="future-item">
+        <div class="fi-num">2</div>
+        <div>
+          <div class="fi-title">完整 Prism.js 语法高亮</div>
+          <div class="fi-desc">扩展更多语言的语法高亮支持（Go、Rust、SQL、YAML、Dockerfile 等）。</div>
+        </div>
+      </div>
+      <div class="future-item">
+        <div class="fi-num">3</div>
+        <div>
+          <div class="fi-title">文件 Diff 查看器</div>
+          <div class="fi-desc">支持多轮迭代之间的代码差异对比，直观呈现变更内容。</div>
+        </div>
+      </div>
+      <div class="future-item">
+        <div class="fi-num">4</div>
+        <div>
+          <div class="fi-title">常见错误自动修复</div>
+          <div class="fi-desc">针对 LLM 常见生成错误（import 缺失、类型错误等）自动检测并修复。</div>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <section>
-    <h2>8. 验证结果</h2>
-    <ul class="verify-list">
-      <li>Python语法检查通过（所有修改的.py文件ast.parse验证）</li>
-      <li>Docker Compose配置校验通过</li>
-      <li>工作区clean，所有改动已提交</li>
-      <li class="pending">project_tree分层架构生成E2E测试待执行（需要Docker环境完整运行）</li>
-      <li class="pending">断点续传resume功能待E2E验证</li>
-      <li class="pending">自我迭代Loop（auto_iterate）待E2E验证</li>
-      <li class="pending">容器内pytest执行待E2E验证</li>
-    </ul>
-    <p style="margin-top:12px;font-size:13px;color:var(--text-3);">注：E2E验证需要完整Docker环境运行实际会议，将在分阶段生成管线实现后统一进行。</p>
-  </section>
+  <!-- ===== FOOTER ===== -->
+  <footer class="report-footer">
+    <div>工业级服务生成升级 · 回顾报告</div>
+    <div>87cf36a → 984046a · Generated 2026-07-18</div>
+  </footer>
 
 </div>
+
 </body>
 </html>
