@@ -19,6 +19,7 @@ import Report from './views/Report';
 import Models from './views/Models';
 import Monitor from './views/Monitor';
 import Topology from './views/Topology';
+import DevOpsPanel from './views/DevOpsPanel';
 import Settings from './views/Settings';
 import Login from './views/Login';
 
@@ -80,6 +81,7 @@ function Shell() {
             <Route path="models" element={<Models />} />
             <Route path="monitor" element={<Monitor />} />
             <Route path="topology" element={<Topology />} />
+            <Route path="devops" element={<DevOpsPanel />} />
             <Route path="settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="" replace />} />
           </Routes>

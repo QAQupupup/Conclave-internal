@@ -32,16 +32,44 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import re
 import shlex
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from app.observability.log_bus import log_bus
+
+# ---- 远程 Docker 主机支持 ----
+# 通过 context var 在调用链中传递目标 Docker 环境变量，避免修改所有函数签名
+_docker_target_env: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "docker_target_env", default=None
+)
+
+
+def set_docker_target_env(env: dict[str, str] | None) -> None:
+    """设置当前任务链的 Docker 目标环境变量（DOCKER_HOST 等）。"""
+    _docker_target_env.set(env)
+
+
+@asynccontextmanager
+async def docker_host_context(host_config: dict[str, Any] | None):
+    """异步上下文管理器：在块内将 docker 命令指向指定主机。"""
+    from app.docker_hosts import build_docker_env
+    if host_config:
+        env = build_docker_env(host_config)
+        token = _docker_target_env.set(env)
+        try:
+            yield
+        finally:
+            _docker_target_env.reset(token)
+    else:
+        yield
 
 # ---- 网络分级 ----
 
@@ -924,12 +952,19 @@ async def _run_docker_cmd(
 ) -> tuple[int, str, str]:
     """执行 docker 命令并返回 (returncode, stdout, stderr)"""
     cmd = _docker_cmd(args)
+    # 合并：调用方env → 远程目标env → 进程env
+    merged_env = os.environ.copy()
+    target_env = _docker_target_env.get()
+    if target_env:
+        merged_env.update(target_env)
+    if env:
+        merged_env.update(env)
     proc = await asyncio.create_subprocess_shell(
         cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
-        env=env,
+        env=merged_env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -974,20 +1009,114 @@ async def deploy_service(
     env_vars: dict | None = None,
     credentials: dict | None = None,
     wait_seconds: int = 300,
+    target_host_id: int | None = None,
 ) -> DeployResult:
     """部署一个长期运行的服务容器
 
     流程：
-    1. 分配宿主机端口
-    2. 创建并启动容器（detached模式，挂载工作区，映射端口）
-    3. 等待服务启动 + 健康检查
-    4. 返回访问URL或错误日志
+    1. 选择目标 Docker 主机（本地默认或通过调度器选择远程主机）
+    2. 分配宿主机端口
+    3. 创建并启动容器（detached模式，挂载工作区，映射端口）
+    4. 等待服务启动 + 健康检查
+    5. 返回访问URL或错误日志
 
     注意：与一次性沙箱不同，部署容器使用宽松安全策略（需要写文件、常驻运行）。
     资源限制比执行沙箱更宽松（512m/2cpus）。
+
+    target_host_id: 指定部署到的 Docker 主机 ID（None=自动调度，0=本地）
     """
-    if not await _check_docker():
-        return DeployResult(ok=False, error="Docker 不可用，无法部署服务")
+    # 解析目标主机配置
+    host_config = None
+    host_info = {"host_id": 0, "host_name": "local", "host_ip": "127.0.0.1"}
+    if target_host_id is not None and target_host_id != 0:
+        from app.db.engine import async_session_factory
+        from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
+        from sqlalchemy import select
+        async with async_session_factory() as session:
+            host = await session.get(DockerHostModel, target_host_id)
+            if host:
+                secret = (await session.execute(
+                    select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == target_host_id)
+                )).scalar_one_or_none()
+                from app.docker_hosts import _model_to_config_dict
+                host_config = _model_to_config_dict(host, secret)
+                host_info = {
+                    "host_id": host.id,
+                    "host_name": host.name,
+                    # 从 docker_host ssh://xxx 中提取 IP
+                    "host_ip": _extract_host_ip(host.docker_host),
+                }
+    elif target_host_id is None:
+        # 自动调度：尝试选择最优主机
+        try:
+            from app.docker_hosts import select_deploy_target
+            target = await select_deploy_target(strategy="least_loaded")
+            if target and target.host_id != 0:
+                from app.db.engine import async_session_factory
+                from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
+                from sqlalchemy import select
+                async with async_session_factory() as session:
+                    host = await session.get(DockerHostModel, target.host_id)
+                    if host:
+                        secret = (await session.execute(
+                            select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == target.host_id)
+                        )).scalar_one_or_none()
+                        from app.docker_hosts import _model_to_config_dict
+                        host_config = _model_to_config_dict(host, secret)
+                        host_info = {
+                            "host_id": host.id,
+                            "host_name": host.name,
+                            "host_ip": _extract_host_ip(host.docker_host),
+                        }
+        except Exception as e:
+            log_bus.warning(f"自动调度失败，使用本地 Docker: {e}", logger="sandbox.deploy")
+
+    async with docker_host_context(host_config):
+        if not await _check_docker():
+            return DeployResult(ok=False, error="Docker 不可用，无法部署服务")
+
+        return await _do_deploy(
+            meeting_id=meeting_id,
+            workspace_root=workspace_root,
+            container_port=container_port,
+            startup_cmd=startup_cmd,
+            health_path=health_path,
+            memory_limit=memory_limit,
+            cpu_limit=cpu_limit,
+            env_vars=env_vars,
+            credentials=credentials,
+            wait_seconds=wait_seconds,
+            host_info=host_info,
+        )
+
+
+def _extract_host_ip(docker_host: str) -> str:
+    """从 DOCKER_HOST 字符串中提取 IP/hostname。"""
+    if not docker_host:
+        return "127.0.0.1"
+    # ssh://user@1.2.3.4:22 -> 1.2.3.4
+    # tcp://1.2.3.4:2375 -> 1.2.3.4
+    import re as _re
+    m = _re.match(r'(?:ssh|tcp)://(?:[^@]+@)?([^:/]+)', docker_host)
+    if m:
+        return m.group(1)
+    return "127.0.0.1"
+
+
+async def _do_deploy(
+    meeting_id: str,
+    workspace_root: Path,
+    container_port: int,
+    startup_cmd: str | None,
+    health_path: str,
+    memory_limit: str,
+    cpu_limit: str,
+    env_vars: dict | None,
+    credentials: dict | None,
+    wait_seconds: int,
+    host_info: dict,
+) -> DeployResult:
+    """实际执行部署（已在 docker_host_context 内）"""
 
     host_port = await _allocate_port()
 
@@ -1016,6 +1145,7 @@ async def deploy_service(
             env_vars=env_vars,
             wait_seconds=wait_seconds,
             health_path=health_path,
+            host_info=host_info,
         )
 
     # 部署前先清理同名旧容器（防止重复部署冲突）
@@ -1232,8 +1362,12 @@ async def deploy_service(
         last_logs = logs_out if logs_out else last_logs
 
         # 构建访问URL（用户从宿主机浏览器访问）
-        # 从前端角度看，后端在 localhost:8000，服务也映射在宿主机端口
-        access_url = f"http://localhost:{host_port}"
+        # 本地部署用 localhost，远程部署用主机 IP
+        host_ip = host_info.get("host_ip", "127.0.0.1")
+        if host_ip in ("127.0.0.1", "localhost", "0.0.0.0"):
+            access_url = f"http://localhost:{host_port}"
+        else:
+            access_url = f"http://{host_ip}:{host_port}"
 
         if healthy:
             # 记录运行中的服务（仅在健康时记录）
@@ -1242,6 +1376,8 @@ async def deploy_service(
                     "container_id": container_id,
                     "host_port": host_port,
                     "access_url": access_url,
+                    "host_id": host_info.get("host_id", 0),
+                    "host_name": host_info.get("host_name", "local"),
                     "started_at": time.time(),
                 }
             return DeployResult(
@@ -1356,9 +1492,11 @@ async def _deploy_compose(
     env_vars: dict | None,
     wait_seconds: int,
     health_path: str,
+    host_info: dict | None = None,
 ) -> DeployResult:
     """使用 docker compose up -d 部署多服务项目"""
     import time as _time
+    host_info = host_info or {"host_id": 0, "host_name": "local", "host_ip": "127.0.0.1"}
 
     # 安全审计
     ok, err, services_info = await _audit_compose_file(compose_file)
@@ -1491,7 +1629,11 @@ async def _deploy_compose(
     )
     last_logs = logs_out if logs_out else last_logs
 
-    access_url = f"http://localhost:{host_port}"
+    host_ip = host_info.get("host_ip", "127.0.0.1")
+    if host_ip in ("127.0.0.1", "localhost", "0.0.0.0"):
+        access_url = f"http://localhost:{host_port}"
+    else:
+        access_url = f"http://{host_ip}:{host_port}"
 
     if healthy or all_running:
         # 至少容器都在运行，视为部署成功
@@ -1503,6 +1645,8 @@ async def _deploy_compose(
                 "compose_file": str(compose_file),
                 "host_port": host_port,
                 "access_url": access_url,
+                "host_id": host_info.get("host_id", 0),
+                "host_name": host_info.get("host_name", "local"),
                 "services": services_info,
                 "started_at": _time.time(),
                 "is_compose": True,

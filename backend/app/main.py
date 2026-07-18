@@ -34,6 +34,7 @@ from app.routers import regression as regression_router
 from app.routers import workspace as workspace_router
 from app.routers import ws as ws_router
 from app.routers import audit_logs as audit_router
+from app.routers import docker_hosts as docker_hosts_router
 from app.utils.tasks import create_supervised_task
 
 # 应用启动时初始化日志系统
@@ -214,6 +215,7 @@ def create_app() -> FastAPI:
     app.include_router(net_auth_router.router)
     app.include_router(preferences_router.router)
     app.include_router(audit_router.router)
+    app.include_router(docker_hosts_router.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, Any]:

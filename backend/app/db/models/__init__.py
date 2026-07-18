@@ -14,6 +14,7 @@ from app.db.models.net_auth import NetAuthRequestModel
 from app.db.models.document import DocumentModel
 from app.db.models.observability import CostRecordModel
 from app.db.models.memory import RawMemoryModel, FeatureMemoryModel, ProfileMemoryModel
+from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
 
 __all__ = [
     "MeetingModel", "MeetingTagModel", "MeetingAuxModel",
@@ -25,4 +26,5 @@ __all__ = [
     "DocumentModel",
     "CostRecordModel",
     "RawMemoryModel", "FeatureMemoryModel", "ProfileMemoryModel",
+    "DockerHostModel", "DockerHostSecretModel",
 ]

@@ -11,6 +11,7 @@ const VIEW_ROUTES: Record<string, string> = {
   models: '/models',
   monitor: '/monitor',
   topology: '/topology',
+  devops: '/devops',
 };
 
 const ICONS: NavItem[] = [
@@ -21,6 +22,7 @@ const ICONS: NavItem[] = [
   { view: 'models', title: '模型中心', svg: (<><rect x="7" y="7" width="10" height="10" rx="1" /><line x1="10" y1="4" x2="10" y2="7" /><line x1="14" y1="4" x2="14" y2="7" /><line x1="10" y1="17" x2="10" y2="20" /><line x1="14" y1="17" x2="14" y2="20" /><line x1="4" y1="10" x2="7" y2="10" /><line x1="4" y1="14" x2="7" y2="14" /><line x1="17" y1="10" x2="20" y2="10" /><line x1="17" y1="14" x2="20" y2="14" /></>) },
   { view: 'monitor', title: '监控面板', svg: (<path d="M3 12h4l2-6 4 12 2-6h6" />) },
   { view: 'topology', title: '组件联通', svg: (<><circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M7 6h10M6.5 7.5L10.5 16M17.5 7.5L13.5 16" /></>) },
+  { view: 'devops', title: '运维面板', svg: (<><rect x="2" y="3" width="20" height="8" rx="2" /><rect x="2" y="13" width="20" height="8" rx="2" /><line x1="6" y1="7" x2="6" y2="7" /><line x1="6" y1="17" x2="6" y2="17" /><line x1="10" y1="7" x2="18" y2="7" /><line x1="10" y1="17" x2="14" y2="17" /></>) },
 ];
 
 export default function NavRail() {

@@ -171,3 +171,96 @@ export async function apiSaveKey(provider: string, name: string, key: string) {
     body: JSON.stringify({ provider, name, key }),
   });
 }
+
+/* ═══ Docker Hosts API ═══ */
+export interface DockerHost {
+  id: number;
+  name: string;
+  description: string;
+  connection_type: string;
+  docker_host: string;
+  ssh_user: string;
+  ssh_port: number;
+  ssh_key_path: string;
+  tls_cert_path: string;
+  tls_verify: boolean;
+  tags: string[];
+  region: string;
+  cpu_cores: number;
+  memory_gb: number;
+  max_containers: number;
+  enabled: boolean;
+  is_default: boolean;
+  health_status: string;
+  last_health_check: string | null;
+  docker_version: string;
+  running_containers: number;
+  total_containers: number;
+  last_error: string;
+  deployed_meetings: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DockerHostInput {
+  name: string;
+  description?: string;
+  connection_type: string;
+  docker_host?: string;
+  ssh_user?: string;
+  ssh_port?: number;
+  ssh_key_path?: string;
+  ssh_password?: string;
+  ssh_key_content?: string;
+  tls_cert_path?: string;
+  tls_key_path?: string;
+  tls_ca_path?: string;
+  tls_verify?: boolean;
+  tags?: string[];
+  region?: string;
+  cpu_cores?: number;
+  memory_gb?: number;
+  max_containers?: number;
+  enabled?: boolean;
+  is_default?: boolean;
+}
+
+export async function apiListDockerHosts() {
+  return api<{ hosts: DockerHost[]; total: number }>('/docker-hosts');
+}
+export async function apiGetDockerHost(id: number) {
+  return api<DockerHost>(`/docker-hosts/${id}`);
+}
+export async function apiCreateDockerHost(data: DockerHostInput) {
+  return api<DockerHost>('/docker-hosts', { method: 'POST', body: JSON.stringify(data) });
+}
+export async function apiUpdateDockerHost(id: number, data: Partial<DockerHostInput>) {
+  return api<DockerHost>(`/docker-hosts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+export async function apiDeleteDockerHost(id: number) {
+  return api(`/docker-hosts/${id}`, { method: 'DELETE' });
+}
+export async function apiHealthCheckHost(id: number) {
+  return api<DockerHost & { health_detail?: any }>(`/docker-hosts/${id}/health-check`, { method: 'POST' });
+}
+export async function apiHealthCheckAllHosts() {
+  return api<{ checked: number; results: any[] }>('/docker-hosts/health-check-all', { method: 'POST' });
+}
+export async function apiGetDockerPresets() {
+  return api<{ presets: any[]; connection_types: any[]; required_fields: any }>('/docker-hosts/presets');
+}
+export async function apiGetDockerSetupScript() {
+  return api<{ script: string; instructions: string[]; quick_install: string }>('/docker-hosts/setup-script');
+}
+export async function apiGetHostContainers(id: number) {
+  return api<{ ok: boolean; containers: any[]; host: string }>(`/docker-hosts/${id}/containers`);
+}
+export async function apiSelectDeployTarget(requirements?: any, preferredHostId?: number, strategy?: string) {
+  const params = new URLSearchParams();
+  if (preferredHostId) params.set('preferred_host_id', String(preferredHostId));
+  if (strategy) params.set('strategy', strategy);
+  return api(`/docker-hosts/select-target?${params}`, {
+    method: 'POST',
+    body: requirements ? JSON.stringify(requirements) : undefined,
+  });
+}
