@@ -271,6 +271,12 @@ async def produce_node(state: MeetingState) -> MeetingState:
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
     from app.observability.log_bus import log_bus as _lb
+    _lb.info(
+        f"produce: === 进入produce节点 ==="
+        f" deliverable_type={state.deliverable_type}"
+        f" iteration={state.iteration_count}",
+        logger="orchestrator.nodes.produce",
+    )
     # 根据产出类型选择模板
     from app.agents.prompts import get_produce_template
     template = get_produce_template(state.deliverable_type)
@@ -418,27 +424,31 @@ async def produce_node(state: MeetingState) -> MeetingState:
 
         try:
             phased_result = await generate_deployable_service_phased(
-                decision=state.decision_record or {},
-                evidence_summary=evidence_summary,
-                extra_anchor=extra_anchor,
-                progress_cb=_phased_progress,
+                state,
+                on_progress=_phased_progress,
             )
             result = phased_result.to_result_dict()
             confidence = "high"
+            total_files = (
+                len(phased_result.project_tree)
+                + len(phased_result.frontend_tree)
+                + len(phased_result.test_tree)
+                + len(phased_result.root_files)
+            )
             _lb.info(
                 f"produce: 分阶段生成完成 — "
-                f"title={phased_result.plan.title}, "
-                f"modules={len(phased_result.plan.modules)}, "
-                f"files={sum(len(v) for v in [phased_result.scaffold_files, phased_result.backend_files, phased_result.frontend_files])}, "
-                f"complexity={phased_result.plan.complexity_level}",
+                f"title={phased_result.title}, "
+                f"files={total_files}, "
+                f"llm_calls={phased_result.total_llm_calls}, "
+                f"complexity={phased_result.complexity_level}",
                 logger="orchestrator.nodes.produce",
             )
             await _emit_progress(state, "phased_done", "分阶段生成完成", 95)
         except Exception as pe:
+            import traceback
             _lb.error(
-                f"produce: 分阶段生成失败，回退到单次LLM调用: {pe}",
+                f"produce: 分阶段生成失败，回退到单次LLM调用: {pe}\n{traceback.format_exc()}",
                 logger="orchestrator.nodes.produce",
-                exc_info=True,
             )
             await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
                                     f"分阶段生成异常({type(pe).__name__})，回退到传统生成模式")

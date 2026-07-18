@@ -93,17 +93,21 @@ class PhasedGenerationResult:
                 "run_command": self.run_command,
                 "credentials": self.credentials,
                 "file_tree": file_tree,
+                "project_tree": self.project_tree,
+                "frontend_tree": self.frontend_tree,
+                "test_tree": self.test_tree,
+                "root_files": self.root_files,
                 "app_code": json.dumps(all_files, ensure_ascii=False),
                 "dockerfile": dockerfile,
                 "docker_compose": docker_compose,
                 "requirements_txt": requirements,
                 "readme": readme,
                 "main_py": main_py,
-                "static_files": all_files,  # 前端ServiceViewer直接使用dict
+                "static_files": all_files,
                 "modules": [
                     {"name": m.name, "resource": m.resource, "api_endpoints": m.api_endpoints}
                     for m in self.plan.modules
-                ] if self.plan else [],
+                ] if getattr(self, 'plan', None) else [],
                 "phased_generation": {
                     "total_llm_calls": self.total_llm_calls,
                     "phases_executed": self.phases_executed,
@@ -141,6 +145,7 @@ async def _call_llm(prompt: str, schema_hint: str,
                             deliverable_type="deployable_service",
                             role=Role.ENGINEER.value)
     req = ThinkRequest(
+        meeting_id=state.meeting_id,
         agent_role=Role.ENGINEER.value, stage="produce",
         prompt=prompt, schema_hint=schema_hint,
         temperature=temperature, seed=42,

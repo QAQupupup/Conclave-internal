@@ -44,6 +44,11 @@ class MeetingManager:
         统一路径：Planner -> Scheduler -> Reducer，返回更新后的 MeetingState。
         遗留节点（如 produce）仍通过 Reducer 调用，后续逐步迁移到 stage_runners。
         """
+        # produce 阶段：reducer 直接调用 produce_node（含分阶段生成），
+        # 不需要 SubTask agent 做额外的 LLM 调用（避免重复生成导致长时间挂起）
+        if stage == "produce":
+            return await reduce_stage_results(state, stage, {})
+
         baseline = baseline or self.select_baseline(
             state.topic if hasattr(state, "topic") else "",
             state.domain_hint if hasattr(state, "domain_hint") else "",
