@@ -172,15 +172,24 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
 
     # [H-02 修复] 权限校验
     allowed, reason = _check_meeting_access(user, meeting_id)
+    # 接入层速率限制
+    client_ip = _ws_client_ip(ws)
+
     if not allowed:
         await _ws_close_error(ws, 4403, "Forbidden", {
             "type": "error", "meeting_id": meeting_id, "message": reason,
         })
         logger.warning("WS 权限拒绝: user=%s meeting=%s reason=%s", user.get("username"), meeting_id, reason)
+        # 审计：WS 权限拒绝
+        try:
+            from app.observability.audit import audit
+            audit("security.unauthorized_access", "denied", {
+                "channel": "ws", "meeting_id": meeting_id, "reason": reason,
+            }, ip=client_ip, username=user.get("username"), meeting_id=meeting_id)
+        except Exception:
+            pass
         return
 
-    # 接入层速率限制
-    client_ip = _ws_client_ip(ws)
     ok, rate_reason = _check_rate_limit(client_ip, is_failed_attempt=False)
     if not ok:
         await _ws_close_error(ws, 4429, "Too Many Requests", {
@@ -189,6 +198,21 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         return
 
     await ws.accept()
+
+    # 审计：WS 连接建立
+    try:
+        from app.observability.audit import audit
+        from app.context import set_user_id, set_username, set_user_role, set_meeting_id
+        set_user_id(str(user.get("uid") or ""))
+        set_username(user.get("username", ""))
+        set_user_role(user.get("role", ""))
+        set_meeting_id(meeting_id)
+        audit("system.ws_connected", "success", {
+            "from_seq": from_seq,
+            "access_reason": reason,
+        }, ip=client_ip, username=user.get("username"), meeting_id=meeting_id)
+    except Exception:
+        pass
 
     # 连接 key（IP + meeting_id 用于出站限流）
     conn_key = f"{client_ip}:{meeting_id}"
@@ -301,6 +325,23 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                     if state is not None:
                         state = apply_signal(state, signal, payload)
                         set_state(state)
+                        # 审计：控制信号
+                        try:
+                            from app.observability.audit import audit
+                            sig_action = {
+                                "approve_borrow": "meeting.borrow_approved",
+                                "reject_borrow": "meeting.borrow_rejected",
+                                "pause": "meeting.paused",
+                                "resume": "meeting.resumed",
+                                "abort": "meeting.aborted",
+                                "intervene": "meeting.intervened",
+                            }.get(signal, "meeting.control")
+                            audit(sig_action, "success", {
+                                "signal": signal,
+                                "payload_keys": list(payload.keys()) if isinstance(payload, dict) else [],
+                            }, username=user.get("username"), meeting_id=meeting_id, ip=client_ip)
+                        except Exception:
+                            pass
                         try:
                             await save_meeting(
                                 meeting_id=meeting_id,
@@ -372,6 +413,14 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         # 清理出站限流记录
         async with _ws_event_lock:
             _ws_event_log.pop(conn_key, None)
+        # 审计：WS 断开
+        try:
+            from app.observability.audit import audit
+            audit("system.ws_disconnected", "success", {
+                "dropped_events": _dropped_count,
+            }, ip=client_ip, username=user.get("username"), meeting_id=meeting_id)
+        except Exception:
+            pass
 
 
 @router.websocket("/ws/system")

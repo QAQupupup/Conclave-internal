@@ -154,6 +154,24 @@ class MeetingState(BaseModel):
     # [AUDIT-FIX P0-2/P0-4] 新增：异常终态记录，用于审计可追溯性
     completed_at: Optional[datetime] = None
     error_detail: Optional[str] = None  # 节点异常或超时时记录错误信息
+    # === 断点续传 & 自我迭代支持 ===
+    # checkpoint: 记录最近一次成功完成的阶段，用于断点恢复
+    # 格式: {"stage": "produce", "completed_at": "...", "substep": "code_generated", "retry_count": 0}
+    checkpoint: Optional[dict[str, Any]] = None
+    # stage_retry_count: 各阶段重试次数 {stage_name: int}
+    stage_retry_count: dict[str, int] = Field(default_factory=dict)
+    max_stage_retries: int = 2  # 每个阶段最大重试次数
+    # === 自我迭代 Loop ===
+    # iteration_count: 当前迭代轮次（0=首轮，1+=迭代轮）
+    iteration_count: int = 0
+    max_iterations: int = 2  # 最大迭代轮次（防止无限循环）
+    # quality_score: 产出质量评分（0-100），由质量门禁评估
+    quality_score: Optional[float] = None
+    quality_feedback: Optional[str] = None  # 质量门禁的反馈意见（用于下一轮迭代）
+    # iteration_history: 历次迭代记录 [{iteration, quality_score, feedback, changes}]
+    iteration_history: list[dict[str, Any]] = Field(default_factory=list)
+    # auto_iterate: 是否自动迭代直到质量达标（用户可设置）
+    auto_iterate: bool = False
 
     def model_post_init(self, __context: Any) -> None:
         """初始化后确保 conclusion_chain 和 llm_trace 的 meeting_id 正确"""

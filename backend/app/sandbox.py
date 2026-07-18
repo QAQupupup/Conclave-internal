@@ -52,8 +52,12 @@ SandboxNetworkLevel = Literal["L1", "L2", "L3"]
 
 # L2 限网：允许的域名白名单
 # 通过自定义 Docker 网络 + DNS 代理(dnsmasq)实现域名级过滤
-# dnsmasq 容器仅解析白名单域名，其他域名返回 NXDOMAIN
-L2_ALLOWED_DOMAINS = ["pypi.org", "files.pythonhosted.org", "pypi.python.org"]
+# dnsmasq 容器仅解析白名单域名，其他域名返回 0.0.0.0（黑洞）
+# 注意：pip 配置使用清华镜像时需要 pypi.tuna.tsinghua.edu.cn
+L2_ALLOWED_DOMAINS = [
+    "pypi.org", "files.pythonhosted.org", "pypi.python.org",
+    "pypi.tuna.tsinghua.edu.cn", "mirrors.tuna.tsinghua.edu.cn",
+]
 
 # L2 沙箱使用的自定义网络名（在 docker-compose.yml 中定义）
 L2_NETWORK_NAME = os.environ.get("CONCLAVE_L2_NETWORK", "conclave-dev_conclave-sandbox-l2")
@@ -84,6 +88,11 @@ FALLBACK_IMAGES = [
 SANDBOX_MEM_LIMIT = os.environ.get("CONCLAVE_SANDBOX_MEM", "256m")
 SANDBOX_CPU_LIMIT = os.environ.get("CONCLAVE_SANDBOX_CPUS", "1")
 SANDBOX_TMPFS_SIZE = os.environ.get("CONCLAVE_SANDBOX_TMPFS", "64m")
+
+# [修复] Docker 工作区命名卷名（由 docker-compose 通过环境变量注入）
+# 开发版: conclave-dev-workspace, OSS版: conclave-oss-workspace
+# 本地开发(无 compose): 默认为 conclave-workspace
+WORKSPACE_VOLUME = os.environ.get("CONCLAVE_WORKSPACE_VOLUME", "conclave-workspace")
 
 # 沙箱模式: auto(默认,尝试Docker,失败拒绝) / docker(强制容器) / host(直接宿主机,仅开发)
 SANDBOX_MODE: Literal["auto", "docker", "host"] = os.environ.get(
@@ -366,19 +375,22 @@ def _build_security_args(
 ) -> list[str]:
     """构建 Docker run 的安全参数
 
-    workspace_root 是 backend 容器内路径（如 /workspace），
-    对应 Docker 命名卷 conclave_conclave-workspace（compose 自动加项目前缀）。
-    沙箱是 sibling 容器，bind mount 源路径必须是宿主机路径，
-    因此用命名卷名而非容器内路径。
+    workspace_root: 宿主机/后端容器内的绝对路径（如 /workspace 或 /workspace/mtg-xxx/）。
+    沙箱是 sibling 容器，共享命名卷 WORKSPACE_VOLUME（挂载到 /workspace）。
+    需要根据 workspace_root 相对于卷根的路径设置容器内工作目录（-w），
+    确保代码文件和命令中的相对路径能正确解析。
+
+    [路径映射修复] 之前 -w 硬编码为 /workspace，当传入会议子目录时会导致
+    python _conclave_exec.py 找不到文件（文件在 /workspace/mtg-xxx/ 下）。
 
     network_level:
         L1 = --network none（默认，纯计算，无网络）
-        L2 = 默认 bridge 网络（限网，允许 pip install pypi）
+        L2 = 自定义网络 + DNS 过滤（仅白名单域名，如 pip install）
         L3 = 默认 bridge 网络（全联网，可访问任意外部 API）
 
     [H-07 加固] 防止沙箱逃逸引发越权渗透：
     - --cap-drop ALL + --security-opt no-new-privileges：阻止权限提升
-    - --pids-limit：限制进程数，防 fork bomb（即使 python os.fork() 也无法无限创建进程）
+    - --pids-limit：限制进程数，防 fork bomb
     - --ulimit：限制文件描述符和 core dump
     - --ipc=private --uts=private：隔离 IPC 和 UTS 命名空间
     - --read-only + tmpfs：只读根文件系统，仅 /tmp 可写
@@ -387,7 +399,17 @@ def _build_security_args(
     - L1 网络为 none，完全隔离；L3 也不使用 host 网络
     - 显式屏蔽 /proc 敏感路径（通过 tmpfs 覆盖）
     """
-    container_ws = "/workspace"
+    # 计算容器内工作目录：将 backend 容器内的 workspace_root 映射到沙箱容器内的路径
+    # 卷在沙箱容器内固定挂载到 /workspace，对应 backend 容器内的 settings.workspace_root
+    ws_root_in_container = "/workspace"
+    vol_root = os.environ.get("CONCLAVE_WORKSPACE_DIR", "/workspace")
+    try:
+        rel = Path(workspace_root).resolve().relative_to(Path(vol_root).resolve())
+        container_cwd = f"{ws_root_in_container}/{rel}".rstrip("/")
+    except (ValueError, OSError):
+        # workspace_root 不在卷根下（如本地开发路径），回退到卷根
+        container_cwd = ws_root_in_container
+
     args = [
         "--rm",
         "-i",
@@ -409,8 +431,9 @@ def _build_security_args(
         # [H-07] 禁止特权容器
         "--privileged=false",
         # [H-07] 工作区挂载为 rw（代码执行需要写输出文件），但根文件系统是 --read-only
-        "-v", "conclave_conclave-workspace:/workspace",
-        "-w", container_ws,
+        # [修复] 卷名从环境变量读取，不再硬编码
+        "-v", f"{WORKSPACE_VOLUME}:/workspace",
+        "-w", container_cwd,  # [修复] 根据 workspace_root 设置正确的工作目录
     ]
 
     # 网络分级
@@ -468,12 +491,20 @@ async def _run_in_container(
 
     security_args = _build_security_args(workspace_root, network_level=network_level)
 
+    # 计算容器内工作目录（与 _build_security_args 中 -w 一致）
+    vol_root = os.environ.get("CONCLAVE_WORKSPACE_DIR", "/workspace")
+    try:
+        rel = Path(workspace_root).resolve().relative_to(Path(vol_root).resolve())
+        container_cwd = f"/workspace/{rel}".rstrip("/")
+    except (ValueError, OSError):
+        container_cwd = "/workspace"
+
     if code is not None:
         # 写文件方式：代码写入工作区，容器内通过挂载路径执行
         code_file = workspace_root / "_conclave_exec.py"
         code_file.write_text(code, encoding="utf-8")
-        # 容器内路径 = 工作区挂载的 /workspace
-        container_path = "/workspace/_conclave_exec.py"
+        # [修复] 容器内路径使用绝对路径（基于正确的工作目录）
+        container_path = f"{container_cwd}/_conclave_exec.py"
         all_args = ["docker", "run", *security_args, resolved, "python", container_path]
     else:
         assert command is not None
@@ -666,6 +697,16 @@ async def run_command(
             logger="sandbox",
             extra={"command": command[:200], "reason": reason},
         )
+        # 审计：危险命令被阻断
+        try:
+            from app.observability.audit import audit
+            audit("sandbox.command_executed", "blocked", {
+                "command": command[:500],
+                "reason": reason,
+                "network_level": network_level,
+            })
+        except Exception:
+            pass
         return ExecResult(
             exit_code=126,  # 126 = command cannot execute
             stdout="",
@@ -876,13 +917,19 @@ def _docker_cmd(args: list[str]) -> str:
     return _shell_cmd(["docker"] + args)
 
 
-async def _run_docker_cmd(args: list[str], timeout: int = 30) -> tuple[int, str, str]:
+async def _run_docker_cmd(
+    args: list[str], timeout: int = 30,
+    cwd: str | None = None,
+    env: dict | None = None,
+) -> tuple[int, str, str]:
     """执行 docker 命令并返回 (returncode, stdout, stderr)"""
     cmd = _docker_cmd(args)
     proc = await asyncio.create_subprocess_shell(
         cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
+        env=env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -945,6 +992,31 @@ async def deploy_service(
     host_port = await _allocate_port()
 
     # 确定工作区在容器内的路径
+    compose_project = f"conclave-svc-{meeting_id[:12]}"
+    meeting_workspace = workspace_root / meeting_id
+
+    # === Docker Compose 多服务部署支持 ===
+    compose_file_candidates = [
+        meeting_workspace / "docker-compose.yml",
+        meeting_workspace / "docker-compose.yaml",
+        meeting_workspace / "compose.yml",
+        meeting_workspace / "compose.yaml",
+    ]
+    compose_file = next((p for p in compose_file_candidates if p.exists()), None)
+
+    if compose_file:
+        return await _deploy_compose(
+            meeting_id=meeting_id,
+            compose_file=compose_file,
+            compose_project=compose_project,
+            workspace_root=workspace_root,
+            host_port=host_port,
+            memory_limit=memory_limit,
+            cpu_limit=cpu_limit,
+            env_vars=env_vars,
+            wait_seconds=wait_seconds,
+            health_path=health_path,
+        )
 
     # 部署前先清理同名旧容器（防止重复部署冲突）
     container_name = f"conclave-svc-{meeting_id[:12]}"
@@ -1041,7 +1113,7 @@ async def deploy_service(
             "--cpus", cpu_limit,
             "-p", f"{host_port}:{container_port}",
             "--network", "bridge",
-            "-v", "conclave_conclave-workspace:/workspace",
+            "-v", f"{WORKSPACE_VOLUME}:/workspace",  # [修复] 卷名从环境变量读取
             "-w", f"/workspace/{meeting_id}",
             "--restart", "no",
         ]
@@ -1070,7 +1142,7 @@ async def deploy_service(
             "--cpus", cpu_limit,
             "-p", f"{host_port}:{container_port}",
             "--network", "bridge",  # 全网络访问（需要pip install）
-            "-v", "conclave_conclave-workspace:/workspace",
+            "-v", f"{WORKSPACE_VOLUME}:/workspace",  # [修复] 卷名从环境变量读取
             "-w", f"/workspace/{meeting_id}",
             # 不使用 --read-only（服务需要写数据库和上传文件）
             # 不使用 nobody 用户（pip install 需要写权限）
@@ -1211,29 +1283,295 @@ async def deploy_service(
         )
 
 
+async def _audit_compose_file(compose_path: Path) -> tuple[bool, str, list[dict]]:
+    """审计 docker-compose.yml 的安全性，禁止危险配置。
+    返回 (ok, error_msg, services_info)。services_info 包含各服务名称、端口映射信息。
+    """
+    import yaml
+    try:
+        text = compose_path.read_text(encoding="utf-8")
+        config = yaml.safe_load(text)
+    except Exception as e:
+        return False, f"Compose 文件解析失败: {e}", []
+
+    if not isinstance(config, dict):
+        return False, "Compose 文件格式无效", []
+
+    services = config.get("services") or {}
+    if not services:
+        return False, "Compose 文件未定义任何服务", []
+
+    services_info = []
+    for svc_name, svc_cfg in services.items():
+        if not isinstance(svc_cfg, dict):
+            continue
+
+        # 安全检查：禁止 privileged
+        if svc_cfg.get("privileged"):
+            return False, f"服务 {svc_name} 使用了 privileged:true，安全策略禁止", []
+
+        # 禁止 host network
+        if svc_cfg.get("network_mode") == "host" or svc_cfg.get("network_mode") == "host":
+            return False, f"服务 {svc_name} 使用了 host 网络模式，安全策略禁止", []
+
+        # 禁止危险 cap_add
+        dangerous_caps = {"ALL", "SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE", "SYS_MODULE"}
+        caps = svc_cfg.get("cap_add") or []
+        for cap in caps:
+            if str(cap).upper() in dangerous_caps:
+                return False, f"服务 {svc_name} 添加了危险能力 {cap}，安全策略禁止", []
+
+        # 禁止挂载敏感路径
+        volumes = svc_cfg.get("volumes") or []
+        sensitive_mounts = ["/var/run/docker.sock", "/etc/shadow", "/etc/passwd", "/root/.ssh", "/etc/kubernetes"]
+        for vol in volumes:
+            vol_str = str(vol)
+            host_part = vol_str.split(":")[0]
+            for sensitive in sensitive_mounts:
+                if sensitive in host_part:
+                    return False, f"服务 {svc_name} 挂载了敏感路径 {host_part}，安全策略禁止", []
+
+        # 收集端口信息
+        ports = svc_cfg.get("ports") or []
+        expose = svc_cfg.get("expose") or []
+        services_info.append({
+            "name": svc_name,
+            "ports": [str(p) for p in ports],
+            "expose": [str(e) for e in expose],
+            "image": svc_cfg.get("image", ""),
+            "build": bool(svc_cfg.get("build")),
+        })
+
+    return True, "", services_info
+
+
+async def _deploy_compose(
+    meeting_id: str,
+    compose_file: Path,
+    compose_project: str,
+    workspace_root: Path,
+    host_port: int,
+    memory_limit: str,
+    cpu_limit: str,
+    env_vars: dict | None,
+    wait_seconds: int,
+    health_path: str,
+) -> DeployResult:
+    """使用 docker compose up -d 部署多服务项目"""
+    import time as _time
+
+    # 安全审计
+    ok, err, services_info = await _audit_compose_file(compose_file)
+    if not ok:
+        await _release_port(host_port)
+        log_bus.warning(
+            f"Compose 文件安全审计失败: {err}",
+            logger="sandbox.deploy.compose",
+            extra={"meeting_id": meeting_id},
+        )
+        return DeployResult(ok=False, error=f"Compose 安全检查失败: {err}")
+
+    log_bus.info(
+        f"检测到 docker-compose.yml，共 {len(services_info)} 个服务，使用 compose 部署",
+        logger="sandbox.deploy.compose",
+        extra={"meeting_id": meeting_id, "services": [s["name"] for s in services_info]},
+    )
+
+    # 清理旧的 compose 项目
+    await _run_docker_cmd(
+        ["compose", "-p", compose_project, "-f", str(compose_file), "down", "-v", "--remove-orphans"],
+        timeout=30,
+        cwd=str(workspace_root / meeting_id),
+    )
+
+    # 构建环境变量参数
+    env_args = []
+    if env_vars:
+        for k, v in env_vars.items():
+            env_args.extend(["-e", f"{k}={v}"])
+
+    # 启动 compose 项目
+    # 设置 COMPOSE_PROJECT_NAME 确保项目隔离
+    compose_env = {**os.environ, "COMPOSE_PROJECT_NAME": compose_project}
+    up_rc, up_out, up_err = await _run_docker_cmd(
+        ["compose", "-p", compose_project, "-f", str(compose_file), "up", "-d", "--build"],
+        timeout=300,
+        cwd=str(workspace_root / meeting_id),
+        env=compose_env,
+    )
+
+    if up_rc != 0:
+        await _release_port(host_port)
+        # 获取 compose 日志帮助调试
+        logs_rc, logs_out, _ = await _run_docker_cmd(
+            ["compose", "-p", compose_project, "-f", str(compose_file), "logs", "--tail=50"],
+            timeout=15,
+            cwd=str(workspace_root / meeting_id),
+        )
+        combined = f"{up_err}\n{logs_out}".strip()
+        log_bus.warning(
+            f"Compose 启动失败 (rc={up_rc})",
+            logger="sandbox.deploy.compose",
+            extra={"meeting_id": meeting_id, "error": up_err[:500]},
+        )
+        return DeployResult(
+            ok=False,
+            host_port=host_port,
+            error=f"Compose 启动失败: {up_err[:500]}",
+            logs=combined[:2000],
+        )
+
+    # 获取所有容器ID
+    ps_rc, ps_out, _ = await _run_docker_cmd(
+        ["compose", "-p", compose_project, "ps", "-q"],
+        timeout=10,
+        cwd=str(workspace_root / meeting_id),
+    )
+    container_ids = [cid[:12] for cid in ps_out.strip().split("\n") if cid.strip()]
+    primary_container = container_ids[0] if container_ids else ""
+
+    log_bus.info(
+        f"Compose 项目已启动: {len(container_ids)} 个容器",
+        logger="sandbox.deploy.compose",
+        extra={"meeting_id": meeting_id, "container_ids": container_ids},
+    )
+
+    # 健康检查：轮询所有容器状态
+    healthy = False
+    last_logs = ""
+    start_wait = _time.time()
+    primary_port = 8000  # 默认主服务端口
+
+    # 从第一个服务的端口映射推断端口
+    if services_info:
+        for svc in services_info:
+            for port_str in svc["ports"]:
+                port_match = re.search(r":(\d+)", str(port_str))
+                if port_match:
+                    primary_port = int(port_match.group(1))
+                    break
+            if primary_port != 8000:
+                break
+
+    while _time.time() - start_wait < wait_seconds:
+        await asyncio.sleep(3)
+
+        all_running = True
+        for cid in container_ids:
+            rc_inspect, inspect_out, _ = await _run_docker_cmd(
+                ["inspect", "-f", "{{.State.Running}}", cid], timeout=5
+            )
+            if rc_inspect != 0 or "true" not in inspect_out:
+                all_running = False
+                break
+
+        if not all_running:
+            logs_rc, logs_out, _ = await _run_docker_cmd(
+                ["compose", "-p", compose_project, "logs", "--tail=50"],
+                timeout=10,
+                cwd=str(workspace_root / meeting_id),
+            )
+            last_logs = logs_out
+            break
+
+        # HTTP 健康检查（通过宿主机端口）
+        try:
+            healthy = await _check_port_healthy("127.0.0.1", host_port, health_path, timeout=3)
+        except Exception:
+            pass
+
+        if healthy:
+            break
+
+    # 获取日志
+    logs_rc, logs_out, _ = await _run_docker_cmd(
+        ["compose", "-p", compose_project, "logs", "--tail=100"],
+        timeout=15,
+        cwd=str(workspace_root / meeting_id),
+    )
+    last_logs = logs_out if logs_out else last_logs
+
+    access_url = f"http://localhost:{host_port}"
+
+    if healthy or all_running:
+        # 至少容器都在运行，视为部署成功
+        async with _services_lock:
+            _running_services[meeting_id] = {
+                "container_id": primary_container,
+                "container_ids": container_ids,
+                "compose_project": compose_project,
+                "compose_file": str(compose_file),
+                "host_port": host_port,
+                "access_url": access_url,
+                "services": services_info,
+                "started_at": _time.time(),
+                "is_compose": True,
+            }
+        return DeployResult(
+            ok=True,
+            container_id=primary_container,
+            host_port=host_port,
+            access_url=access_url,
+            health_status="healthy" if healthy else "running",
+            logs=last_logs[:2000],
+            credentials=env_vars,
+        )
+    else:
+        # 清理失败的部署
+        await _run_docker_cmd(
+            ["compose", "-p", compose_project, "-f", str(compose_file), "down", "-v", "--remove-orphans"],
+            timeout=30,
+            cwd=str(workspace_root / meeting_id),
+        )
+        await _release_port(host_port)
+        return DeployResult(
+            ok=False,
+            host_port=host_port,
+            error=f"Compose 服务启动后{wait_seconds}秒内未通过健康检查",
+            logs=last_logs[:2000],
+        )
+
+
 async def stop_service(meeting_id: str) -> dict:
-    """停止并清理某个会议的服务容器"""
+    """停止并清理某个会议的服务容器（支持单容器和compose多服务）"""
     async with _services_lock:
         svc = _running_services.pop(meeting_id, None)
     if not svc:
         return {"stopped": False, "reason": "no_service"}
 
-    container_id = svc["container_id"]
     host_port = svc.get("host_port", 0)
+    is_compose = svc.get("is_compose", False)
 
-    # 停止并删除容器
-    await _run_docker_cmd(["stop", container_id], timeout=15)
-    await _run_docker_cmd(["rm", "-f", container_id], timeout=10)
+    if is_compose:
+        # Compose 多服务：使用 docker compose down 清理
+        compose_project = svc.get("compose_project")
+        compose_file = svc.get("compose_file")
+        meeting_workspace = str(Path(sv.get("compose_file", "")).parent) if svc.get("compose_file") else None
+        if compose_project:
+            compose_down_cmd = ["compose", "-p", compose_project, "down", "-v", "--remove-orphans"]
+            if compose_file:
+                compose_down_cmd.extend(["-f", compose_file])
+            await _run_docker_cmd(compose_down_cmd, timeout=30, cwd=meeting_workspace)
+        log_bus.info(
+            f"Compose 项目已清理: {compose_project}",
+            logger="sandbox.deploy.compose",
+            extra={"meeting_id": meeting_id},
+        )
+    else:
+        # 单容器模式
+        container_id = svc["container_id"]
+        await _run_docker_cmd(["stop", container_id], timeout=15)
+        await _run_docker_cmd(["rm", "-f", container_id], timeout=10)
+        log_bus.info(
+            f"服务容器已清理: {container_id}",
+            logger="sandbox.deploy",
+            extra={"meeting_id": meeting_id},
+        )
 
     if host_port:
         await _release_port(host_port)
 
-    log_bus.info(
-        f"服务容器已清理: {container_id}",
-        logger="sandbox.deploy",
-        extra={"meeting_id": meeting_id},
-    )
-    return {"stopped": True, "container_id": container_id}
+    return {"stopped": True, "compose": is_compose}
 
 
 async def get_service_status(meeting_id: str) -> dict | None:
@@ -1262,3 +1600,87 @@ async def cleanup_all_services() -> None:
             await stop_service(mid)
         except Exception as e:
             log_bus.warning(f"清理服务容器失败 {mid}: {e}", logger="sandbox.deploy")
+
+
+async def run_tests_in_container(
+    meeting_id: str,
+    workspace_root: Path,
+    timeout: int = 120,
+) -> dict:
+    """在已部署的服务容器中运行pytest测试。
+
+    返回 {"passed": int, "failed": int, "failures": list[str], "output": str, "ok": bool}
+    """
+    import re as _re
+
+    async with _services_lock:
+        svc = _running_services.get(meeting_id)
+
+    if not svc:
+        return {"passed": 0, "failed": 0, "failures": [], "output": "", "ok": False,
+                "error": "服务未运行，无法执行测试"}
+
+    container_id = svc["container_id"]
+
+    # 检查容器内是否有tests目录和pytest
+    # 先检查pytest是否安装
+    check_rc, check_out, check_err = await _run_docker_cmd(
+        ["exec", container_id, "python", "-c", "import pytest; print(pytest.__version__)"],
+        timeout=10,
+    )
+    if check_rc != 0:
+        # 尝试安装pytest
+        log_bus.info(f"容器内未安装pytest，尝试安装...", logger="sandbox.test")
+        await _run_docker_cmd(
+            ["exec", container_id, "pip", "install", "pytest", "pytest-asyncio", "httpx", "-q"],
+            timeout=60,
+        )
+
+    # 运行pytest
+    test_cmd = [
+        "exec", container_id, "python", "-m", "pytest",
+        "tests/", "-v", "--tb=short", "--no-header", "-q",
+        "-p", "no:warnings",
+    ]
+    rc, out, err = await _run_docker_cmd(test_cmd, timeout=timeout)
+
+    # 解析测试结果
+    output = out + "\n" + err
+    passed = 0
+    failed = 0
+    failures = []
+
+    # 解析pytest输出："X passed, Y failed"
+    pass_match = _re.search(r"(\d+)\s+passed", output)
+    fail_match = _re.search(r"(\d+)\s+failed", output)
+    if pass_match:
+        passed = int(pass_match.group(1))
+    if fail_match:
+        failed = int(fail_match.group(1))
+
+    # 解析失败的测试名
+    fail_lines = _re.findall(r"FAILED\s+(tests/\S+::\S+)", output)
+    failures = fail_lines[:10]
+
+    # 如果没有匹配到标准格式，尝试其他解析
+    if passed == 0 and failed == 0 and "ERRORS" in output:
+        err_match = _re.search(r"(\d+)\s+error", output)
+        if err_match:
+            failed = int(err_match.group(1))
+
+    ok = (failed == 0) and (rc == 0 or passed > 0)
+
+    log_bus.info(
+        f"测试执行完成: {passed}通过, {failed}失败",
+        logger="sandbox.test",
+        extra={"meeting_id": meeting_id, "passed": passed, "failed": failed, "rc": rc},
+    )
+
+    return {
+        "passed": passed,
+        "failed": failed,
+        "failures": failures,
+        "output": output[-3000:],  # 保留最后3000字符
+        "ok": ok,
+        "exit_code": rc,
+    }

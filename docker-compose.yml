@@ -31,28 +31,30 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      # 仅开放沙箱需要的端点
-      CONTAINERS: 1
-      IMAGES: 1
+      # 沙箱和部署服务需要的端点
+      CONTAINERS: 1     # 创建/启动/停止/删除容器（沙箱 + 部署服务）
+      IMAGES: 1         # 拉取/列出镜像
+      BUILD: 1          # [修复] 允许 docker build（deploy_service 需要构建用户 Dockerfile）
+      NETWORKS: 1       # [修复] 允许网络查询（沙箱连接 L2 网络需要解析网络名）
+      VOLUMES: 1        # 允许卷管理（docker compose 多服务部署需要创建/管理卷；单容器部署使用预创建卷）
       INFO: 1
       VERSION: 1
-      # 禁用所有危险端点
-      EXEC: 0
-      SERVICES: 0
+      PING: 1           # 健康检查
+      # 危险端点：严格禁用
+      EXEC: 0           # 禁止 docker exec（进入运行中容器，防止横向渗透）
+      SERVICES: 0       # 禁止 Swarm services
       TASKS: 0
-      SECRETS: 0
+      SECRETS: 0        # 禁止访问 Docker secrets
       PLUGINS: 0
-      NETWORKS: 0
       NODES: 0
       SWARM: 0
       DISTRIBUTION: 0
-      BUILD: 0
-      COMMIT: 0
+      COMMIT: 0         # 禁止 docker commit（防止通过容器提交窃取镜像）
       CONFIGS: 0
-      VOLUMES: 0
       SESSION: 0
-      SYSTEM: 0
-      EVENTS: 0
+      SYSTEM: 0         # 禁止 /system/* 端点（df、info 等通过 INFO=1 已覆盖）
+      EVENTS: 0         # 事件流不需要
+      AUTH: 0           # 禁止认证端点
     networks:
       - conclave-internal
     healthcheck:
@@ -73,9 +75,9 @@ services:
       --address=/pypi.org/151.101.0.223 \
       --address=/files.pythonhosted.org/151.101.0.223 \
       --address=/pypi.python.org/151.101.0.223 \
+      --address=/pypi.tuna.tsinghua.edu.cn/101.6.15.130 \
       --address=/mirrors.tuna.tsinghua.edu.cn/101.6.15.130 \
-      --address=/0.0.0.0 \
-      --server=8.8.8.8
+      --address=/#/0.0.0.0
     networks:
       conclave-sandbox-l2:
         ipv4_address: 10.20.0.10
@@ -136,6 +138,10 @@ services:
       - CONCLAVE_DOCKER_DISABLED=${CONCLAVE_DOCKER_DISABLED:-false}
       # Docker socket proxy: 通过代理连接 Docker API（不直挂 socket）
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      # [修复] 沙箱配置：工作区卷名和 L2 网络名（避免代码中硬编码与 compose 不一致）
+      - CONCLAVE_WORKSPACE_VOLUME=conclave-dev-workspace
+      - CONCLAVE_L2_NETWORK=conclave-dev-conclave-sandbox-l2
+      - CONCLAVE_L2_DNS=10.20.0.10
     dns:
       - 8.8.8.8
       - 223.5.5.5

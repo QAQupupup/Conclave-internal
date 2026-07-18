@@ -1,4 +1,4 @@
-﻿# ===== Conclave OSS Docker Compose =====
+# ===== Conclave OSS Docker Compose =====
 # 完整部署：前端(nginx) + 后端(FastAPI) + 自动沙箱准备
 #
 # 启动: docker compose up -d
@@ -77,6 +77,8 @@ services:
       # [v4] Docker 监控默认启用（entrypoint 会自动配置好权限）
       # 如果在无 Docker 的环境运行，可设 CONCLAVE_DOCKER_DISABLED=true
       - CONCLAVE_DOCKER_DISABLED=${CONCLAVE_DOCKER_DISABLED:-false}
+      # [修复] 沙箱配置：工作区卷名
+      - CONCLAVE_WORKSPACE_VOLUME=conclave-oss-workspace
     dns:
       - 8.8.8.8
       - 223.5.5.5

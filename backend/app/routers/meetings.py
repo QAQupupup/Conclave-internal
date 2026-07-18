@@ -124,6 +124,12 @@ async def create_meeting(req: CreateMeetingRequest) -> CreateMeetingResponse:
     # 会议级模型覆盖（空=继承 ENV 默认，runner 启动时 resolve 为快照）
     if req.model:
         state.model_override = req.model
+    # === 断点续传 & 自我迭代配置 ===
+    state.auto_iterate = req.auto_iterate
+    if req.max_iterations is not None:
+        state.max_iterations = req.max_iterations
+    if req.max_stage_retries is not None:
+        state.max_stage_retries = req.max_stage_retries
 
     # 加载角色配置：优先使用传入的 role_ids，否则从库中取所有活跃角色
     if req.role_ids:
