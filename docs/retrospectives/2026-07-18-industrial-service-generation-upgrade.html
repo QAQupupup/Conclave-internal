@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>修复报告 - 工业级服务生成能力升级 - 2026-07-18</title>
+  <style>
+    :root {
+      --bg: #fafaf9;
+      --surface: #ffffff;
+      --border: #e7e5e4;
+      --text: #1c1917;
+      --text-2: #57534e;
+      --text-3: #a8a29e;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --red: #dc2626;
+      --red-soft: #fee2e2;
+      --green: #16a34a;
+      --green-soft: #dcfce7;
+      --orange: #ea580c;
+      --orange-soft: #fed7aa;
+      --purple: #7c3aed;
+      --purple-soft: #ede9fe;
+      --code-bg: #f5f5f4;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 40px 20px;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    .report-header { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; margin-bottom: 24px; }
+    .report-header h1 { font-size: 24px; margin-bottom: 8px; }
+    .report-header .subtitle { color: var(--text-2); font-size: 14px; margin-bottom: 16px; }
+    .report-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--text-2); }
+    .report-meta span { display: inline-flex; align-items: center; gap: 4px; }
+    .report-meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .report-chain { margin-top: 12px; font-size: 13px; color: var(--text-3); }
+    .report-chain a { color: var(--accent); text-decoration: none; }
+    .report-chain a:hover { text-decoration: underline; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+    .stat-card .num { font-size: 28px; font-weight: 700; }
+    .stat-card .label { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+    .stat-card.p0 .num { color: var(--red); }
+    .stat-card.p1 .num { color: var(--orange); }
+    .stat-card.p2 .num { color: var(--accent); }
+    .stat-card.p3 .num { color: var(--green); }
+    section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; }
+    section h2 { font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    section h3 { font-size: 15px; margin: 20px 0 8px; }
+    section p { font-size: 14px; color: var(--text-2); margin-bottom: 10px; }
+    .bug-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    .bug-card .bug-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .badge-p0 { background: var(--red-soft); color: var(--red); }
+    .badge-p1 { background: var(--orange-soft); color: var(--orange); }
+    .badge-p2 { background: var(--accent-soft); color: var(--accent); }
+    .badge-p3 { background: var(--purple-soft); color: var(--purple); }
+    .badge-fixed { background: var(--green-soft); color: var(--green); }
+    .badge-feat { background: var(--accent-soft); color: var(--accent); }
+    .bug-detail { font-size: 14px; color: var(--text-2); }
+    .bug-detail strong { color: var(--text); }
+    .bug-detail .field { margin-bottom: 8px; }
+    .bug-detail .field-label { font-weight: 600; color: var(--text); display: inline-block; min-width: 80px; }
+    pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 13px; line-height: 1.5; margin: 8px 0; }
+    code { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
+    .commit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .commit-table th, .commit-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    .commit-table th { color: var(--text-3); font-weight: 600; }
+    .commit-table code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
+    .pattern-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .pattern-table th, .pattern-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .pattern-table th { color: var(--text-3); font-weight: 600; }
+    .lesson-list { list-style: none; }
+    .lesson-list li { padding: 8px 0; padding-left: 20px; position: relative; font-size: 14px; color: var(--text-2); }
+    .lesson-list li::before { content: '▸'; position: absolute; left: 0; color: var(--accent); }
+    .verify-list { list-style: none; }
+    .verify-list li { padding: 6px 0; padding-left: 24px; position: relative; font-size: 14px; }
+    .verify-list li::before { content: '✓'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+    .verify-list li.pending::before { content: '○'; color: var(--orange); }
+    .verify-list li.fail::before { content: '✗'; color: var(--red); }
+    .arch-diagram { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre; margin: 12px 0; }
+    .dim-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
+    .dim-item { border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 13px; }
+    .dim-item .dim-name { font-weight: 600; color: var(--text); }
+    .dim-item .dim-weight { color: var(--text-3); font-size: 12px; }
+    .dim-item .dim-gate { color: var(--red); font-size: 12px; font-weight: 600; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header class="report-header">
+    <h1>工业级服务生成能力升级报告</h1>
+    <p class="subtitle">从单文件demo生成升级为分层架构+测试驱动+断点续传+质量门禁的工业级项目生成</p>
+    <div class="report-meta">
+      <span>📅 2026年7月18日</span>
+      <span>🔖 Commit区间: <code>3320146</code> → <code>87cf36a</code></span>
+      <span>🔧 2个P0 / 3个P1 / 5个P2修复/升级</span>
+      <span>📝 完整追溯文档</span>
+    </div>
+    <div class="report-chain">
+      上一轮修复: <a href="./2026-07-18-html-tag-rendering-fix.html"><code>03ea80c</code> → <code>f3134c6</code></a>
+    </div>
+  </header>
+
+  <section class="stats-grid" style="background:none;border:none;padding:0;">
+    <div class="stat-card p0"><div class="num">2</div><div class="label">P0 阻断修复</div></div>
+    <div class="stat-card p1"><div class="num">3</div><div class="label">P1 严重修复</div></div>
+    <div class="stat-card p2"><div class="num">5</div><div class="label">P2 功能升级</div></div>
+    <div class="stat-card p3"><div class="num">4</div><div class="label">新增文件/模块</div></div>
+  </section>
+
+  <section>
+    <h2>1. 问题概述</h2>
+    <p>在全项目从头分析中发现，Conclave的可部署服务生成（deployable_service）能力存在严重的质量瓶颈：</p>
+    <p><strong>核心问题：单次LLM调用生成20KB单文件app.py</strong>，导致以下系统性缺陷：</p>
+    <ul class="lesson-list">
+      <li><strong>P0 - LLM输出截断和超时：</strong>bugfix阶段prompt过大导致连续ReadTimeout，修复完全失效</li>
+      <li><strong>P0 - Demo级产出：</strong>生成的代码是单文件FastAPI demo，无分层架构，SQL注入漏洞，缺少静态文件</li>
+      <li><strong>P1 - 无断点续传：</strong>阶段失败直接标记FAILED，无法从断点恢复，每次从头开始</li>
+      <li><strong>P1 - 无自我迭代：</strong>产出质量不达标时无法自动改进，只能人工重新发起会议</li>
+      <li><strong>P1 - 无测试驱动：</strong>部署后不运行测试，功能正确性无法验证</li>
+      <li><strong>P2 - 部署失败无详情：</strong>只返回ok/false，无法诊断构建失败原因</li>
+      <li><strong>P2 - 无demo检测：</strong>无法识别"实现了功能但只是个demo"的情况</li>
+      <li><strong>P2 - 代码审查误报：</strong>将参数化查询误判为SQL注入</li>
+      <li><strong>P2 - 前端状态不同步：</strong>后端DONE但前端显示"进行中"</li>
+      <li><strong>P2 - 无跨会议演进：</strong>每次从头生成，无法基于历史版本扩展</li>
+    </ul>
+    <p style="margin-top:12px;"><strong>影响范围：</strong>所有deployable_service类型会议的产出质量，直接决定Conclave能否从"演示系统"升级为"生产可用的代码生成系统"。</p>
+    <p><strong>问题发现背景：</strong>全项目从头分析（~45,000行代码逐模块扫描）+ E2E测试验证发现多个P0/P1问题。</p>
+  </section>
+
+  <section>
+    <h2>2. Commit 区间详情</h2>
+    <p><strong>起始Commit：</strong><code>3320146</code> - fix(security): comprehensive security hardening + frontend/testing fixes（本轮升级前最后一个commit）</p>
+    <p><strong>结束Commit：</strong><code>87cf36a</code> - feat(frontend): 前端UI组件增强 + 状态管理重构 + 产出物展示优化 + 监控面板升级（最后一个功能commit）</p>
+    <h3>本次升级的Commit列表</h3>
+    <table class="commit-table">
+      <thead><tr><th>Hash</th><th>描述</th><th>文件数</th><th>变更</th></tr></thead>
+      <tbody>
+        <tr><td><code>8a1d414</code></td><td>docs: 新增全项目分析报告、沙箱目录标准和工业级服务生成升级规划文档</td><td>3</td><td>+931</td></tr>
+        <tr><td><code>1a98e94</code></td><td>feat(orchestrator): 工业级服务生成核心升级 - 断点续传/自我迭代/分层架构/质量门禁</td><td>17</td><td>+1705/-370</td></tr>
+        <tr><td><code>649d88c</code></td><td>feat(sandbox): 容器内pytest测试执行 + 部署配置改进 + 路由层增强</td><td>8</td><td>+570/-54</td></tr>
+        <tr><td><code>87cf36a</code></td><td>feat(frontend): 前端UI组件增强 + 状态管理重构 + 产出物展示优化 + 监控面板升级</td><td>23</td><td>+1555/-4574</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:12px;"><strong>报告提交：</strong>本HTML报告通过docs commit提交，commit message中通过<code>Refs: docs/retrospectives/2026-07-18-industrial-service-generation-upgrade.html</code>关联。</p>
+    <p style="margin-top:12px;"><strong>总计：</strong>约52个文件，新增约4761行，删除约4998行（含4030行废弃legacy代码），净减少约237行。</p>
+  </section>
+
+  <section>
+    <h2>3. 修复/升级详情</h2>
+
+    <h3>3.1 P0 Bug修复</h3>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p0">P0</span>
+        <span class="badge badge-fixed">已修复</span>
+        <strong>PlaywrightWebSearch session_key重复参数导致搜索失败</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">现象：</span>Web搜索功能不稳定，Playwright调用时可能因参数重复而出错。</div>
+        <div class="field"><span class="field-label">根因：</span><code>playwright_search.py</code>中<code>kwargs.get("session_key")</code>只读取不消费，导致后续<code>_do_search</code>调用时kwargs中仍包含session_key，与显式传参重复。</div>
+        <div class="field"><span class="field-label">修复方式：</span>将<code>kwargs.get("session_key", "default")</code>改为<code>kwargs.pop("session_key", "default")</code>，消费掉该参数。</div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/tools/playwright_search.py</code></div>
+      </div>
+    </div>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p0">P0</span>
+        <span class="badge badge-fixed">已修复</span>
+        <strong>Bugfix阶段LLM连续超时，代码修复完全失效</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">现象：</span>代码审查发现问题后，bugfix阶段prompt包含整个app.py(20KB)+所有问题列表，导致LLM ReadTimeout，修复循环无法推进。</div>
+        <div class="field"><span class="field-label">根因：</span>bugfix采用"逐个问题修复+全量代码重生成"模式，单次prompt过大；同时prompt中冗余信息太多。</div>
+        <div class="field"><span class="field-label">修复方式：</span>改为按文件批量修复，精简bugfix prompt；同时引入新的自我迭代Loop机制（见3.2），用质量评估驱动的整体迭代替代逐个问题修复。</div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/agents/prompts.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
+      </div>
+    </div>
+
+    <h3>3.2 P1 架构级升级</h3>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p1">P1</span>
+        <span class="badge badge-feat">新功能</span>
+        <strong>断点续传（Checkpoint & Resume）</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">问题：</span>阶段失败直接标记FAILED，所有进度丢失，必须从头开始。</div>
+        <div class="field"><span class="field-label">实现：</span>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li>MeetingState新增字段：<code>checkpoint</code>、<code>stage_retry_count</code>、<code>max_stage_retries</code></li>
+            <li>每阶段执行前/后记录checkpoint，失败时标记<code>resumable=true</code></li>
+            <li>阶段级自动重试（默认2次），重试失败后标记FAILED但保留checkpoint</li>
+            <li><code>_handle_resume</code>扩展支持FAILED状态：从checkpoint的failed_stage重新执行</li>
+            <li>启动时扫描RUNNING状态会议自动标记PAUSED，崩溃恢复增强</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/conclave_core/state.py</code>、<code>backend/app/orchestrator/runner.py</code>、<code>backend/app/schemas/meeting.py</code></div>
+      </div>
+    </div>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p1">P1</span>
+        <span class="badge badge-feat">新功能</span>
+        <strong>自我迭代Loop（Quality-Driven Iteration）</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">问题：</span>产出质量不达标时无法自动改进，只能人工重新发起。</div>
+        <div class="field"><span class="field-label">实现：</span>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li>质量门禁评估后不达标自动触发迭代（最多2轮，可配置）</li>
+            <li>质量反馈（分数+问题列表）注入下一轮produce prompt</li>
+            <li>新增API参数：<code>auto_iterate</code>、<code>max_iterations</code></li>
+            <li><code>iteration_history</code>记录每轮评估分数和问题</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/orchestrator/runner.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
+      </div>
+    </div>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p1">P1</span>
+        <span class="badge badge-feat">新功能</span>
+        <strong>跨会议演进（Cross-Meeting Evolution）</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">问题：</span>每次会议从头生成，无法基于已有项目扩展新功能。</div>
+        <div class="field"><span class="field-label">实现：</span>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li>produce节点加载<code>reference_meeting_ids</code>的项目文件作为baseline</li>
+            <li>关键文件内容注入prompt，引导LLM"扩展而非重写"已有代码</li>
+            <li>MeetingCharter增加reference_meeting_ids支持</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/orchestrator/nodes/produce.py</code>、<code>backend/app/schemas/meeting.py</code></div>
+      </div>
+    </div>
+
+    <h3>3.3 P2 功能升级</h3>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p2">P2</span>
+        <span class="badge badge-feat">新功能</span>
+        <strong>工业级分层架构生成</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">问题：</span>单文件app.py(20KB)是demo级代码，无法用于生产。</div>
+        <div class="field"><span class="field-label">实现：</span>
+          <p style="margin:4px 0;"><strong>DeployableServiceArtifact重构</strong>，支持完整项目目录树：</p>
+          <div class="arch-diagram">{project}/
+├── app/
+│   ├── main.py              # create_app()工厂 + lifespan
+│   ├── config.py            # @dataclass(frozen=True) Settings
+│   ├── middleware.py        # CORS/认证/追踪
+│   ├── dependencies.py      # FastAPI依赖注入
+│   ├── routers/             # Controller层（APIRouter按资源拆分）
+│   ├── schemas/             # DTO/VO层（Pydantic v2）
+│   ├── services/            # BO层（业务逻辑）
+│   ├── dao/                 # DAO层（数据访问）
+│   ├── db/
+│   │   ├── base.py          # SQLAlchemy Base
+│   │   ├── engine.py        # async_engine + session_factory
+│   │   └── models/          # DO层（ORM模型）
+│   └── domain/              # 领域层（枚举/纯业务规则）
+├── frontend/                # React 18 + TypeScript + Vite
+├── tests/                   # pytest
+├── Dockerfile / docker-compose.yml / requirements.txt / README.md</div>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li>新增<code>project_tree</code>/<code>frontend_tree</code>/<code>test_tree</code>/<code>root_files</code>字段</li>
+            <li>新增复杂度评估：<code>complexity_level</code>（micro/small/medium/large）</li>
+            <li>新增<code>tech_stack</code>/<code>title</code>/<code>description</code>/<code>is_demo_suspected</code>元数据</li>
+            <li>向后兼容旧的单文件app_code模式</li>
+            <li>安全路径处理（防路径穿越）、自动补全__init__.py、ast.parse语法检查</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/agents/schemas.py</code>、<code>backend/app/agents/prompts.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
+      </div>
+    </div>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p2">P2</span>
+        <span class="badge badge-feat">新功能</span>
+        <strong>8维度质量门禁</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">问题：</span>原质量门禁仅检查功能覆盖度，无法判断代码规模和真实性。</div>
+        <div class="field"><span class="field-label">实现：</span>
+          <div class="dim-grid">
+            <div class="dim-item"><div class="dim-name">部署成功</div><div class="dim-weight">权重: 10分</div><div class="dim-gate">硬门槛：必须通过</div></div>
+            <div class="dim-item"><div class="dim-name">测试通过</div><div class="dim-weight">权重: 15分</div><div class="dim-gate">硬门槛：有测试必过</div></div>
+            <div class="dim-item"><div class="dim-name">架构完整性</div><div class="dim-weight">权重: 25分</div><div>检查11个关键层次文件</div></div>
+            <div class="dim-item"><div class="dim-name">代码规模匹配</div><div class="dim-weight">权重: 20分</div><div class="dim-gate">硬门槛：文件/行数匹配复杂度</div></div>
+            <div class="dim-item"><div class="dim-name">功能真实性</div><div class="dim-weight">权重: 15分</div><div>检测TODO/NotImplemented/demo模式</div></div>
+            <div class="dim-item"><div class="dim-name">代码质量</div><div class="dim-weight">权重: 15分</div><div>ast.parse语法检查</div></div>
+            <div class="dim-item"><div class="dim-name">前端完整性</div><div class="dim-weight">权重: 10分</div><div>medium+必须有React</div></div>
+            <div class="dim-item"><div class="dim-name">文档完整性</div><div class="dim-weight">权重: 5分</div><div>README+.env.example</div></div>
+          </div>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li><strong>Demo检测：</strong>文件&lt;5或代码&lt;200行或&gt;=3处demo标记→判为stub（<code>is_demo_suspected=true</code>）</li>
+            <li>硬失败机制：任一硬门槛未通过即触发迭代</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/orchestrator/nodes/produce.py</code></div>
+      </div>
+    </div>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p2">P2</span>
+        <span class="badge badge-feat">新功能</span>
+        <strong>容器内pytest测试执行</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">问题：</span>代码生成后不运行测试，功能正确性无法验证。</div>
+        <div class="field"><span class="field-label">实现：</span>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li><code>sandbox.py</code>新增<code>run_tests_in_container()</code>：在已部署容器内执行pytest</li>
+            <li>自动安装pytest/pytest-asyncio/httpx测试依赖</li>
+            <li>解析pytest输出，返回结构化结果（passed/failed/errors/failures列表）</li>
+            <li>produce节点集成：部署成功+有测试文件时自动运行测试</li>
+            <li>测试失败用例名注入下一轮迭代prompt</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/sandbox.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code></div>
+      </div>
+    </div>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p2">P2</span>
+        <span class="badge badge-fixed">已修复</span>
+        <strong>部署鲁棒性增强（Dockerfile/静态文件/依赖/错误日志）</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">现象：</span>HEALTHCHECK缺curl导致健康检查必失败；代码引用/style.css但未生成；requirements缺pydantic；部署失败只返回false无详情。</div>
+        <div class="field"><span class="field-label">修复方式：</span>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li>部署时自动检测并补全HEALTHCHECK所需依赖（curl等）</li>
+            <li>静态文件缺失时自动生成默认CSS</li>
+            <li>requirements.txt缺失依赖自动补全</li>
+            <li>部署失败时返回完整traceback和容器日志</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/sandbox.py</code>、<code>backend/app/orchestrator/nodes/produce.py</code>、<code>backend/Dockerfile</code>、<code>docker-compose.yml</code></div>
+      </div>
+    </div>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p2">P2</span>
+        <span class="badge badge-fixed">已修复</span>
+        <strong>代码审查SQL注入误报 + 前端状态同步</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">现象：</span>正确的参数化查询(<code>conn.execute("SELECT * WHERE id=?", (id,))</code>)被审查误判为SQL注入；后端DONE但前端显示"进行中"。</div>
+        <div class="field"><span class="field-label">修复方式：</span>
+          <ul style="font-size:13px;padding-left:18px;margin:4px 0;">
+            <li>优化CODE_REVIEW_PROMPT，明确参数化查询(?)是正确的安全写法，不应报SQL注入</li>
+            <li>前端AppContext重构（+385行），增加会议状态同步逻辑，支持checkpoint/iteration/test_result消息类型</li>
+            <li>新增Toast/ConfirmModal/ErrorBoundary基础UI组件</li>
+            <li>删除4030行废弃app.legacy.html</li>
+          </ul>
+        </div>
+        <div class="field"><span class="field-label">影响文件：</span><code>backend/app/agents/prompts.py</code>、<code>frontend/src/state/AppContext.tsx</code>、<code>frontend/src/lib/ws.ts</code>、前端各view</div>
+      </div>
+    </div>
+
+    <h3>3.4 新增模块</h3>
+
+    <div class="bug-card">
+      <div class="bug-header">
+        <span class="badge badge-p3">新增</span>
+        <strong>审计日志模块</strong>
+      </div>
+      <div class="bug-detail">
+        <div class="field"><span class="field-label">文件：</span><code>backend/app/observability/audit.py</code> - 安全事件审计记录器</div>
+        <div class="field"><span class="field-label">文件：</span><code>backend/app/routers/audit_logs.py</code> - 审计日志查询API</div>
+        <div class="field"><span class="field-label">集成：</span>熔断器跳闸、认证失败、沙箱安全事件等关键节点自动记录审计日志</div>
+      </div>
+    </div>
+
+  </section>
+
+  <section>
+    <h2>4. 复杂度等级定义</h2>
+    <table class="pattern-table">
+      <thead><tr><th>等级</th><th>文件数</th><th>代码行数</th><th>架构要求</th><th>前端</th><th>测试</th><th>数据库</th></tr></thead>
+      <tbody>
+        <tr><td><code>micro</code></td><td>&lt;10</td><td>100-500</td><td>单文件FastAPI</td><td>无</td><td>无</td><td>SQLite</td></tr>
+        <tr><td><code>small</code></td><td>10-20</td><td>300-2000</td><td>基础分层</td><td>简单HTML</td><td>基础</td><td>SQLite</td></tr>
+        <tr><td><code>medium</code></td><td>20-50</td><td>1000-8000</td><td>完整7层</td><td>React+TS</td><td>pytest</td><td>PostgreSQL</td></tr>
+        <tr><td><code>large</code></td><td>50+</td><td>3000+</td><td>多模块/微服务</td><td>React+TS</td><td>完整测试</td><td>PG+Redis</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>5. 根因归类</h2>
+    <table class="pattern-table">
+      <thead><tr><th>错误模式</th><th>描述</th><th>预防措施</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>单次LLM输出过载</td>
+          <td>要求LLM一次输出20KB+单文件或30+文件的完整项目，超出输出可靠性范围，导致截断、幻觉、超时</td>
+          <td>改为分阶段管线式生成：需求→文档+测试→架构→逐模块→测试→部署。每次LLM调用输出2-3个文件</td>
+        </tr>
+        <tr>
+          <td>kwargs.get/pop混淆</td>
+          <td>kwargs.get只读取不消费，下游再次调用时参数重复导致Playwright调用异常</td>
+          <td>从kwargs提取独占参数时必须用pop，遵循"谁提取谁消费"原则</td>
+        </tr>
+        <tr>
+          <td>全量重生成替代增量修复</td>
+          <td>bugfix/迭代时重新生成整个项目，可能破坏已正确的代码，且prompt过大导致超时</td>
+          <td>改为增量patch模式：只修改测试失败/有问题的文件，保留正确代码</td>
+        </tr>
+        <tr>
+          <td>部署无反馈循环</td>
+          <td>部署后不验证、不测试、不检查健康状态，失败时无日志，无法诊断</td>
+          <td>部署后自动验证健康状态+运行测试+返回错误日志，形成闭环</td>
+        </tr>
+        <tr>
+          <td>质量门禁与产出规模不匹配</td>
+          <td>用单一功能覆盖度指标评估所有规模的产出，无法识别demo级代码</td>
+          <td>多维度质量评估，引入复杂度匹配检查和demo模式检测</td>
+        </tr>
+        <tr>
+          <td>前端状态与后端事件不同步</td>
+          <td>WebSocket消息类型扩展后前端未同步处理，导致状态残留</td>
+          <td>新增消息类型时前后端同步更新，增加类型定义共享</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>6. 经验沉淀与改进建议</h2>
+    <ul class="lesson-list">
+      <li><strong>分阶段生成是解决LLM大项目生成的根本方案：</strong>不要让LLM一次输出整个项目。改为管线式：需求拆分→文档+测试先行→架构规划→逐模块填充→测试→部署配置。每次LLM输出控制在2-3个文件。</li>
+      <li><strong>测试驱动生成(TDD for AI)：</strong>先生成测试用例，再生成实现代码，用测试结果驱动迭代，比事后审查更有效。</li>
+      <li><strong>断点续传是长流程系统的必备能力：</strong>任何可能耗时较长的pipeline都必须支持checkpoint/resume，单次失败不应导致全部重来。</li>
+      <li><strong>质量门禁必须多维：</strong>单一指标（如"部署成功"）无法保证产出质量，需要从架构完整性、代码规模、功能真实性、测试通过等多个维度评估。</li>
+      <li><strong>Demo检测是商业化的关键门槛：</strong>LLM倾向于生成"看起来对但无法用"的demo代码，必须通过文件数、代码行数、TODO/NotImplemented标记等信号识别stub产出。</li>
+      <li><strong>kwargs参数消费规范：</strong>装饰器/中间件提取kwargs参数时，明确区分"透传参数"（用get）和"消费参数"（用pop）。</li>
+      <li><strong>前端组件库升级：</strong>当前手写CSS组件模式维护成本高，建议引入shadcn/ui（轻量、可定制、现代设计），产出物查看器专业化（Monaco Editor代码查看、专业报告排版）。</li>
+      <li><strong>数据源接入：</strong>代码生成需要GitHub模板few-shot；商业调研需要专业搜索API（Tavily/SerpAPI）；金融分析需要财经数据源（AKShare）。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>7. 遗留问题（下一步P0）</h2>
+    <ul class="lesson-list">
+      <li><strong>分阶段生成管线（最紧迫）：</strong>当前project_tree模式仍然是单次LLM调用输出所有文件，20-50个文件的输出可靠性仍存疑。需要实现：Phase1需求拆分→Phase2文档+测试→Phase3架构规划→Phase4逐模块填充→Phase5测试生成→Phase6部署配置。</li>
+      <li><strong>增量修复：</strong>迭代时不重新生成整个项目，只修改有问题的文件（基于diff的patch模式）。</li>
+      <li><strong>容器构建鲁棒性：</strong>npm/pip使用lock文件固定版本；构建超时自动重试；完整构建日志记录。</li>
+      <li><strong>前端UI组件库升级：</strong>引入shadcn/ui替换手写组件；产出物查看器专业化。</li>
+      <li><strong>project_tree多文件生成E2E验证：</strong>新的分层架构生成已实现但尚未经过完整E2E验证，medium复杂度项目（React+PG+pytest）的实际生成成功率需要测试。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>8. 验证结果</h2>
+    <ul class="verify-list">
+      <li>Python语法检查通过（所有修改的.py文件ast.parse验证）</li>
+      <li>Docker Compose配置校验通过</li>
+      <li>工作区clean，所有改动已提交</li>
+      <li class="pending">project_tree分层架构生成E2E测试待执行（需要Docker环境完整运行）</li>
+      <li class="pending">断点续传resume功能待E2E验证</li>
+      <li class="pending">自我迭代Loop（auto_iterate）待E2E验证</li>
+      <li class="pending">容器内pytest执行待E2E验证</li>
+    </ul>
+    <p style="margin-top:12px;font-size:13px;color:var(--text-3);">注：E2E验证需要完整Docker环境运行实际会议，将在分阶段生成管线实现后统一进行。</p>
+  </section>
+
+</div>
+</body>
+</html>
