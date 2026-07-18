@@ -321,6 +321,11 @@ def setup_auth_middleware(app: FastAPI) -> None:
 
         if auth_user:
             request.state.auth_user = auth_user
+            # 设置用户上下文（用于日志/审计追踪）
+            from app.context import set_user_id, set_username, set_user_role as _set_ur
+            set_user_id(str(auth_user.get("uid", "") or ""))
+            set_username(auth_user.get("username", ""))
+            _set_ur(auth_user.get("role", ""))
             return await call_next(request)
 
         # 认证方式2：Dev token（向后兼容，视为 admin）
@@ -329,17 +334,40 @@ def setup_auth_middleware(app: FastAPI) -> None:
             _DEV_TOKEN.encode("utf-8"),
         ):
             request.state.auth_user = {"username": "dev", "role": "admin", "uid": None}
+            from app.context import set_user_id, set_username, set_user_role as _set_ur2
+            set_user_id("dev")
+            set_username("dev")
+            _set_ur2("admin")
             return await call_next(request)
 
         # 全部认证失败
         ok2, _reason2 = _check_rate_limit(client_ip_str, is_failed_attempt=True)
         if not ok2:
             logger.warning("IP %s 触发封禁：%s", client_ip_str, _reason2)
+            # 审计：触发封禁
+            try:
+                from app.observability.audit import audit
+                audit("security.rate_limited", "blocked", {
+                    "reason": "auth_failures_exceeded",
+                    "path": path,
+                }, ip=client_ip_str)
+            except Exception:
+                pass
             return JSONResponse(
                 status_code=429,
                 content={"detail": f"认证失败过多：{_reason2}"},
                 headers={"Retry-After": str(_RATE_BLOCK_SECONDS)},
             )
+        # 审计：未授权访问尝试
+        try:
+            from app.observability.audit import audit
+            audit("security.unauthorized_access", "failure", {
+                "path": path,
+                "method": request.method,
+                "has_auth_header": bool(auth_header),
+            }, ip=client_ip_str)
+        except Exception:
+            pass
         return JSONResponse(
             status_code=401,
             content={"detail": "认证失败：token 无效或已过期"},
@@ -418,6 +446,14 @@ def setup_trace_middleware(app: FastAPI) -> None:
                 "request_id=%s %s %s %d %.0fms",
                 rid, method, path, status, elapsed,
             )
+            # 审计：5xx 错误
+            try:
+                from app.observability.audit import audit
+                audit("system.error", "error", {
+                    "method": method, "path": path, "status": status,
+                }, duration_ms=int(elapsed))
+            except Exception:
+                pass
         elif status >= 400:
             logger.warning(
                 "request_id=%s %s %s %d %.0fms",
@@ -428,6 +464,26 @@ def setup_trace_middleware(app: FastAPI) -> None:
                 "request_id=%s %s %s %d %.0fms",
                 rid, method, path, status, elapsed,
             )
+
+        # 审计：写操作（POST/PUT/DELETE/PATCH）自动记录
+        if method in ("POST", "PUT", "DELETE", "PATCH"):
+            _NO_AUDIT_PATHS = {"/health", "/metrics", "/docs", "/openapi.json", "/redoc"}
+            if path not in _NO_AUDIT_PATHS and not path.startswith("/docs"):
+                try:
+                    from app.observability.audit import audit
+                    # 推断操作类型
+                    action_map = {
+                        "POST": _infer_audit_action(path, "create"),
+                        "PUT": _infer_audit_action(path, "update"),
+                        "DELETE": _infer_audit_action(path, "delete"),
+                        "PATCH": _infer_audit_action(path, "update"),
+                    }
+                    action = action_map.get(method, "system.request")
+                    audit(action, "success" if status < 400 else "failure", {
+                        "method": method, "path": path, "status": status,
+                    }, duration_ms=int(elapsed), ip=_client_ip(request))
+                except Exception:
+                    pass
 
         response.headers["X-Request-Id"] = rid
         return response
@@ -445,6 +501,61 @@ def get_dev_token_info() -> dict[str, Any]:
         "jwt_auth_enabled": True,
         "default_admin_username": os.environ.get("CONCLAVE_ADMIN_USERNAME", "admin"),
     }
+
+
+# 路径到审计动作的映射表（高频路径专用，更精确）
+_PATH_AUDIT_MAP: dict[str, str] = {
+    "/api/meetings": "meeting.created",
+}
+
+
+def _infer_audit_action(path: str, method_fallback: str) -> str:
+    """根据 URL 路径推断审计动作类型"""
+    # 精确匹配
+    if path in _PATH_AUDIT_MAP:
+        return _PATH_AUDIT_MAP[path]
+    # 路径片段推断
+    if "/meetings" in path:
+        if "/control" in path:
+            return "meeting.control"
+        if "/intervene" in path:
+            return "meeting.intervened"
+        if "/run" in path:
+            return "meeting.started"
+        if "/abort" in path:
+            return "meeting.aborted"
+        if "/borrow" in path or "/takeover" in path:
+            return "meeting.borrow_requested"
+        if "/reference" in path:
+            return "meeting.reference_injected"
+        if "/tags" in path:
+            return "meeting.tag_changed"
+        if "/model" in path:
+            return "meeting.model_changed"
+        if method_fallback == "delete":
+            return "meeting.deleted"
+        return "meeting.updated"
+    if "/auth" in path:
+        if "/login" in path:
+            return "auth.login"
+        return "auth.action"
+    if "/workspace" in path:
+        if "/exec" in path or "/run" in path:
+            return "sandbox.command_executed"
+        if "/files" in path:
+            return "sandbox.file_modified"
+        return "workspace.action"
+    if "/llm/keys" in path:
+        return "admin.key_saved"
+    if "/net-auth" in path or "/net_auth" in path:
+        return "sandbox.network_auth"
+    if "/agent-roles" in path or "/agent_roles" in path:
+        return "admin.role_changed"
+    if "/preferences" in path:
+        return "admin.config_changed"
+    if "/captcha" in path:
+        return "sandbox.captcha_resolved"
+    return f"system.{method_fallback}"
 
 
 def record_auth_failure(ip: str) -> None:

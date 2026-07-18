@@ -159,16 +159,93 @@ class TestedSystemArtifact(BaseModel):
 
 
 class DeployableServiceArtifact(BaseModel):
-    """deployable_service 产出：可部署服务
+    """deployable_service 产出：工业级可部署服务
 
-    关键字段 app_code / dockerfile 为必填。
+    支持两种模式：
+    1. 分层架构模式（默认）：project_tree 包含完整项目文件树，遵循 Controller/Service/DAO/Model/Schema 分层
+    2. 单文件兼容模式（向后兼容）：app_code/dockerfile 等顶层字段提供单文件实现
+
+    复杂度等级（complexity_level）：
+    - "micro": 微工具（<10个文件），单文件FastAPI，无前端，SQLite
+    - "small": 小型服务（10-20个文件），基础分层，简单HTML前端，SQLite
+    - "medium": 中型服务（20-50个文件），完整分层+React前端+PostgreSQL+测试+Alembic迁移
+    - "large": 大型服务（50+文件），微服务架构+多模块+完整测试+CI/CD+监控
     """
     model_config = _SCHEMA_CONFIG
-    app_code: str       # 必填：应用代码
-    dockerfile: str = "" # 必填但允许空（生成时可能只给内容）
+
+    # === 基础元数据 ===
+    title: str = ""
+    description: str = ""
+    complexity_level: str = "medium"  # micro|small|medium|large
+    tech_stack: list[str] = Field(default_factory=list)
+    port: int = 8000
+    run_command: str = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    credentials: dict[str, str] = Field(default_factory=dict)
+
+    # === 分层架构文件树（主力输出）===
+    # 格式: {"app/main.py": "...", "app/routers/xxx.py": "...", "app/db/models/xxx.py": "...", ...}
+    # 包含后端所有Python文件、配置文件、迁移脚本
+    project_tree: dict[str, str] = Field(default_factory=dict)
+
+    # === 前端React项目文件树 ===
+    # 格式: {"frontend/src/App.tsx": "...", "frontend/package.json": "...", "frontend/Dockerfile": "..."}
+    frontend_tree: dict[str, str] = Field(default_factory=dict)
+
+    # === 测试文件树 ===
+    # 格式: {"tests/test_api.py": "...", "tests/conftest.py": "..."}
+    test_tree: dict[str, str] = Field(default_factory=dict)
+
+    # === 部署文件（项目根目录）===
+    # 格式: {"Dockerfile": "...", "docker-compose.yml": "...", "requirements.txt": "...", ".env.example": "...", "pyproject.toml": "..."}
+    root_files: dict[str, str] = Field(default_factory=dict)
+
+    # === 向后兼容字段（单文件模式，LLM可能只输出这些）===
+    # 如果project_tree为空，produce节点会将这些字段组装成project_tree
+    app_code: str = ""
+    dockerfile: str = ""
     docker_compose: str = ""
     requirements_txt: str = ""
     readme: str = ""
+    static_files: dict[str, str] = Field(default_factory=dict)
+
+    def get_effective_tree(self) -> dict[str, str]:
+        """获取最终生效的完整文件树（合并project_tree + 兼容字段）"""
+        tree = dict(self.project_tree)
+        # 如果project_tree为空，从兼容字段组装
+        if not tree:
+            if self.app_code:
+                tree["app/main.py"] = self.app_code
+            if self.requirements_txt:
+                tree["requirements.txt"] = self.requirements_txt
+            if self.dockerfile:
+                tree["Dockerfile"] = self.dockerfile
+            if self.docker_compose:
+                tree["docker-compose.yml"] = self.docker_compose
+            if self.readme:
+                tree["README.md"] = self.readme
+            for path, content in self.static_files.items():
+                tree[path] = content
+        # 合并root_files
+        for path, content in self.root_files.items():
+            tree[path] = content
+        # 合并frontend_tree
+        for path, content in self.frontend_tree.items():
+            tree[path] = content
+        # 合并test_tree
+        for path, content in self.test_tree.items():
+            tree[path] = content
+        return tree
+
+    def count_code_lines(self) -> int:
+        """统计总代码行数（用于规模评估）"""
+        total = 0
+        for content in self.get_effective_tree().values():
+            total += len(content.split("\n"))
+        return total
+
+    def count_files(self) -> int:
+        """统计文件总数（用于规模评估）"""
+        return len(self.get_effective_tree())
 
 
 class ProduceResult(BaseModel):

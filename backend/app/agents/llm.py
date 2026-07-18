@@ -458,6 +458,15 @@ class CircuitBreaker:
                 "熔断器打开：连续失败 %d 次，%gs 内拒绝所有 LLM 调用",
                 self._failure_count, self.recovery_timeout,
             )
+            # 审计：熔断器跳闸
+            try:
+                from app.observability.audit import audit
+                audit("system.llm_circuit_tripped", "error", {
+                    "failure_count": self._failure_count,
+                    "recovery_timeout_s": self.recovery_timeout,
+                })
+            except Exception:
+                pass
 
 
 # 进程级单例熔断器

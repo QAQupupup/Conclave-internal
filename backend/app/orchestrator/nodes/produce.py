@@ -264,6 +264,9 @@ async def produce_node(state: MeetingState) -> MeetingState:
 
     [AUDIT-FIX P0-2] 修复：部署失败时确保 artifact 仍被保存（不返回 null）。
     节点级异常兜底由 Runner.run() 的 try/except 统一处理（P0-4）。
+
+    [迭代支持] 如果 state.iteration_count > 0，说明是质量迭代轮，
+    将 quality_feedback 注入到 prompt 中引导 LLM 改进。
     """
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
@@ -271,6 +274,79 @@ async def produce_node(state: MeetingState) -> MeetingState:
     # 根据产出类型选择模板
     from app.agents.prompts import get_produce_template
     template = get_produce_template(state.deliverable_type)
+
+    # === 迭代反馈注入 ===
+    iteration_anchor = ""
+    if state.iteration_count > 0 and state.quality_feedback:
+        iteration_anchor = (
+            f"\n\n[重要 - 质量迭代 第{state.iteration_count}轮]\n"
+            f"上一轮产出质量评分为 {state.quality_score}/100，未达商用标准。\n"
+            f"质量评估反馈如下，你必须针对这些问题进行全面改进：\n{state.quality_feedback}\n\n"
+            f"请在保持已有功能完整性的基础上，重点修复上述问题，"
+            f"提升代码质量、部署可靠性和功能完整度。不要省略任何已有功能。\n"
+        )
+        _lb.info(
+            f"produce: 迭代模式 第{state.iteration_count}轮，质量反馈已注入",
+            logger="orchestrator.nodes.produce",
+            extra={"quality_score": state.quality_score},
+        )
+        await _emit_progress(state, "iterating", f"第{state.iteration_count}轮质量迭代改进中...", 5)
+        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                f"[质量迭代 第{state.iteration_count}轮] 根据质量评估反馈进行改进...")
+
+    # === 跨会议演进：加载引用会议的baseline代码 ===
+    baseline_anchor = ""
+    if state.reference_meeting_ids and state.deliverable_type == "deployable_service":
+        try:
+            from app.config import settings as _settings
+            baseline_projects = []
+            for ref_id in state.reference_meeting_ids[-1:]:  # 只取最近一个引用作为baseline，避免prompt过大
+                ref_ws = Path(_settings.workspace_root) / ref_id
+                if not ref_ws.exists():
+                    continue
+                # 扫描baseline项目结构
+                ref_files = {}
+                for f in ref_ws.rglob("*"):
+                    if f.is_file() and f.suffix in (".py", ".tsx", ".ts", ".json", ".yml", ".yaml", ".md", ".css", ".html", ".txt"):
+                        rel = str(f.relative_to(ref_ws)).replace("\\", "/")
+                        if any(skip in rel for skip in ["__pycache__", ".pyc", "node_modules", "__init__.py"]):
+                            continue
+                        try:
+                            content = f.read_text(encoding="utf-8")
+                            if len(content) < 5000:  # 只加载小文件，避免prompt过大
+                                ref_files[rel] = content[:2000]
+                        except Exception:
+                            pass
+                if ref_files:
+                    file_list = list(ref_files.keys())[:20]
+                    baseline_projects.append({
+                        "meeting_id": ref_id,
+                        "file_count": len(ref_files),
+                        "files": ref_files,
+                        "file_list": file_list,
+                    })
+                    _lb.info(
+                        f"produce: 加载baseline会议 {ref_id}，{len(ref_files)}个文件",
+                        logger="orchestrator.nodes.produce",
+                    )
+            if baseline_projects:
+                baseline_anchor = "\n\n[重要 - 跨会议演进] 以下是之前会议已完成的项目代码，你需要在此基础上**扩展和改进**，而不是从头重写：\n"
+                for bp in baseline_projects:
+                    baseline_anchor += f"\n--- 历史项目版本（{bp['file_count']}个文件）---\n"
+                    baseline_anchor += f"文件列表: {', '.join(bp['file_list'])}\n"
+                    # 只注入关键文件的内容，限制总量
+                    injected_count = 0
+                    for fname, fcontent in bp["files"].items():
+                        if injected_count >= 8:  # 最多注入8个关键文件
+                            break
+                        if any(k in fname for k in ["main.py", "config.py", "models", "schemas", "routers", "engine"]):
+                            baseline_anchor += f"\n=== {fname} ===\n{fcontent}\n"
+                            injected_count += 1
+                    baseline_anchor += "\n请在上述代码基础上进行改进和扩展，保持已有功能完整性，添加新的需求功能。\n"
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                        f"已加载{len(baseline_projects)}个历史项目版本作为演进基线")
+        except Exception as be:
+            _lb.warning(f"produce: 加载baseline失败: {be}", logger="orchestrator.nodes.produce")
 
     # 发送进度：开始生成
     await _emit_progress(state, "llm_generate", "正在调用大模型生成产出内容，这可能需要几分钟...", 10)
@@ -286,9 +362,18 @@ async def produce_node(state: MeetingState) -> MeetingState:
 
     # 带一致性自检的 LLM 调用
     async def call_fn(anchor: str) -> dict[str, Any]:
+        # 合并迭代反馈anchor + 跨会议baseline
+        combined_anchor = anchor
+        anchors_to_merge = []
+        if iteration_anchor:
+            anchors_to_merge.append(iteration_anchor)
+        if baseline_anchor:
+            anchors_to_merge.append(baseline_anchor)
+        if anchors_to_merge:
+            combined_anchor = "\n".join(anchors_to_merge) + ("\n" + anchor if anchor else "")
         req = build_produce_prompt(
             state.decision_record or {},
-            anchor=anchor,
+            anchor=combined_anchor,
             template=template,
             deliverable_type=state.deliverable_type,
             evidence_summary=evidence_summary or None,
@@ -585,259 +670,170 @@ async def produce_node(state: MeetingState) -> MeetingState:
 
     elif state.deliverable_type == "deployable_service":
         ds_data = result.get("deployable_service") or {}
-        app_code = ds_data.get("app_code", "")
-        requirements_txt = ds_data.get("requirements_txt", "")
-        dockerfile_content = ds_data.get("dockerfile", "")
-        docker_compose_content = ds_data.get("docker_compose", "")
-        readme_content = ds_data.get("readme", "")
-        credentials = ds_data.get("credentials") or {}
-        service_port = ds_data.get("port", 8000)
-        frontend_files = ds_data.get("frontend_files") or {}
-        if app_code:
+
+        # 兼容新旧格式：构造DeployableServiceArtifact实例来获取有效文件树
+        try:
+            from app.agents.schemas import DeployableServiceArtifact
+            ds_artifact = DeployableServiceArtifact(**ds_data)
+        except Exception:
+            # 降级：手动构造
+            ds_artifact = DeployableServiceArtifact(
+                title=ds_data.get("title", ""),
+                description=ds_data.get("description", ""),
+                complexity_level=ds_data.get("complexity_level", "medium"),
+                tech_stack=ds_data.get("tech_stack", []),
+                port=ds_data.get("port", 8000),
+                run_command=ds_data.get("run_command", "uvicorn app.main:app --host 0.0.0.0 --port 8000"),
+                credentials=ds_data.get("credentials", {}),
+                project_tree=ds_data.get("project_tree", {}),
+                frontend_tree=ds_data.get("frontend_tree", {}),
+                test_tree=ds_data.get("test_tree", {}),
+                root_files=ds_data.get("root_files", {}),
+                app_code=ds_data.get("app_code", ""),
+                dockerfile=ds_data.get("dockerfile", ""),
+                docker_compose=ds_data.get("docker_compose", ""),
+                requirements_txt=ds_data.get("requirements_txt", ""),
+                readme=ds_data.get("readme", ""),
+                static_files=ds_data.get("static_files", {}),
+            )
+
+        effective_tree = ds_artifact.get_effective_tree()
+        complexity = ds_artifact.complexity_level
+        total_files = ds_artifact.count_files()
+        total_lines = ds_artifact.count_code_lines()
+        service_port = ds_artifact.port
+        credentials = ds_artifact.credentials
+
+        _lb.info(
+            f"produce: 收到可部署服务产出，复杂度={complexity}, 文件数={total_files}, 代码行数={total_lines}",
+            logger="orchestrator.nodes.produce",
+            extra={"complexity": complexity, "files": total_files, "lines": total_lines},
+        )
+        await _emit_progress(state, "writing_files", f"正在写入 {total_files} 个项目文件（{total_lines}行代码）...", 20)
+        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                f"代码生成完成：复杂度 {complexity}，{total_files} 个文件，{total_lines} 行代码")
+
+        if effective_tree:
             from app.config import settings
             ws_root = Path(settings.workspace_root) / state.meeting_id
-            ws_root.mkdir(parents=True, exist_ok=True)
 
-            # === 代码 Review + BugFix 循环 ===
-            # [AUDIT-FIX P0-3] 修复：增加连续修复失败计数器，超过阈值提前退出循环
-            review_rounds = 0
-            max_review_rounds = 3
-            max_consecutive_fix_failures = 3  # 连续修复失败上限
-            consecutive_fix_failures = 0
-            review_passed = False
-            review_summary = ""
-            code_files = {
-                "app.py": app_code,
-                "requirements.txt": requirements_txt,
-                "Dockerfile": dockerfile_content,
-                "docker-compose.yml": docker_compose_content,
-            }
+            # === 写入完整项目树 ===
+            files_written = 0
+            dirs_created = set()
+            for rel_path, content in effective_tree.items():
+                if not isinstance(content, str) or len(content) < 1:
+                    continue
+                # 安全路径处理：防止路径穿越
+                safe_path = rel_path.replace("\\", "/")
+                if safe_path.startswith("/"):
+                    safe_path = safe_path[1:]
+                if ".." in safe_path:
+                    continue
+                target = ws_root / safe_path
+                # 确保父目录存在
+                parent = target.parent
+                if parent not in dirs_created:
+                    parent.mkdir(parents=True, exist_ok=True)
+                    dirs_created.add(parent)
+                target.write_text(content, encoding="utf-8")
+                files_written += 1
 
-            await _emit_progress(state, "code_review", "正在进行代码审查和修复...", 50)
+            _lb.info(f"produce: 已写入 {files_written} 个文件到工作区", logger="orchestrator.nodes.produce")
 
-            for review_rounds in range(1, max_review_rounds + 1):
-                _lb.info(f"produce: 代码审查第{review_rounds}轮", logger="orchestrator.nodes.produce")
-                # 调用LLM做代码审查
-                from app.agents.prompts import CODE_REVIEW_PROMPT, CODE_FIX_PROMPT
-                from app.agents.bug_patterns import format_bug_patterns_for_prompt
-                bug_patterns = format_bug_patterns_for_prompt()
-
-                review_prompt = CODE_REVIEW_PROMPT.format(
-                    bug_patterns=bug_patterns,
-                    app_code=code_files["app.py"],
-                    requirements_txt=code_files["requirements.txt"],
-                    dockerfile=code_files["Dockerfile"],
-                    docker_compose=code_files["docker-compose.yml"],
-                )
-                review_req = ThinkRequest(
-                    agent_role=Role.ENGINEER.value,
-                    stage="review",
-                    prompt=review_prompt,
-                    schema_hint="code_review",
-                    model=_resolve_model_for_call(state, Role.ENGINEER.value, "review"),
-                )
-                # 为review阶段注入Skills（deliverable_quality, code_conventions等）
-                try:
-                    from app.agents.skills import format_skills_for_prompt
-                    skills_text = format_skills_for_prompt(stage="review", deliverable_type="deployable_service", role=Role.ENGINEER.value)
-                    if skills_text:
-                        review_req.prompt = review_req.prompt + "\n\n" + skills_text
-                except Exception:
-                    pass
-                review_resp = await execute_think(review_req)
-                review_result = review_resp.result if hasattr(review_resp, 'result') else {}
-                if isinstance(review_result, dict):
-                    issues = review_result.get("issues", [])
-                    review_summary = review_result.get("summary", "")
-                    critical_high = [i for i in issues if i.get("severity") in ("critical", "high")]
-                    # [AUDIT-FIX P2] 审查一致性：综合 passed 字段和 critical/high 问题判断
-                    # 避免 LLM 输出 passed=true 但 issues 中含 critical 的矛盾
-                    passed_from_llm = review_result.get("passed", False)
-                    if not critical_high:
-                        # [AUDIT-FIX P2] 无 critical/high 问题即通过，并记录 LLM passed 字段是否一致
-                        review_passed = True
-                        if not passed_from_llm:
-                            _lb.warning("produce: 审查 passed=false 但无 critical/high 问题，按问题判定为通过",
-                                        logger="orchestrator.nodes.produce")
-                        _lb.info(f"produce: 代码审查通过（第{review_rounds}轮，{len(issues)}个低/中级别问题）",
-                                 logger="orchestrator.nodes.produce")
-                        # 记录审查通过消息
-                        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                                f"代码审查第{review_rounds}轮通过（{len(issues)}个低/中级别问题，不影响部署）")
-                        break
-
-                    # 有critical/high问题，修复
-                    _lb.info(f"produce: 发现{len(critical_high)}个严重问题，开始修复",
-                             logger="orchestrator.nodes.produce",
-                             extra={"issues": [i.get("description", "")[:100] for i in critical_high]})
-                    for issue in critical_high:
-                        file_to_fix = issue.get("file", "app.py")
-                        file_key_map = {"app.py": "app.py", "requirements.txt": "requirements.txt",
-                                        "Dockerfile": "Dockerfile", "docker-compose.yml": "docker-compose.yml"}
-                        fkey = file_key_map.get(file_to_fix, "app.py")
-                        original = code_files[fkey]
-                        issues_text = f"- [{issue.get('severity','high')}] {issue.get('description','')}\n  修复建议: {issue.get('fix','')}"
-                        fix_prompt = CODE_FIX_PROMPT.format(
-                            original_code=original,
-                            issues_text=issues_text,
-                            bug_patterns=bug_patterns,
-                            file_to_fix=fkey,
-                        )
-                        fix_req = ThinkRequest(
-                            agent_role=Role.ENGINEER.value,
-                            stage="bugfix",
-                            prompt=fix_prompt,
-                            schema_hint="bugfix",  # [AUDIT-FIX P1-2] 修复：补全 schema_hint 确保 trace 记录正确 stage
-                            model=_resolve_model_for_call(state, Role.ENGINEER.value, "bugfix"),
-                        )
-                        # 为bugfix阶段注入Skills（code_conventions等）
-                        try:
-                            from app.agents.skills import format_skills_for_prompt
-                            skills_text = format_skills_for_prompt(stage="bugfix", deliverable_type="deployable_service", role=Role.ENGINEER.value)
-                            if skills_text:
-                                fix_req.prompt = fix_req.prompt + "\n\n" + skills_text
-                        except Exception:
-                            pass
-                        fix_resp = await execute_think(fix_req)
-                        # 正确解析LLM返回的JSON：可能是 {"fixed_code": "..."} 格式，也可能直接是代码字符串
-                        fixed_code = ""
-                        if isinstance(fix_resp.result, dict):
-                            fixed_code = str(fix_resp.result.get("fixed_code", "") or fix_resp.result.get("code", "") or "")
-                            # 如果dict中没有fixed_code字段，尝试取第一个字符串值
-                            if not fixed_code:
-                                for v in fix_resp.result.values():
-                                    if isinstance(v, str) and len(v) > 20:
-                                        fixed_code = v
-                                        break
-                        elif isinstance(fix_resp.result, str):
-                            fixed_code = fix_resp.result
-                        else:
-                            fixed_code = str(fix_resp.result)
-                        # 清理可能的markdown代码块标记
-                        fixed_code = fixed_code.strip()
-                        if fixed_code.startswith("```"):
-                            lines = fixed_code.split("\n")
-                            # 去掉第一行```language和最后一行```
-                            lines = lines[1:]
-                            while lines and lines[-1].strip().startswith("```"):
-                                lines = lines[:-1]
-                            fixed_code = "\n".join(lines)
-                        # [AUDIT-FIX P0-1] 修复：用 ast.parse 校验 Python 代码有效性，
-                        # 替代原来粗暴的 startswith("{") 检查（会误拒以 "{" 开头的合法代码）
-                        # [AUDIT-FIX P0-3] 修复：增加连续失败计数，超过阈值时退出循环
-                        _fix_ok = False
-                        if not fixed_code:
-                            _lb.warning(f"produce: 修复 {fkey} 返回空代码，保留原版本",
-                                        logger="orchestrator.nodes.produce")
-                        elif fkey.endswith(".py"):
-                            import ast as _ast
-                            try:
-                                _ast.parse(fixed_code)
-                                code_files[fkey] = fixed_code
-                                _fix_ok = True
-                            except SyntaxError as _se:
-                                _lb.warning(f"produce: 修复 {fkey} 代码有语法错误 ({_se})，保留原版本",
-                                            logger="orchestrator.nodes.produce")
-                        else:
-                            # 非 .py 文件（requirements.txt, Dockerfile 等）：非空即接受
-                            code_files[fkey] = fixed_code
-                            _fix_ok = True
-                        # P0-3: 连续失败计数
-                        if _fix_ok:
-                            consecutive_fix_failures = 0
-                        else:
-                            consecutive_fix_failures += 1
-                            if consecutive_fix_failures >= max_consecutive_fix_failures:
-                                _lb.warning(
-                                    f"produce: 连续 {consecutive_fix_failures} 次修复失败，"
-                                    f"跳过剩余问题并在本轮终止审查循环",
-                                    logger="orchestrator.nodes.produce")
-                                review_passed = False
-                                break
-                else:
-                    review_passed = True  # 审查返回非JSON，跳过
-                    break
-
-            # 更新代码
-            app_code = code_files["app.py"]
-            requirements_txt = code_files["requirements.txt"]
-            dockerfile_content = code_files["Dockerfile"]
-            docker_compose_content = code_files["docker-compose.yml"]
-
-            # 写入所有部署文件到工作区
-            (ws_root / "app.py").write_text(app_code, encoding="utf-8")
-            if requirements_txt:
-                (ws_root / "requirements.txt").write_text(requirements_txt, encoding="utf-8")
-            if dockerfile_content:
-                (ws_root / "Dockerfile").write_text(dockerfile_content, encoding="utf-8")
-            if docker_compose_content:
-                (ws_root / "docker-compose.yml").write_text(docker_compose_content, encoding="utf-8")
-            # 写入前端文件
-            if frontend_files:
-                frontend_dir = ws_root / "frontend"
-                frontend_dir.mkdir(parents=True, exist_ok=True)
-                for fname, fcontent in frontend_files.items():
-                    if not isinstance(fcontent, str):
-                        continue
-                    # 安全路径：仅允许 index.html / style.css 等简单文件名
-                    safe_name = Path(fname).name
-                    if safe_name in ("index.html", "style.css", "app.js"):
-                        (frontend_dir / safe_name).write_text(fcontent, encoding="utf-8")
-                _lb.info(
-                    f"produce: 已写入 {len(frontend_files)} 个前端文件到 frontend/",
-                    logger="orchestrator.nodes.produce",
-                    extra={"meeting_id": state.meeting_id, "files": list(frontend_files.keys())},
-                )
-            # 写入 README
-            if readme_content:
-                (ws_root / "README.md").write_text(readme_content, encoding="utf-8")
-            else:
-                default_readme = f"""# {ds_data.get('title', 'Deployable Service')}
-
-{ds_data.get('description', '')}
-
-## 快速开始
-```bash
-pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port {service_port}
-```
-服务端口: {service_port}
-"""
-                (ws_root / "README.md").write_text(default_readme, encoding="utf-8")
-
-            # 更新ds_data中的代码为修复后的版本
-            ds_data["app_code"] = app_code
-            ds_data["requirements_txt"] = requirements_txt
-            ds_data["dockerfile"] = dockerfile_content
-            ds_data["docker_compose"] = docker_compose_content
-            ds_data["frontend_files"] = frontend_files
-            state.artifact["deployable_service"] = ds_data
-            state.artifact["deployment_dir"] = str(ws_root)
-            state.artifact["review"] = {
-                "rounds": review_rounds,
-                "passed": review_passed,
-                "summary": review_summary,
-            }
-
-            # === 沙箱自动部署 ===
-            deployment_info = {}
-            try:
-                from app.sandbox import deploy_service
-                _lb.info("produce: 开始沙箱部署服务...", logger="orchestrator.nodes.produce")
-                await _emit_progress(state, "deploying", "正在Docker沙箱中部署服务，这可能需要1-2分钟...", 75)
-
-                # 确保有/health端点 - 如果app_code中没有，自动注入
-                if "/health" not in app_code and '"/health"' not in app_code and "'/health'" not in app_code:
+            # === 自动修复：检查/补全必要文件 ===
+            # 1. 确保有/health端点
+            main_py = ws_root / "app" / "main.py"
+            if main_py.exists():
+                main_content = main_py.read_text(encoding="utf-8")
+                if "/health" not in main_content:
                     health_code = """
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
-"""
-                    # 注入到 if __name__ == "__main__" 之前
-                    if 'if __name__' in app_code:
-                        app_code = app_code.replace('if __name__', health_code + '\nif __name__')
-                        (ws_root / "app.py").write_text(app_code, encoding="utf-8")
+async def health_check():
+    return {"status": "ok", "service": "%s"}
+""" % ds_artifact.title
+                    if "app = create_app()" in main_content:
+                        main_content = main_content.replace("app = create_app()",
+                                                            "app = create_app()\n" + health_code)
+                    else:
+                        main_content += "\n" + health_code
+                    main_py.write_text(main_content, encoding="utf-8")
+
+            # 2. 确保Dockerfile安装了HEALTHCHECK需要的工具
+            dockerfile_path = ws_root / "Dockerfile"
+            if dockerfile_path.exists():
+                df_content = dockerfile_path.read_text(encoding="utf-8")
+                if "HEALTHCHECK" in df_content and "curl" not in df_content and "wget" not in df_content:
+                    # 在CMD之前插入curl安装
+                    if "CMD " in df_content:
+                        df_content = df_content.replace(
+                            "CMD ",
+                            "RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n\nCMD ",
+                            1
+                        )
+                        dockerfile_path.write_text(df_content, encoding="utf-8")
+
+            # 3. 确保有__init__.py文件
+            for pkg_dir in ["app", "app/routers", "app/schemas", "app/services", "app/dao", "app/db", "app/db/models", "app/domain", "app/core"]:
+                init_file = ws_root / pkg_dir / "__init__.py"
+                if (ws_root / pkg_dir).exists() and not init_file.exists():
+                    init_file.write_text("", encoding="utf-8")
+
+            # === 代码审查（针对关键文件）===
+            review_passed = True
+            review_summary = ""
+            review_rounds = 0
+            test_results = None
+
+            await _emit_progress(state, "code_review", "正在审查关键代码文件...", 40)
+
+            # 收集关键文件用于审查
+            key_files_content = {}
+            key_files_review = ["app/main.py", "app/config.py", "app/db/engine.py", "requirements.txt", "Dockerfile", "docker-compose.yml"]
+            for kf in key_files_review:
+                kf_path = ws_root / kf
+                if kf_path.exists():
+                    try:
+                        key_files_content[kf] = kf_path.read_text(encoding="utf-8")
+                    except Exception:
+                        pass
+
+            # 收集所有router/schema/dao文件做简要检查
+            for subdir in ["app/routers", "app/schemas", "app/services", "app/dao", "app/db/models"]:
+                subdir_path = ws_root / subdir
+                if subdir_path.exists():
+                    for f in subdir_path.iterdir():
+                        if f.suffix == ".py" and f.name != "__init__.py":
+                            rel = str(f.relative_to(ws_root)).replace("\\", "/")
+                            try:
+                                key_files_content[rel] = f.read_text(encoding="utf-8")[:3000]  # 截断审查
+                            except Exception:
+                                pass
+
+            # 运行Python语法检查
+            syntax_errors = []
+            for rel_path, content in effective_tree.items():
+                if rel_path.endswith(".py") and isinstance(content, str) and len(content) > 10:
+                    import ast as _ast
+                    try:
+                        _ast.parse(content)
+                    except SyntaxError as se:
+                        syntax_errors.append(f"{rel_path}:{se.lineno}: {se.msg}")
+
+            if syntax_errors:
+                review_passed = False
+                review_summary = f"发现{len(syntax_errors)}个Python语法错误: {'; '.join(syntax_errors[:3])}"
+                _lb.warning(f"produce: 语法检查发现错误: {syntax_errors[:3]}", logger="orchestrator.nodes.produce")
+            else:
+                review_passed = True
+                review_summary = f"语法检查通过（{files_written}个文件）"
+
+            # === 沙箱部署 ===
+            deployment_info = {"ok": False, "error": "not_attempted"}
+            try:
+                from app.sandbox import deploy_service
+                _lb.info("produce: 开始沙箱部署服务...", logger="orchestrator.nodes.produce")
+                await _emit_progress(state, "deploying", "正在Docker沙箱中构建和部署服务...", 60)
 
                 deploy_result = await deploy_service(
                     meeting_id=state.meeting_id,
@@ -852,36 +848,115 @@ def health():
                 _lb.info(
                     f"produce: 服务部署{'成功' if deploy_result.ok else '失败'}",
                     logger="orchestrator.nodes.produce",
-                    extra={"access_url": deploy_result.access_url, "ok": deploy_result.ok},
+                    extra={
+                        "access_url": deploy_result.access_url,
+                        "ok": deploy_result.ok,
+                        "error": deployment_info.get("error", ""),
+                    },
                 )
 
-                # 发布服务部署事件
                 await bus.publish(make_event(
                     "service.deployed" if deploy_result.ok else "service.deploy_failed",
                     state.meeting_id,
                     deployment_info,
                 ))
             except Exception as deploy_err:
+                import traceback
                 _lb.error(f"produce: 服务部署异常: {deploy_err}", logger="orchestrator.nodes.produce")
-                deployment_info = {"ok": False, "error": str(deploy_err)}
+                deployment_info = {"ok": False, "error": str(deploy_err), "logs": traceback.format_exc()[:2000]}
 
-            state.artifact["deployment"] = deployment_info
-            state.artifact["execution"] = {
-                "exit_code": 0 if review_passed else 1,
-                "stdout": (
-                    f"代码审查: {review_rounds}轮, {'通过' if review_passed else '存在未修复问题'}\n"
-                    f"部署文件: app.py / requirements.txt / Dockerfile / docker-compose.yml / README.md\n"
-                    f"服务部署: {'成功 ✅ ' + deployment_info.get('access_url', '') if deployment_info.get('ok') else '失败: ' + deployment_info.get('error', '未知错误')}"
-                ),
-                "stderr": deployment_info.get("logs", "") if not deployment_info.get("ok") else "",
-                "sandboxed": True,
-                "files": ["app.py", "requirements.txt", "Dockerfile", "docker-compose.yml", "README.md"],
+            # === 测试执行（部署成功后且有测试文件时）===
+            if deployment_info.get("ok") and ds_artifact.test_tree:
+                await _emit_progress(state, "testing", "正在运行自动化测试...", 80)
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, "部署成功，正在运行自动化测试...")
+                try:
+                    from app.sandbox import run_tests_in_container
+                    test_results = await run_tests_in_container(
+                        meeting_id=state.meeting_id,
+                        workspace_root=settings.workspace_root,
+                    )
+                    _lb.info(
+                        f"produce: 测试结果: passed={test_results.get('passed',0)}, failed={test_results.get('failed',0)}",
+                        logger="orchestrator.nodes.produce",
+                    )
+                    await bus.publish(make_event("service.tested", state.meeting_id, test_results))
+                    if test_results.get("failed", 0) > 0:
+                        failed_tests = test_results.get("failures", [])[:3]
+                        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                                f"测试完成：{test_results.get('passed',0)}通过，{test_results.get('failed',0)}失败。"
+                                                f"失败用例: {'; '.join(failed_tests)}")
+                    else:
+                        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
+                                                f"全部 {test_results.get('passed', 0)} 个测试通过 ✅")
+                except Exception as test_err:
+                    _lb.warning(f"produce: 测试执行异常: {test_err}", logger="orchestrator.nodes.produce")
+                    test_results = {"passed": 0, "failed": 0, "error": str(test_err)}
+            elif deployment_info.get("ok") and not ds_artifact.test_tree:
+                test_results = {"passed": 0, "failed": 0, "note": "no_tests_generated",
+                                "warning": "未生成测试文件，质量门禁无法完全验证"}
+                _lb.warning("produce: 部署成功但未生成测试文件", logger="orchestrator.nodes.produce")
+
+            # === 汇总产出物信息 ===
+            state.artifact["deployable_service"] = {
+                **ds_data,
+                "project_tree": dict(ds_artifact.project_tree),
+                "frontend_tree": dict(ds_artifact.frontend_tree),
+                "test_tree": dict(ds_artifact.test_tree),
+                "root_files": dict(ds_artifact.root_files),
+                "complexity_level": complexity,
+                "tech_stack": ds_artifact.tech_stack,
+                "total_files": total_files,
+                "total_lines": total_lines,
             }
-            # 记录部署结果消息
-            if deployment_info.get("ok"):
+            state.artifact["deployment_dir"] = str(ws_root)
+            state.artifact["review"] = {
+                "rounds": review_rounds,
+                "passed": review_passed,
+                "summary": review_summary,
+                "syntax_errors": syntax_errors if not review_passed else [],
+            }
+            state.artifact["deployment"] = deployment_info
+            state.artifact["test_results"] = test_results
+
+            # 判断整体成功：部署成功 + (无测试或测试通过)
+            deploy_ok = deployment_info.get("ok", False)
+            tests_pass = (test_results is None or
+                          test_results.get("failed", 0) == 0 or
+                          test_results.get("note") == "no_tests_generated")
+            overall_ok = deploy_ok and review_passed and tests_pass
+
+            file_list_summary = list(effective_tree.keys())[:20]
+            if total_files > 20:
+                file_list_summary.append(f"... (共{total_files}个文件)")
+
+            state.artifact["execution"] = {
+                "exit_code": 0 if overall_ok else 1,
+                "stdout": (
+                    f"复杂度: {complexity}\n"
+                    f"代码规模: {total_files}文件, {total_lines}行\n"
+                    f"技术栈: {', '.join(ds_artifact.tech_stack[:8])}\n"
+                    f"代码审查: {'通过' if review_passed else '未通过'}\n"
+                    f"服务部署: {'成功 ✅ ' + deployment_info.get('access_url', '') if deploy_ok else '失败: ' + deployment_info.get('error', '未知错误')}\n"
+                    f"测试结果: " + (
+                        f"{test_results.get('passed', 0)}通过/{test_results.get('failed', 0)}失败"
+                        if test_results and test_results.get("note") != "no_tests_generated"
+                        else "未生成测试文件"
+                    ) + "\n"
+                    f"文件列表: {', '.join(file_list_summary)}"
+                ),
+                "stderr": (deployment_info.get("logs", "") if not deploy_ok else "") +
+                          ("\n" + (test_results.get("error", "") if test_results and test_results.get("error") else "")),
+                "sandboxed": True,
+                "files": list(effective_tree.keys()),
+            }
+
+            if deploy_ok:
                 url = deployment_info.get("access_url", "")
+                test_msg = ""
+                if test_results and test_results.get("failed", 0) == 0 and test_results.get("passed", 0) > 0:
+                    test_msg = f"，{test_results['passed']}个测试全部通过"
                 await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                        f"服务部署成功！访问地址：{url}")
+                                        f"服务部署成功！访问地址：{url}{test_msg}")
             else:
                 err = deployment_info.get("error", "未知错误")
                 await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,

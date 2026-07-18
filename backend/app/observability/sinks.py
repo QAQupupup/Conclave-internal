@@ -25,11 +25,13 @@ class ConsoleSink:
             rid = event.get("request_id", "-")
             mid = event.get("meeting_id", "-")
             sid = event.get("runner_session_id", "-")
+            user = event.get("username", "-")
             logger = event.get("logger", "")
             msg = event.get("message", "")
             extra = event.get("extra", {})
+            user_str = f"[{user}]" if user and user != "-" else ""
             extra_str = f" {json.dumps(extra, ensure_ascii=False)}" if extra else ""
-            line = f"{ts} [{level}] [{rid}] [{mid}] [{sid}] {logger}: {msg}{extra_str}\n"
+            line = f"{ts} [{level}] [{rid}] [{mid}] [{sid}]{user_str} {logger}: {msg}{extra_str}\n"
             with self._lock:
                 self._stream.write(line)
                 self._stream.flush()

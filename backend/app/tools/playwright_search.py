@@ -449,8 +449,8 @@ class PlaywrightWebSearch:
         from playwright.async_api import Error as PlaywrightError
 
         fetched_at = datetime.now(timezone.utc).isoformat()
-        # 提取 session_key（不消费，留给 _do_search）
-        session_key = kwargs.get("session_key", "default")
+        # 提取 session_key（消费掉，避免 _do_search 调用时 kwargs 重复传参）
+        session_key = kwargs.pop("session_key", "default")
         # Phase 3: 中文查询自动翻译为英文（在 try 之前执行，重试时复用）
         translated_query = await self._translate_query(query)
         if translated_query != query:

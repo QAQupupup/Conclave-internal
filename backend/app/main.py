@@ -33,6 +33,7 @@ from app.routers import preferences as preferences_router
 from app.routers import regression as regression_router
 from app.routers import workspace as workspace_router
 from app.routers import ws as ws_router
+from app.routers import audit_logs as audit_router
 from app.utils.tasks import create_supervised_task
 
 # 应用启动时初始化日志系统
@@ -212,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(regression_router.router)
     app.include_router(net_auth_router.router)
     app.include_router(preferences_router.router)
+    app.include_router(audit_router.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, Any]:
@@ -288,32 +290,26 @@ def create_app() -> FastAPI:
         except Exception:
             pass
 
-    @app.get("/debug/auth-info", tags=["debug"])
-    async def debug_auth_info(request: Request) -> dict[str, Any]:
-        """认证信息查询端点（供前端自动发现 dev token）。
+    _app_env = os.environ.get("APP_ENV", "dev").lower()
+    if _app_env != "production":
+        @app.get("/debug/auth-info", tags=["debug"])
+        async def debug_auth_info(request: Request) -> dict[str, Any]:
+            """认证信息查询端点（仅开发/测试模式可用）。"""
+            from app.middleware import _API_TOKEN, _DEV_TOKEN, get_dev_token_info
 
-        [M-11 修复] 生产环境（设置了 CONCLAVE_API_TOKEN）下此端点仅返回认证状态摘要，
-        不泄露具体配置细节；dev 模式返回明文 token 供前端自动配置。
-        非 GET 或异常请求一律拒绝。
-        """
-        from app.middleware import _API_TOKEN, _DEV_TOKEN, get_dev_token_info
-
-        info = get_dev_token_info()
-        if not _API_TOKEN:
-            # dev 模式：返回明文 token
-            info["token"] = _DEV_TOKEN
-            info["note"] = "dev 模式自动发现；生产环境必须设置 CONCLAVE_API_TOKEN"
-        else:
-            # 生产模式：不泄露 token 和具体配置细节
-            info["token"] = None
-            info["note"] = "生产模式"
-            # 生产模式下隐藏敏感字段（限速阈值、用户名等）
-            info.pop("fail_ban_enabled", None)
-            info.pop("rate_limit_per_min", None)
-            info.pop("rate_limit_fail_per_min", None)
-            info.pop("rate_block_seconds", None)
-            info.pop("default_admin_username", None)
-        return info
+            info = get_dev_token_info()
+            if not _API_TOKEN:
+                info["token"] = _DEV_TOKEN
+                info["note"] = "dev 模式自动发现；生产环境必须设置 CONCLAVE_API_TOKEN"
+            else:
+                info["token"] = None
+                info["note"] = "非 dev 模式"
+                info.pop("fail_ban_enabled", None)
+                info.pop("rate_limit_per_min", None)
+                info.pop("rate_limit_fail_per_min", None)
+                info.pop("rate_block_seconds", None)
+                info.pop("default_admin_username", None)
+            return info
 
     return app
 

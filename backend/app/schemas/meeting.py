@@ -15,6 +15,9 @@ class CreateMeetingRequest(BaseModel):
     role_ids: list[str] = Field(default_factory=list, max_length=50, description="预选角色 ID 列表，为空则自动生成")
     reference_meeting_ids: list[str] = Field(default_factory=list, max_length=20, description="引用的历史会议 ID 列表")
     model: str = Field("", max_length=200, description="会议级模型覆盖（格式: provider_id:model_id 或纯 model_id），空=继承 ENV 默认")
+    auto_iterate: bool = Field(False, description="是否自动迭代直到质量达标（仅对deployable_service等代码产出有效）")
+    max_iterations: int = Field(2, ge=0, le=5, description="最大迭代轮次（0=不迭代）")
+    max_stage_retries: int = Field(2, ge=0, le=5, description="每个阶段最大重试次数")
 
 
 class CreateMeetingResponse(BaseModel):

@@ -300,90 +300,255 @@ PRODUCE_TESTED_SYSTEM = """[阶段: Produce]
 }}"""
 
 # ---------- 产出阶段：可部署服务 ----------
-PRODUCE_DEPLOYABLE_SERVICE = """[阶段: Produce]
+PRODUCE_DEPLOYABLE_SERVICE = """[阶段: Produce - 工业级服务生成]
 裁决结果：{decision_record}
-任务：基于讨论结论，生成 PRD 文档 + OpenAPI 摘要 + 可直接部署的完整服务。包含应用代码、Dockerfile 和 docker-compose.yml。
+任务：基于讨论结论，生成可直接部署的**工业级分层服务**。禁止生成demo/stub/示例代码，必须是功能完整、真实可用、有实际业务价值的服务。
 
-【代码质量要求 - 必读】
-以下是历次生成中发现的常见Bug模式，你必须严格避免：
+【第一步：复杂度评估】
+根据需求评估服务复杂度，决定生成规模：
+- "micro": 微工具/脚本（<10文件），单文件FastAPI+SQLite，无前端，无测试
+- "small": 小型API服务（10-20文件），基础分层(app/main+routers+schemas+db)，简单HTML前端，SQLite，基础测试
+- "medium": 中型服务（20-50文件，默认），完整分层(routers/services/dao/db/domain/schemas/config)+React前端+PostgreSQL+Alembic+pytest测试+多阶段Dockerfile
+- "large": 大型服务（50+文件），微服务架构+多业务模块+完整测试套件+CI/CD+监控
 
-{bug_patterns}
+评估依据：业务实体数量、API端点数量、是否需要前端、用户规模预期、数据复杂度。
 
-额外硬性要求：
-1. 必须添加 /health 健康检查端点（返回 {{"status":"ok"}}）
-2. 所有import必须完整（使用timedelta时必须from datetime import timedelta）
-3. requirements.txt 只包含第三方包（不要写sqlite3/json/os等标准库）
-4. JWT库保持一致：代码用import jwt → requirements写PyJWT==2.8.0（不要用python-jose）
-5. Dockerfile CMD中的模块名必须与文件名一致（文件叫app.py → CMD ["uvicorn","app:app",...]）
-6. uvicorn必须绑定0.0.0.0（不能是127.0.0.1，否则容器外无法访问）
-7. 代码、Dockerfile、docker-compose三处端口必须一致（默认8000）
-8. Dockerfile中必须RUN mkdir -p uploads data等必要目录
-9. 所有数据库连接必须在try/finally中关闭
-10. SQL必须用参数化查询(?占位符)，禁止f-string拼接
-11. SECRET_KEY使用os.environ.get('SECRET_KEY', 'dev-only-change-me')，不要硬编码生产密钥
-12. README.md必须包含：功能简介、安装步骤、启动命令、默认端口、默认账号密码（如有）
-13. 如果系统有默认管理员/测试账号，必须在README和credentials字段中明确标注
-14. 所有API接口必须是真实实现，不允许返回硬编码mock数据
-15. 代码单文件不超过500行，超过时应拆分模块（但对于简单服务可以保持单文件）
-16. **必须同时生成 React 前端**：使用 React 18（通过 CDN 引入，无需 npm build），提供完整可交互的前端页面；FastAPI 后端必须用 `StaticFiles` 在根路径 `/` 提供前端页面，API 路径统一以 `/api` 开头
-17. **Dockerfile 必须使用国内镜像源加速**：基础镜像用 `swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim`，pip 使用 `https://pypi.tuna.tsinghua.edu.cn/simple`，apt 使用 `https://mirrors.tuna.tsinghua.edu.cn/debian`，npm 使用 `https://registry.npmmirror.com`，Alpine apk 使用 `https://mirrors.aliyun.com/alpine/`。
-18. **推荐多阶段构建**：用 builder 阶段安装依赖并生成产物，最终阶段只复制必要文件，减小镜像体积并加快部署。
-19. **禁止生成 Stub/降级示例服务**：必须根据需求生成功能完整、有实际使用价值的系统，包含真实数据库操作、完整 CRUD 和前端交互界面
+【第二步：强制分层架构（medium/large必须严格遵守）】
+项目必须遵循以下分层结构（参照工业标准）：
 
-输出 JSON:
+```
+{project_name}/
+├── app/                           # 后端应用包
+│   ├── __init__.py
+│   ├── main.py                    # [入口] create_app()工厂 + lifespan（启动初始化/关闭清理）
+│   ├── config.py                  # [配置] @dataclass(frozen=True) Settings，环境变量+.env
+│   ├── context.py                 # [横切] contextvars全链路追踪(request_id)
+│   ├── middleware.py              # [横切] CORS/认证/请求追踪中间件
+│   ├── auth.py                    # [横切] API Key/JWT认证
+│   ├── dependencies.py            # [横切] FastAPI依赖注入(get_db等)
+│   ├── routers/                   # [1.路由层/Controller] APIRouter，按资源拆分
+│   │   ├── __init__.py
+│   │   └── {{resource}}.py        # 每个资源一个router，只做参数校验+调用service+返回响应
+│   ├── schemas/                   # [2.DTO/VO层] Pydantic v2模型
+│   │   ├── __init__.py
+│   │   ├── common.py              # 通用响应(PageResponse等)
+│   │   └── {{resource}}.py        # XxxCreateRequest/XxxResponse/XxxUpdateRequest
+│   ├── services/                  # [3.服务层/BO] 跨模块业务逻辑、事务边界
+│   │   ├── __init__.py
+│   │   └── {{service_name}}.py    # 如auth_service.py, {{resource}}_service.py
+│   ├── dao/                       # [4.DAO层/Repository] 数据访问
+│   │   ├── __init__.py
+│   │   └── {{resource}}_dao.py    # async函数，使用async_session_factory
+│   ├── db/                        # [5.数据库基础设施/DO]
+│   │   ├── __init__.py
+│   │   ├── base.py                # SQLAlchemy DeclarativeBase
+│   │   ├── engine.py              # create_async_engine + async_session_factory + get_db
+│   │   └── models/                # ORM模型
+│   │       ├── __init__.py         # re-export所有模型（供Alembic使用）
+│   │       └── {{resource}}.py    # XxxModel(Base)，Mapped[mapped_column]
+│   ├── domain/                    # [6.领域层] 纯Python，无外部依赖
+│   │   ├── __init__.py
+│   │   └── enums.py              # 所有枚举(str, Enum)
+│   ├── core/                      # [7.核心引擎] 复杂业务规则（medium+必须）
+│   │   └── __init__.py
+│   └── static/                    # 静态资源（如有HTML前端）
+│       └── style.css
+├── frontend/                      # React前端（medium+必须）
+│   ├── Dockerfile                 # 两阶段构建(node builder -> nginx)
+│   ├── nginx.conf                 # API反代 + SPA fallback
+│   ├── vite.config.ts
+│   ├── tsconfig.json
+│   ├── package.json
+│   ├── index.html
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── components/            # UI组件
+│       ├── pages/                 # 页面
+│       ├── hooks/                 # 自定义hooks
+│       ├── lib/                   # API客户端/工具
+│       ├── store/                 # React Context状态管理
+│       ├── types/                 # TypeScript类型
+│       └── styles/                # CSS(tokens.css+components.css)
+├── tests/                         # 测试（medium+必须）
+│   ├── conftest.py                # 全局fixtures（测试数据库、test client）
+│   └── test_{{feature}}.py        # pytest测试用例
+├── alembic/                       # 数据库迁移（medium+必须）
+│   ├── env.py
+│   └── versions/
+│       └── 0001_initial_schema.py
+├── Dockerfile                     # 后端多阶段构建
+├── docker-compose.yml             # 完整编排（含PostgreSQL/Redis等）
+├── requirements.txt               # Python依赖（按功能分组注释）
+├── pyproject.toml                 # 项目元数据+pytest配置
+├── .env.example                   # 环境变量模板
+└── README.md                      # 完整文档（含API文档和部署说明）
+```
+
+【代码质量硬性要求】
+1. 入口必须用create_app()工厂函数+lifespan，lifespan中做初始化和清理
+2. 配置用@dataclass(frozen=True) Settings，通过os.environ.get读取，有合理默认值
+3. 路由层只做参数校验、调用service/dao、返回响应，禁止在router中写复杂SQL或业务逻辑
+4. 所有请求/响应使用Pydantic v2 BaseModel，Field加description和校验规则
+5. DAO层用async/await+async with async_session_factory()，手动commit/rollback
+6. ORM用SQLAlchemy 2.0 Mapped[mapped_column]风格，relationship用字符串前向引用
+7. SQL必须用参数化查询(?或:key占位符)，禁止f-string拼接SQL
+8. 所有数据库连接必须在try/finally中关闭
+9. API路径统一以/api/v1开头，避免与前端路由冲突
+10. 必须有/health端点（返回数据库连接状态）
+11. 必须有错误处理（HTTPException+统一错误响应格式）
+12. SECRET_KEY/API_KEY通过os.environ.get读取，不硬编码生产密钥
+13. Dockerfile必须使用国内镜像源（swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io基础镜像、清华pip/apt源）
+14. Dockerfile必须安装HEALTHCHECK需要的工具（curl或wget）
+15. uvicorn必须绑定0.0.0.0
+16. 后端、前端、docker-compose三处端口必须一致
+17. README必须包含：功能简介、技术栈、架构说明、API文档、启动命令、环境变量、默认账号
+
+【前端React要求（medium+必须）】
+1. 使用React 18+TypeScript+Vite构建（不是CDN Babel版）
+2. 使用React Context+useReducer做状态管理（不需要Redux/Zustand）
+3. 组件按功能拆分，每个组件文件不超过200行
+4. 使用fetch或axios封装API客户端，统一处理错误
+5. nginx.conf配置API反向代理和SPA fallback
+6. Dockerfile两阶段构建：node:20-slim构建 -> nginx:alpine托管
+7. CSS分文件：tokens.css(设计token) + components.css(组件样式)
+8. 提供完整的CRUD UI交互，不是空壳页面
+9. 页面必须美观、响应式、有loading/error状态处理
+
+【测试要求（medium+必须）】
+1. 使用pytest+pytest-asyncio+httpx.AsyncClient
+2. conftest.py提供：测试数据库（SQLite内存）、test client、事件循环
+3. 每个API端点至少一个测试用例（创建/查询/更新/删除/错误场景）
+4. 测试必须验证：响应状态码、响应结构、数据库状态变化、错误处理
+5. 禁止写永远通过的空测试（如assert True）
+6. 测试命名：test_{{feature}}_{{scenario}}（如test_create_shortlink_success, test_create_shortlink_invalid_url）
+
+【禁止事项】
+- 禁止生成返回硬编码mock数据的stub接口
+- 禁止生成空的try/except块吞掉异常
+- 禁止在模块顶层创建数据库连接（必须在lifespan中初始化）
+- 禁止在router中直接导入db.engine做查询（必须通过DAO）
+- 禁止domain层导入任何app.*模块
+- 禁止生成"示例"或"demo"代码，所有功能必须真实可用
+- 禁止省略错误处理、输入校验、日志记录
+
+【输出JSON格式】
+输出JSON，严格遵循以下结构：
+
 {{
   "prd": {{
-    "title": "...",
+    "title": "服务名称",
     "goal": "目标说明",
     "scope": "范围说明",
     "assumptions": ["假设1"],
     "constraints": ["约束1"],
-    "api_endpoints": ["GET /api/..."],
-    "open_questions": ["待解决问题"]
+    "api_endpoints": ["POST /api/v1/...", "GET /api/v1/..."],
+    "open_questions": []
   }},
   "openapi": "openapi: 3.0.0\\ninfo: ...",
   "deployable_service": {{
-    "title": "...",
+    "title": "服务名称",
     "description": "服务说明",
-    "app_code": "完整的 Python 应用代码（FastAPI，可直接运行，包含/health端点）；API 路径必须以 /api 开头；必须用 StaticFiles 在 / 提供前端页面",
-    "requirements_txt": "依赖清单（每行一个包名==版本，只含第三方包；必须包含 fastapi uvicorn[standard] python-multipart）",
-    "dockerfile": "Dockerfile 内容（基于 swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim，pip/apt 使用国内镜像，推荐多阶段构建）",
-    "docker_compose": "docker-compose.yml 内容",
-    "readme": "README.md内容（含启动说明和账号密码）",
-    "frontend_files": {{
-      "index.html": "完整 React 前端 HTML（CDN 引入 React 18 + Babel standalone，包含 JSX 代码），提供完整 UI 交互",
-      "style.css": "前端样式表（必须美观、响应式）"
-    }},
+    "complexity_level": "medium",
+    "tech_stack": ["FastAPI", "SQLAlchemy", "PostgreSQL", "React", "TypeScript", "Vite", "pytest", "Docker"],
     "port": 8000,
-    "run_command": "uvicorn app:app --host 0.0.0.0 --port 8000",
-    "credentials": {{"username": "默认账号(如有)", "password": "默认密码(如有)", "note": "账号说明"}}
+    "run_command": "uvicorn app.main:app --host 0.0.0.0 --port 8000",
+    "credentials": {{}},
+    "project_tree": {{
+      "app/__init__.py": "",
+      "app/main.py": "完整代码...",
+      "app/config.py": "完整代码...",
+      "app/routers/__init__.py": "",
+      "app/routers/xxx.py": "完整代码...",
+      "app/schemas/__init__.py": "",
+      "app/schemas/common.py": "完整代码...",
+      "app/schemas/xxx.py": "完整代码...",
+      "app/services/__init__.py": "",
+      "app/services/xxx_service.py": "完整代码...",
+      "app/dao/__init__.py": "",
+      "app/dao/xxx_dao.py": "完整代码...",
+      "app/db/__init__.py": "",
+      "app/db/base.py": "完整代码...",
+      "app/db/engine.py": "完整代码...",
+      "app/db/models/__init__.py": "",
+      "app/db/models/xxx.py": "完整代码...",
+      "app/domain/__init__.py": "",
+      "app/domain/enums.py": "完整代码..."
+    }},
+    "frontend_tree": {{
+      "frontend/package.json": "完整JSON...",
+      "frontend/Dockerfile": "...",
+      "frontend/nginx.conf": "...",
+      "frontend/vite.config.ts": "...",
+      "frontend/tsconfig.json": "...",
+      "frontend/index.html": "...",
+      "frontend/src/main.tsx": "...",
+      "frontend/src/App.tsx": "...",
+      "frontend/src/components/xxx.tsx": "...",
+      "frontend/src/lib/api.ts": "...",
+      "frontend/src/types/index.ts": "...",
+      "frontend/src/styles/tokens.css": "...",
+      "frontend/src/styles/components.css": "..."
+    }},
+    "test_tree": {{
+      "tests/conftest.py": "完整代码...",
+      "tests/test_xxx.py": "完整测试用例..."
+    }},
+    "root_files": {{
+      "Dockerfile": "多阶段Dockerfile内容...",
+      "docker-compose.yml": "完整编排...",
+      "requirements.txt": "依赖列表...",
+      "pyproject.toml": "...",
+      ".env.example": "环境变量模板...",
+      "README.md": "完整文档..."
+    }},
+    "app_code": "",
+    "dockerfile": "",
+    "docker_compose": "",
+    "requirements_txt": "",
+    "readme": ""
   }}
-}}"""
+}}
+
+重要：
+1. 所有文件必须输出**完整的、可运行的代码**，不要用"..."省略或写"此处省略"
+2. project_tree中每个文件的value必须是该文件的完整内容
+3. micro复杂度可以简化层次（单文件app.py），但small/medium/large必须严格分层
+4. 如果复杂度为micro/small，frontend_tree和test_tree可以为空对象
+5. 每个Python文件必须有正确的import，每个TS文件必须有正确的import
+6. 确保跨文件的import路径正确（如from app.db.engine import async_session_factory）
+"""
 
 # 代码Review Prompt
 CODE_REVIEW_PROMPT = """你是一位资深代码审查工程师。请审查以下生成的服务代码，找出所有会导致服务无法启动、运行时报错、或明显安全问题的Bug。
+
+【重要：避免误报】
+- SQL注入仅在使用字符串拼接(f-string/%)构造SQL时才算问题；使用参数化查询(?占位符)是正确的，不要误报。
+- 数据库连接只要在finally块中关闭了就是正确的，不要误报。
+- 只报告真实存在的问题，不要猜测或假设。
+- 重点检查代码中实际引用但未提供的文件（如/static/style.css是否有对应内容）。
 
 【Bug模式参考】
 {bug_patterns}
 
 【审查重点】
 1. 所有import是否完整（特别是timedelta等容易遗漏的）
-2. requirements.txt是否包含标准库（sqlite3/json/os等不能出现在requirements中）
+2. requirements.txt是否包含非标准库（sqlite3/json/os等是Python标准库不能出现在requirements中）
 3. JWT/密码库是否与代码import一致
-4. Dockerfile CMD模块名是否与.py文件名一致
+4. Dockerfile CMD模块名是否与.py文件名一致（app.py对应app:app）
 5. uvicorn是否绑定0.0.0.0
 6. 端口是否在app.py/Dockerfile/docker-compose.yml三处一致
 7. 数据库连接是否在所有路径下关闭
-8. 是否有SQL注入风险
+8. 是否有SQL注入风险（仅当使用f-string/字符串拼接构造SQL时报告）
 9. 是否有/health端点
-10. README是否包含启动步骤和默认账号
-11. Dockerfile是否创建了uploads等必要目录
-12. 是否有硬编码密钥
+10. README是否包含启动步骤和默认账号/环境变量
+11. Dockerfile是否创建了static/data等必要目录
+12. 是否有硬编码密钥且未提示通过环境变量覆盖
 13. 是否有明显的语法错误或NameError
-14. Dockerfile 是否使用国内镜像源（swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io 基础镜像、清华/阿里云 pip/apt/apk/npm 源）
-15. Dockerfile 是否推荐多阶段构建以减小体积
-16. 是否同时生成了 React 前端文件（frontend/index.html 等），且后端在根路径 `/` 提供静态文件
-17. API 路径是否统一以 `/api` 开头，避免与前端路由冲突
+14. Dockerfile 最终阶段是否安装了 HEALTHCHECK 需要的工具（curl/wget/python）
+15. Dockerfile 是否使用国内镜像源（swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io 基础镜像、清华/阿里云 pip/apt源）
+16. 代码中引用的静态文件（如/static/style.css）是否在static_files中提供了内容
+17. API 路径是否统一以 /api 开头，避免与前端路由冲突
 18. 服务是否是真实完整实现，而非 stub/示例/demo
 
 【待审查代码】
@@ -414,32 +579,41 @@ docker-compose.yml:
     {{
       "severity": "critical|high|medium|low",
       "file": "app.py|requirements.txt|Dockerfile|docker-compose.yml",
-      "description": "问题描述",
-      "fix": "具体修复建议（说明要改什么、怎么改）"
+      "line_hint": "问题所在的大概行号或函数名",
+      "description": "问题描述（具体说明是什么问题）",
+      "fix": "具体修复建议（给出确切的修改内容，不要笼统建议）"
     }}
   ],
   "summary": "总体评价"
 }}
 
+critical级别：服务完全无法启动/安全漏洞/数据丢失风险
+high级别：功能缺失/部署失败/明显错误
+medium级别：代码质量问题/不影响运行的缺陷
+low级别：风格/文档/优化建议
+
 如果没有任何critical或high级别的问题，passed设为true。"""
 
-# Bug修复Prompt
-CODE_FIX_PROMPT = """你是一位代码修复工程师。以下代码经审查发现了问题，请根据审查意见修复代码。
+# Bug修复Prompt - 精简版：减少冗余上下文，降低LLM超时概率
+CODE_FIX_PROMPT = """你是一位代码修复工程师。以下代码经审查发现了问题，请修复。
+
+【文件类型】{file_to_fix}
+
+【问题描述和修复方案】
+{issues_text}
+
+【常见Bug模式参考】
+{bug_patterns}
+
+【要求】
+1. 只修复列出的问题，不要改动其他功能
+2. 不要引入新的Bug
+3. 输出修复后的完整文件内容，不要输出解释
+4. 如果是Dockerfile缺少curl/wget，在最终阶段的apt-get install中添加curl
+5. 如果是缺少静态CSS文件，补充简洁美观的CSS内容
 
 【原始代码】
 {original_code}
-
-【审查发现的问题】
-{issues_text}
-
-【经验库参考】
-{bug_patterns}
-
-要求：
-1. 修复所有列出的问题
-2. 保持代码原有功能不变
-3. 不要引入新的Bug
-4. 只输出修复后的完整代码，不要输出解释
 
 修复后的{file_to_fix}内容："""
 

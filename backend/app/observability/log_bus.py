@@ -33,8 +33,16 @@ class LogBus:
         # 注册 WebSocket 事件总线 Sink（实时推送到前端日志面板）
         from app.observability.sinks import EventBusSink
         self._sinks.append(EventBusSink())
-        # 可选：JSON 文件 Sink（通过环境变量启用）
+        # JSON 文件 Sink：通过环境变量启用；非测试环境默认写入到数据目录
         json_file = os.environ.get("CONCLAVE_LOG_JSON_FILE", "")
+        if not json_file and os.environ.get("APP_ENV", "") != "test":
+            # 生产/开发环境默认启用 JSON 审计日志
+            default_log_dir = os.environ.get("CONCLAVE_LOG_DIR", "/app/data/logs")
+            try:
+                os.makedirs(default_log_dir, exist_ok=True)
+                json_file = os.path.join(default_log_dir, "conclave.jsonl")
+            except Exception:
+                json_file = ""
         if json_file:
             try:
                 self._sinks.append(JSONFileSink(json_file))
@@ -60,7 +68,7 @@ class LogBus:
 
         自动注入追踪上下文（request_id, meeting_id, runner_session_id, agent_role）。
         """
-        from app.context import get_runner_session_id, get_agent_role
+        from app.context import get_runner_session_id, get_agent_role, get_user_id, get_username, get_user_role
 
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -69,6 +77,9 @@ class LogBus:
             "meeting_id": get_meeting_id(),
             "runner_session_id": get_runner_session_id(),
             "agent_role": get_agent_role(),
+            "user_id": get_user_id(),
+            "username": get_username(),
+            "user_role": get_user_role(),
             "logger": logger,
             "message": message,
             "extra": extra or {},

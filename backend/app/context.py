@@ -29,6 +29,18 @@ _agent_role: contextvars.ContextVar[str] = contextvars.ContextVar(
     "agent_role", default=""
 )
 
+# user_id / username：当前请求的认证用户（认证中间件设置）
+# 用于审计日志中标识操作者身份
+_user_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "user_id", default="-"
+)
+_username: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "username", default="-"
+)
+_user_role: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "user_role", default=""
+)
+
 
 def new_request_id() -> str:
     """生成新的 request_id（短格式 UUID）"""
@@ -100,14 +112,33 @@ def reset_agent_role(token: contextvars.Token[str]) -> None:
     _agent_role.reset(token)
 
 
-def get_trace_context() -> dict[str, str]:
-    """获取当前追踪上下文快照（用于日志注入）
+def get_user_id() -> str:
+    return _user_id.get()
 
-    返回 {"request_id": "...", "meeting_id": "...", "runner_session_id": "...", "agent_role": "..."}
-    """
+def set_user_id(uid: str) -> contextvars.Token[str]:
+    return _user_id.set(uid)
+
+def get_username() -> str:
+    return _username.get()
+
+def set_username(name: str) -> contextvars.Token[str]:
+    return _username.set(name)
+
+def get_user_role() -> str:
+    return _user_role.get()
+
+def set_user_role(role: str) -> contextvars.Token[str]:
+    return _user_role.set(role)
+
+
+def get_trace_context() -> dict[str, str]:
+    """获取当前追踪上下文快照（用于日志注入）"""
     return {
         "request_id": _request_id.get(),
         "meeting_id": _meeting_id.get(),
         "runner_session_id": _runner_session_id.get(),
         "agent_role": _agent_role.get(),
+        "user_id": _user_id.get(),
+        "username": _username.get(),
+        "user_role": _user_role.get(),
     }

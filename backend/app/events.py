@@ -65,6 +65,19 @@ class InMemoryEventBus:
                 "Failed to persist event to DB: meeting_id=%s type=%s error=%s: %s",
                 event.meeting_id, event.type, type(e).__name__, str(e)[:200],
             )
+            # 审计：事件持久化失败（关键告警信号）
+            try:
+                from app.observability.audit import audit
+                audit("system.error", "error", {
+                    "component": "event_bus",
+                    "operation": "persist_event",
+                    "event_type": event.type,
+                    "meeting_id": event.meeting_id,
+                    "error_type": type(e).__name__,
+                    "error": str(e)[:300],
+                })
+            except Exception:
+                pass
             # 使用内存计数器作为兜底 seq，避免 seq 不一致导致前端混乱
             fallback = self._history.get(event.meeting_id, [])
             event.seq = (fallback[-1].seq + 1) if fallback else 0

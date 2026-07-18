@@ -5,6 +5,7 @@ import asyncio
 import threading
 import time
 import os
+from datetime import datetime, timezone
 
 from app.config import settings
 from app.db_legacy import save_meeting, save_message
@@ -299,7 +300,70 @@ class Runner:
                 # 执行阶段：由 Manager 负责阶段内调度（Phase 1 兼容模式直接调用旧节点）
                 t0 = time.monotonic()
                 logger.debug("会议 %s 执行阶段: %s", state.meeting_id, current_stage.value)
-                state = await self.manager.run_stage(state, current_stage.value)
+                try:
+                    state = await self.manager.run_stage(state, current_stage.value)
+                except Exception as stage_exc:
+                    # === 断点续传：阶段失败时不直接标记FAILED，而是记录checkpoint并重试 ===
+                    import traceback
+                    stage_name = current_stage.value
+                    retry_count = state.stage_retry_count.get(stage_name, 0)
+                    logger.error(
+                        f"会议 {state.meeting_id} 阶段 {stage_name} 执行异常 (重试 {retry_count}/{state.max_stage_retries}): {stage_exc}",
+                        exc_info=True,
+                    )
+                    log_bus.error(
+                        f"阶段异常: {stage_name}, 错误: {stage_exc}",
+                        logger="orchestrator.runner",
+                        extra={
+                            "meeting_id": state.meeting_id,
+                            "stage": stage_name,
+                            "retry_count": retry_count,
+                            "error": str(stage_exc)[:500],
+                            "traceback": traceback.format_exc()[:1000],
+                        },
+                    )
+                    if retry_count < state.max_stage_retries:
+                        # 重试当前阶段：不推进stage，记录重试次数，短暂等待后继续循环
+                        state.stage_retry_count[stage_name] = retry_count + 1
+                        state.error_detail = f"阶段 {stage_name} 异常(重试{retry_count+1}/{state.max_stage_retries}): {str(stage_exc)[:500]}"
+                        # 发布阶段重试事件
+                        await bus.publish(make_event(
+                            "stage.retry",
+                            state.meeting_id,
+                            {"stage": stage_name, "retry_count": retry_count + 1, "error": str(stage_exc)[:200]},
+                        ))
+                        await self._persist(state)
+                        await asyncio.sleep(2)  # 重试前短暂等待
+                        continue  # 重新执行当前阶段
+                    else:
+                        # 重试次数耗尽，记录checkpoint后标记FAILED（支持resume）
+                        state.checkpoint = {
+                            "last_completed_stage": None,  # 找最近完成的阶段
+                            "failed_stage": stage_name,
+                            "failed_at": datetime.now(timezone.utc).isoformat(),
+                            "error": str(stage_exc)[:1000],
+                            "retry_count": retry_count,
+                            "resumable": True,
+                        }
+                        # 回填last_completed_stage
+                        order = ["clarify", "team_discuss", "cross_team", "evidence_check", "arbitrate", "produce"]
+                        try:
+                            idx = order.index(stage_name)
+                            if idx > 0:
+                                state.checkpoint["last_completed_stage"] = order[idx - 1]
+                        except (ValueError, IndexError):
+                            pass
+                        state.status = MeetingStatus.FAILED
+                        state.error_detail = f"阶段 {stage_name} 重试{state.max_stage_retries}次后失败: {str(stage_exc)[:1000]}"
+                        state.completed_at = datetime.now(timezone.utc)
+                        await self._persist(state)
+                        await bus.publish(make_event(
+                            "meeting.failed",
+                            state.meeting_id,
+                            {"stage": stage_name, "error": str(stage_exc)[:500], "resumable": True},
+                        ))
+                        break
+
                 elapsed = time.monotonic() - t0
 
                 # 节点执行后，state.stage 已被节点设置为管线中的下一个阶段（默认推进）
@@ -313,6 +377,15 @@ class Runner:
                 await _let_borrowed_agents_speak(state, current_stage)
                 conf = state.confidence_flags.get(current_stage.value, "unknown")
                 logger.info("会议 %s 阶段 %s 完成 (%.2fs, confidence=%s)", state.meeting_id, current_stage.value, elapsed, conf)
+
+                # === 断点续传：记录成功checkpoint ===
+                state.checkpoint = {
+                    "last_completed_stage": current_stage.value,
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "elapsed_s": round(elapsed, 2),
+                    "confidence": conf,
+                    "retry_count": state.stage_retry_count.get(current_stage.value, 0),
+                }
 
                 # 诊断日志：节点返回后、_persist 前
                 log_bus.info(
@@ -330,6 +403,73 @@ class Runner:
                     logger="orchestrator.runner",
                     extra={"stage": current_stage.value, "messages_count": len(state.messages)},
                 )
+
+                # === 自我迭代 Loop：produce完成后评估质量，不达标则触发迭代 ===
+                if current_stage == Stage.PRODUCE and not is_terminal(state):
+                    quality_result = await self._evaluate_quality(state)
+                    state.quality_score = quality_result.get("score", 0)
+                    state.quality_feedback = quality_result.get("feedback", "")
+                    should_iterate = quality_result.get("should_iterate", False)
+                    log_bus.info(
+                        f"质量门禁评估: score={state.quality_score}, should_iterate={should_iterate}, "
+                        f"iteration={state.iteration_count}/{state.max_iterations}",
+                        logger="orchestrator.runner",
+                        extra={
+                            "quality_score": state.quality_score,
+                            "should_iterate": should_iterate,
+                            "iteration_count": state.iteration_count,
+                            "auto_iterate": state.auto_iterate,
+                        },
+                    )
+                    # 记录迭代历史
+                    state.iteration_history.append({
+                        "iteration": state.iteration_count,
+                        "quality_score": state.quality_score,
+                        "feedback": state.quality_feedback[:500],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    if should_iterate and state.iteration_count < state.max_iterations and state.auto_iterate:
+                        # 触发迭代：回退到produce阶段，注入质量反馈
+                        state.iteration_count += 1
+                        state.stage = Stage.PRODUCE  # 重新执行produce
+                        # 将质量反馈注入到state中，produce节点可以读取
+                        state.intervention_messages.append({
+                            "id": f"quality-feedback-{state.iteration_count}",
+                            "sender": "moderator",
+                            "content": (
+                                f"[质量迭代 第{state.iteration_count}轮] 上一轮产出质量评分 {state.quality_score}/100，"
+                                f"未达商用标准。请根据以下反馈改进后重新产出：\n{state.quality_feedback}"
+                            ),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "type": "quality_iteration",
+                        })
+                        await bus.publish(make_event(
+                            "iteration.started",
+                            state.meeting_id,
+                            {
+                                "iteration": state.iteration_count,
+                                "quality_score": state.quality_score,
+                                "feedback": state.quality_feedback[:300],
+                            },
+                        ))
+                        _lb2 = get_logger("orchestrator.runner")
+                        _lb2.info(
+                            f"会议 {state.meeting_id} 触发自我迭代 第{state.iteration_count}轮",
+                            logger="orchestrator.runner",
+                        )
+                        await self._persist(state)
+                        continue  # 重新执行produce阶段
+                    elif should_iterate and not state.auto_iterate:
+                        # 用户未开启auto_iterate，标记为需要人工确认
+                        await bus.publish(make_event(
+                            "quality.needs_review",
+                            state.meeting_id,
+                            {
+                                "quality_score": state.quality_score,
+                                "feedback": state.quality_feedback,
+                                "can_iterate": state.iteration_count < state.max_iterations,
+                            },
+                        ))
 
                 # 终止判断
                 if is_terminal(state):
@@ -457,6 +597,271 @@ class Runner:
             _schedule_cleanup(state.meeting_id, _STATE_TTL_AFTER_DONE)
 
         return state
+
+    async def _evaluate_quality(self, state: MeetingState) -> dict:
+        """质量门禁评估：多维度评估产出物质量，决定是否需要迭代改进。
+
+        评估维度（权重）：
+        1. 部署成功（硬门槛）：部署失败直接不通过
+        2. 测试通过（硬门槛）：有测试必须全部通过，无测试则扣分
+        3. 架构完整性（25分）：是否有完整分层（routers/schemas/services/dao/db/domain/config）
+        4. 代码规模匹配度（20分）：代码行数/文件数是否匹配复杂度等级（检测demo/stub）
+        5. 功能真实性（15分）：检测是否为硬编码mock/demo
+        6. 代码质量（15分）：语法检查、参数化查询、错误处理等
+        7. 前端完整性（10分）：medium+必须有React前端
+        8. 文档完整性（5分）：README、环境变量、API文档
+        """
+        artifact = state.artifact or {}
+        ds = artifact.get("deployable_service", {})
+        review = artifact.get("review", {})
+        deployment = artifact.get("deployment", {})
+        test_results = artifact.get("test_results", {})
+        execution = artifact.get("execution", {})
+
+        score = 0
+        feedback_parts = []
+        hard_failures = []
+
+        total_files = ds.get("total_files", 0)
+        total_lines = ds.get("total_lines", 0)
+        complexity = ds.get("complexity_level", "medium")
+        project_tree = ds.get("project_tree", {})
+        frontend_tree = ds.get("frontend_tree", {})
+        test_tree = ds.get("test_tree", {})
+        root_files = ds.get("root_files", {})
+
+        # === 1. 部署检查（硬门槛）===
+        deploy_ok = deployment.get("ok", False)
+        if deploy_ok:
+            score += 10  # 基础分
+        else:
+            hard_failures.append(f"服务部署失败: {deployment.get('error', '未知错误')}")
+
+        # === 2. 测试检查（硬门槛）===
+        if test_tree:
+            test_passed = test_results.get("passed", 0)
+            test_failed = test_results.get("failed", 0)
+            test_total = test_passed + test_failed
+            if test_total > 0 and test_failed == 0:
+                score += 15
+                feedback_parts.append(f"测试全部通过（{test_passed}个）")
+            elif test_failed > 0:
+                hard_failures.append(f"测试失败：{test_failed}个失败/{test_total}个")
+            elif test_results.get("error"):
+                hard_failures.append(f"测试执行异常: {test_results.get('error')}")
+            else:
+                score += 5  # 测试存在但未执行成功
+        elif complexity in ("medium", "large"):
+            hard_failures.append("medium/large复杂度必须生成测试文件，但未检测到测试")
+        else:
+            feedback_parts.append("未生成测试文件（micro/small复杂度可接受但不推荐）")
+            score += 3  # 有测试意识
+
+        # === 3. 架构完整性（25分）===
+        arch_score = 0
+        expected_layers = {
+            "app/main.py": 4,       # 入口文件
+            "app/config.py": 3,      # 配置
+            "app/db/engine.py": 3,   # 数据库引擎
+            "app/db/base.py": 2,     # ORM基类
+            "app/routers/": 4,       # 路由层
+            "app/schemas/": 3,       # DTO层
+            "app/services/": 2,      # 服务层（medium+需要）
+            "app/dao/": 2,           # DAO层（medium+需要）
+            "app/db/models/": 2,     # ORM模型
+            "app/domain/": 1,        # 领域层
+            "app/middleware.py": 1,  # 中间件
+        }
+        all_files = set(project_tree.keys()) | set(root_files.keys())
+        for path, weight in expected_layers.items():
+            if path.endswith("/"):
+                # 目录：检查是否有文件在该目录下
+                has_files = any(f.startswith(path) and f != path + "__init__.py" for f in all_files)
+                if has_files:
+                    arch_score += weight
+            else:
+                if path in all_files or any(f.endswith(path.split("/")[-1]) and path.rsplit("/", 1)[0] in f for f in all_files):
+                    arch_score += weight
+
+        # micro/small可以简化
+        if complexity == "micro":
+            arch_score = min(arch_score + 10, 25)
+        elif complexity == "small":
+            arch_score = min(arch_score + 5, 25)
+        score += arch_score
+        if arch_score < 15:
+            missing = [p for p in expected_layers if not any(f.startswith(p) for f in all_files)]
+            if missing:
+                feedback_parts.append(f"架构层次不完整，缺少: {', '.join(missing[:5])}")
+
+        # === 4. 代码规模匹配度（20分）- Demo检测核心 ===
+        scale_score = 0
+        # 各复杂度期望的代码量范围
+        expected_scale = {
+            "micro":  {"min_files": 1, "max_files": 10, "min_lines": 100, "max_lines": 500},
+            "small":  {"min_files": 5, "max_files": 20, "min_lines": 300, "max_lines": 2000},
+            "medium": {"min_files": 15, "max_files": 50, "min_lines": 1000, "max_lines": 8000},
+            "large":  {"min_files": 30, "max_files": 200, "min_lines": 3000, "max_lines": 30000},
+        }
+        exp = expected_scale.get(complexity, expected_scale["medium"])
+
+        if total_files >= exp["min_files"]:
+            scale_score += 8
+        elif total_files >= exp["min_files"] * 0.5:
+            scale_score += 4
+            feedback_parts.append(f"文件数({total_files})偏少，期望至少{exp['min_files']}个")
+        else:
+            hard_failures.append(f"文件数({total_files})严重不足，期望至少{exp['min_files']}个（可能是demo）")
+
+        if total_lines >= exp["min_lines"]:
+            scale_score += 8
+        elif total_lines >= exp["min_lines"] * 0.5:
+            scale_score += 4
+            feedback_parts.append(f"代码行数({total_lines})偏少，期望至少{exp['min_lines']}行")
+        else:
+            hard_failures.append(f"代码行数({total_lines})严重不足，期望至少{exp['min_lines']}行（疑似demo/stub）")
+
+        # Dockerfile/requirements/README存在性
+        essential_root = ["Dockerfile", "requirements.txt"]
+        for ef in essential_root:
+            if ef in root_files or any(f.endswith(ef) for f in all_files):
+                scale_score += 2
+        scale_score = min(scale_score, 20)
+        score += scale_score
+
+        # === 5. 功能真实性检测（15分）- 检测demo/stub ===
+        real_score = 15
+        # 检查代码中是否有hardcoded mock数据模式
+        all_code = "\n".join(
+            str(v) for k, v in project_tree.items()
+            if k.endswith(".py") and isinstance(v, str)
+        )
+        demo_patterns = [
+            ("TODO", "包含TODO标记"),
+            ("return []", "返回空列表作为mock数据"),
+            ("return {}", "返回空字典作为mock数据"),
+            ("pass  # TODO", "空pass实现"),
+            ("return {\"message\": \"not implemented\"}", "未实现占位"),
+            ("raise NotImplementedError", "未实现异常"),
+            ("hardcoded", "明确标注hardcoded"),
+            ("示例", "包含中文'示例'标记"),
+            ("stub", "stub代码"),
+        ]
+        demo_hits = 0
+        for pattern, desc in demo_patterns:
+            if pattern in all_code:
+                demo_hits += 1
+                real_score -= 3
+        if demo_hits >= 3:
+            hard_failures.append(f"检测到{demo_hits}处demo/stub标记，代码疑似未真实实现")
+        elif demo_hits > 0:
+            feedback_parts.append(f"代码中存在{demo_hits}处可能的demo占位符")
+
+        # 检查是否有真实的数据库操作
+        has_real_db = any(kw in all_code for kw in ["INSERT", "SELECT", "UPDATE", "DELETE", "session.execute", "commit(", "create_all"])
+        if has_real_db:
+            real_score += 0  # 已包含在基础分中
+        else:
+            real_score -= 5
+            feedback_parts.append("未检测到真实数据库操作")
+
+        # 检查是否有参数化查询（SQL注入防护）
+        has_param_query = "?" in all_code or ":key" in all_code or "text(" in all_code
+        if not has_param_query and complexity in ("medium", "large"):
+            real_score -= 3
+
+        real_score = max(0, min(15, real_score))
+        score += real_score
+
+        # === 6. 代码质量（15分）===
+        quality_score = 15
+        # 语法检查
+        if review.get("syntax_errors"):
+            quality_score -= 10
+            hard_failures.append(f"存在语法错误: {review['syntax_errors'][0]}")
+        elif review.get("passed"):
+            quality_score += 0
+        # 错误处理
+        if "HTTPException" in all_code or "except " in all_code:
+            quality_score += 0
+        else:
+            quality_score -= 3
+        # try/finally for DB connections
+        if "finally" in all_code or "async with" in all_code:
+            quality_score += 0
+        else:
+            quality_score -= 2
+        quality_score = max(0, min(15, quality_score))
+        score += quality_score
+
+        # === 7. 前端完整性（10分）===
+        frontend_score = 0
+        if complexity in ("medium", "large"):
+            if frontend_tree:
+                # 检查关键前端文件
+                fe_files = set(frontend_tree.keys())
+                has_package = any("package.json" in f for f in fe_files)
+                has_app = any("App.tsx" in f or "App.jsx" in f for f in fe_files)
+                has_components = any("/components/" in f for f in fe_files)
+                has_dockerfile = any("Dockerfile" in f for f in fe_files)
+                if has_package:
+                    frontend_score += 3
+                if has_app:
+                    frontend_score += 3
+                if has_components:
+                    frontend_score += 2
+                if has_dockerfile:
+                    frontend_score += 2
+                if frontend_score < 5:
+                    feedback_parts.append("React前端不完整（缺少关键文件）")
+            else:
+                feedback_parts.append("medium/large复杂度应包含React前端，但未检测到")
+                frontend_score = 0
+        else:
+            frontend_score = 8  # micro/small不要求React
+        score += frontend_score
+
+        # === 8. 文档完整性（5分）===
+        doc_score = 0
+        if "README.md" in root_files or any(f.endswith("README.md") for f in all_files):
+            doc_score += 3
+        if ".env.example" in root_files or any(".env" in f for f in all_files):
+            doc_score += 2
+        score += doc_score
+
+        # === 最终判定 ===
+        score = max(0, min(100, score))
+
+        # 硬失败条件：任一硬门槛未通过即需要迭代
+        should_iterate = bool(hard_failures) or score < 70
+
+        # 构建反馈
+        all_feedback = []
+        if hard_failures:
+            all_feedback.append("【必须修复】")
+            all_feedback.extend(f"- {h}" for h in hard_failures)
+        if feedback_parts:
+            all_feedback.append("【建议改进】")
+            all_feedback.extend(f"- {f}" for f in feedback_parts)
+        if not all_feedback and score >= 80:
+            all_feedback.append("质量评估通过，服务达到商用标准")
+
+        feedback = "\n".join(all_feedback)
+
+        return {
+            "score": score,
+            "feedback": feedback,
+            "should_iterate": should_iterate,
+            "hard_failures": hard_failures,
+            "deploy_ok": deploy_ok,
+            "tests_ok": test_results.get("failed", 0) == 0 if test_tree else True,
+            "total_files": total_files,
+            "total_lines": total_lines,
+            "complexity": complexity,
+            "arch_score": arch_score,
+            "scale_score": scale_score,
+            "is_demo_suspected": total_files < 5 or total_lines < 200 or demo_hits >= 3,
+        }
 
     async def _persist(self, state: MeetingState) -> None:
         """持久化会议状态与发言到 PostgreSQL

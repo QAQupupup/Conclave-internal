@@ -31,17 +31,38 @@ def _handle_pause(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
 
 
 def _handle_resume(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
-    """resume: 恢复快照，标记 running"""
-    if state.status != MeetingStatus.PAUSED:
+    """resume: 恢复运行（支持PAUSED和FAILED两种状态）
+
+    - PAUSED: 从paused_snapshot恢复
+    - FAILED且有checkpoint: 断点续传，从失败的阶段重新开始
+    """
+    if state.status == MeetingStatus.PAUSED:
+        snapshot = state.paused_snapshot
+        if snapshot:
+            restored = MeetingState(**snapshot)
+            restored.status = MeetingStatus.RUNNING
+            restored.paused_snapshot = None
+            return restored
+        state.status = MeetingStatus.RUNNING
+        return state
+    elif state.status == MeetingStatus.FAILED:
+        # === 断点续传：从checkpoint恢复 ===
+        cp = state.checkpoint or {}
+        failed_stage = cp.get("failed_stage")
+        if failed_stage and cp.get("resumable"):
+            # 重置错误状态，回到失败的阶段重新执行
+            state.status = MeetingStatus.RUNNING
+            state.error_detail = None
+            state.completed_at = None
+            # 清空该阶段的重试计数（允许新一轮重试）
+            if failed_stage in state.stage_retry_count:
+                state.stage_retry_count[failed_stage] = 0
+            # stage保持在失败的阶段（runner会重新执行该阶段）
+            return state
+        else:
+            raise ControlError(f"会议已失败且无可恢复的检查点")
+    else:
         raise ControlError(f"当前状态 {state.status} 不可恢复")
-    snapshot = state.paused_snapshot
-    if snapshot:
-        restored = MeetingState(**snapshot)
-        restored.status = MeetingStatus.RUNNING
-        restored.paused_snapshot = None
-        return restored
-    state.status = MeetingStatus.RUNNING
-    return state
 
 
 def _handle_abort(state: MeetingState, payload: dict[str, Any]) -> MeetingState:

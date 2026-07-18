@@ -199,6 +199,17 @@ async def safe_fetch(
         # 每跳都做 SSRF 校验
         ok, reason = validate_url(current_url, allowed_domains=allowed_domains)
         if not ok:
+            # 审计：SSRF 阻断
+            try:
+                from app.observability.audit import audit
+                audit("security.ssrf_blocked", "blocked", {
+                    "url": current_url[:500],
+                    "original_url": url[:500],
+                    "hop": hop + 1,
+                    "reason": reason,
+                })
+            except Exception:
+                pass
             return False, f"SSRF 检查失败（第{hop+1}跳）: {reason}"
 
         # 防止循环重定向
