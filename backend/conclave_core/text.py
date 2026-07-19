@@ -47,10 +47,7 @@ def compress_decisions_to_brief(
 
     core_decisions = []
     for d in decisions[:5]:
-        if isinstance(d, dict):
-            text = d.get("summary", d.get("verdict", str(d)))
-        else:
-            text = str(d)
+        text = d.get("summary", d.get("verdict", str(d))) if isinstance(d, dict) else str(d)
         if text:
             core_decisions.append(text[:120])
 
@@ -61,10 +58,14 @@ def compress_decisions_to_brief(
             if direction in support_counts:
                 support_counts[direction] += 1
     evidence_backing = (
-        f"{support_counts['supports']} 条证据支持, "
-        f"{support_counts['refutes']} 条反驳, "
-        f"{support_counts['neutral']} 条中性"
-    ) if evidence_set else "无证据数据"
+        (
+            f"{support_counts['supports']} 条证据支持, "
+            f"{support_counts['refutes']} 条反驳, "
+            f"{support_counts['neutral']} 条中性"
+        )
+        if evidence_set
+        else "无证据数据"
+    )
 
     rejected = []
     adopted_ids = set()
@@ -126,7 +127,7 @@ def format_arbitrate_as_text(
             if text:
                 role_val = claim.get("agent_role", "")
                 role_prefix = f"[{role_val}] " if role_val else ""
-                lines.append(f"  {i+1}. [{ctype}] {role_prefix}{text}")
+                lines.append(f"  {i + 1}. [{ctype}] {role_prefix}{text}")
         if len(adopted) > display_count:
             lines.append(f"  …另有 {len(adopted) - display_count} 条论点已纳入最终产出。")
         lines.append("")

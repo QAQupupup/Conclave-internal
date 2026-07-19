@@ -8,6 +8,7 @@ from app.models import AgentRole
 
 class CreateRoleRequest(BaseModel):
     """创建/更新角色请求"""
+
     id: str = Field(..., description="英文标识，如 fullstack_engineer")
     display_name: str = Field(..., description="中文名")
     perspective: str = Field("", description="核心视角")
@@ -22,15 +23,18 @@ class CreateRoleRequest(BaseModel):
 
 class GenerateRolesRequest(BaseModel):
     """议题驱动生成角色请求"""
+
     topic: str = Field(..., description="会议议题")
 
 
 class GenerateRolesResponse(BaseModel):
     """生成角色响应"""
+
     roles: list[AgentRole]
     generated_at: str
 
 
 class UpsertRoleResponse(BaseModel):
     """单个角色 upsert 响应"""
+
     role: AgentRole

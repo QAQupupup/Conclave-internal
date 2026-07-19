@@ -2,6 +2,7 @@
 
 提供审计日志查询、统计接口，供管理员查看操作记录、安全事件和系统异常。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -34,11 +35,18 @@ async def query_audit_logs(
             raise HTTPException(status_code=403, detail="需要管理员权限")
 
     from app.observability.audit import get_audit_logger
+
     logger = get_audit_logger()
     logs = logger.query(
-        limit=limit, offset=offset, action=action, username=username,
-        meeting_id=meeting_id, category=category, status=status,
-        since=since, until=until,
+        limit=limit,
+        offset=offset,
+        action=action,
+        username=username,
+        meeting_id=meeting_id,
+        category=category,
+        status=status,
+        since=since,
+        until=until,
     )
     return {"logs": logs, "limit": limit, "offset": offset, "count": len(logs)}
 
@@ -54,6 +62,7 @@ async def audit_stats(
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     from app.observability.audit import get_audit_logger
+
     logger = get_audit_logger()
     return logger.stats(since_minutes=since_minutes)
 
@@ -69,6 +78,7 @@ async def security_events(
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     from app.observability.audit import get_audit_logger
+
     logger = get_audit_logger()
     # 查询安全类别的事件
     events = logger.query(limit=limit, category="安全")

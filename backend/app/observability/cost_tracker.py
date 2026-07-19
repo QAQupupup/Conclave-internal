@@ -9,11 +9,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from app.context import get_request_id, get_meeting_id, get_runner_session_id
+from app.context import get_meeting_id, get_request_id, get_runner_session_id
+
+# 保存对后台刷盘任务的引用，防止被垃圾回收
+_flush_tasks: set[asyncio.Task] = set()
 
 
 @dataclass
@@ -26,19 +30,20 @@ class CostRecord:
     - tool 级：GROUP BY trace_id, tool_name
     - call 级：每条记录即一次调用
     """
-    trace_id: str = ""           # = runner_session_id，贯穿整个会议运行
+
+    trace_id: str = ""  # = runner_session_id，贯穿整个会议运行
     meeting_id: str = ""
     request_id: str = ""
-    agent_role: str = ""         # 发起调用的 Agent 角色
-    node: str = ""               # pipeline 阶段名（clarify / intra_team / ...）
-    tool_name: str = ""          # "llm" | "web_search" | "browser.goto" | "browser.click" | ...
-    cost_usd: float = 0.0        # 估算成本（美元）
-    input_tokens: int = 0        # 输入 tokens（仅 LLM 有值）
-    output_tokens: int = 0       # 输出 tokens（仅 LLM 有值）
-    total_tokens: int = 0        # 总 tokens
-    latency_ms: int = 0          # 调用延迟
+    agent_role: str = ""  # 发起调用的 Agent 角色
+    node: str = ""  # pipeline 阶段名（clarify / intra_team / ...）
+    tool_name: str = ""  # "llm" | "web_search" | "browser.goto" | "browser.click" | ...
+    cost_usd: float = 0.0  # 估算成本（美元）
+    input_tokens: int = 0  # 输入 tokens（仅 LLM 有值）
+    output_tokens: int = 0  # 输出 tokens（仅 LLM 有值）
+    total_tokens: int = 0  # 总 tokens
+    latency_ms: int = 0  # 调用延迟
     timestamp: str = ""
-    status: str = "ok"           # "ok" | "error" | "fallback"
+    status: str = "ok"  # "ok" | "error" | "fallback"
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -86,25 +91,27 @@ def estimate_llm_cost(model: str, input_tokens: int, output_tokens: int) -> floa
     # 优先使用 llm_providers 的完整定价表（人民币），换算为美元
     try:
         from app.llm_providers import get_model_pricing
+
         p = get_model_pricing(model)
         if p and p.get("input") is not None:
             input_price_per_m = p["input"]
             output_price_per_m = p["output"]
             currency = p.get("currency", "CNY")
             rate = 1.0 / 7.2 if currency == "CNY" else 1.0  # RMB→USD近似汇率
-            cost = (input_tokens / 1_000_000) * input_price_per_m * rate + \
-                   (output_tokens / 1_000_000) * output_price_per_m * rate
-            return round(cost, 6)
+            cost = (input_tokens / 1_000_000) * input_price_per_m * rate + (
+                output_tokens / 1_000_000
+            ) * output_price_per_m * rate
+            return round(cost, 6)  # type: ignore[no-any-return]
     except Exception:
         pass
     # 回退：本地美元定价表
     pricing = _LLM_PRICING.get(model, _LLM_PRICING["_default"])
-    cost = (input_tokens / 1_000_000) * pricing["input"] + \
-           (output_tokens / 1_000_000) * pricing["output"]
+    cost = (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing["output"]
     return round(cost, 6)
 
 
 # ---------- CostTracker ----------
+
 
 class CostTracker:
     """成本追踪器：记录所有调用的成本，汇总并 emit 到 LogBus
@@ -122,6 +129,7 @@ class CostTracker:
     - 记录数有上限（MAX_RECORDS），超过自动裁剪最旧记录，防止内存泄漏
     - summary() 支持按 meeting_id 过滤
     """
+
     MAX_RECORDS: int = 10000  # 最多保留 1 万条记录（约覆盖数十次会议）
 
     def __init__(self) -> None:
@@ -132,7 +140,7 @@ class CostTracker:
         """获取当前上下文的 trace_id（复用 runner_session_id）"""
         return get_runner_session_id()
 
-    def record_llm(
+    async def record_llm(
         self,
         node: str,
         model: str,
@@ -143,8 +151,9 @@ class CostTracker:
         extra: dict[str, Any] | None = None,
         agent_role: str = "",
     ) -> CostRecord:
-        """记录一次 LLM 调用成本"""
+        """记录一次 LLM 调用成本（协程安全：asyncio.Lock 保护 _records 写入）"""
         from app.context import get_agent_role
+
         cost = estimate_llm_cost(model, input_tokens, output_tokens)
         record = CostRecord(
             trace_id=self._get_trace_id(),
@@ -162,16 +171,16 @@ class CostTracker:
             status=status,
             extra={"model": model, **(extra or {})},
         )
-        self._records.append(record)
-        # 裁剪超过上限的旧记录（防止内存泄漏）
-        if len(self._records) > self.MAX_RECORDS:
-            # 移除最旧的记录
-            excess = len(self._records) - self.MAX_RECORDS
-            del self._records[:excess]
+        async with self._lock:
+            self._records.append(record)
+            # 裁剪超过上限的旧记录（防止内存泄漏）
+            if len(self._records) > self.MAX_RECORDS:
+                excess = len(self._records) - self.MAX_RECORDS
+                del self._records[:excess]
         self._emit(record)
         return record
 
-    def record_tool(
+    async def record_tool(
         self,
         node: str,
         tool_name: str,
@@ -180,7 +189,7 @@ class CostTracker:
         status: str = "ok",
         extra: dict[str, Any] | None = None,
     ) -> CostRecord:
-        """记录一次工具调用成本（web_search / browser 操作等）"""
+        """记录一次工具调用成本（协程安全：asyncio.Lock 保护 _records 写入）"""
         record = CostRecord(
             trace_id=self._get_trace_id(),
             meeting_id=get_meeting_id(),
@@ -193,11 +202,12 @@ class CostTracker:
             status=status,
             extra=extra or {},
         )
-        self._records.append(record)
-        # 裁剪超过上限的旧记录
-        if len(self._records) > self.MAX_RECORDS:
-            excess = len(self._records) - self.MAX_RECORDS
-            del self._records[:excess]
+        async with self._lock:
+            self._records.append(record)
+            # 裁剪超过上限的旧记录
+            if len(self._records) > self.MAX_RECORDS:
+                excess = len(self._records) - self.MAX_RECORDS
+                del self._records[:excess]
         self._emit(record)
         return record
 
@@ -205,6 +215,7 @@ class CostTracker:
         """将成本记录 emit 到 LogBus（旁路，不影响主流程）"""
         try:
             from app.observability.log_bus import log_bus
+
             log_bus.emit(
                 "INFO",
                 f"cost: {record.tool_name} ({record.node})",
@@ -215,20 +226,20 @@ class CostTracker:
             pass
 
         # 异步持久化到数据库（best-effort，不阻塞主流程）
-        try:
+        with contextlib.suppress(Exception):
             self._enqueue_db_flush(record)
-        except Exception:
-            pass
 
     def _enqueue_db_flush(self, record: CostRecord) -> None:
         """将记录加入异步刷盘队列，后台批量写入数据库"""
         import asyncio
+
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(_flush_record_to_db(record))
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(_flush_record_to_db(record))
+            _flush_tasks.add(task)
+            task.add_done_callback(_flush_tasks.discard)
         except RuntimeError:
-            pass  # 无事件循环时跳过
+            pass  # 无事件循环时跳过（测试/脚本场景）
 
     def summary(self) -> dict[str, Any]:
         """返回成本汇总（按 node / tool 聚合）"""
@@ -298,10 +309,12 @@ def reset_cost_tracker() -> None:
 
 # ---------- 异步数据库刷盘 ----------
 
+
 async def _flush_record_to_db(record: CostRecord) -> None:
     """将单条成本记录异步写入数据库（best-effort，失败不重试）"""
     try:
         from datetime import datetime, timezone
+
         from app.db.engine import async_session_factory
         from app.db.models import CostRecordModel
 
@@ -330,8 +343,12 @@ async def _flush_record_to_db(record: CostRecord) -> None:
             await session.commit()
     except Exception as exc:
         import logging
+
         logging.getLogger("observability.cost_tracker").warning(
             f"成本记录写入数据库失败: {exc}",
-            extra={"error": str(exc), "record": record.model_dump(mode="json") if hasattr(record, "model_dump") else str(record)},
+            extra={
+                "error": str(exc),
+                "record": record.model_dump(mode="json") if hasattr(record, "model_dump") else str(record),
+            },
         )
         # 成本持久化失败不影响主流程

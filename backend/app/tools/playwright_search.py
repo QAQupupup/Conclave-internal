@@ -26,36 +26,31 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
-import ipaddress
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-
 from .domain_registry import (
     match_entity,
     rank_by_tier,
     tag_url,
 )
-from .playwright.stealth_js import _STEALTH_JS
 from .playwright.captcha_js import _CAPTCHA_DETECT_JS
-from .playwright.extract_js import _EXTRACT_JS
-from .playwright.jsonld_js import _JSONLD_EXTRACT_JS
 from .playwright.chunk_js import _CHUNK_EXTRACT_JS
+from .playwright.jsonld_js import _JSONLD_EXTRACT_JS
+from .playwright.security import _is_safe_url
 from .playwright.session_pool import SessionPool
-from .playwright.security import _is_safe_url, _BLOCKED_SCHEMES
+from .playwright.stealth_js import _STEALTH_JS
 
 logger = logging.getLogger("app.tools.playwright_search")
 
 _USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
-
 
 
 class PlaywrightWebSearch:
@@ -75,15 +70,16 @@ class PlaywrightWebSearch:
     evidence_type = "web"
 
     def __init__(self) -> None:
-        self._browser = None
-        self._playwright = None
+        from app.lazy_asyncio import LazyLock, LazySemaphore
+
+        self._browser: Any = None
+        self._playwright: Any = None
         self._browser_headed = False  # 标记浏览器当前是否以有头模式运行
-        self._semaphore = asyncio.Semaphore(3)  # 并发页面数限制
-        self._lock = asyncio.Lock()  # 浏览器初始化锁
+        self._semaphore = LazySemaphore(3)  # 并发页面数限制（懒加载，跨循环安全）
+        self._lock = LazyLock()  # 浏览器初始化锁（懒加载，跨循环安全）
         # Cookie/存储持久化：保存到数据目录，跨重启复用
         self._storage_state_path = os.path.join(
-            os.environ.get("CONCLAVE_DATA_DIR", "/app/data"),
-            "browser_storage_state.json"
+            os.environ.get("CONCLAVE_DATA_DIR", "/app/data"), "browser_storage_state.json"
         )
         self._captcha_blocked_domains: dict[str, float] = {}  # 域名 → 被阻时间，避免重复尝试
         self._session_warmed = False  # 是否已完成 Session 预热
@@ -104,7 +100,7 @@ class PlaywrightWebSearch:
         - 超长查询（> 2000 字符）自动分句翻译后合并
         """
         # 快速检测：无中文字符直接返回
-        if not any('\u4e00' <= c <= '\u9fff' for c in query):
+        if not any("\u4e00" <= c <= "\u9fff" for c in query):
             return query
 
         # 延迟检测翻译模型可用性
@@ -112,8 +108,6 @@ class PlaywrightWebSearch:
             return query  # 已知不可用，跳过
 
         try:
-            import httpx
-            import re
             from app.config import settings
 
             if not settings.llm_api_key or not settings.llm_base_url:
@@ -137,9 +131,9 @@ class PlaywrightWebSearch:
             )
 
             # 合并翻译结果
-            merged_parts = []
+            merged_parts: list[str] = []
             for i, t in enumerate(translations):
-                if isinstance(t, Exception) or t == chunks[i]:
+                if isinstance(t, BaseException) or t == chunks[i]:
                     # 翻译失败，使用原始 chunk
                     merged_parts.append(chunks[i])
                     logger.warning("chunk %d 翻译失败，使用原始文本", i)
@@ -152,8 +146,7 @@ class PlaywrightWebSearch:
 
         except Exception as e:
             self._translation_failures += 1
-            logger.warning("查询翻译失败 (%d次, %s)，降级为原始查询",
-                          self._translation_failures, str(e)[:60])
+            logger.warning("查询翻译失败 (%d次, %s)，降级为原始查询", self._translation_failures, str(e)[:60])
             self._translator_available = False
 
         return query
@@ -192,7 +185,7 @@ class PlaywrightWebSearch:
                     self._translator_available = True
                     if len(text) <= 200:  # 只对短查询打印日志
                         logger.info("查询翻译: '%s' → '%s'", text[:60], translated[:80])
-                    return translated
+                    return translated  # type: ignore[no-any-return]
             else:
                 logger.warning("翻译模型返回 %d: %s", resp.status_code, resp.text[:200])
                 self._translator_available = False
@@ -205,9 +198,10 @@ class PlaywrightWebSearch:
         分隔符优先级：中文句号/问号/感叹号 > 换行 > 分号 > 逗号 > 空格
         """
         import re
+
         chunks = []
         # 按句子分隔符切分（中英文通用）
-        sentences = re.split(r'(?<=[。！？.!?\n])\s*', text)
+        sentences = re.split(r"(?<=[。！？.!?\n])\s*", text)
         current = ""
 
         for sent in sentences:
@@ -222,7 +216,7 @@ class PlaywrightWebSearch:
                 # 如果单个句子超过限制，强制按字符截断
                 if len(sent) > max_chars:
                     for i in range(0, len(sent), max_chars):
-                        chunks.append(sent[i:i + max_chars])
+                        chunks.append(sent[i : i + max_chars])
                 else:
                     current = sent
 
@@ -246,7 +240,6 @@ class PlaywrightWebSearch:
 
         try:
             logger.info("开始 Session 预热...")
-            import time as _time_module
             from playwright.async_api import Error as PlaywrightError
 
             context = await self._browser.new_context(
@@ -276,8 +269,10 @@ class PlaywrightWebSearch:
 
                 # Step 2: 接受 Cookie 同意弹窗
                 try:
-                    accept_btn = page.locator('button[aria-label="Accept"], button#bnp_btn_accept, '
-                                              'button[class*="accept"], button[class*="cookie"]').first
+                    accept_btn = page.locator(
+                        'button[aria-label="Accept"], button#bnp_btn_accept, '
+                        'button[class*="accept"], button[class*="cookie"]'
+                    ).first
                     await accept_btn.click(timeout=3000)
                     await page.wait_for_timeout(1000)
                 except (PlaywrightError, Exception):
@@ -318,6 +313,7 @@ class PlaywrightWebSearch:
         """
         # 检查当前需要的模式
         from app.tools.captcha_guard import get_captcha_guard
+
         guard = await get_captcha_guard()
         need_headed = guard.guard_mode
 
@@ -330,39 +326,33 @@ class PlaywrightWebSearch:
                     self._browser = None
                     self._session_pool.clear()  # 浏览器重启后 Context 全部失效
                     self._session_warmed = False  # 浏览器重建后需要重新预热
-                    try:
+                    with contextlib.suppress(Exception):
                         await self._playwright.stop()
-                    except Exception:
-                        pass
                     self._playwright = None
             except Exception as e:
                 logger.warning("浏览器健康检查失败 (%s)，重新启动...", str(e)[:60])
                 self._browser = None
                 self._session_pool.clear()  # 浏览器重启后 Context 全部失效
                 self._session_warmed = False  # 浏览器重建后需要重新预热
-                try:
+                with contextlib.suppress(Exception):
                     await self._playwright.stop()
-                except Exception:
-                    pass
                 self._playwright = None
 
         if self._browser is not None:
             if self._browser_headed == need_headed:
                 return  # 模式匹配，复用现有浏览器
             # 模式不匹配，关闭旧浏览器，重新启动
-            logger.info("CAPTCHA 值守模式切换（%s → %s），重启浏览器...",
-                        "有头" if self._browser_headed else "无头",
-                        "有头" if need_headed else "无头")
-            try:
+            logger.info(
+                "CAPTCHA 值守模式切换（%s → %s），重启浏览器...",
+                "有头" if self._browser_headed else "无头",
+                "有头" if need_headed else "无头",
+            )
+            with contextlib.suppress(Exception):
                 await self._browser.close()
-            except Exception:
-                pass
             self._browser = None
             self._session_pool.clear()  # 浏览器重启后 Context 全部失效
-            try:
+            with contextlib.suppress(Exception):
                 await self._playwright.stop()
-            except Exception:
-                pass
             self._playwright = None
 
         async with self._lock:
@@ -491,14 +481,22 @@ class PlaywrightWebSearch:
             {"url", "title", "content", "chunks", "source_tier", "signals", "error"}
         """
         from .domain_registry import tag_url
+
         fetched_at = datetime.now(timezone.utc).isoformat()
 
         # SSRF 校验
         safe, reason = _is_safe_url(url)
         if not safe:
             logger.warning("fetch_url SSRF拦截: url=%s reason=%s", url[:80], reason)
-            return {"url": url, "title": "", "content": "", "chunks": [],
-                    "source_tier": "D", "signals": {}, "error": reason}
+            return {
+                "url": url,
+                "title": "",
+                "content": "",
+                "chunks": [],
+                "source_tier": "D",
+                "signals": {},
+                "error": reason,
+            }
 
         await self._ensure_browser()
         tier_info = tag_url(url)
@@ -510,34 +508,55 @@ class PlaywrightWebSearch:
                 timeout=20.0,
             )
         except asyncio.TimeoutError:
-            return {"url": url, "title": "", "content": "", "chunks": [],
-                    "source_tier": tier_info["source_tier"], "signals": {}, "error": "timeout"}
+            return {
+                "url": url,
+                "title": "",
+                "content": "",
+                "chunks": [],
+                "source_tier": tier_info["source_tier"],
+                "signals": {},
+                "error": "timeout",
+            }
         except Exception as e:
-            return {"url": url, "title": "", "content": "", "chunks": [],
-                    "source_tier": tier_info["source_tier"], "signals": {}, "error": str(e)[:200]}
+            return {
+                "url": url,
+                "title": "",
+                "content": "",
+                "chunks": [],
+                "source_tier": tier_info["source_tier"],
+                "signals": {},
+                "error": str(e)[:200],
+            }
 
         chunks = result.get("chunks", [])
         title = result.get("title", "")
         jsonld = result.get("jsonld", {})
 
         if not chunks:
-            return {"url": url, "title": title, "content": "", "chunks": [],
-                    "source_tier": tier_info["source_tier"],
-                    "signals": {"page_title": title, "fetched_at": fetched_at},
-                    "error": "no_content"}
+            return {
+                "url": url,
+                "title": title,
+                "content": "",
+                "chunks": [],
+                "source_tier": tier_info["source_tier"],
+                "signals": {"page_title": title, "fetched_at": fetched_at},
+                "error": "no_content",
+            }
 
         # 组装 content（拼接前几个 chunk 的文本）和 chunks 列表
         content_parts = []
         chunk_list = []
         total_chars = 0
-        for i, chunk in enumerate(chunks):
+        for _i, chunk in enumerate(chunks):
             text = chunk.get("text", "")
-            chunk_list.append({
-                "text": text[:max_chars],
-                "heading_path": chunk.get("heading_path", ""),
-                "heading_level": chunk.get("heading_level", 0),
-                "is_ugc": chunk.get("is_ugc", False),
-            })
+            chunk_list.append(
+                {
+                    "text": text[:max_chars],
+                    "heading_path": chunk.get("heading_path", ""),
+                    "heading_level": chunk.get("heading_level", 0),
+                    "is_ugc": chunk.get("is_ugc", False),
+                }
+            )
             if total_chars < max_chars:
                 content_parts.append(text)
                 total_chars += len(text)
@@ -561,7 +580,9 @@ class PlaywrightWebSearch:
             "error": None,
         }
 
-    async def _do_search(self, query: str, top_k: int, fetched_at: str, session_key: str, **kwargs: Any) -> list[dict[str, Any]]:
+    async def _do_search(
+        self, query: str, top_k: int, fetched_at: str, session_key: str, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         """搜索核心逻辑（被 search() 的 wait_for 包裹）
 
         Args:
@@ -593,8 +614,9 @@ class PlaywrightWebSearch:
 
             # 1. Bing 搜索获取 URL 列表（请求 3x 结果用于 tier 重排）
             fetch_count = min(top_k * 3, 15)
-            urls = await self._search_ddg(query, fetch_count, session_key=session_key,
-                                           locale=locale, time_range=time_range, country=country)
+            urls = await self._search_ddg(
+                query, fetch_count, session_key=session_key, locale=locale, time_range=time_range, country=country
+            )
             if not urls:
                 logger.warning("Bing 搜索无结果: query=%s", query[:50])
                 return []
@@ -609,7 +631,7 @@ class PlaywrightWebSearch:
             # 5. 从 chunks 组装 evidence（每 chunk 一条 evidence）
             evidence: list[dict[str, Any]] = []
             ev_idx = 0
-            for url, result in zip(ranked_urls, results):
+            for url, result in zip(ranked_urls, results, strict=False):
                 if isinstance(result, Exception):
                     logger.warning("页面提取失败: url=%s err=%s", url, str(result)[:100])
                     continue
@@ -632,10 +654,10 @@ class PlaywrightWebSearch:
 
                 # UGC tier downgrade（Claude #5）：
                 # 嵌入评论/社区笔记的 chunk 不继承 S/A/B tier，降级为 C
-                def _effective_tier(is_ugc: bool) -> str:
+                def _effective_tier(is_ugc: bool, tier_info: dict[str, Any] = tier_info) -> str:
                     if is_ugc:
                         return "C"
-                    return tier_info["source_tier"]
+                    return tier_info["source_tier"]  # type: ignore[no-any-return]
 
                 # 限制每页最大 chunk 数，避免 evidence 爆炸（如 docs.python.org 85 chunks）
                 max_chunks_per_page = 5
@@ -650,59 +672,70 @@ class PlaywrightWebSearch:
 
                     # A-4: content hash — 基于结构化 chunk 输出（heading_path + text），非 raw HTML
                     heading_path = chunk.get("heading_path", "")
-                    content_hash = hashlib.sha256(
-                        f"{heading_path}|{raw_text}".encode("utf-8")
-                    ).hexdigest()[:16]
+                    content_hash = hashlib.sha256(f"{heading_path}|{raw_text}".encode()).hexdigest()[:16]
 
-                    evidence.append({
-                        "evidence_id": f"web-{ev_idx}",
-                        "quote": quote_delimited,
-                        "source": f"web:{hostname}",
-                        "url": url,
-                        "domain": hostname,
-                        "content_hash": content_hash,
-                        # 顶层 tier 向后兼容（用 effective_tier）
-                        "source_tier": eff_tier,
-                        # signals 袋 — 原始正交信号，agent 自行加权
-                        "signals": {
-                            # 页面级信号
-                            "tier_static": tier_info["source_tier"],
-                            "effective_tier": eff_tier,
-                            "is_official": tier_info["is_official"],
-                            "fetched_at": fetched_at,
-                            "page_last_modified": page_last_modified,
-                            "jsonld_publisher": jsonld.get("publisher"),
-                            "jsonld_author": jsonld.get("author"),
-                            "jsonld_date_published": jsonld.get("datePublished"),
-                            "jsonld_type": jsonld.get("type"),
-                            "structured_data_present": bool(jsonld.get("entry_count", 0) > 0),
-                            "page_title": page_title,
-                            "page_fallback": page_fallback,
-                            "page_ugc_count": page_ugc_count,
-                            "iframe_fallback": result.get("iframe_fallback", False),
-                            # chunk 级信号（Phase 1.5 新增）
-                            "heading_path": heading_path,
-                            "heading_level": chunk.get("heading_level", 0),
-                            "chunk_index": chunk_idx,
-                            "total_chunks": min(len(chunks), max_chunks_per_page),
-                            "is_ugc": chunk_ugc,
+                    evidence.append(
+                        {
+                            "evidence_id": f"web-{ev_idx}",
+                            "quote": quote_delimited,
+                            "source": f"web:{hostname}",
+                            "url": url,
+                            "domain": hostname,
                             "content_hash": content_hash,
-                        },
-                    })
+                            # 顶层 tier 向后兼容（用 effective_tier）
+                            "source_tier": eff_tier,
+                            # signals 袋 — 原始正交信号，agent 自行加权
+                            "signals": {
+                                # 页面级信号
+                                "tier_static": tier_info["source_tier"],
+                                "effective_tier": eff_tier,
+                                "is_official": tier_info["is_official"],
+                                "fetched_at": fetched_at,
+                                "page_last_modified": page_last_modified,
+                                "jsonld_publisher": jsonld.get("publisher"),
+                                "jsonld_author": jsonld.get("author"),
+                                "jsonld_date_published": jsonld.get("datePublished"),
+                                "jsonld_type": jsonld.get("type"),
+                                "structured_data_present": bool(jsonld.get("entry_count", 0) > 0),
+                                "page_title": page_title,
+                                "page_fallback": page_fallback,
+                                "page_ugc_count": page_ugc_count,
+                                "iframe_fallback": result.get("iframe_fallback", False),
+                                # chunk 级信号（Phase 1.5 新增）
+                                "heading_path": heading_path,
+                                "heading_level": chunk.get("heading_level", 0),
+                                "chunk_index": chunk_idx,
+                                "total_chunks": min(len(chunks), max_chunks_per_page),
+                                "is_ugc": chunk_ugc,
+                                "content_hash": content_hash,
+                            },
+                        }
+                    )
                     ev_idx += 1
 
-            logger.info("Web Search 完成: query=%s, 获取 %d 条证据 / %d 页 (entity=%s)",
-                        query[:50], len(evidence), len(ranked_urls), entity or "unknown")
+            logger.info(
+                "Web Search 完成: query=%s, 获取 %d 条证据 / %d 页 (entity=%s)",
+                query[:50],
+                len(evidence),
+                len(ranked_urls),
+                entity or "unknown",
+            )
             return evidence
 
         except Exception as e:
             logger.error("Web Search 异常: %s", str(e)[:200])
             return []
 
-    async def _search_ddg(self, query: str, top_k: int, *,
-                           session_key: str = "default",
-                           locale: str = "zh-CN",
-                           time_range: str | None = None, country: str = "CN") -> list[str]:
+    async def _search_ddg(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        session_key: str = "default",
+        locale: str = "zh-CN",
+        time_range: str | None = None,
+        country: str = "CN",
+    ) -> list[str]:
         """Bing 搜索（含 MultiEngineSearch failover 到 DDG）
 
         搜索策略（三级 fallback）：
@@ -724,6 +757,7 @@ class PlaywrightWebSearch:
         # Phase D: 优先使用 MultiEngineSearch（含自动 failover）
         try:
             from app.tools.search_engine import get_multi_engine_search
+
             multi = get_multi_engine_search()
             if multi._engines:  # 有可用引擎时
                 search_kwargs: dict[str, Any] = {}
@@ -734,12 +768,10 @@ class PlaywrightWebSearch:
                 result = await multi.search(query, max_results=top_k, **search_kwargs)
                 if result["results"]:
                     urls = [r.url for r in result["results"]]
-                    logger.info("MultiEngineSearch 成功: engine=%s, urls=%d",
-                               result["engine_used"], len(urls))
+                    logger.info("MultiEngineSearch 成功: engine=%s, urls=%d", result["engine_used"], len(urls))
                     return urls
                 # MultiEngineSearch 所有引擎都失败，降级到直接 Bing 搜索
-                logger.warning("MultiEngineSearch 全部失败 (%s)，降级到直接 Bing 搜索",
-                              result["failed_engines"])
+                logger.warning("MultiEngineSearch 全部失败 (%s)，降级到直接 Bing 搜索", result["failed_engines"])
         except Exception as e:
             logger.warning("MultiEngineSearch 异常，降级到直接 Bing 搜索: %s", str(e)[:100])
 
@@ -749,8 +781,9 @@ class PlaywrightWebSearch:
         # 重试机制：Bing 表单搜索偶发返回空结果
         for attempt in range(2):
             try:
-                raw_results = await self._do_bing_search(query, top_k, session_key=session_key,
-                                                          locale=locale, time_range=time_range, country=country)
+                raw_results = await self._do_bing_search(
+                    query, top_k, session_key=session_key, locale=locale, time_range=time_range, country=country
+                )
                 if raw_results:
                     # _do_bing_search 返回 list[dict{url, title}]，提取 URL
                     return [r["url"] for r in raw_results if "url" in r]
@@ -768,6 +801,7 @@ class PlaywrightWebSearch:
         logger.warning("Bing 搜索 2 次均无结果，最终降级到 DDG 直接搜索: query=%s", query[:50])
         try:
             from app.tools.engines.ddg_engine import DuckDuckGoEngine
+
             ddg = DuckDuckGoEngine()
             if ddg.is_available:
                 ddg_results = await ddg.search(query, max_results=top_k)
@@ -781,10 +815,16 @@ class PlaywrightWebSearch:
 
         return []
 
-    async def _do_bing_search(self, query: str, top_k: int, *,
-                                session_key: str = "default",
-                                locale: str = "zh-CN",
-                                time_range: str | None = None, country: str = "CN") -> list[dict[str, str]]:
+    async def _do_bing_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        session_key: str = "default",
+        locale: str = "zh-CN",
+        time_range: str | None = None,
+        country: str = "CN",
+    ) -> list[dict[str, str]]:
         """执行单次 Bing 表单搜索（使用 SessionPool 复用 Context）
 
         流程：从 SessionPool 获取 Context → 访问首页 → 搜索框输入 → 从 cite 标签提取真实 URL
@@ -909,6 +949,7 @@ class PlaywrightWebSearch:
 
                 # 从 cite 文本重建完整 URL + 保留标题
                 from .domain_registry import SPAM_DOMAINS
+
                 results: list[dict[str, str]] = []  # {url, title}
                 seen: set[str] = set()
                 for item in raw_results[:top_k]:
@@ -936,19 +977,17 @@ class PlaywrightWebSearch:
                                 seen.add(url)
                                 results.append({"url": url, "title": title})
 
-                logger.debug("Bing 搜索: query=%s, 获取 %d URLs",
-                             query[:50], len(results))
+                logger.debug("Bing 搜索: query=%s, 获取 %d URLs", query[:50], len(results))
                 # 成功获取结果后保存 Cookie 状态
                 if results:
-                    try:
+                    with contextlib.suppress(Exception):
                         await context.storage_state(path=self._storage_state_path)
-                    except Exception:
-                        pass
                 return results[:top_k]
 
             except Exception as e:
-                logger.warning("Bing 搜索失败 (attempt=%d, session_key=%s): %s",
-                               attempt + 1, session_key[:20], str(e)[:100])
+                logger.warning(
+                    "Bing 搜索失败 (attempt=%d, session_key=%s): %s", attempt + 1, session_key[:20], str(e)[:100]
+                )
                 # Context 可能已损坏，从池中移除
                 if context is not None:
                     await self._session_pool.invalidate(session_key)
@@ -960,14 +999,14 @@ class PlaywrightWebSearch:
             finally:
                 # 只关闭 Page，不关闭 Context（Context 由 SessionPool 管理）
                 if page is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await page.close()
-                    except Exception:
-                        pass
 
-    async def _fetch_and_extract(self, url: str, *,
-                                    locale: str = "zh-CN",
-                                    session_key: str = "default") -> dict[str, Any]:
+        return []  # 防御性返回（理论不会到达，因为第二次失败会 raise）
+
+    async def _fetch_and_extract(
+        self, url: str, *, locale: str = "zh-CN", session_key: str = "default"
+    ) -> dict[str, Any]:
         """Playwright 渲染页面并提取 claim 粒度分块 + 结构化元数据
 
         Phase 1.5 改进（Claude Sonnet 5 #4）：
@@ -1002,17 +1041,30 @@ class PlaywrightWebSearch:
         safe, reason = _is_safe_url(url)
         if not safe:
             logger.warning("SSRF 拦截: url=%s reason=%s", url[:80], reason)
-            return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
-                    "last_modified": None, "fallback": True, "ugc_count": 0}
+            return {
+                "chunks": [],
+                "title": "",
+                "jsonld": {"entry_count": 0},
+                "last_modified": None,
+                "fallback": True,
+                "ugc_count": 0,
+            }
 
         # A-3: per-domain 限速（token-bucket）
         try:
             from app.tools.rate_limiter import get_rate_limiter
+
             acquired = await get_rate_limiter().acquire(url, max_wait=5.0)
             if not acquired:
                 logger.warning("域名限速超时，跳过: url=%s", url[:80])
-                return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
-                        "last_modified": None, "fallback": True, "ugc_count": 0}
+                return {
+                    "chunks": [],
+                    "title": "",
+                    "jsonld": {"entry_count": 0},
+                    "last_modified": None,
+                    "fallback": True,
+                    "ugc_count": 0,
+                }
         except Exception:
             pass  # 限速器故障不阻断主流程
 
@@ -1021,14 +1073,21 @@ class PlaywrightWebSearch:
             try:
                 # 检查域名是否近期被验证码拦截
                 hostname_check = urlparse(url).hostname or ""
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
                 if hostname_check in self._captcha_blocked_domains:
                     blocked_at = self._captcha_blocked_domains[hostname_check]
                     if now - blocked_at < 300:  # 5分钟内不重试被验证码拦截的域名
                         logger.debug("域名近期被CAPTCHA拦截，跳过: %s", hostname_check)
-                        return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
-                                "last_modified": None, "fallback": True, "ugc_count": 0,
-                                "captcha": True, "captcha_types": ["cooldown"]}
+                        return {
+                            "chunks": [],
+                            "title": "",
+                            "jsonld": {"entry_count": 0},
+                            "last_modified": None,
+                            "fallback": True,
+                            "ugc_count": 0,
+                            "captcha": True,
+                            "captcha_types": ["cooldown"],
+                        }
 
                 # 加载持久化的 Cookie（如果存在）
                 storage_state = None
@@ -1081,10 +1140,20 @@ class PlaywrightWebSearch:
                     final_url = response.url
                     safe_redirect, redirect_reason = _is_safe_url(final_url)
                     if not safe_redirect:
-                        logger.warning("SSRF redirect 拦截: initial=%s final=%s reason=%s",
-                                       url[:60], final_url[:60], redirect_reason)
-                        return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
-                                "last_modified": None, "fallback": True, "ugc_count": 0}
+                        logger.warning(
+                            "SSRF redirect 拦截: initial=%s final=%s reason=%s",
+                            url[:60],
+                            final_url[:60],
+                            redirect_reason,
+                        )
+                        return {
+                            "chunks": [],
+                            "title": "",
+                            "jsonld": {"entry_count": 0},
+                            "last_modified": None,
+                            "fallback": True,
+                            "ugc_count": 0,
+                        }
 
                 # P0-5: response body 大小限制
                 MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5MB
@@ -1092,14 +1161,18 @@ class PlaywrightWebSearch:
                 if response:
                     cl = response.headers.get("content-length")
                     if cl:
-                        try:
+                        with contextlib.suppress(ValueError):
                             content_length = int(cl)
-                        except ValueError:
-                            pass
                 if content_length and content_length > MAX_RESPONSE_BYTES:
                     logger.warning("响应体过大，跳过: url=%s size=%d", url[:60], content_length)
-                    return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
-                            "last_modified": None, "fallback": True, "ugc_count": 0}
+                    return {
+                        "chunks": [],
+                        "title": "",
+                        "jsonld": {"entry_count": 0},
+                        "last_modified": None,
+                        "fallback": True,
+                        "ugc_count": 0,
+                    }
 
                 # 拟人化等待：随机延迟 500-1500ms（模拟人类阅读页面开始加载）
                 await page.wait_for_timeout(500 + int(500 * (hash(url) % 100) / 100))
@@ -1110,8 +1183,9 @@ class PlaywrightWebSearch:
                     if captcha_result and captcha_result.get("detected"):
                         captcha_types = captcha_result.get("types", [])
                         captcha_title = captcha_result.get("title", "")
-                        logger.warning("CAPTCHA 检测: url=%s types=%s title=%s",
-                                     url[:60], captcha_types, captcha_title[:50])
+                        logger.warning(
+                            "CAPTCHA 检测: url=%s types=%s title=%s", url[:60], captcha_types, captcha_title[:50]
+                        )
                         # 记录被拦截的域名
                         if hostname_check:
                             self._captcha_blocked_domains[hostname_check] = now
@@ -1122,6 +1196,7 @@ class PlaywrightWebSearch:
                                 CaptchaStatus,
                                 get_captcha_guard,
                             )
+
                             guard = await get_captcha_guard()
                             if guard.guard_mode:
                                 status = await guard.intercept_captcha(
@@ -1134,27 +1209,42 @@ class PlaywrightWebSearch:
                                     await page.wait_for_timeout(2000)
                                     recheck = await page.evaluate(_CAPTCHA_DETECT_JS)
                                     if recheck and recheck.get("detected"):
-                                        logger.warning("CAPTCHA 人工处理后仍然存在，跳过: %s",
-                                                     recheck.get("types"))
+                                        logger.warning("CAPTCHA 人工处理后仍然存在，跳过: %s", recheck.get("types"))
                                     else:
                                         pass  # CAPTCHA 已通过，继续正常提取流程
                                 else:
-                                    return {"chunks": [], "title": captcha_title,
-                                            "jsonld": {"entry_count": 0},
-                                            "last_modified": None, "fallback": True,
-                                            "ugc_count": 0, "captcha": True,
-                                            "captcha_types": captcha_types}
-                            else:
-                                return {"chunks": [], "title": captcha_title,
+                                    return {
+                                        "chunks": [],
+                                        "title": captcha_title,
                                         "jsonld": {"entry_count": 0},
-                                        "last_modified": None, "fallback": True,
-                                        "ugc_count": 0, "captcha": True,
-                                        "captcha_types": captcha_types}
-                        except ImportError:
-                            return {"chunks": [], "title": captcha_title,
+                                        "last_modified": None,
+                                        "fallback": True,
+                                        "ugc_count": 0,
+                                        "captcha": True,
+                                        "captcha_types": captcha_types,
+                                    }
+                            else:
+                                return {
+                                    "chunks": [],
+                                    "title": captcha_title,
                                     "jsonld": {"entry_count": 0},
-                                    "last_modified": None, "fallback": True, "ugc_count": 0,
-                                    "captcha": True, "captcha_types": captcha_types}
+                                    "last_modified": None,
+                                    "fallback": True,
+                                    "ugc_count": 0,
+                                    "captcha": True,
+                                    "captcha_types": captcha_types,
+                                }
+                        except ImportError:
+                            return {
+                                "chunks": [],
+                                "title": captcha_title,
+                                "jsonld": {"entry_count": 0},
+                                "last_modified": None,
+                                "fallback": True,
+                                "ugc_count": 0,
+                                "captcha": True,
+                                "captcha_types": captcha_types,
+                            }
                 except Exception:
                     pass  # CAPTCHA 检测本身不应该阻断流程
 
@@ -1191,10 +1281,8 @@ class PlaywrightWebSearch:
 
                 # 成功提取后，保存 Cookie 状态（用于下次访问）
                 if chunks and not fallback:
-                    try:
+                    with contextlib.suppress(Exception):
                         await context.storage_state(path=self._storage_state_path)
-                    except Exception:
-                        pass
 
                 return {
                     "chunks": chunks or [],
@@ -1210,44 +1298,58 @@ class PlaywrightWebSearch:
                 logger.debug("页面渲染失败: url=%s err=%s", url, str(e)[:100])
                 # Context 可能已损坏，从池中移除
                 await self._session_pool.invalidate(session_key)
-                return {"chunks": [], "title": "", "jsonld": {"entry_count": 0},
-                        "last_modified": None, "fallback": True, "ugc_count": 0}
+                return {
+                    "chunks": [],
+                    "title": "",
+                    "jsonld": {"entry_count": 0},
+                    "last_modified": None,
+                    "fallback": True,
+                    "ugc_count": 0,
+                }
             finally:
                 # 只关闭 Page，不关闭 Context（Context 由 SessionPool 管理）
                 if page is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await page.close()
-                    except Exception:
-                        pass
 
     async def close(self) -> None:
         """关闭浏览器实例（应用关闭时调用）"""
         # 先清理所有 Context
         await self._session_pool.cleanup()
         if self._browser:
-            try:
+            with contextlib.suppress(Exception):
                 await self._browser.close()
-            except Exception:
-                pass
             self._browser = None
         if self._playwright:
-            try:
+            with contextlib.suppress(Exception):
                 await self._playwright.stop()
-            except Exception:
-                pass
             self._playwright = None
         logger.info("Playwright 浏览器已关闭")
 
 
 # 全局单例（延迟初始化）
 _instance: PlaywrightWebSearch | None = None
+_instance_loop: asyncio.AbstractEventLoop | None = None
 
 
 def get_playwright_search() -> PlaywrightWebSearch:
-    """获取全局 PlaywrightWebSearch 单例"""
-    global _instance
-    if _instance is None:
+    """获取全局 PlaywrightWebSearch 单例（循环感知：不同循环自动重建）"""
+    global _instance, _instance_loop
+    try:
+        cur_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        cur_loop = None
+    need_new = (
+        _instance is None
+        or _instance_loop is None
+        or _instance_loop.is_closed()
+        or cur_loop is None
+        or _instance_loop is not cur_loop
+    )
+    if need_new:
         _instance = PlaywrightWebSearch()
+        _instance_loop = cur_loop
+    assert _instance is not None
     return _instance
 
 

@@ -4,11 +4,13 @@
 处理异常，异常被 asyncio 吞掉仅打印 "Task exception was never retrieved"，
 导致后台任务静默失败（如 key 加载失败、定价抓取失败等不易发现）。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Coroutine
+from collections.abc import Coroutine
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +37,14 @@ def create_supervised_task(
             exc = t.exception()
         except asyncio.CancelledError:
             return
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         if exc is not None:
             log.error(
                 "后台任务 %s 未捕获异常: %s: %s",
-                task_name, type(exc).__name__, exc,
+                task_name,
+                type(exc).__name__,
+                exc,
                 exc_info=exc,
             )
 

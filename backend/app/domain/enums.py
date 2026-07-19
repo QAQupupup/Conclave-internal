@@ -2,15 +2,17 @@
 
 从 app/models.py 迁移而来，原样保留，仅调整文件位置。
 """
+
 from __future__ import annotations
 
 from enum import Enum
 
-
 # ---------- 枚举 ----------
+
 
 class Role(str, Enum):
     """会议角色"""
+
     MODERATOR = "moderator"
     PRODUCT_ARCHITECT = "product_architect"
     ENGINEER = "engineer"
@@ -22,6 +24,7 @@ class Role(str, Enum):
 
 class ClaimType(str, Enum):
     """论点类型"""
+
     FACT = "fact"
     ASSUMPTION = "assumption"
     CONSTRAINT = "constraint"
@@ -29,6 +32,7 @@ class ClaimType(str, Enum):
 
 class ConflictType(str, Enum):
     """冲突类型"""
+
     FACTUAL = "factual"
     PREFERENCE = "preference"
     SCOPE = "scope"
@@ -36,6 +40,7 @@ class ConflictType(str, Enum):
 
 class Stage(str, Enum):
     """状态机六阶段"""
+
     CLARIFY = "clarify"
     INTRA_TEAM = "intra_team"
     CROSS_TEAM = "cross_team"
@@ -46,6 +51,7 @@ class Stage(str, Enum):
 
 class MeetingStatus(str, Enum):
     """会议运行状态"""
+
     RUNNING = "running"
     PAUSED = "paused"
     ABORTED = "aborted"

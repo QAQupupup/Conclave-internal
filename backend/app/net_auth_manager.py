@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.events import bus, make_event
@@ -89,9 +89,22 @@ def determine_needed_level(code: str, failure_reason: str) -> str:
     code_lower = code.lower()
 
     # HTTP 请求 → L3
-    if any(p in code_lower for p in ["import requests", "from requests", "import urllib", "from urllib",
-                                      "import httpx", "from httpx", "import aiohttp", "from aiohttp",
-                                      "http://", "https://", "urlopen"]):
+    if any(
+        p in code_lower
+        for p in [
+            "import requests",
+            "from requests",
+            "import urllib",
+            "from urllib",
+            "import httpx",
+            "from httpx",
+            "import aiohttp",
+            "from aiohttp",
+            "http://",
+            "https://",
+            "urlopen",
+        ]
+    ):
         return "L3"
 
     # pip install → L2
@@ -148,29 +161,34 @@ async def request_network_access(
     )
 
     # 发布事件通知前端
-    await bus.publish(make_event(
-        "net_auth.requested",
-        meeting_id,
-        {
-            "request_id": request_id,
-            "requested_level": needed_level,
-            "detected_level": detected_level,
-            "failure_reason": failure_reason,
-            "expires_at": expires_at.isoformat(),
-            "auto_approve": AUTO_APPROVE,
-        },
-    ))
+    await bus.publish(
+        make_event(
+            "net_auth.requested",
+            meeting_id,
+            {
+                "request_id": request_id,
+                "requested_level": needed_level,
+                "detected_level": detected_level,
+                "failure_reason": failure_reason,
+                "expires_at": expires_at.isoformat(),
+                "auto_approve": AUTO_APPROVE,
+            },
+        )
+    )
 
     # 自动通过
     if AUTO_APPROVE:
         from app.net_auth import review_auth_request
+
         await review_auth_request(request_id, "approved", "自动通过（AUTO_APPROVE=1）")
         log_bus.info(f"网络授权自动通过: {request_id}", logger="net_auth")
-        await bus.publish(make_event(
-            "net_auth.reviewed",
-            meeting_id,
-            {"request_id": request_id, "action": "approved", "comment": "自动通过"},
-        ))
+        await bus.publish(
+            make_event(
+                "net_auth.reviewed",
+                meeting_id,
+                {"request_id": request_id, "action": "approved", "comment": "自动通过"},
+            )
+        )
         return {"approved": True, "level": needed_level, "request_id": request_id}
 
     # 等待用户批复（带超时）
@@ -182,11 +200,13 @@ async def request_network_access(
             f"网络授权申请超时未批复，降级处理: {request_id}",
             logger="net_auth",
         )
-        await bus.publish(make_event(
-            "net_auth.timeout",
-            meeting_id,
-            {"request_id": request_id, "action": "expired"},
-        ))
+        await bus.publish(
+            make_event(
+                "net_auth.timeout",
+                meeting_id,
+                {"request_id": request_id, "action": "expired"},
+            )
+        )
         return {"approved": False, "level": None, "request_id": request_id, "timeout": True}
 
     if result["status"] == "approved":
@@ -199,12 +219,11 @@ async def request_network_access(
 async def _wait_for_review(request_id: str, meeting_id: str, timeout: int) -> dict[str, Any] | None:
     """等待用户批复，超时返回 None"""
     # 订阅事件
-    future: asyncio.Future = asyncio.get_event_loop().create_future()
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
 
     async def handler(event):
-        if event.type == "net_auth.reviewed" and event.payload.get("request_id") == request_id:
-            if not future.done():
-                future.set_result(event.payload)
+        if event.type == "net_auth.reviewed" and event.payload.get("request_id") == request_id and not future.done():
+            future.set_result(event.payload)
 
     unsub = bus.subscribe(meeting_id, handler)
 
@@ -223,8 +242,9 @@ async def _wait_for_review(request_id: str, meeting_id: str, timeout: int) -> di
 
 async def _poll_for_review(request_id: str, timeout: int) -> dict[str, Any]:
     """轮询 DB 等待批复结果"""
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
         req = await get_auth_request(request_id)
         if req and req["status"] != "pending":
             return req

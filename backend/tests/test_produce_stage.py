@@ -6,6 +6,7 @@
 
 所有测试使用 monkeypatch 替换 compute / 事件总线，避免真实 LLM 与数据库依赖。
 """
+
 from __future__ import annotations
 
 from typing import Any

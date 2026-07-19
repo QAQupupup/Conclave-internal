@@ -4,17 +4,17 @@
 from __future__ import annotations
 
 from app.orchestrator.borrow_helpers import (
+    _BORROWABLE_ROLES,
+    _ROLE_NAMES,
+    AUTO_BORROW_THRESHOLD,
     _let_borrowed_agents_speak,
     _moderator_assess_borrow,
-    AUTO_BORROW_THRESHOLD,
-    _ROLE_NAMES,
-    _BORROWABLE_ROLES,
 )
 
 __all__ = [
+    "AUTO_BORROW_THRESHOLD",
+    "_BORROWABLE_ROLES",
+    "_ROLE_NAMES",
     "_let_borrowed_agents_speak",
     "_moderator_assess_borrow",
-    "AUTO_BORROW_THRESHOLD",
-    "_ROLE_NAMES",
-    "_BORROWABLE_ROLES",
 ]

@@ -26,19 +26,23 @@ logger = get_logger("llm.providers")
 
 # ========== Provider 定义 ==========
 
+
 @dataclass
 class ProviderConfig:
     """LLM 厂商配置"""
-    id: str                           # 唯一ID，如 "siliconflow"
-    name: str                         # 人类可读名称
-    base_url: str                     # API Base URL
-    api_key: str = ""                 # 默认API Key（从环境变量读取）
-    balance_endpoint: str = ""        # 余额查询路径（相对于base_url），空=不支持
+
+    id: str  # 唯一ID，如 "siliconflow"
+    name: str  # 人类可读名称
+    base_url: str  # API Base URL
+    api_key: str = ""  # 默认API Key（从环境变量读取）
+    balance_endpoint: str = ""  # 余额查询路径（相对于base_url），空=不支持
     models_endpoint: str = "/models"  # 模型列表路径
-    balance_response_path: tuple[str, ...] = ()  # 余额字段在JSON中的路径，如 ("data","totalBalance")
+    balance_response_path: tuple[
+        str | int, ...
+    ] = ()  # 余额字段在JSON中的路径，如 ("data","totalBalance")，支持int索引列表
     models_are_openai_compatible: bool = True
     supports_custom_key: bool = True  # 是否支持用户自带Key
-    pricing_note: str = ""            # 定价说明
+    pricing_note: str = ""  # 定价说明
 
 
 # 内置 Provider 注册表
@@ -139,6 +143,7 @@ def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str
     # 首先加入当前主配置
     try:
         from app.context import get_meeting_id
+
         mid = get_meeting_id()
         if mid and mid != "-":
             base_url, api_key, model, pid = get_meeting_llm_config(mid)
@@ -181,12 +186,13 @@ def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str
 
 # ========== 上下文窗口管理 ==========
 
+
 def estimate_tokens(text: str) -> int:
     """粗略估算文本的 token 数量。
 
     中文约 2 字符/token，英文约 4 字符/token。
     """
-    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
     other_chars = len(text) - chinese_chars
     return (chinese_chars // 2) + (other_chars // 4)
 
@@ -288,14 +294,54 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
 
 # 推荐模型列表（会议中常用）
 RECOMMENDED_MODELS = [
-    {"id": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B", "name": "DeepSeek-R1-8B (免费)", "desc": "推理模型，免费使用", "recommended_for": "推理/数学/代码"},
-    {"id": "THUDM/GLM-Z1-9B-0414", "name": "GLM-Z1-9B (免费)", "desc": "9B推理模型，免费使用", "recommended_for": "推理/通用任务"},
-    {"id": "deepseek-ai/DeepSeek-V3.2", "name": "DeepSeek-V3.2", "desc": "强JSON遵循，性价比高", "recommended_for": "会议讨论/产出"},
-    {"id": "deepseek-ai/DeepSeek-V4-Flash", "name": "DeepSeek-V4-Flash", "desc": "快速响应，成本低", "recommended_for": "快速讨论/简单任务"},
-    {"id": "MiniMaxAI/MiniMax-M2.5", "name": "MiniMax-M2.5", "desc": "综合性价比最优，90.4分", "recommended_for": "跨团队/证据检查"},
-    {"id": "ByteDance-Seed/Seed-OSS-36B-Instruct", "name": "Seed-OSS-36B", "desc": "响应最快6s，成本最低", "recommended_for": "团队内部讨论"},
-    {"id": "deepseek-ai/DeepSeek-R1", "name": "DeepSeek-R1", "desc": "推理模型，深度思考", "recommended_for": "复杂推理/代码审查"},
-    {"id": "Pro/deepseek-ai/DeepSeek-V3.2", "name": "DeepSeek-V3.2 Pro", "desc": "专享版，稳定无速率限制", "recommended_for": "生产环境"},
+    {
+        "id": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+        "name": "DeepSeek-R1-8B (免费)",
+        "desc": "推理模型，免费使用",
+        "recommended_for": "推理/数学/代码",
+    },
+    {
+        "id": "THUDM/GLM-Z1-9B-0414",
+        "name": "GLM-Z1-9B (免费)",
+        "desc": "9B推理模型，免费使用",
+        "recommended_for": "推理/通用任务",
+    },
+    {
+        "id": "deepseek-ai/DeepSeek-V3.2",
+        "name": "DeepSeek-V3.2",
+        "desc": "强JSON遵循，性价比高",
+        "recommended_for": "会议讨论/产出",
+    },
+    {
+        "id": "deepseek-ai/DeepSeek-V4-Flash",
+        "name": "DeepSeek-V4-Flash",
+        "desc": "快速响应，成本低",
+        "recommended_for": "快速讨论/简单任务",
+    },
+    {
+        "id": "MiniMaxAI/MiniMax-M2.5",
+        "name": "MiniMax-M2.5",
+        "desc": "综合性价比最优，90.4分",
+        "recommended_for": "跨团队/证据检查",
+    },
+    {
+        "id": "ByteDance-Seed/Seed-OSS-36B-Instruct",
+        "name": "Seed-OSS-36B",
+        "desc": "响应最快6s，成本最低",
+        "recommended_for": "团队内部讨论",
+    },
+    {
+        "id": "deepseek-ai/DeepSeek-R1",
+        "name": "DeepSeek-R1",
+        "desc": "推理模型，深度思考",
+        "recommended_for": "复杂推理/代码审查",
+    },
+    {
+        "id": "Pro/deepseek-ai/DeepSeek-V3.2",
+        "name": "DeepSeek-V3.2 Pro",
+        "desc": "专享版，稳定无速率限制",
+        "recommended_for": "生产环境",
+    },
 ]
 
 
@@ -303,6 +349,7 @@ def get_model_pricing(model_id: str) -> dict[str, Any]:
     """获取模型定价信息（优先动态抓取，回退到硬编码表）"""
     # 延迟导入避免循环依赖
     from .pricing_fetcher import get_model_pricing as _live_pricing
+
     return _live_pricing(model_id)
 
 
@@ -310,28 +357,27 @@ def estimate_cost_cny(model_id: str, input_tokens: int, output_tokens: int) -> f
     """估算调用成本（人民币）"""
     p = get_model_pricing(model_id)
     cost = (input_tokens / 1_000_000) * p["input"] + (output_tokens / 1_000_000) * p["output"]
-    return round(cost, 6)
+    return round(cost, 6)  # type: ignore[no-any-return]
 
 
 # ========== 模型分类辅助 ==========
 
+
 def _is_qwen_llm(model_id: str) -> bool:
     """判断是否为 Qwen LLM（非 Embedding/Reranker 向量模型）。
-    
+
     Qwen 全系 LLM 不支持 response_format: json_object，与 Conclave 不兼容。
     保留 Qwen3-VL-Embedding 和 Qwen3-VL-Reranker（向量模型，不受此限制）。
     """
     if not model_id.startswith("Qwen/"):
         return False
     # 保留向量模型
-    if "Embed" in model_id or "Rerank" in model_id:
-        return False
-    return True
+    return not ("Embed" in model_id or "Rerank" in model_id)
 
 
 def categorize_models(models: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """将模型列表分类：free/cheap/standard/pro/reasoning/multimodal/embedding
-    
+
     Qwen 全系 LLM 不支持 response_format: json_object，已从可用模型池排除。
     仅保留 Qwen 向量模型 (Qwen/Qwen3-VL-Embedding/Reranker)。
     """
@@ -376,13 +422,15 @@ def categorize_models(models: list[dict[str, Any]]) -> dict[str, list[dict[str, 
 
 # ========== 运行时模型选择 ==========
 
+
 @dataclass
 class MeetingLLMConfig:
     """单个会议的 LLM 配置（可覆盖全局默认）"""
-    provider_id: str = ""          # provider ID，空=使用默认
-    model: str = ""                # 模型ID，空=使用默认
-    api_key: str = ""              # 自定义API Key（BYOK），空=使用默认
-    base_url: str = ""             # 自定义base_url，空=使用provider默认
+
+    provider_id: str = ""  # provider ID，空=使用默认
+    model: str = ""  # 模型ID，空=使用默认
+    api_key: str = ""  # 自定义API Key（BYOK），空=使用默认
+    base_url: str = ""  # 自定义base_url，空=使用provider默认
 
 
 # 进程级：会议ID -> MeetingLLMConfig 覆盖
@@ -392,8 +440,9 @@ _model_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 CACHE_TTL = 300  # 模型列表缓存5分钟
 
 
-def set_meeting_model(meeting_id: str, provider_id: str = "", model: str = "",
-                      api_key: str = "", base_url: str = "") -> MeetingLLMConfig:
+def set_meeting_model(
+    meeting_id: str, provider_id: str = "", model: str = "", api_key: str = "", base_url: str = ""
+) -> MeetingLLMConfig:
     """设置某个会议的模型覆盖配置"""
     cfg = _meeting_overrides.get(meeting_id, MeetingLLMConfig())
     if provider_id:
@@ -410,7 +459,7 @@ def set_meeting_model(meeting_id: str, provider_id: str = "", model: str = "",
 
 def get_meeting_llm_config(meeting_id: str = "") -> tuple[str, str, str, str]:
     """获取会议的有效 LLM 配置 (base_url, api_key, model, provider_id)
-    
+
     优先级：会议覆盖 > 环境变量默认
     """
     # 默认值从环境变量
@@ -554,10 +603,12 @@ def resolve_model_from_snapshot(
 
 # ========== 远程查询：模型列表和余额 ==========
 
-async def fetch_models(provider_id: str = "", api_key: str = "", base_url: str = "",
-                       use_cache: bool = True) -> list[dict[str, Any]]:
+
+async def fetch_models(
+    provider_id: str = "", api_key: str = "", base_url: str = "", use_cache: bool = True
+) -> list[dict[str, Any]]:
     """从Provider拉取可用模型列表
-    
+
     优先从缓存返回（5分钟TTL），use_cache=False强制刷新
     """
     # 确定用哪个provider
@@ -598,7 +649,7 @@ async def fetch_models(provider_id: str = "", api_key: str = "", base_url: str =
             models = data.get("data", [])
             _model_cache[cache_key] = (time.monotonic(), models)
             logger.info(f"fetch_models: 从 {url} 拉取到 {len(models)} 个模型")
-            return models
+            return models  # type: ignore[no-any-return]
     except Exception as e:
         logger.error(f"fetch_models 失败: {e}")
         return []
@@ -606,7 +657,7 @@ async def fetch_models(provider_id: str = "", api_key: str = "", base_url: str =
 
 async def fetch_balance(provider_id: str = "", api_key: str = "", base_url: str = "") -> dict[str, Any]:
     """查询账户余额
-    
+
     返回: {"balance": float, "currency": "CNY"|"USD", "raw": {...}, "provider": str, "supported": bool}
     """
     # 确定provider
@@ -632,7 +683,14 @@ async def fetch_balance(provider_id: str = "", api_key: str = "", base_url: str 
     url = f"{(base_url or p.base_url).rstrip('/')}{endpoint}"
     key = api_key or p.api_key
     if not key:
-        return {"balance": None, "currency": "CNY", "raw": {}, "provider": p.id, "supported": False, "message": "未配置API Key"}
+        return {
+            "balance": None,
+            "currency": "CNY",
+            "raw": {},
+            "provider": p.id,
+            "supported": False,
+            "message": "未配置API Key",
+        }
 
     headers = {"Authorization": f"Bearer {key}"}
     try:
@@ -642,10 +700,14 @@ async def fetch_balance(provider_id: str = "", api_key: str = "", base_url: str 
             data = resp.json()
 
         # 按path提取余额
-        balance_val = data
+        balance_val: Any = data
         for part in p.balance_response_path:
-            if isinstance(balance_val, dict) and part in balance_val:
-                balance_val = balance_val[part]
+            if isinstance(balance_val, dict):
+                if isinstance(part, str) and part in balance_val:
+                    balance_val = balance_val[part]
+                else:
+                    balance_val = None
+                    break
             elif isinstance(balance_val, list) and isinstance(part, int) and part < len(balance_val):
                 balance_val = balance_val[part]
             else:
@@ -673,14 +735,20 @@ async def fetch_balance(provider_id: str = "", api_key: str = "", base_url: str 
         }
     except httpx.HTTPStatusError as e:
         return {
-            "balance": None, "currency": "CNY", "raw": {},
-            "provider": p.id, "supported": True,
+            "balance": None,
+            "currency": "CNY",
+            "raw": {},
+            "provider": p.id,
+            "supported": True,
             "message": f"HTTP {e.response.status_code}: {e.response.text[:200]}",
         }
     except Exception as e:
         return {
-            "balance": None, "currency": "CNY", "raw": {},
-            "provider": p.id, "supported": True,
+            "balance": None,
+            "currency": "CNY",
+            "raw": {},
+            "provider": p.id,
+            "supported": True,
             "message": f"查询失败: {e}",
         }
 

@@ -2,6 +2,7 @@
 # 支持 LocalAgentCompute（进程内）和 GRPCAgentCompute（远程 Worker）
 
 from __future__ import annotations
+
 import asyncio
 import inspect
 import json
@@ -13,8 +14,14 @@ from typing import Any, Protocol, runtime_checkable
 from app.agents import llm as _llm_mod
 from app.agents.llm import LLMClient
 from app.agents.prompts import (
-    MODERATOR_CLARIFY, ARCHITECT_INTRA, ENGINEER_INTRA,
-    CROSS_TEAM, EVIDENCE_CHECK, ARBITRATE, PRODUCE, render,
+    ARBITRATE,
+    ARCHITECT_INTRA,
+    CROSS_TEAM,
+    ENGINEER_INTRA,
+    EVIDENCE_CHECK,
+    MODERATOR_CLARIFY,
+    PRODUCE,
+    render,
 )
 from app.agents.role_templates import ROLE_LIBRARY
 from app.logging_config import get_logger
@@ -60,21 +67,23 @@ def _get_intra_template(role: Role) -> str:
 @dataclass
 class ToolCall:
     """Agent 请求执行的工具调用"""
-    tool_name: str = ""            # "web_search" | "browser.goto" | "browser.click" | ...
+
+    tool_name: str = ""  # "web_search" | "browser.goto" | "browser.click" | ...
     arguments: dict[str, Any] = field(default_factory=dict)  # 工具参数
-    reason: str = ""               # Agent 为什么调用此工具（可读性 + 调试）
+    reason: str = ""  # Agent 为什么调用此工具（可读性 + 调试）
 
 
 @dataclass
 class ToolResult:
     """工具调用的执行结果"""
+
     tool_name: str = ""
     arguments: dict[str, Any] = field(default_factory=dict)
     success: bool = True
-    result: Any = None             # 工具返回值
+    result: Any = None  # 工具返回值
     error: str = ""
     latency_ms: int = 0
-    iteration: int = 0             # 第几轮 ReAct 迭代
+    iteration: int = 0  # 第几轮 ReAct 迭代
 
 
 @dataclass
@@ -87,6 +96,7 @@ class ThinkRequest:
     - iteration: 当前 ReAct 迭代序号（0 = 首轮）
     非 ReAct 模式下这三个字段为空/0，行为与原来一致。
     """
+
     request_id: str = ""
     meeting_id: str = ""
     runner_session_id: str = ""
@@ -96,7 +106,7 @@ class ThinkRequest:
     schema_hint: str = ""
     temperature: float = 0.0
     seed: int = 42
-    model: str = ""               # per-role/stage 模型覆盖（空=继承会议级配置）
+    model: str = ""  # per-role/stage 模型覆盖（空=继承会议级配置）
     # ReAct 扩展
     available_tools: list[dict[str, Any]] = field(default_factory=list)  # [{name, description, parameters}]
     tool_history: list[ToolResult] = field(default_factory=list)
@@ -113,6 +123,7 @@ class ThinkResponse:
     - input_tokens / output_tokens: token 用量（成本追踪）
     非 ReAct 模式下 tool_calls 为空，need_continue 为 False。
     """
+
     success: bool = False
     result: dict[str, Any] = field(default_factory=dict)
     error: str = ""
@@ -134,6 +145,7 @@ class AgentCompute(Protocol):
     - LocalAgentCompute：进程内直接调用 LLM
     - GRPCAgentCompute：通过 gRPC 调用远程 Worker
     """
+
     async def think(self, req: ThinkRequest) -> ThinkResponse: ...
 
     async def think_batch(self, requests: list[ThinkRequest]) -> list[ThinkResponse]:
@@ -153,7 +165,9 @@ class LocalAgentCompute:
 
     async def think(self, req: ThinkRequest) -> ThinkResponse:
         import time
-        from app.context import set_agent_role, reset_agent_role
+
+        from app.context import reset_agent_role, set_agent_role
+
         # 设置 agent_role 上下文（trace/cost/logging 自动注入）
         role_token = set_agent_role(req.agent_role) if req.agent_role else None
         t0 = time.monotonic()
@@ -174,11 +188,13 @@ class LocalAgentCompute:
                 if isinstance(raw_calls, list):
                     for call in raw_calls:
                         if isinstance(call, dict):
-                            tool_calls.append(ToolCall(
-                                tool_name=call.get("tool_name", ""),
-                                arguments=call.get("arguments", {}),
-                                reason=call.get("reason", ""),
-                            ))
+                            tool_calls.append(
+                                ToolCall(
+                                    tool_name=call.get("tool_name", ""),
+                                    arguments=call.get("arguments", {}),
+                                    reason=call.get("reason", ""),
+                                )
+                            )
 
             return ThinkResponse(
                 success=True,
@@ -280,6 +296,7 @@ def _inject_profile(prompt: str, agent_role: str) -> str:
     """
     try:
         from app.memory.profile import inject_profile
+
         return inject_profile(prompt, agent_role)
     except Exception:
         return prompt
@@ -305,10 +322,7 @@ def _inject_tools_to_prompt(prompt: str, available_tools: list[dict[str, Any]]) 
     tool_lines = ["\n\n【可用工具 - 你可以调用以下工具获取信息】"]
     for i, tool in enumerate(available_tools, 1):
         params = ", ".join(f"{k}: {v}" for k, v in tool.get("parameters", {}).items())
-        tool_lines.append(
-            f"{i}. {tool['name']}: {tool['description']}\n"
-            f"   参数: {params if params else '无'}"
-        )
+        tool_lines.append(f"{i}. {tool['name']}: {tool['description']}\n   参数: {params if params else '无'}")
 
     tool_lines.append(
         "\n【工具调用规则】\n"
@@ -325,6 +339,7 @@ def _inject_skills(prompt: str, stage: str, deliverable_type: str = "", role: st
     """在prompt末尾注入匹配的Skill内容（动态加载设计规范/代码规范/沟通风格等）"""
     try:
         from app.agents.skills import format_skills_for_prompt
+
         skills_text = format_skills_for_prompt(
             stage=stage,
             deliverable_type=deliverable_type,
@@ -338,7 +353,13 @@ def _inject_skills(prompt: str, stage: str, deliverable_type: str = "", role: st
     return prompt
 
 
-def build_clarify_prompt(topic: str, doc_summaries: list[str], anchor: str = "", available_tools: list[dict[str, Any]] | None = None, reference_context: str = "") -> ThinkRequest:
+def build_clarify_prompt(
+    topic: str,
+    doc_summaries: list[str],
+    anchor: str = "",
+    available_tools: list[dict[str, Any]] | None = None,
+    reference_context: str = "",
+) -> ThinkRequest:
     """构造 clarify 阶段的思考请求"""
     prompt = render(MODERATOR_CLARIFY, topic=topic, doc_summaries="; ".join(doc_summaries) if doc_summaries else "无")
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
@@ -404,8 +425,9 @@ def build_intra_react_prompt(
             + "\n".join(parts)
             + "\n\n请基于上述参考，结合你的专业视角发表论点。"
         )
-    prompt = render(template, role_persona=_get_role_persona(role.value),
-                    clarified_topic=clarified_topic, stance=stance)
+    prompt = render(
+        template, role_persona=_get_role_persona(role.value), clarified_topic=clarified_topic, stance=stance
+    )
     # 在模板渲染后注入前序结论
     if prior_summary:
         prompt = prompt + prior_summary
@@ -435,7 +457,9 @@ def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> T
     )
 
 
-def build_evidence_prompt(conflict: dict, evidence_chunks: list[dict], anchor: str = "", available_tools: list[dict[str, Any]] | None = None) -> ThinkRequest:
+def build_evidence_prompt(
+    conflict: dict, evidence_chunks: list[dict], anchor: str = "", available_tools: list[dict[str, Any]] | None = None
+) -> ThinkRequest:
     prompt = render(EVIDENCE_CHECK, conflict=str(conflict), evidence_chunks=str(evidence_chunks))
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     prompt = _inject_skills(prompt, stage="evidence_check", role=Role.MODERATOR.value)
@@ -477,6 +501,7 @@ def build_produce_prompt(
         template = PRODUCE
     # 注入代码质量经验库（bug patterns）
     from app.agents.bug_patterns import format_bug_patterns_for_prompt
+
     bug_patterns = format_bug_patterns_for_prompt()
     # 格式化证据上下文（供 data_science / code_analysis 模板使用）
     evidence_context = ""
@@ -515,9 +540,11 @@ def _format_evidence_for_code_gen(evidence_summary: dict) -> str:
 
     samples = evidence_summary.get("evidence_samples", [])
     if samples:
-        lines.append(f"关键证据摘要（共 {evidence_summary.get('evidence_count', len(samples))} 条，展示前 {len(samples)} 条）:")
+        lines.append(
+            f"关键证据摘要（共 {evidence_summary.get('evidence_count', len(samples))} 条，展示前 {len(samples)} 条）:"
+        )
         for s in samples[:10]:
-            support_tag = f"[{s.get('supports', 'neutral')}]" if s.get('supports') else ""
+            support_tag = f"[{s.get('supports', 'neutral')}]" if s.get("supports") else ""
             lines.append(f"  - {support_tag} {s.get('quote', '')[:150]}  (来源: {s.get('source', '?')})")
         lines.append("")
 
@@ -545,6 +572,7 @@ def get_compute() -> AgentCompute:
     global _compute
     if _compute is None:
         from app.config import settings
+
         if settings.use_grpc_compute:
             _compute = GRPCAgentCompute(settings.grpc_compute_endpoint)
         else:
@@ -563,7 +591,7 @@ def reset_compute() -> None:
     _compute = None
 
 
-async def execute_think(req: "ThinkRequest") -> "ThinkResponse":
+async def execute_think(req: ThinkRequest) -> ThinkResponse:
     """统一 Agent 执行入口：所有 LLM 调用应经此函数
 
     职责：

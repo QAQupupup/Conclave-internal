@@ -9,6 +9,7 @@ backend/ 根目录执行：
 
 或在 pyproject.toml 中通过 [tool.setuptools.ext-modules] / setup.py 接入。
 """
+
 from __future__ import annotations
 
 import os
@@ -16,7 +17,6 @@ from pathlib import Path
 
 from Cython.Build import cythonize
 from setuptools import Extension, setup
-
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = PACKAGE_DIR.parent

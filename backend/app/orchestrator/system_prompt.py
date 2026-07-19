@@ -8,6 +8,7 @@
 - 用户提示词：用户原始请求（不修改、不截断）
 - 修正覆盖：API 显式 flow_plan 或系统级强制覆盖
 """
+
 from __future__ import annotations
 
 from app.config import settings
@@ -119,8 +120,7 @@ def build_classification_prompt(
     if override_mode:
         # API 显式覆盖：追加到用户提示词末尾，但标记为系统覆盖
         user_prompt += (
-            f"\n\n[系统覆盖] 外部已指定 flow_plan = \"{override_mode}\"，"
-            f"但如果此模式与请求不匹配，请在 reason 中说明。"
+            f'\n\n[系统覆盖] 外部已指定 flow_plan = "{override_mode}"，但如果此模式与请求不匹配，请在 reason 中说明。'
         )
 
     return system_prompt, user_prompt
@@ -141,7 +141,8 @@ def parse_classification_result(result_text: str) -> dict:
         {"mode": str, "reason": str} 或 {"mode": "standard", "reason": "parse error"}
     """
     import json
-    from app.orchestrator.instant import normalize_mode, FLOW_STANDARD, FLOW_INSTANT, FLOW_PLAN, FLOW_SIMPLE
+
+    from app.orchestrator.instant import FLOW_INSTANT, FLOW_PLAN, FLOW_SIMPLE, FLOW_STANDARD, normalize_mode
 
     text = result_text.strip()
 
@@ -158,7 +159,8 @@ def parse_classification_result(result_text: str) -> dict:
     except json.JSONDecodeError:
         # 尝试从文本中提取 JSON（LLM 可能在 JSON 前后加了说明文字）
         import re
-        match = re.search(r'\{[^}]+\}', text)
+
+        match = re.search(r"\{[^}]+\}", text)
         if match:
             try:
                 data = json.loads(match.group())
@@ -179,8 +181,8 @@ def parse_classification_result(result_text: str) -> dict:
 
 def _get_sandbox_mode() -> str:
     """获取沙箱模式描述"""
-    mode = settings.sandbox_mode if hasattr(settings, 'sandbox_mode') else "auto"
-    docker_available = getattr(settings, 'sandbox_docker_available', True)
+    mode = settings.sandbox_mode if hasattr(settings, "sandbox_mode") else "auto"
+    docker_available = getattr(settings, "sandbox_docker_available", True)
     if mode == "auto":
         return "Docker（auto 模式）" if docker_available else "subprocess（无 Docker）"
     return mode
@@ -188,10 +190,10 @@ def _get_sandbox_mode() -> str:
 
 def _get_memory_status() -> str:
     """获取记忆系统状态"""
-    disabled = settings.memory_disabled if hasattr(settings, 'memory_disabled') else False
+    disabled = settings.memory_disabled if hasattr(settings, "memory_disabled") else False
     return "关闭" if disabled else "开启（三层记忆）"
 
 
 def _get_dynamic_routing() -> bool:
     """获取动态路由开关状态"""
-    return getattr(settings, 'dynamic_routing_enabled', True)
+    return getattr(settings, "dynamic_routing_enabled", True)

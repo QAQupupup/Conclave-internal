@@ -6,4 +6,5 @@ from pydantic import BaseModel
 
 class PreferenceValue(BaseModel):
     """偏好写入请求体"""
+
     value: str

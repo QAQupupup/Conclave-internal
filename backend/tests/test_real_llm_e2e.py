@@ -51,8 +51,8 @@ async def test_real_llm_full_meeting():
     6. 因果链完整（所有日志带 request_id + meeting_id + runner_session_id）
     """
     from app.models import MeetingState, MeetingStatus, Stage
-    from app.orchestrator.runner import Runner
     from app.orchestrator import runner as runner_mod
+    from app.orchestrator.runner import Runner
 
     meeting_id = f"real-e2e-{os.getpid()}"
     topic = "设计一个团队任务管理 API，支持任务分配、优先级和进度跟踪"
@@ -70,6 +70,7 @@ async def test_real_llm_full_meeting():
 
     # 清理 httpx 连接池
     from app.agents.compute import shutdown_compute
+
     await shutdown_compute()
 
     # ===== 断言 =====
@@ -114,8 +115,7 @@ async def test_real_llm_full_meeting():
         produce_fallback = stage_stats.get("produce", {}).get("fallback", 0)
         other_fallback = summary["fallback_calls"] - produce_fallback
         assert other_fallback == 0, (
-            f"非 produce 阶段发生降级: 总降级 {summary['fallback_calls']}, "
-            f"produce 降级 {produce_fallback}"
+            f"非 produce 阶段发生降级: 总降级 {summary['fallback_calls']}, produce 降级 {produce_fallback}"
         )
         print(f"  [警告] produce 阶段降级 {produce_fallback} 次（API 超时，非代码 bug）")
     assert summary["invalid_calls"] == 0 or summary["fallback_calls"] > 0, (
@@ -155,8 +155,8 @@ async def test_real_llm_role_matching():
     if not _REAL_LLM_AVAILABLE:
         pytest.skip(_skip_reason)
 
-    from app.orchestrator.nodes import _match_role
     from app.models import Role
+    from app.orchestrator.nodes import _match_role
 
     # 测试中文角色名匹配
     test_cases = [
@@ -173,6 +173,4 @@ async def test_real_llm_role_matching():
     for role_str, expected_role in test_cases:
         matched = _match_role(role_str)
         assert matched is not None, f"角色匹配失败: '{role_str}' → None"
-        assert matched == expected_role, (
-            f"角色匹配错误: '{role_str}' → {matched}, 期望 {expected_role}"
-        )
+        assert matched == expected_role, f"角色匹配错误: '{role_str}' → {matched}, 期望 {expected_role}"

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from app.models import MeetingState
 from app.rag.retriever import retrieve_for_conflict
@@ -62,12 +61,14 @@ async def _collect_evidence(meeting_id: str, conflict: dict) -> list[dict]:
         web_search = get_web_search()
         web_results = await web_search.search(summary, top_k=3, session_key=meeting_id)
         for i, wr in enumerate(web_results):
-            evidence_chunks.append({
-                "evidence_id": f"web-{i}",
-                "quote": wr.get("quote", "")[:200],
-                "source": wr.get("source", "web:unknown"),
-                "char_range": [0, 0],
-            })
+            evidence_chunks.append(
+                {
+                    "evidence_id": f"web-{i}",
+                    "quote": wr.get("quote", "")[:200],
+                    "source": wr.get("source", "web:unknown"),
+                    "char_range": [0, 0],
+                }
+            )
     if not evidence_chunks:
         evidence_chunks = _make_common_knowledge_evidence(conflict)
     return evidence_chunks
@@ -78,6 +79,7 @@ async def _prefetch_evidence(state: MeetingState, conflicts: list[dict]) -> dict
 
     返回 {conflict_id: [evidence_chunks]} 字典，evidence_check 节点优先使用。
     """
+
     async def _retrieve_one(conflict: dict) -> tuple[str, list[dict]]:
         cid = conflict.get("id", "c0")
         chunks = await _collect_evidence(state.meeting_id, conflict)

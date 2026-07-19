@@ -1,10 +1,14 @@
 """网络授权申请 ORM 模型：net_auth_requests。"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, Text, DateTime, Index,
+    DateTime,
+    Index,
+    String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,7 +23,9 @@ class NetAuthRequestModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     meeting_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, index=True,
+        String(36),
+        nullable=False,
+        index=True,
     )
     stage: Mapped[str] = mapped_column(String(20), nullable=False)
     code_snippet: Mapped[str] = mapped_column(Text, nullable=False)
@@ -28,23 +34,29 @@ class NetAuthRequestModel(Base):
     failure_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
     stderr_output: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="pending",
+        String(20),
+        nullable=False,
+        default="pending",
         comment="pending|approved|denied|expired",
     )
     review_action: Mapped[str | None] = mapped_column(String(20), nullable=True)
     review_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
     )
     resolved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     __table_args__ = (

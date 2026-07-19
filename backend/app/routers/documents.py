@@ -31,7 +31,14 @@ async def upload_document(meeting_id: str, file: UploadFile = File(...)) -> dict
     if state is None:
         raise HTTPException(status_code=404, detail="会议不存在，请先创建")
 
-    # 文件大小限制
+    # [SECURITY-FIX] 文件大小预检查（Content-Length 头），避免大文件全量读入内存
+    if file.size is not None and file.size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件过大：{file.size // 1024}KB，限制 {MAX_UPLOAD_SIZE // 1024 // 1024}MB",
+        )
+
+    # 文件大小限制（读取后校验实际大小）
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE:
         raise HTTPException(
@@ -91,9 +98,8 @@ async def upload_document(meeting_id: str, file: UploadFile = File(...)) -> dict
     except Exception as e:
         # 元数据持久化失败不影响主流程（切块已入库）
         import logging
-        logging.getLogger("routers.documents").warning(
-            "文档元数据持久化失败: %s", str(e)[:100]
-        )
+
+        logging.getLogger("routers.documents").warning("文档元数据持久化失败: %s", str(e)[:100])
 
     return {
         "meeting_id": meeting_id,

@@ -1,8 +1,8 @@
 # LLM 调用封装：真实 LLM（httpx 调 openai 兼容接口）+ StubLLM（无 key 时返回符合 schema 的假数据）
 from __future__ import annotations
 
+import contextlib
 import json
-import os
 from typing import Any, Protocol
 
 import httpx
@@ -19,6 +19,7 @@ logger = get_logger("agents.llm")
 def _get_stage_temperatures() -> dict[str, float]:
     """从 settings.llm_stage_temperatures 解析阶段温度映射，解析失败回退到默认值"""
     import json
+
     try:
         result = json.loads(settings.llm_stage_temperatures)
         if isinstance(result, dict):
@@ -27,12 +28,20 @@ def _get_stage_temperatures() -> dict[str, float]:
         logger.warning("解析 CONCLAVE_LLM_STAGE_TEMPERATURES 失败，使用默认值: %s", e)
     # 默认值（与原 STAGE_TEMPERATURES 常量一致）
     return {
-        "clarify": 0.0, "intra_team": 0.3, "cross_team": 0.0,
-        "evidence_check": 0.0, "arbitrate": 0.0, "produce": 0.1,
-        "produce_prd_openapi": 0.1, "produce_design_doc": 0.1,
-        "produce_comprehensive": 0.1, "produce_research_report": 0.1,
-        "produce_business_report": 0.1, "produce_code_analysis": 0.1,
-        "produce_tested_system": 0.1, "produce_deployable_service": 0.1,
+        "clarify": 0.0,
+        "intra_team": 0.3,
+        "cross_team": 0.0,
+        "evidence_check": 0.0,
+        "arbitrate": 0.0,
+        "produce": 0.1,
+        "produce_prd_openapi": 0.1,
+        "produce_design_doc": 0.1,
+        "produce_comprehensive": 0.1,
+        "produce_research_report": 0.1,
+        "produce_business_report": 0.1,
+        "produce_code_analysis": 0.1,
+        "produce_tested_system": 0.1,
+        "produce_deployable_service": 0.1,
     }
 
 
@@ -50,7 +59,10 @@ def STAGE_TEMPERATURES() -> dict[str, float]:
 
 class LLMClient(Protocol):
     """LLM 客户端协议：输入 prompt，返回解析后的 dict"""
-    async def complete(self, prompt: str, schema_hint: str = "") -> dict[str, Any]: ...
+
+    async def complete(
+        self, prompt: str, schema_hint: str = "", model_override: str = "", agent_role: str = ""
+    ) -> dict[str, Any]: ...
 
 
 class StubLLM:
@@ -255,7 +267,11 @@ class StubLLM:
                         "title": "技术调研报告",
                         "summary": "围绕会议决策系统的技术选型与可行性进行了调研。",
                         "findings": [
-                            {"topic": "LLM 集成方案", "detail": "采用 OpenAI 兼容接口，支持多模型切换。", "source": "技术调研"},
+                            {
+                                "topic": "LLM 集成方案",
+                                "detail": "采用 OpenAI 兼容接口，支持多模型切换。",
+                                "source": "技术调研",
+                            },
                             {"topic": "沙箱隔离", "detail": "Docker 容器隔离用户代码执行。", "source": "安全评估"},
                         ],
                         "analysis": "当前技术方案可行，需关注 LLM 调用成本和延迟。",
@@ -303,26 +319,26 @@ class StubLLM:
                             "from fastapi import FastAPI\n"
                             "from pydantic import BaseModel\n"
                             "\n"
-                            "app = FastAPI(title=\"Stub Wiki\")\n"
+                            'app = FastAPI(title="Stub Wiki")\n'
                             "\n"
                             "pages = {}\n"
                             "\n"
                             "class Page(BaseModel):\n"
                             "    title: str\n"
-                            "    content: str = \"\"\n"
+                            '    content: str = ""\n'
                             "\n"
-                            "@app.get(\"/health\")\n"
+                            '@app.get("/health")\n'
                             "def health():\n"
-                            "    return {\"status\": \"ok\"}\n"
+                            '    return {"status": "ok"}\n'
                             "\n"
-                            "@app.get(\"/pages/{title}\")\n"
+                            '@app.get("/pages/{title}")\n'
                             "def get_page(title: str):\n"
-                            "    return pages.get(title, {\"detail\": \"not found\"})\n"
+                            '    return pages.get(title, {"detail": "not found"})\n'
                             "\n"
-                            "@app.post(\"/pages\")\n"
+                            '@app.post("/pages")\n'
                             "def create_page(page: Page):\n"
                             "    pages[page.title] = page\n"
-                            "    return {\"status\": \"created\", \"title\": page.title}\n"
+                            '    return {"status": "created", "title": page.title}\n'
                         ),
                         "requirements_txt": "fastapi\nuvicorn[standard]\n",
                         "dockerfile": (
@@ -335,12 +351,7 @@ class StubLLM:
                             'CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]\n'
                         ),
                         "docker_compose": (
-                            "version: '3.8'\n"
-                            "services:\n"
-                            "  wiki:\n"
-                            "    build: .\n"
-                            "    ports:\n"
-                            "      - \"8000:8000\"\n"
+                            "version: '3.8'\nservices:\n  wiki:\n    build: .\n    ports:\n      - \"8000:8000\"\n"
                         ),
                         "readme": "# Stub Wiki\n\n开发降级模式生成的示例服务。\n\n## 启动\n```bash\npip install -r requirements.txt\nuvicorn app:app --host 0.0.0.0 --port 8000\n```\n",
                         "port": 8000,
@@ -420,7 +431,11 @@ class CircuitBreaker:
     状态机：closed → open（连续失败 >= threshold）→ half_open（冷却后）→ closed/half_open
     """
 
-    def __init__(self, failure_threshold: int = settings.llm_circuit_failure_threshold, recovery_timeout: float = settings.llm_circuit_recovery_timeout):
+    def __init__(
+        self,
+        failure_threshold: int = settings.llm_circuit_failure_threshold,
+        recovery_timeout: float = settings.llm_circuit_recovery_timeout,
+    ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self._failure_count = 0
@@ -435,6 +450,7 @@ class CircuitBreaker:
         """是否允许调用 LLM"""
         if self._state == "open":
             import time
+
             if time.monotonic() - self._opened_at >= self.recovery_timeout:
                 self._state = "half_open"
                 logger.info("熔断器进入 half_open 状态，尝试恢复")
@@ -453,18 +469,25 @@ class CircuitBreaker:
         if self._failure_count >= self.failure_threshold and self._state != "open":
             self._state = "open"
             import time
+
             self._opened_at = time.monotonic()
             logger.error(
                 "熔断器打开：连续失败 %d 次，%gs 内拒绝所有 LLM 调用",
-                self._failure_count, self.recovery_timeout,
+                self._failure_count,
+                self.recovery_timeout,
             )
             # 审计：熔断器跳闸
             try:
                 from app.observability.audit import audit
-                audit("system.llm_circuit_tripped", "error", {
-                    "failure_count": self._failure_count,
-                    "recovery_timeout_s": self.recovery_timeout,
-                })
+
+                audit(
+                    "system.llm_circuit_tripped",
+                    "error",
+                    {
+                        "failure_count": self._failure_count,
+                        "recovery_timeout_s": self.recovery_timeout,
+                    },
+                )
             except Exception:
                 pass
 
@@ -505,19 +528,29 @@ class RealLLM:
         self.api_key = settings.llm_api_key
         self.base_url = settings.llm_base_url or "https://api.openai.com/v1"
         self.model = settings.llm_model
-        self._client = httpx.AsyncClient(timeout=settings.llm_default_timeout)
+        # [SECURITY-FIX] 配置连接池限制 + 响应体大小保护
+        self._max_response_size = 10 * 1024 * 1024  # 10MB 响应体上限
+        self._client = httpx.AsyncClient(
+            timeout=settings.llm_default_timeout,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30,
+            ),
+        )
         # 接口是否支持 json_object 响应格式；遇到 400 时自动置 False 并回退
         # 注意：按 (base_url, model) 维度缓存，不同provider/model支持情况可能不同
         self._json_mode_supported: dict[str, bool] = {}
 
     def _resolve_config(self) -> tuple[str, str, str]:
         """解析当前调用应使用的 (base_url, api_key, model)
-        
+
         优先级：会议级覆盖 > 全局默认（环境变量）
         """
         try:
             from app.context import get_meeting_id
             from app.llm_providers import get_meeting_llm_config
+
             mid = get_meeting_id()
             if mid and mid != "-":
                 base_url, api_key, model, _pid = get_meeting_llm_config(mid)
@@ -537,13 +570,12 @@ class RealLLM:
 
     async def aclose(self) -> None:
         """关闭底层 httpx 连接池，防止事件循环关闭时挂起"""
-        try:
+        with contextlib.suppress(Exception):
             await self._client.aclose()
-        except Exception:
-            pass
 
-    async def complete(self, prompt: str, schema_hint: str = "",
-                       model_override: str = "", agent_role: str = "") -> dict[str, Any]:
+    async def complete(
+        self, prompt: str, schema_hint: str = "", model_override: str = "", agent_role: str = ""
+    ) -> dict[str, Any]:
         """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级
 
         model_override: per-role 或 per-stage 模型覆盖（格式: "provider_id:model_id" 或 "model_id"）
@@ -553,6 +585,7 @@ class RealLLM:
         if not _circuit_breaker.can_call():
             logger.warning("熔断器打开，跳过 LLM 调用，直接降级到 Stub")
             from app.observability.log_bus import log_bus
+
             log_bus.warning(
                 f"LLM 熔断器打开，直接降级: stage={schema_hint}",
                 logger="agents.llm",
@@ -568,10 +601,12 @@ class RealLLM:
         _log_base, _log_key, _log_model = self._resolve_config()
 
         # [FALLBACK] 上下文窗口管理：超长 prompt 自动截断
-        from app.llm_providers import trim_prompt_to_budget, estimate_tokens
+        from app.llm_providers import estimate_tokens, trim_prompt_to_budget
+
         prompt_token_est = estimate_tokens(prompt)
         if prompt_token_est > settings.llm_max_prompt_tokens:
             from app.observability.log_bus import log_bus
+
             log_bus.warning(
                 f"Prompt 超长 ({prompt_token_est} tokens), 自动截断到 {settings.llm_max_prompt_tokens}",
                 logger="agents.llm",
@@ -581,6 +616,7 @@ class RealLLM:
 
         # [FALLBACK] Provider 回退链：连接失败时尝试下一个 provider
         from app.llm_providers import get_fallback_chain
+
         fallback_chain = get_fallback_chain(model_override=model_override or None)
 
         current_prompt = prompt
@@ -594,7 +630,10 @@ class RealLLM:
             for attempt in range(1, self.MAX_ATTEMPTS + 1):
                 try:
                     content = await self._call_api(
-                        current_prompt, schema_desc, stage, attempt,
+                        current_prompt,
+                        schema_desc,
+                        stage,
+                        attempt,
                         config_override=(_p_url, _p_key, _p_model),
                         agent_role=agent_role,
                         provider_id=_p_id,
@@ -620,9 +659,13 @@ class RealLLM:
                     )
                     logger.info(
                         "阶段=%s attempt=%d provider=%s 解析成功 (temp=%.1f)",
-                        stage, attempt, _p_id, temp,
+                        stage,
+                        attempt,
+                        _p_id,
+                        temp,
                     )
                     from app.observability.log_bus import log_bus
+
                     log_bus.info(
                         f"LLM 调用成功: stage={stage}, attempt={attempt}, provider={_p_id}",
                         logger="agents.llm",
@@ -631,36 +674,31 @@ class RealLLM:
                     if schema_hint == "intra_team" and isinstance(result, dict):
                         claims_val = result.get("claims")
                         if not claims_val:
-                            raise ValueError(
-                                "intra_team 阶段 claims 为空，LLM 未输出有效论点"
-                            )
+                            raise ValueError("intra_team 阶段 claims 为空，LLM 未输出有效论点")
                     # produce 阶段：校验代码类产出的关键字段非空
                     if schema_hint.startswith("produce") and isinstance(result, dict):
                         _ds = result.get("deployable_service")
                         if isinstance(_ds, dict) and not _ds.get("app_code"):
-                            raise ValueError(
-                                "deployable_service.app_code 为空，LLM 未生成有效应用代码"
-                            )
+                            raise ValueError("deployable_service.app_code 为空，LLM 未生成有效应用代码")
                         _ca = result.get("code_analysis")
                         if isinstance(_ca, dict) and not _ca.get("code"):
-                            raise ValueError(
-                                "code_analysis.code 为空，LLM 未生成有效代码"
-                            )
+                            raise ValueError("code_analysis.code 为空，LLM 未生成有效代码")
                         _ts = result.get("tested_system")
                         if isinstance(_ts, dict) and not _ts.get("main_code") and not _ts.get("test_code"):
-                            raise ValueError(
-                                "tested_system 主代码和测试代码均为空"
-                            )
+                            raise ValueError("tested_system 主代码和测试代码均为空")
                     _circuit_breaker.record_success()
-                    return result
+                    return result  # type: ignore[no-any-return]
                 except (httpx.ConnectError, httpx.TimeoutException) as conn_err:
                     # 连接级错误：切换到下一个 provider
                     last_error = f"{_p_id}: {type(conn_err).__name__}: {conn_err}"
                     logger.warning(
                         "阶段=%s provider=%s 连接失败, 尝试下一个 provider: %s",
-                        stage, _p_id, last_error[:200],
+                        stage,
+                        _p_id,
+                        last_error[:200],
                     )
                     from app.observability.log_bus import log_bus
+
                     log_bus.warning(
                         f"Provider {_p_id} 连接失败, 尝试回退",
                         logger="agents.llm",
@@ -687,6 +725,7 @@ class RealLLM:
         logger.error("阶段=%s 三次重试全部失败，降级到 StubLLM。最后错误: %s", stage, last_error[:300])
         # 旁路日志：LLM 降级
         from app.observability.log_bus import log_bus
+
         log_bus.error(
             f"LLM 降级到 StubLLM: stage={stage}",
             logger="agents.llm",
@@ -763,8 +802,7 @@ class RealLLM:
         system_content = "你是会议决策助手，严格输出 JSON，不要输出多余文本。"
         if schema_desc:
             system_content += (
-                "\n输出必须严格符合以下 JSON Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n"
-                f"{schema_desc}"
+                f"\n输出必须严格符合以下 JSON Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n{schema_desc}"
             )
         # 关闭 Qwen3.5 思考模式，防止思考过程干扰 JSON 输出
         if settings.llm_no_think:
@@ -794,6 +832,10 @@ class RealLLM:
         t0 = time.monotonic()
         try:
             resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)
+            # [SECURITY-FIX] 检查响应大小，防止恶意/故障端点返回超大响应体
+            content_length = resp.headers.get("content-length")
+            if content_length and int(content_length) > self._max_response_size:
+                raise ValueError(f"LLM response too large: {content_length} bytes (max {self._max_response_size})")
             resp.raise_for_status()
             latency_ms = int((time.monotonic() - t0) * 1000)
         except httpx.HTTPStatusError as e:
@@ -852,9 +894,15 @@ class RealLLM:
                     error_detail=f"HTTPStatusError: {e.response.status_code} {e.response.text[:300]}",
                 )
                 raise
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout,
-                httpx.PoolTimeout, httpx.NetworkError, httpx.TimeoutException,
-                OSError) as e:
+        except (
+            httpx.ConnectError,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+            httpx.NetworkError,
+            httpx.TimeoutException,
+            OSError,
+        ) as e:
             # 网络级错误（连接失败、超时等）：必须先记录调用再抛出，
             # 否则 complete() 中的 update_last_record 会污染上一条成功记录
             latency_ms = int((time.monotonic() - t0) * 1000)
@@ -906,7 +954,8 @@ class RealLLM:
         # （estimate_llm_cost 内部会优先查 llm_providers 的多厂商定价表）
         try:
             from app.observability.cost_tracker import get_cost_tracker
-            get_cost_tracker().record_llm(
+
+            await get_cost_tracker().record_llm(
                 node=stage,
                 model=model,
                 input_tokens=input_tokens,
@@ -915,7 +964,7 @@ class RealLLM:
             )
         except Exception:
             pass
-        return content
+        return content  # type: ignore[no-any-return]
 
     @staticmethod
     def _looks_like_json_mode_error(e: httpx.HTTPStatusError) -> bool:

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from conclave_core.conclusion_chain import ConclusionChain, ConsistencyResult, LockedConclusion
 
 
-def lock_conclusion(chain: "ConclusionChain", stage: str, content: dict[str, Any]) -> "LockedConclusion":
+def lock_conclusion(chain: ConclusionChain, stage: str, content: dict[str, Any]) -> LockedConclusion:
     """锁定一个阶段结论，返回 LockedConclusion
 
     - content_hash = sha256(json.dumps(content, sort_keys=True))[:12]
@@ -19,9 +19,9 @@ def lock_conclusion(chain: "ConclusionChain", stage: str, content: dict[str, Any
     """
     from conclave_core.conclusion_chain import LockedConclusion
 
-    content_hash = hashlib.sha256(
-        json.dumps(content, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    ).hexdigest()[:12]
+    content_hash = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[
+        :12
+    ]
     conclusion = LockedConclusion(
         conclusion_id=f"locked-{stage}-{content_hash}",
         stage=stage,
@@ -33,7 +33,7 @@ def lock_conclusion(chain: "ConclusionChain", stage: str, content: dict[str, Any
     return conclusion
 
 
-def get_locked_context(chain: "ConclusionChain", current_stage: str) -> str:
+def get_locked_context(chain: ConclusionChain, current_stage: str) -> str:
     """生成给当前阶段的'已确认结论'上下文文本，注入 prompt
 
     把所有已锁定结论格式化为扁平文本：
@@ -44,9 +44,7 @@ def get_locked_context(chain: "ConclusionChain", current_stage: str) -> str:
     """
     if not chain.conclusions:
         return ""
-    lines: list[str] = [
-        "【已确认结论 - 以下结论已锁定，你的输出必须基于这些结论，不得与之矛盾】"
-    ]
+    lines: list[str] = ["【已确认结论 - 以下结论已锁定，你的输出必须基于这些结论，不得与之矛盾】"]
     for c in chain.conclusions:
         lines.append(f"【已确认结论 - {c.stage}阶段】")
         for key, value in c.content.items():
@@ -55,7 +53,7 @@ def get_locked_context(chain: "ConclusionChain", current_stage: str) -> str:
     return "\n".join(lines)
 
 
-def check_consistency(chain: "ConclusionChain", new_output: dict[str, Any], current_stage: str) -> "ConsistencyResult":
+def check_consistency(chain: ConclusionChain, new_output: dict[str, Any], current_stage: str) -> ConsistencyResult:
     """检查新输出是否与已锁定结论矛盾
 
     简化实现：基于关键词和字段存在性，不做语义理解。
@@ -91,8 +89,7 @@ def check_consistency(chain: "ConclusionChain", new_output: dict[str, Any], curr
                         has_topic = any(kw in text for kw in topic_keywords)
                         if has_neg and has_topic:
                             violations.append(
-                                f"输出可能否定了已确认议题「{topic}」"
-                                f"（检测到否定词与议题关键词同时出现）"
+                                f"输出可能否定了已确认议题「{topic}」（检测到否定词与议题关键词同时出现）"
                             )
                             break
 
@@ -112,9 +109,7 @@ def check_consistency(chain: "ConclusionChain", new_output: dict[str, Any], curr
                         any_match = True
                         break
                 if not any_match:
-                    violations.append(
-                        f"PRD 未包含任何已采纳结论的核心内容：{adopted_claims}"
-                    )
+                    violations.append(f"PRD 未包含任何已采纳结论的核心内容：{adopted_claims}")
 
     # ---------- 规则3：裁决不得推翻高风险论点 ----------
     if current_stage == "arbitrate":
@@ -135,9 +130,7 @@ def check_consistency(chain: "ConclusionChain", new_output: dict[str, Any], curr
                     has_neg = any(neg in rationale for neg in negation_words)
                     has_claim = any(kw in rationale for kw in claim_keywords)
                     if has_neg and has_claim:
-                        violations.append(
-                            f"裁决可能推翻了高风险论点：{claim_text}"
-                        )
+                        violations.append(f"裁决可能推翻了高风险论点：{claim_text}")
                         break
 
     return ConsistencyResult(
@@ -146,7 +139,7 @@ def check_consistency(chain: "ConclusionChain", new_output: dict[str, Any], curr
     )
 
 
-def get_chain_summary(chain: "ConclusionChain") -> dict[str, Any]:
+def get_chain_summary(chain: ConclusionChain) -> dict[str, Any]:
     """返回链摘要，用于 trace 和 state 持久化"""
     return {
         "meeting_id": chain.meeting_id,

@@ -147,13 +147,26 @@ from __future__ import annotations
 
 from typing import Any
 
-
-SUPPORTED_BLOCK_TYPES = frozenset({
-    "paragraph", "list", "findings", "code", "api_table",
-    "kpi_grid", "conflicts", "risks", "timeline", "data_model",
-    "test_groups", "file_tree", "field", "team_config",
-    "attachments", "raw",
-})
+SUPPORTED_BLOCK_TYPES = frozenset(
+    {
+        "paragraph",
+        "list",
+        "findings",
+        "code",
+        "api_table",
+        "kpi_grid",
+        "conflicts",
+        "risks",
+        "timeline",
+        "data_model",
+        "test_groups",
+        "file_tree",
+        "field",
+        "team_config",
+        "attachments",
+        "raw",
+    }
+)
 
 
 def build_report_layout(
@@ -189,16 +202,19 @@ def build_report_layout(
     if builder is None:
         builder = _build_generic_layout
 
-    layout = builder(artifact, {
-        "meeting_meta": meeting_meta or {},
-        "confidence": confidence or {},
-        "decisions": decisions or [],
-        "adopted_claims": adopted_claims or [],
-        "key_questions": key_questions or [],
-        "team_config": team_config or [],
-        "conflicts": conflicts or [],
-        "llm_trace": llm_trace or {},
-    })
+    layout = builder(
+        artifact,
+        {
+            "meeting_meta": meeting_meta or {},
+            "confidence": confidence or {},
+            "decisions": decisions or [],
+            "adopted_claims": adopted_claims or [],
+            "key_questions": key_questions or [],
+            "team_config": team_config or [],
+            "conflicts": conflicts or [],
+            "llm_trace": llm_trace or {},
+        },
+    )
 
     layout["type"] = deliverable_type
     layout.setdefault("sections", [])
@@ -223,9 +239,13 @@ def _build_generic_layout(artifact: dict, ctx: dict) -> dict:
                     blocks.append({"type": "raw", "data": {"text": str(val)}})
             sections.append({"id": key, "title": key.replace("_", " ").title(), "blocks": blocks})
         elif isinstance(value, str) and len(value) > 100:
-            sections.append({"id": key, "title": key.replace("_", " ").title(), "blocks": [
-                {"type": "code", "data": {"code": value, "lang": "TEXT"}}
-            ]})
+            sections.append(
+                {
+                    "id": key,
+                    "title": key.replace("_", " ").title(),
+                    "blocks": [{"type": "code", "data": {"code": value, "lang": "TEXT"}}],
+                }
+            )
 
     _append_appendix_section(sections, ctx)
     return {"title": artifact.get("title", "未命名报告"), "subtitle": "", "sections": sections}
@@ -272,8 +292,14 @@ def _build_prd_openapi_layout(artifact: dict, ctx: dict) -> dict:
                 {"type": "field", "data": {"label": "title", "value": prd.get("title", "")}},
                 {"type": "field", "data": {"label": "goal", "value": prd.get("goal", "")}},
                 {"type": "field", "data": {"label": "scope", "value": prd.get("scope", "")}},
-                {"type": "list", "data": {"items": prd.get("assumptions", []), "ordered": False}, },
-                {"type": "list", "data": {"items": prd.get("constraints", []), "ordered": False}, },
+                {
+                    "type": "list",
+                    "data": {"items": prd.get("assumptions", []), "ordered": False},
+                },
+                {
+                    "type": "list",
+                    "data": {"items": prd.get("constraints", []), "ordered": False},
+                },
                 {"type": "api_table", "data": {"endpoints": prd.get("api_endpoints", [])}},
                 {"type": "list", "data": {"items": prd.get("open_questions", []), "ordered": False}},
             ],
@@ -304,7 +330,7 @@ def _build_research_report_layout(artifact: dict, ctx: dict) -> dict:
     findings = r.get("findings", [])
     finding_items = [
         {
-            "num": f"{i+1:02d}",
+            "num": f"{i + 1:02d}",
             "topic": f.get("topic", ""),
             "detail": f.get("detail", ""),
             "trace": f.get("trace"),
@@ -551,11 +577,13 @@ def _build_code_analysis_layout(artifact: dict, ctx: dict) -> dict:
         },
     ]
     if exec_result:
-        sections.append({
-            "id": "execution",
-            "title": "执行结果",
-            "blocks": _build_execution_blocks(exec_result),
-        })
+        sections.append(
+            {
+                "id": "execution",
+                "title": "执行结果",
+                "blocks": _build_execution_blocks(exec_result),
+            }
+        )
     _append_appendix_section(sections, ctx)
     return {"title": prd.get("title", ca.get("title", "")), "subtitle": meta.get("topic", ""), "sections": sections}
 
@@ -592,11 +620,13 @@ def _build_data_science_layout(artifact: dict, ctx: dict) -> dict:
         },
     ]
     if exec_result:
-        sections.append({
-            "id": "execution",
-            "title": "执行结果",
-            "blocks": _build_execution_blocks(exec_result),
-        })
+        sections.append(
+            {
+                "id": "execution",
+                "title": "执行结果",
+                "blocks": _build_execution_blocks(exec_result),
+            }
+        )
     _append_appendix_section(sections, ctx)
     return {"title": prd.get("title", ca.get("title", "")), "subtitle": meta.get("topic", ""), "sections": sections}
 
@@ -648,11 +678,13 @@ def _build_tested_system_layout(artifact: dict, ctx: dict) -> dict:
         },
     ]
     if exec_result:
-        sections.append({
-            "id": "test_results",
-            "title": "测试结果",
-            "blocks": _build_test_result_blocks(exec_result),
-        })
+        sections.append(
+            {
+                "id": "test_results",
+                "title": "测试结果",
+                "blocks": _build_test_result_blocks(exec_result),
+            }
+        )
     _append_appendix_section(sections, ctx)
     return {"title": ts.get("title", prd.get("title", "")), "subtitle": meta.get("topic", ""), "sections": sections}
 
@@ -707,32 +739,40 @@ def _build_deployable_service_layout(artifact: dict, ctx: dict) -> dict:
         },
     ]
     if review:
-        sections.append({
-            "id": "code_review",
-            "title": "代码审查",
-            "blocks": [
-                {"type": "field", "data": {"label": "结果", "value": review.get("result", "")}},
-                {"type": "list", "data": {"items": review.get("issues", []), "ordered": False}},
-            ],
-        })
+        sections.append(
+            {
+                "id": "code_review",
+                "title": "代码审查",
+                "blocks": [
+                    {"type": "field", "data": {"label": "结果", "value": review.get("result", "")}},
+                    {"type": "list", "data": {"items": review.get("issues", []), "ordered": False}},
+                ],
+            }
+        )
     if exec_result and "tests" in str(exec_result):
-        sections.append({
-            "id": "test_results",
-            "title": "测试结果",
-            "blocks": _build_test_result_blocks(exec_result),
-        })
+        sections.append(
+            {
+                "id": "test_results",
+                "title": "测试结果",
+                "blocks": _build_test_result_blocks(exec_result),
+            }
+        )
     if ds.get("dockerfile"):
-        sections.append({
-            "id": "dockerfile",
-            "title": "Dockerfile",
-            "blocks": [{"type": "code", "data": {"code": ds.get("dockerfile", ""), "lang": "DOCKER"}}],
-        })
+        sections.append(
+            {
+                "id": "dockerfile",
+                "title": "Dockerfile",
+                "blocks": [{"type": "code", "data": {"code": ds.get("dockerfile", ""), "lang": "DOCKER"}}],
+            }
+        )
     if ds.get("docker_compose"):
-        sections.append({
-            "id": "docker_compose",
-            "title": "docker-compose.yml",
-            "blocks": [{"type": "code", "data": {"code": ds.get("docker_compose", ""), "lang": "YAML"}}],
-        })
+        sections.append(
+            {
+                "id": "docker_compose",
+                "title": "docker-compose.yml",
+                "blocks": [{"type": "code", "data": {"code": ds.get("docker_compose", ""), "lang": "YAML"}}],
+            }
+        )
     _append_appendix_section(sections, ctx)
     return {"title": prd.get("title", ""), "subtitle": meta.get("topic", ""), "sections": sections}
 
@@ -743,15 +783,17 @@ def _append_appendix_section(sections: list, ctx: dict) -> None:
     trace = ctx.get("llm_trace", {})
     if not trace:
         return
-    sections.append({
-        "id": "appendix",
-        "title": "附录",
-        "blocks": [
-            {"type": "field", "data": {"label": "LLM 调用次数", "value": str(trace.get("total_calls", "—"))}},
-            {"type": "field", "data": {"label": "成功率", "value": trace.get("success_rate", "—")}},
-            {"type": "field", "data": {"label": "总 Token", "value": str(trace.get("total_tokens", "—"))}},
-        ],
-    })
+    sections.append(
+        {
+            "id": "appendix",
+            "title": "附录",
+            "blocks": [
+                {"type": "field", "data": {"label": "LLM 调用次数", "value": str(trace.get("total_calls", "—"))}},
+                {"type": "field", "data": {"label": "成功率", "value": trace.get("success_rate", "—")}},
+                {"type": "field", "data": {"label": "总 Token", "value": str(trace.get("total_tokens", "—"))}},
+            ],
+        }
+    )
 
 
 def _enrich_conflicts(conflicts: list, decisions: list) -> list:
@@ -761,14 +803,16 @@ def _enrich_conflicts(conflicts: list, decisions: list) -> list:
     for i, c in enumerate(conflicts):
         cid = c.get("id", f"conflict-{i}")
         dec = decision_map.get(cid, {})
-        result.append({
-            "summary": c.get("summary", ""),
-            "sideA": c.get("side_a", c.get("sideA", "")),
-            "sideB": c.get("side_b", c.get("sideB", "")),
-            "verdict": c.get("verdict", "compromise"),
-            "rationale": dec.get("rationale", c.get("rationale", "")),
-            "trace": c.get("trace"),
-        })
+        result.append(
+            {
+                "summary": c.get("summary", ""),
+                "sideA": c.get("side_a", c.get("sideA", "")),
+                "sideB": c.get("side_b", c.get("sideB", "")),
+                "verdict": c.get("verdict", "compromise"),
+                "rationale": dec.get("rationale", c.get("rationale", "")),
+                "trace": c.get("trace"),
+            }
+        )
     return result
 
 
@@ -776,7 +820,7 @@ def _parse_risks_from_text(text: str) -> list:
     """从风险评估文本中解析风险项"""
     if not text:
         return []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
     risks = []
     for line in lines:
         level = "mid"
@@ -794,9 +838,9 @@ def _parse_risks_from_list(items: list) -> list:
     return [{"level": "mid", "desc": str(item)} for item in items]
 
 
-def _parse_entities(entities: list) -> list:
+def _parse_entities(entities: list) -> list[dict[str, Any]]:
     """解析数据模型实体"""
-    result = []
+    result: list[dict[str, Any]] = []
     for e in entities:
         if isinstance(e, str):
             parts = e.split(":", 1)
@@ -804,10 +848,12 @@ def _parse_entities(entities: list) -> list:
             fields = [f.strip() for f in parts[1].split(",")] if len(parts) > 1 else []
             result.append({"entity": name, "fields": fields})
         elif isinstance(e, dict):
-            result.append({
-                "entity": e.get("entity", e.get("name", "")),
-                "fields": e.get("fields", []),
-            })
+            result.append(
+                {
+                    "entity": str(e.get("entity", e.get("name", ""))),
+                    "fields": e.get("fields", []),
+                }
+            )
     return result
 
 
@@ -818,11 +864,13 @@ def _parse_file_tree(items: list) -> list:
     result = []
     for item in items:
         if isinstance(item, dict):
-            result.append({
-                "name": item.get("name", ""),
-                "type": item.get("type", "file"),
-                "indent": item.get("indent", item.get("level", 0)),
-            })
+            result.append(
+                {
+                    "name": item.get("name", ""),
+                    "type": item.get("type", "file"),
+                    "indent": item.get("indent", item.get("level", 0)),
+                }
+            )
         elif isinstance(item, str):
             indent = len(item) - len(item.lstrip())
             name = item.strip()
@@ -867,7 +915,12 @@ def _build_deploy_status_blocks(deployment: dict, exec_result: dict) -> list:
     blocks = []
     if deployment:
         blocks.append({"type": "field", "data": {"label": "服务地址", "value": deployment.get("access_url", "—")}})
-        blocks.append({"type": "field", "data": {"label": "部署状态", "value": "健康运行中" if deployment.get("ok") else "部署失败"}})
+        blocks.append(
+            {
+                "type": "field",
+                "data": {"label": "部署状态", "value": "健康运行中" if deployment.get("ok") else "部署失败"},
+            }
+        )
         blocks.append({"type": "field", "data": {"label": "部署时间", "value": deployment.get("deployed_at", "—")}})
     else:
         blocks.append({"type": "paragraph", "data": {"text": "部署信息不可用"}})

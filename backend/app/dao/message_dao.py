@@ -3,6 +3,7 @@
 提供保存与按会议列出发言记录的能力。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
 import json

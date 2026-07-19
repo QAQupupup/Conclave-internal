@@ -1,7 +1,6 @@
 # 一致性自检：置信度相关纯函数
 from __future__ import annotations
 
-
 _CONFIDENCE_RANK: dict[str, int] = {"high": 0, "low": 1, "fallback": 2}
 
 

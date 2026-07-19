@@ -3,7 +3,8 @@
 # Phase 3 将逐阶段替换为基于 AgentResult 的直接状态写入，并移除旧节点。
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.models import MeetingState
 
@@ -17,7 +18,7 @@ async def reduce_clarify(
     from app.orchestrator.stage_runners import run_clarify
 
     # clarify 是单任务，结果在第一个（也是唯一一个）task result 中
-    task_result = next(iter(results.values()), {}) if results else {}
+    task_result: Any = next(iter(results.values()), {}) if results else {}
     agent_result = task_result.get("payload", {}) if isinstance(task_result, dict) else {}
     confidence = task_result.get("confidence", "high") if isinstance(task_result, dict) else "high"
     return await run_clarify(state, agent_result, confidence)
@@ -32,7 +33,7 @@ async def reduce_intra_team(
     from app.orchestrator.stage_runners import run_intra_team
 
     role_results: list[dict[str, Any]] = []
-    for task_id, task_result in results.items():
+    for _task_id, task_result in results.items():
         if not isinstance(task_result, dict):
             continue
         payload = task_result.get("payload", {})
@@ -42,17 +43,20 @@ async def reduce_intra_team(
         react = meta.get("react") or payload.get("react", False)
         confidence = task_result.get("confidence", "high")
         claims = payload.get("claims", []) if isinstance(payload, dict) else []
-        role_results.append({
-            "role": role,
-            "stance": stance,
-            "claims": claims,
-            "confidence": confidence,
-            "react": react,
-        })
+        role_results.append(
+            {
+                "role": role,
+                "stance": stance,
+                "claims": claims,
+                "confidence": confidence,
+                "react": react,
+            }
+        )
 
     if not role_results:
         # 兜底：若 Scheduler 未产生可用结果，回退到旧节点（兼容层保险）
         from app.orchestrator.nodes.intra_team import intra_team_node
+
         return await intra_team_node(state)
 
     return await run_intra_team(state, role_results)
@@ -66,7 +70,7 @@ async def reduce_cross_team(
     """cross_team 阶段归约"""
     from app.orchestrator.stage_runners import run_cross_team
 
-    task_result = next(iter(results.values()), {}) if results else {}
+    task_result: Any = next(iter(results.values()), {}) if results else {}
     agent_result = task_result.get("payload", {}) if isinstance(task_result, dict) else {}
     confidence = task_result.get("confidence", "high") if isinstance(task_result, dict) else "high"
     return await run_cross_team(state, agent_result, confidence)
@@ -81,7 +85,7 @@ async def reduce_evidence_check(
     from app.orchestrator.stage_runners import run_evidence_check
 
     conflict_results: list[dict[str, Any]] = []
-    for task_id, task_result in results.items():
+    for _task_id, task_result in results.items():
         if not isinstance(task_result, dict):
             continue
         payload = task_result.get("payload", {})
@@ -90,17 +94,21 @@ async def reduce_evidence_check(
         if not conflict:
             # 回退：结果格式不符，委托旧节点
             from app.orchestrator.nodes.evidence_check import evidence_check_node
+
             return await evidence_check_node(state)
         confidence = task_result.get("confidence", "high")
-        conflict_results.append({
-            "conflict": conflict,
-            "evidence_chunks": [],
-            "result": payload,
-            "confidence": confidence,
-        })
+        conflict_results.append(
+            {
+                "conflict": conflict,
+                "evidence_chunks": [],
+                "result": payload,
+                "confidence": confidence,
+            }
+        )
 
     if not conflict_results:
         from app.orchestrator.nodes.evidence_check import evidence_check_node
+
         return await evidence_check_node(state)
 
     return await run_evidence_check(state, conflict_results)
@@ -114,7 +122,7 @@ async def reduce_arbitrate(
     """arbitrate 阶段归约"""
     from app.orchestrator.stage_runners import run_arbitrate
 
-    task_result = next(iter(results.values()), {}) if results else {}
+    task_result: Any = next(iter(results.values()), {}) if results else {}
     agent_result = task_result.get("payload", {}) if isinstance(task_result, dict) else {}
     confidence = task_result.get("confidence", "high") if isinstance(task_result, dict) else "high"
     return await run_arbitrate(state, agent_result, confidence)
@@ -131,7 +139,7 @@ async def reduce_produce(
     return await produce_node(state)
 
 
-_STAGE_REDUCERS: dict[str, Callable[[MeetingState, str, dict[str, Any]], Any]] = {
+_STAGE_REDUCERS: dict[str, Callable[[MeetingState, str, dict[str, Any]], Awaitable[MeetingState]]] = {
     "clarify": reduce_clarify,
     "intra_team": reduce_intra_team,
     "cross_team": reduce_cross_team,
@@ -153,7 +161,7 @@ async def reduce_stage_results(
     return await reducer(state, stage, results)
 
 
-def get_stage_reducer(stage: str) -> Callable[[MeetingState, str, dict[str, Any]], Any]:
+def get_stage_reducer(stage: str) -> Callable[[MeetingState, str, dict[str, Any]], Awaitable[MeetingState]]:
     """获取阶段 reducer（兼容层，供 Manager 使用）"""
     reducer = _STAGE_REDUCERS.get(stage)
     if reducer is None:

@@ -6,11 +6,13 @@ from pydantic import BaseModel, Field
 
 class BaselineRequest(BaseModel):
     """创建基线请求"""
+
     meeting_id: str = Field(..., description="会议 ID")
 
 
 class BaselineSummary(BaseModel):
     """基线摘要（列表项）"""
+
     baseline_id: str
     created_at: str
     meeting_id: str

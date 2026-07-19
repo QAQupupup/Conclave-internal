@@ -28,11 +28,12 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from app.tools.playwright.session_pool import SessionPool
+
 # ---------------------------------------------------------------------------
 # 被测试模块
 # ---------------------------------------------------------------------------
 from app.tools.playwright_search import PlaywrightWebSearch, _is_safe_url
-from app.tools.playwright.session_pool import SessionPool
 from app.tools.search_engine import (
     EngineHealth,
     MultiEngineSearch,
@@ -41,10 +42,10 @@ from app.tools.search_engine import (
     SearchResult,
 )
 
-
 # ============================================================================
 # 1. PlaywrightWebSearch._split_into_chunks() — 文本分块逻辑
 # ============================================================================
+
 
 class TestSplitIntoChunks:
     """测试静态方法 _split_into_chunks：按句子边界分割长文本。"""
@@ -121,6 +122,7 @@ class TestSplitIntoChunks:
 # 2. _is_safe_url() — SSRF 安全校验
 # ============================================================================
 
+
 class TestIsSafeUrl:
     """测试 URL 安全校验函数：防止 SSRF 攻击。"""
 
@@ -137,11 +139,11 @@ class TestIsSafeUrl:
         assert reason == "ok"
 
     def test_accepts_url_with_query_params(self):
-        ok, reason = _is_safe_url("https://www.google.com/search?q=test")
+        ok, _reason = _is_safe_url("https://www.google.com/search?q=test")
         assert ok is True
 
     def test_accepts_url_with_port(self):
-        ok, reason = _is_safe_url("https://api.example.com:8443/v1/data")
+        ok, _reason = _is_safe_url("https://api.example.com:8443/v1/data")
         assert ok is True
 
     # ---- 拒绝危险协议 ----
@@ -152,27 +154,27 @@ class TestIsSafeUrl:
         assert "file" in reason.lower() or "scheme" in reason.lower()
 
     def test_rejects_data_scheme(self):
-        ok, reason = _is_safe_url("data:text/html,<script>alert(1)</script>")
+        ok, _reason = _is_safe_url("data:text/html,<script>alert(1)</script>")
         assert ok is False
 
     def test_rejects_javascript_scheme(self):
-        ok, reason = _is_safe_url("javascript:alert(1)")
+        ok, _reason = _is_safe_url("javascript:alert(1)")
         assert ok is False
 
     def test_rejects_vbscript_scheme(self):
-        ok, reason = _is_safe_url("vbscript:msgbox(1)")
+        ok, _reason = _is_safe_url("vbscript:msgbox(1)")
         assert ok is False
 
     def test_rejects_about_scheme(self):
-        ok, reason = _is_safe_url("about:blank")
+        ok, _reason = _is_safe_url("about:blank")
         assert ok is False
 
     def test_rejects_blob_scheme(self):
-        ok, reason = _is_safe_url("blob:https://example.com/uuid")
+        ok, _reason = _is_safe_url("blob:https://example.com/uuid")
         assert ok is False
 
     def test_rejects_empty_scheme(self):
-        ok, reason = _is_safe_url("//example.com/path")
+        ok, _reason = _is_safe_url("//example.com/path")
         assert ok is False
 
     # ---- 拒绝私网 / localhost ----
@@ -183,36 +185,34 @@ class TestIsSafeUrl:
         assert "localhost" in reason
 
     def test_rejects_loopback_ip(self):
-        ok, reason = _is_safe_url("http://127.0.0.1:8080/api")
+        ok, _reason = _is_safe_url("http://127.0.0.1:8080/api")
         assert ok is False
 
     def test_rejects_private_192_168(self):
-        ok, reason = _is_safe_url("http://192.168.1.1/admin")
+        ok, _reason = _is_safe_url("http://192.168.1.1/admin")
         assert ok is False
 
     def test_rejects_private_10(self):
-        ok, reason = _is_safe_url("http://10.0.0.1/internal")
+        ok, _reason = _is_safe_url("http://10.0.0.1/internal")
         assert ok is False
 
     def test_rejects_private_172_16(self):
-        ok, reason = _is_safe_url("http://172.16.0.1/secret")
+        ok, _reason = _is_safe_url("http://172.16.0.1/secret")
         assert ok is False
 
     def test_rejects_link_local(self):
-        ok, reason = _is_safe_url("http://169.254.169.254/latest/meta-data/")
+        ok, _reason = _is_safe_url("http://169.254.169.254/latest/meta-data/")
         assert ok is False
 
     # ---- 拒绝元数据端点 ----
 
     def test_rejects_metadata_google(self):
-        ok, reason = _is_safe_url(
-            "http://metadata.google.internal/computeMetadata/v1/"
-        )
+        ok, reason = _is_safe_url("http://metadata.google.internal/computeMetadata/v1/")
         assert ok is False
         assert "metadata" in reason
 
     def test_rejects_metadata_generic(self):
-        ok, reason = _is_safe_url("http://metadata/")
+        ok, _reason = _is_safe_url("http://metadata/")
         assert ok is False
 
     # ---- 拒绝 userinfo 绕过 ----
@@ -224,7 +224,7 @@ class TestIsSafeUrl:
         assert "userinfo" in reason.lower() or "绕过" in reason
 
     def test_rejects_userinfo_with_password(self):
-        ok, reason = _is_safe_url("https://user:pass@example.com/")
+        ok, _reason = _is_safe_url("https://user:pass@example.com/")
         assert ok is False
 
     # ---- 边界情况 ----
@@ -237,7 +237,7 @@ class TestIsSafeUrl:
 
     def test_rejects_malformed_url(self):
         """完全无法解析的 URL。"""
-        ok, reason = _is_safe_url("not-a-valid-url!!!")
+        ok, _reason = _is_safe_url("not-a-valid-url!!!")
         # 实际上 urlparse 会把它当作 path，hostname 为空
         assert ok is False
 
@@ -245,6 +245,7 @@ class TestIsSafeUrl:
 # ============================================================================
 # 3. SessionPool 基本操作
 # ============================================================================
+
 
 class TestSessionPool:
     """测试浏览器 Context 池：按 session_key 分配/复用 Context。"""
@@ -263,9 +264,7 @@ class TestSessionPool:
         """创建 mock 浏览器，new_context() 每次返回新的 mock Context。"""
         browser = MagicMock()
         # 使用 side_effect 确保每次调用返回不同实例
-        browser.new_context = AsyncMock(
-            side_effect=lambda **kwargs: self._make_mock_ctx()
-        )
+        browser.new_context = AsyncMock(side_effect=lambda **kwargs: self._make_mock_ctx())
         return browser
 
     @pytest.mark.asyncio
@@ -383,6 +382,7 @@ class TestSessionPool:
 # 4. _translate_query — 纯英文直通路径
 # ============================================================================
 
+
 class TestTranslateQuery:
     """测试查询翻译：纯英文查询应直接返回，不调用 API。"""
 
@@ -406,9 +406,7 @@ class TestTranslateQuery:
     @pytest.mark.asyncio
     async def test_pure_english_with_special_chars(self, searcher):
         """含特殊字符的英文查询应直通。"""
-        result = await searcher._translate_query(
-            "C++ std::vector vs std::list performance"
-        )
+        result = await searcher._translate_query("C++ std::vector vs std::list performance")
         assert result == "C++ std::vector vs std::list performance"
 
     @pytest.mark.asyncio
@@ -434,6 +432,7 @@ class TestTranslateQuery:
 # ============================================================================
 # 5. search() 方法基本参数传递（mock browser + context）
 # ============================================================================
+
 
 class TestSearchMethod:
     """测试 search() 方法的基本参数传递和流程控制。
@@ -473,11 +472,9 @@ class TestSearchMethod:
         return mock_browser, mock_context, mock_page
 
     @pytest.mark.asyncio
-    async def test_search_english_query_no_translation(
-        self, searcher, mock_browser_and_context
-    ):
+    async def test_search_english_query_no_translation(self, searcher, mock_browser_and_context):
         """英文查询不应触发翻译，直接搜索。"""
-        mock_browser, mock_context, mock_page = mock_browser_and_context
+        mock_browser, _mock_context, _mock_page = mock_browser_and_context
 
         # Mock _ensure_browser 设置 _browser
         searcher._browser = mock_browser
@@ -485,9 +482,7 @@ class TestSearchMethod:
         searcher._session_warmed = True
 
         # Mock _search_ddg 返回空（避免测试 Bing 搜索流程）
-        with patch.object(
-            searcher, "_search_ddg", new_callable=AsyncMock
-        ) as mock_ddg:
+        with patch.object(searcher, "_search_ddg", new_callable=AsyncMock) as mock_ddg:
             mock_ddg.return_value = []
             results = await searcher.search("Python async programming", top_k=3)
 
@@ -501,34 +496,26 @@ class TestSearchMethod:
     @pytest.mark.asyncio
     async def test_search_passes_session_key(self, searcher, mock_browser_and_context):
         """search() 应将 session_key 传递给 _do_search。"""
-        mock_browser, mock_context, mock_page = mock_browser_and_context
+        mock_browser, _mock_context, _mock_page = mock_browser_and_context
         searcher._browser = mock_browser
         searcher._session_warmed = True
 
-        with patch.object(
-            searcher, "_do_search", new_callable=AsyncMock
-        ) as mock_do:
+        with patch.object(searcher, "_do_search", new_callable=AsyncMock) as mock_do:
             mock_do.return_value = []
-            await searcher.search(
-                "test query", top_k=5, session_key="meeting-42"
-            )
+            await searcher.search("test query", top_k=5, session_key="meeting-42")
 
         # _do_search 被调用时 session_key 作为第4个位置参数
         call_args = mock_do.call_args
         assert call_args[0][3] == "meeting-42"
 
     @pytest.mark.asyncio
-    async def test_search_passes_language_and_time_range(
-        self, searcher, mock_browser_and_context
-    ):
+    async def test_search_passes_language_and_time_range(self, searcher, mock_browser_and_context):
         """search() 应将 language、time_range、country 参数传递给 _search_ddg。"""
-        mock_browser, mock_context, mock_page = mock_browser_and_context
+        mock_browser, _mock_context, _mock_page = mock_browser_and_context
         searcher._browser = mock_browser
         searcher._session_warmed = True
 
-        with patch.object(
-            searcher, "_search_ddg", new_callable=AsyncMock
-        ) as mock_ddg:
+        with patch.object(searcher, "_search_ddg", new_callable=AsyncMock) as mock_ddg:
             mock_ddg.return_value = []
             await searcher.search(
                 "test query",
@@ -544,17 +531,13 @@ class TestSearchMethod:
         assert call_kwargs["country"] == "US"
 
     @pytest.mark.asyncio
-    async def test_search_default_language_zh_cn(
-        self, searcher, mock_browser_and_context
-    ):
+    async def test_search_default_language_zh_cn(self, searcher, mock_browser_and_context):
         """默认 language 应为 zh-CN。"""
-        mock_browser, mock_context, mock_page = mock_browser_and_context
+        mock_browser, _mock_context, _mock_page = mock_browser_and_context
         searcher._browser = mock_browser
         searcher._session_warmed = True
 
-        with patch.object(
-            searcher, "_search_ddg", new_callable=AsyncMock
-        ) as mock_ddg:
+        with patch.object(searcher, "_search_ddg", new_callable=AsyncMock) as mock_ddg:
             mock_ddg.return_value = []
             await searcher.search("test", top_k=3)
 
@@ -564,25 +547,21 @@ class TestSearchMethod:
     @pytest.mark.asyncio
     async def test_search_timeout_returns_empty(self, searcher, mock_browser_and_context):
         """search() 在超时时应返回空列表。"""
-        mock_browser, mock_context, mock_page = mock_browser_and_context
+        mock_browser, _mock_context, _mock_page = mock_browser_and_context
         searcher._browser = mock_browser
         searcher._session_warmed = True
 
         # Mock _do_search 引发 TimeoutError
-        with patch.object(
-            searcher, "_do_search", new_callable=AsyncMock
-        ) as mock_do:
+        with patch.object(searcher, "_do_search", new_callable=AsyncMock) as mock_do:
             mock_do.side_effect = asyncio.TimeoutError()
             results = await searcher.search("test query", top_k=3)
 
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_search_playwright_error_retry(
-        self, searcher, mock_browser_and_context
-    ):
+    async def test_search_playwright_error_retry(self, searcher, mock_browser_and_context):
         """浏览器连接断开时，search() 应自动重建浏览器并重试一次。"""
-        mock_browser, mock_context, mock_page = mock_browser_and_context
+        mock_browser, _mock_context, _mock_page = mock_browser_and_context
         searcher._browser = mock_browser
         searcher._session_warmed = True
 
@@ -593,16 +572,15 @@ class TestSearchMethod:
             call_count += 1
             if call_count == 1:
                 from playwright.async_api import Error as PlaywrightError
+
                 raise PlaywrightError("browser has been closed")
             return []
 
-        with patch.object(
-            searcher, "_do_search", side_effect=mock_do_search
+        with (
+            patch.object(searcher, "_do_search", side_effect=mock_do_search),
+            patch.object(searcher, "_ensure_browser", new_callable=AsyncMock),
         ):
-            with patch.object(
-                searcher, "_ensure_browser", new_callable=AsyncMock
-            ):
-                results = await searcher.search("test", top_k=3)
+            results = await searcher.search("test", top_k=3)
 
         # 应重试了两次（第一次失败，第二次成功）
         assert call_count == 2
@@ -612,6 +590,7 @@ class TestSearchMethod:
 # ============================================================================
 # 6. SearchResult.__post_init__() — 自动填充逻辑
 # ============================================================================
+
 
 class TestSearchResultPostInit:
     """测试 SearchResult 数据类的自动填充行为。"""
@@ -686,6 +665,7 @@ class TestSearchResultPostInit:
 # ============================================================================
 # 7. EngineHealth — 健康追踪（success/failure 计数、冷却期）
 # ============================================================================
+
 
 class TestEngineHealth:
     """测试引擎健康度追踪器。"""
@@ -781,6 +761,7 @@ class TestEngineHealth:
 # ============================================================================
 # 8. MultiEngineSearch failover 逻辑（mock engine）
 # ============================================================================
+
 
 class TestMultiEngineSearch:
     """测试多引擎搜索调度器的 failover 逻辑。"""

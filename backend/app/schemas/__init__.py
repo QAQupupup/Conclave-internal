@@ -2,52 +2,69 @@
 # 从 routers/ 内嵌的 Pydantic 模型提取，按业务域分文件
 # __init__.py 做 re-export，保证 from app.schemas import XxxDTO 可用
 
-from app.schemas.meeting import (
-    CreateMeetingRequest,
-    CreateMeetingResponse,
-    ControlRequest,
-    RunResponse,
-    BatchDeleteRequest,
-    AddTagRequest,
-    InjectReferenceRequest,
-    InterventionRequest,
-    SetModelRequest,
-    SaveApiKeyRequest,
-)
-from app.schemas.auth import LoginRequest, LoginResponse, MeResponse
 from app.schemas.agent_role import (
     CreateRoleRequest,
     GenerateRolesRequest,
     GenerateRolesResponse,
     UpsertRoleResponse,
 )
-from app.schemas.regression import BaselineRequest, BaselineSummary
+from app.schemas.auth import LoginRequest, LoginResponse, MeResponse
 from app.schemas.captcha import GuardModeRequest, ResolveRequest
-from app.schemas.net_auth import ReviewRequest, AuthRequestSummary
-from app.schemas.preferences import PreferenceValue
-from app.schemas.workspace import FileWriteRequest, CodeRunRequest, CommandRequest
 from app.schemas.common import ApiResponse, PaginatedResponse
+from app.schemas.meeting import (
+    AddTagRequest,
+    BatchDeleteRequest,
+    ControlRequest,
+    CreateMeetingRequest,
+    CreateMeetingResponse,
+    InjectReferenceRequest,
+    InterventionRequest,
+    RunResponse,
+    SaveApiKeyRequest,
+    SetModelRequest,
+)
+from app.schemas.net_auth import AuthRequestSummary, ReviewRequest
+from app.schemas.preferences import PreferenceValue
+from app.schemas.regression import BaselineRequest, BaselineSummary
+from app.schemas.workspace import CodeRunRequest, CommandRequest, FileWriteRequest
 
 __all__ = [
-    # meeting
-    "CreateMeetingRequest", "CreateMeetingResponse", "ControlRequest",
-    "RunResponse", "BatchDeleteRequest", "AddTagRequest",
-    "InjectReferenceRequest", "InterventionRequest",
-    "SetModelRequest", "SaveApiKeyRequest",
-    # auth
-    "LoginRequest", "LoginResponse", "MeResponse",
-    # agent_role
-    "CreateRoleRequest", "GenerateRolesRequest", "GenerateRolesResponse", "UpsertRoleResponse",
+    "AddTagRequest",
+    # common
+    "ApiResponse",
+    "AuthRequestSummary",
     # regression
-    "BaselineRequest", "BaselineSummary",
+    "BaselineRequest",
+    "BaselineSummary",
+    "BatchDeleteRequest",
+    "CodeRunRequest",
+    "CommandRequest",
+    "ControlRequest",
+    # meeting
+    "CreateMeetingRequest",
+    "CreateMeetingResponse",
+    # agent_role
+    "CreateRoleRequest",
+    # workspace
+    "FileWriteRequest",
+    "GenerateRolesRequest",
+    "GenerateRolesResponse",
     # captcha
-    "GuardModeRequest", "ResolveRequest",
-    # net_auth
-    "ReviewRequest", "AuthRequestSummary",
+    "GuardModeRequest",
+    "InjectReferenceRequest",
+    "InterventionRequest",
+    # auth
+    "LoginRequest",
+    "LoginResponse",
+    "MeResponse",
+    "PaginatedResponse",
     # preferences
     "PreferenceValue",
-    # workspace
-    "FileWriteRequest", "CodeRunRequest", "CommandRequest",
-    # common
-    "ApiResponse", "PaginatedResponse",
+    "ResolveRequest",
+    # net_auth
+    "ReviewRequest",
+    "RunResponse",
+    "SaveApiKeyRequest",
+    "SetModelRequest",
+    "UpsertRoleResponse",
 ]

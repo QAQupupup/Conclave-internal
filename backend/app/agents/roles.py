@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from app.agents import llm as llm_mod
 from app.agents.llm import LLMClient
+
 # 统一单一数据源：re-export app.models.Role（7 角色）
 # 消除历史上 agents/roles.Role（3 角色）与 models.Role（7 角色）不一致的漂移
 from app.models import Role

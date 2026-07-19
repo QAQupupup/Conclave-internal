@@ -11,34 +11,29 @@
 8. build_charter_from_clarify 完整流程
 9. 空 charter 边界情况
 """
+
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
+from conclave_core import charter as charter_module
 from conclave_core.charter import (
     DEFAULT_CONSTRAINTS,
     MeetingCharter,
-    build_charter_from_clarify,
     _load_constraints_from_file,
+    build_charter_from_clarify,
 )
-from conclave_core import charter as charter_module
 from conclave_core.charter_logic import (
-    to_prompt_anchor,
     check_drift,
-    register_borrow,
     is_already_borrowed,
-    _scope_keywords,
+    register_borrow,
+    to_prompt_anchor,
 )
-
 
 # ============================================================
 # 1. to_prompt_anchor 格式测试
 # ============================================================
+
 
 class TestToPromptAnchor:
     """锚点文本生成格式验证"""
@@ -90,6 +85,7 @@ class TestToPromptAnchor:
 # 2. MeetingCharter 不可变性
 # ============================================================
 
+
 class TestCharterImmutability:
     """original_topic 不可篡改验证"""
 
@@ -115,6 +111,7 @@ class TestCharterImmutability:
 # ============================================================
 # 3. constraints 加载和注入
 # ============================================================
+
 
 class TestConstraintsLoading:
     """行为约束加载验证"""
@@ -172,7 +169,7 @@ constraints:
     def test_max_constraints_limit(self, tmp_path):
         """约束数量超过上限应截断"""
         items = [{"text": f"约束{i}"} for i in range(100)]
-        yaml_content = "constraints:\n" + "\n".join(f"  - text: \"{item['text']}\"" for item in items)
+        yaml_content = "constraints:\n" + "\n".join(f'  - text: "{item["text"]}"' for item in items)
         constraint_file = tmp_path / "many.yaml"
         constraint_file.write_text(yaml_content, encoding="utf-8")
 
@@ -193,6 +190,7 @@ constraints:
 # ============================================================
 # 4. check_drift 漂移检测
 # ============================================================
+
 
 class TestCheckDrift:
     """漂移检测逻辑验证"""
@@ -245,6 +243,7 @@ class TestCheckDrift:
 # 5. register_borrow / is_already_borrowed
 # ============================================================
 
+
 class TestBorrowTracking:
     """借调防重复验证"""
 
@@ -273,6 +272,7 @@ class TestBorrowTracking:
 # ============================================================
 # 6. build_charter_from_clarify 完整流程
 # ============================================================
+
 
 class TestBuildCharterFromClarify:
     """宪章构造完整流程验证"""

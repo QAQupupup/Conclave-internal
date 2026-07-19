@@ -1,4 +1,5 @@
 """经验库加载器：加载bug_patterns.yaml并格式化为LLM可读文本"""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -15,7 +16,7 @@ def load_bug_patterns() -> dict[str, Any]:
     """加载bug_patterns.yaml，返回原始dict（带缓存）"""
     if not _PATTERNS_FILE.exists():
         return {"version": 0, "python_fastapi": [], "docker_deployment": [], "frontend_react": [], "architecture": []}
-    with open(_PATTERNS_FILE, "r", encoding="utf-8") as f:
+    with open(_PATTERNS_FILE, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
@@ -38,10 +39,18 @@ def format_bug_patterns_for_prompt() -> str:
         lines = [f"### {title}"]
         for item in items:
             severity = item.get("severity", "medium")
-            sev_mark = "🔴" if severity == "critical" else "🟠" if severity == "high" else "🟡" if severity == "medium" else "⚪"
+            sev_mark = (
+                "🔴"
+                if severity == "critical"
+                else "🟠"
+                if severity == "high"
+                else "🟡"
+                if severity == "medium"
+                else "⚪"
+            )
             pattern = item.get("pattern", "")
             fix = item.get("fix", "")
-            lines.append(f"{sev_mark} **{item.get('name', '')}** (ID:{item.get('id','')}, {severity})")
+            lines.append(f"{sev_mark} **{item.get('name', '')}** (ID:{item.get('id', '')}, {severity})")
             lines.append(f"   - 问题: {pattern}")
             lines.append(f"   - 修复: {fix}")
             if item.get("example_bad"):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import time
 from collections import deque
@@ -18,6 +19,7 @@ _COLLECTION_INTERVAL = float(os.environ.get("METRICS_COLLECTION_INTERVAL", "10")
 @dataclass
 class MetricPoint:
     """单个采集点的指标快照"""
+
     timestamp: float
     cpu_percent: float
     memory_mb: float
@@ -66,16 +68,8 @@ class MetricsStore:
     def snapshot(self) -> dict[str, Any]:
         """返回当前完整快照（供 GET /metrics 使用）"""
         latest = self.latest()
-        avg_latency = (
-            sum(self._request_latencies) / len(self._request_latencies)
-            if self._request_latencies
-            else 0.0
-        )
-        requests_per_minute = (
-            self._request_count / (self.uptime_seconds / 60.0)
-            if self.uptime_seconds > 0
-            else 0.0
-        )
+        avg_latency = sum(self._request_latencies) / len(self._request_latencies) if self._request_latencies else 0.0
+        requests_per_minute = self._request_count / (self.uptime_seconds / 60.0) if self.uptime_seconds > 0 else 0.0
 
         return {
             "timestamp": time.time(),
@@ -113,6 +107,7 @@ class MetricsStore:
                 total_cost_usd = 0.0
                 try:
                     from app.observability.cost_tracker import get_cost_tracker
+
                     s = get_cost_tracker().summary()
                     total_tokens = s.get("total_tokens", 0)
                     total_cost_usd = s.get("total_cost_usd", 0.0)
@@ -123,6 +118,7 @@ class MetricsStore:
                 active_meetings = 0
                 try:
                     from sqlalchemy import text as _text
+
                     from app.db.engine import async_session_factory as _asf
 
                     async with _asf() as session:
@@ -140,20 +136,17 @@ class MetricsStore:
                 browser_contexts = 0
                 try:
                     from app.tools.browser_tool import get_browser_pool
+
                     browser_contexts = get_browser_pool().context_count
                 except Exception:
                     pass
 
                 # 请求吞吐量
                 requests_per_minute = (
-                    self._request_count / (self.uptime_seconds / 60.0)
-                    if self.uptime_seconds > 0
-                    else 0.0
+                    self._request_count / (self.uptime_seconds / 60.0) if self.uptime_seconds > 0 else 0.0
                 )
                 avg_latency = (
-                    sum(self._request_latencies) / len(self._request_latencies)
-                    if self._request_latencies
-                    else 0.0
+                    sum(self._request_latencies) / len(self._request_latencies) if self._request_latencies else 0.0
                 )
 
                 point = MetricPoint(
@@ -185,10 +178,8 @@ class MetricsStore:
         """停止后台采集"""
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
 
 

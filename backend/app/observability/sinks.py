@@ -1,10 +1,11 @@
 # LogSink 实现：ConsoleSink / JSONFileSink / RemoteGRPCSink（预留）
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import threading
-from typing import Any, TextIO
+from typing import Any, ClassVar, TextIO
 
 
 class ConsoleSink:
@@ -49,8 +50,8 @@ class JSONFileSink:
     def __init__(self, file_path: str) -> None:
         self._file_path = file_path
         self._lock = threading.Lock()
-        # 打开文件（追加模式，UTF-8）
-        self._file = open(file_path, "a", encoding="utf-8")
+        # 打开文件（追加模式，UTF-8）—— 长生命周期文件句柄，在 close() 中关闭
+        self._file = open(file_path, "a", encoding="utf-8")  # noqa: SIM115
 
     def write(self, event: dict[str, Any]) -> None:
         try:
@@ -62,10 +63,8 @@ class JSONFileSink:
             pass  # sink 异常不影响主流程
 
     def close(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._file.close()
-        except Exception:
-            pass
 
 
 class RemoteGRPCSink:
@@ -108,10 +107,8 @@ class RemoteGRPCSink:
         self._buffer.clear()
 
     def close(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._flush()
-        except Exception:
-            pass
 
 
 class EventBusSink:
@@ -123,18 +120,19 @@ class EventBusSink:
     """
 
     # 不需要推送到前端的高频/噪声日志
-    _NOISY_LOGGERS = {
+    _NOISY_LOGGERS: ClassVar[set[str]] = {
         "app.middleware.trace",
         "uvicorn.access",
         "uvicorn.error",
     }
     # 只推送到前端的日志级别及以上
-    _MIN_LEVEL = "INFO"
-    _LEVEL_RANK = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+    _MIN_LEVEL: ClassVar[str] = "INFO"
+    _LEVEL_RANK: ClassVar[dict[str, int]] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
 
     def write(self, event: dict[str, Any]) -> None:
         try:
             import asyncio
+
             from app.events import bus, make_event
 
             mid = event.get("meeting_id", "-")
@@ -166,10 +164,6 @@ class EventBusSink:
             except RuntimeError:
                 # 没有运行中的事件循环，无法推送
                 return
-            loop.call_soon_threadsafe(
-                lambda: asyncio.ensure_future(
-                    bus.publish(make_event("log.entry", mid, payload))
-                )
-            )
+            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(bus.publish(make_event("log.entry", mid, payload))))
         except Exception:
             pass  # sink 异常不影响主流程

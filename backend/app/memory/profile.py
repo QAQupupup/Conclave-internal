@@ -19,7 +19,7 @@ def inject_profile(prompt: str, agent_role: str) -> str:
         if anchor:
             return f"{anchor}\n\n{prompt}"
         return prompt
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("inject_profile 失败: %s", e)
         return prompt
 
@@ -88,5 +88,5 @@ async def trigger_extraction(state: Any) -> None:
             )
             if features:
                 await memory_store.update_profile(agent_role, features)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("trigger_extraction 失败，不影响主流程: %s", e)

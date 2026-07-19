@@ -1,9 +1,16 @@
 /* Conclave API Client — ported from app.html
- * 统一 HTTP 客户端：自动注入 JWT、401 处理、JSON 解析。 */
+ * 统一 HTTP 客户端：自动注入 JWT、401 处理、JSON 解析、超时、重试。 */
 import { getToken, clearToken, commitLogin, commitLogout } from './auth';
 import type { ConclaveUser } from './auth';
 
 const API_BASE = ''; // 同源
+
+/** 默认超时时间（毫秒） */
+const DEFAULT_TIMEOUT = 30_000;
+/** 长操作超时（会议创建/运行/健康检查等可能耗时较长的请求） */
+const LONG_TIMEOUT = 120_000;
+/** 幂等 GET 请求在网络错误时的重试次数 */
+const NETWORK_RETRY_COUNT = 1;
 
 /** 401 时触发（App 层注册为全局认证过期处理） */
 let unauthorizedHandler: (() => void) | null = null;
@@ -15,6 +22,10 @@ export interface ApiOptions extends RequestInit {
   headers?: Record<string, string>;
   /** 静默模式：401 时仍触发全局 authExpired，但不抛错（调用方 catch 后回退 mock） */
   silent?: boolean;
+  /** 请求超时（毫秒），默认 30000 */
+  timeout?: number;
+  /** 网络错误时重试次数（仅 GET/HEAD 请求），默认 1 */
+  retries?: number;
 }
 
 export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -24,24 +35,64 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
   };
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  try {
-    const res = await fetch(API_BASE + path, { ...opts, headers });
-    if (res.status === 401) {
-      clearToken();
-      // 全局 401 拦截器总是触发（token 过期是全局事件，与 silent 无关）
-      // AppContext 的 handler 内部有去重，并发 401 只触发一次
-      unauthorizedHandler?.();
-      throw new Error('未登录或登录已过期');
+
+  const timeout = opts.timeout ?? DEFAULT_TIMEOUT;
+  const maxRetries = opts.retries ?? (opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'DELETE' || opts.method === 'PATCH' ? 0 : NETWORK_RETRY_COUNT);
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    // 如果调用方传入了 signal，串联两个 signal
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        clearTimeout(timer);
+        throw new Error('请求已取消');
+      }
+      opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+
+    try {
+      const res = await fetch(API_BASE + path, {
+        ...opts,
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (res.status === 401) {
+        clearToken();
+        unauthorizedHandler?.();
+        throw new Error('未登录或登录已过期');
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      return (res.status === 204 ? null : await res.json()) as T;
+    } catch (e: any) {
+      clearTimeout(timer);
+      lastError = e;
+
+      // AbortError（超时/取消）不重试
+      if (e.name === 'AbortError') {
+        if (opts.signal?.aborted) throw new Error('请求已取消', { cause: e });
+        throw new Error(`请求超时（${Math.round(timeout / 1000)}秒）`, { cause: e });
+      }
+
+      // 网络错误且还有重试次数时，短暂延迟后重试
+      const isNetworkError = e.message === 'Failed to fetch' || e.message?.includes('network');
+      if (isNetworkError && attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+
+      if (e.message === 'Failed to fetch') throw new Error('无法连接服务器，请检查后端是否启动', { cause: e });
+      throw e;
     }
-    return (res.status === 204 ? null : await res.json()) as T;
-  } catch (e: any) {
-    if (e.message === 'Failed to fetch') throw new Error('无法连接服务器，请检查后端是否启动');
-    throw e;
   }
+  throw lastError!;
 }
 
 /* ═══ Auth API ═══ */
@@ -97,7 +148,13 @@ export async function apiGetMeeting(meetingId: string) {
   return api(`/meetings/${meetingId}`);
 }
 export async function apiRunMeeting(meetingId: string) {
-  return api(`/meetings/${meetingId}/run`, { method: 'POST' });
+  return api(`/meetings/${meetingId}/run`, { method: 'POST', timeout: LONG_TIMEOUT });
+}
+export async function apiHealthCheckHost(id: number) {
+  return api<DockerHost & { health_detail?: any }>(`/docker-hosts/${id}/health-check`, { method: 'POST', timeout: LONG_TIMEOUT });
+}
+export async function apiHealthCheckAllHosts() {
+  return api<{ checked: number; results: any[] }>('/docker-hosts/health-check-all', { method: 'POST', timeout: LONG_TIMEOUT });
 }
 export async function apiGetProgress(meetingId: string) {
   return api(`/meetings/${meetingId}/progress`);
@@ -152,15 +209,32 @@ export async function apiGetPreferences(silent = false) {
   return api('/preferences/', { silent });
 }
 export async function apiSetPreference(key: string, value: any) {
-  return api(`/preferences/${key}`, { method: 'PUT', body: JSON.stringify({ value }) });
+  return api(`/preferences/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify({ value }) });
+}
+export async function apiDeletePreference(key: string) {
+  return api(`/preferences/${encodeURIComponent(key)}`, { method: 'DELETE' });
 }
 
 /* ═══ LLM API ═══ */
 export async function apiGetProviders(silent = false) {
   return api('/meetings/llm/providers', { silent });
 }
+export async function apiQueryModels(params: { provider?: string; api_key?: string; base_url?: string; refresh?: boolean } = {}, silent = false) {
+  return api('/meetings/llm/models', {
+    method: 'POST',
+    body: JSON.stringify(params),
+    silent,
+  });
+}
+export async function apiQueryBalance(params: { provider?: string; api_key?: string; base_url?: string } = {}) {
+  return api('/meetings/llm/balance', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
 export async function apiGetModels(silent = false) {
-  return api('/meetings/llm/models', { silent });
+  // 兼容旧调用：无参数查询默认模型列表
+  return apiQueryModels({}, silent);
 }
 export async function apiGetKeys(silent = false) {
   return api('/meetings/llm/keys', { silent });
@@ -239,12 +313,6 @@ export async function apiUpdateDockerHost(id: number, data: Partial<DockerHostIn
 }
 export async function apiDeleteDockerHost(id: number) {
   return api(`/docker-hosts/${id}`, { method: 'DELETE' });
-}
-export async function apiHealthCheckHost(id: number) {
-  return api<DockerHost & { health_detail?: any }>(`/docker-hosts/${id}/health-check`, { method: 'POST' });
-}
-export async function apiHealthCheckAllHosts() {
-  return api<{ checked: number; results: any[] }>('/docker-hosts/health-check-all', { method: 'POST' });
 }
 export async function apiGetDockerPresets() {
   return api<{ presets: any[]; connection_types: any[]; required_fields: any }>('/docker-hosts/presets');

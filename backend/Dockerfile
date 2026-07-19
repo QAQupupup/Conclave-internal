@@ -40,10 +40,12 @@ RUN apt-get update && \
         curl ca-certificates gnupg tzdata \
         xvfb x11vnc websockify novnc \
         fonts-wqy-zenhei fonts-noto-cjk \
-        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
         libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
-        libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
-        libxshmfence1 && \
+        libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+        libxshmfence1 libglib2.0-0 libexpat1 libxcb1 libx11-6 libxext6 \
+        libx11-xcb1 libxcb-dri3-0 libxrender1 \
+        libxi6 libxtst6 libxcursor1 libxss1 libgtk-3-0 libgdk-pixbuf-2.0-0 && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
     chmod a+r /etc/apt/keyrings/docker.asc && \

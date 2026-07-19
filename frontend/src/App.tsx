@@ -22,6 +22,7 @@ import Topology from './views/Topology';
 import DevOpsPanel from './views/DevOpsPanel';
 import Settings from './views/Settings';
 import Login from './views/Login';
+import NotFound from './views/NotFound';
 
 /** 将 Toast 函数桥接到 AppContext（AppContext 初始化时 ToastProvider 尚未挂载） */
 function ToastBridge() {
@@ -83,7 +84,7 @@ function Shell() {
             <Route path="topology" element={<Topology />} />
             <Route path="devops" element={<DevOpsPanel />} />
             <Route path="settings" element={<Settings />} />
-            <Route path="*" element={<Navigate to="" replace />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </ErrorBoundary>
       </main>

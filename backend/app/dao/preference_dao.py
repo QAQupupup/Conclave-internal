@@ -3,6 +3,7 @@
 提供单条/全部偏好的读写与删除。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -67,4 +68,4 @@ async def delete_preference(user_id: str, key: str) -> bool:
             {"user_id": user_id, "key": key},
         )
         await session.commit()
-        return result.rowcount > 0
+        return result.rowcount > 0  # type: ignore[no-any-return]

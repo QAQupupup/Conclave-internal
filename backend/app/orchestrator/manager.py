@@ -7,9 +7,9 @@ from typing import Any
 from app.agents.agent_runtime import AgentContext, AgentResult, build_agent_from_baseline
 from app.agents.task_baseline import TaskBaseline, get_baseline
 from app.orchestrator.context_manager import ContextManager
-from conclave_core.scheduler import Scheduler, SubTask
 from app.orchestrator.stage_planners import get_stage_planner
 from app.orchestrator.stage_reducers import reduce_stage_results
+from conclave_core.scheduler import Scheduler, SubTask
 
 
 class MeetingManager:
@@ -110,6 +110,7 @@ class MeetingManager:
     async def persist_state(self, state: Any) -> None:
         """持久化状态到 PostgreSQL（通过 db_legacy）"""
         from app.db_legacy import save_meeting, save_meeting_aux, save_message
+
         aux = state.extract_aux() if hasattr(state, "extract_aux") else {}
         await save_meeting(
             meeting_id=state.meeting_id,
@@ -126,12 +127,14 @@ class MeetingManager:
     async def publish_event(self, meeting_id: str, event_type: str, payload: dict[str, Any]) -> None:
         """通过 EventBus 发布事件"""
         from app.events import bus, make_event
+
         await bus.publish(make_event(event_type, meeting_id, payload))
 
-    def dispatch_material(self, query: str, meeting_id: str) -> dict[str, Any]:
+    def dispatch_material(self, query: str, meeting_id: str) -> list[dict[str, Any]]:
         """通过 RAG retriever 检索物料"""
         try:
             from app.rag.retriever import retrieve
-            return retrieve(query, meeting_id)
+
+            return retrieve(meeting_id, query)
         except Exception:
-            return {}
+            return []

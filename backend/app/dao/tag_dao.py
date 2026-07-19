@@ -3,6 +3,7 @@
 提供标签聚合列表、按会议增删查标签。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -55,7 +56,7 @@ async def add_meeting_tag(meeting_id: str, tag: str) -> bool:
             },
         )
         await session.commit()
-        return result.rowcount > 0
+        return (result.rowcount or 0) > 0  # type: ignore[no-any-return]
 
 
 async def remove_meeting_tag(meeting_id: str, tag: str) -> bool:
@@ -66,4 +67,4 @@ async def remove_meeting_tag(meeting_id: str, tag: str) -> bool:
             {"meeting_id": meeting_id, "tag": tag},
         )
         await session.commit()
-        return result.rowcount > 0
+        return (result.rowcount or 0) > 0  # type: ignore[no-any-return]

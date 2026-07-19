@@ -1,11 +1,12 @@
 # 日志总线：旁路日志分发，应用代码只 emit，不关心 sink
 from __future__ import annotations
 
+import contextlib
 import os
 from datetime import datetime, timezone
 from typing import Any
 
-from app.context import get_request_id, get_meeting_id
+from app.context import get_meeting_id, get_request_id
 from app.observability.sinks import ConsoleSink, JSONFileSink
 
 
@@ -32,6 +33,7 @@ class LogBus:
         self._sinks.append(ConsoleSink())
         # 注册 WebSocket 事件总线 Sink（实时推送到前端日志面板）
         from app.observability.sinks import EventBusSink
+
         self._sinks.append(EventBusSink())
         # JSON 文件 Sink：通过环境变量启用；非测试环境默认写入到数据目录
         json_file = os.environ.get("CONCLAVE_LOG_JSON_FILE", "")
@@ -44,10 +46,8 @@ class LogBus:
             except Exception:
                 json_file = ""
         if json_file:
-            try:
+            with contextlib.suppress(Exception):
                 self._sinks.append(JSONFileSink(json_file))
-            except Exception:
-                pass  # 文件无法创建/写入时降级为仅 ConsoleSink
 
     def add_sink(self, sink) -> None:
         """注册日志 sink"""
@@ -68,7 +68,7 @@ class LogBus:
 
         自动注入追踪上下文（request_id, meeting_id, runner_session_id, agent_role）。
         """
-        from app.context import get_runner_session_id, get_agent_role, get_user_id, get_username, get_user_role
+        from app.context import get_agent_role, get_runner_session_id, get_user_id, get_user_role, get_username
 
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -86,10 +86,8 @@ class LogBus:
         }
 
         for sink in self._sinks:
-            try:
+            with contextlib.suppress(Exception):
                 sink.write(event)
-            except Exception:
-                pass  # sink 异常不影响主流程
 
     def info(self, message: str, logger: str = "", extra: dict[str, Any] | None = None) -> None:
         self.emit("INFO", message, logger, extra)

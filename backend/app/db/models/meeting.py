@@ -4,16 +4,28 @@
 引用，由 SQLAlchemy 在 mapper 配置阶段通过共享 Base 注册表惰性解析，无需在此
 导入目标模型类，从而避免循环导入。
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    String, Text, Integer, DateTime, ForeignKey, Index, UniqueConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.db.models.event import EventModel
+    from app.db.models.message import MessageModel
 
 
 # ============================================================
@@ -24,16 +36,19 @@ class MeetingModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     topic: Mapped[str] = mapped_column(String(500), nullable=False)
+    owner_username: Mapped[str] = mapped_column(String(100), nullable=False, default="system", index=True)
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="running",
-        comment="running|paused|aborted|done|deleted"
+        String(20), nullable=False, default="running", comment="running|paused|aborted|done|deleted"
     )
     stage: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="clarify",
-        comment="clarify|intra_team|cross_team|evidence_check|arbitrate|produce"
+        String(20),
+        nullable=False,
+        default="clarify",
+        comment="clarify|intra_team|cross_team|evidence_check|arbitrate|produce",
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
     # 完整 MeetingState JSON 快照
@@ -42,14 +57,17 @@ class MeetingModel(Base):
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     # 关系
-    messages: Mapped[list["MessageModel"]] = relationship(
-        back_populates="meeting", cascade="all, delete-orphan",
+    messages: Mapped[list[MessageModel]] = relationship(
+        back_populates="meeting",
+        cascade="all, delete-orphan",
     )
-    events: Mapped[list["EventModel"]] = relationship(
-        back_populates="meeting", cascade="all, delete-orphan",
+    events: Mapped[list[EventModel]] = relationship(
+        back_populates="meeting",
+        cascade="all, delete-orphan",
     )
-    tags: Mapped[list["MeetingTagModel"]] = relationship(
-        back_populates="meeting", cascade="all, delete-orphan",
+    tags: Mapped[list[MeetingTagModel]] = relationship(
+        back_populates="meeting",
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (
@@ -66,16 +84,18 @@ class MeetingTagModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meeting_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("meetings.id", ondelete="CASCADE"),
+        String(36),
+        ForeignKey("meetings.id", ondelete="CASCADE"),
         nullable=False,
     )
     tag: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
 
-    meeting: Mapped["MeetingModel"] = relationship(back_populates="tags")
+    meeting: Mapped[MeetingModel] = relationship(back_populates="tags")
 
     __table_args__ = (
         UniqueConstraint("meeting_id", "tag", name="uq_meeting_tag"),
@@ -94,22 +114,25 @@ class MeetingAuxModel(Base):
     __tablename__ = "meeting_aux"
 
     meeting_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("meetings.id", ondelete="CASCADE"),
+        String(36),
+        ForeignKey("meetings.id", ondelete="CASCADE"),
         primary_key=True,
     )
     key: Mapped[str] = mapped_column(
-        String(50), primary_key=True,
+        String(50),
+        primary_key=True,
         comment="aux field name: llm_trace|evidence_set|conclusion_chain|borrowed_agents",
     )
     value_json: Mapped[str] = mapped_column(
-        Text, nullable=False, default="{}",
+        Text,
+        nullable=False,
+        default="{}",
         comment="JSON-serialized aux field value",
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
 
-    __table_args__ = (
-        Index("idx_meeting_aux_meeting", "meeting_id"),
-    )
+    __table_args__ = (Index("idx_meeting_aux_meeting", "meeting_id"),)

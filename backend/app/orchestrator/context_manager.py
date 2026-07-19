@@ -9,8 +9,10 @@ from typing import Any
 @dataclass
 class ContextBudget:
     """上下文预算"""
+
     max_tokens: int = 8000
     reserved_tokens: int = 1500  # 留给 system/role/instruction
+
     @property
     def available_tokens(self) -> int:
         return self.max_tokens - self.reserved_tokens
@@ -19,6 +21,7 @@ class ContextBudget:
 @dataclass
 class ContextSlice:
     """准备好喂给 Agent 的上下文切片"""
+
     charter: dict[str, Any] = field(default_factory=dict)
     locked_conclusions: list[dict[str, Any]] = field(default_factory=list)
     recent_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -32,22 +35,26 @@ class ContextSlice:
         if self.charter:
             parts.append(f"# 会议宪章\n{self.charter.get('topic', '')}")
         if self.locked_conclusions:
-            parts.append("# 已锁定结论\n" + "\n".join(
-                f"- [{c.get('stage')}] {c.get('summary', '')}" for c in self.locked_conclusions
-            ))
+            parts.append(
+                "# 已锁定结论\n"
+                + "\n".join(f"- [{c.get('stage')}] {c.get('summary', '')}" for c in self.locked_conclusions)
+            )
         if self.evidence:
-            parts.append("# 证据\n" + "\n".join(
-                f"- {e.get('quote', '')[:200]} ({e.get('source', '')})" for e in self.evidence
-            ))
+            parts.append(
+                "# 证据\n" + "\n".join(f"- {e.get('quote', '')[:200]} ({e.get('source', '')})" for e in self.evidence)
+            )
         if self.material_snippets:
             parts.append("# 物料\n")
             for k, v in self.material_snippets.items():
                 parts.append(f"## {k}\n{str(v)[:600]}")
         if self.recent_messages:
-            parts.append("# 近期发言\n" + "\n".join(
-                f"[{m.get('stage')}] {m.get('role', '')}: {str(m.get('content', ''))[:200]}"
-                for m in self.recent_messages
-            ))
+            parts.append(
+                "# 近期发言\n"
+                + "\n".join(
+                    f"[{m.get('stage')}] {m.get('role', '')}: {str(m.get('content', ''))[:200]}"
+                    for m in self.recent_messages
+                )
+            )
         return "\n\n".join(parts)
 
 
@@ -82,8 +89,7 @@ class ContextManager:
             chain = state.conclusion_chain
             if isinstance(chain, list):
                 slice_.locked_conclusions = [
-                    {"stage": c.get("stage", ""), "summary": c.get("summary", str(c)[:120])}
-                    for c in chain
+                    {"stage": c.get("stage", ""), "summary": c.get("summary", str(c)[:120])} for c in chain
                 ]
 
         # 3. 证据（仅 evidence_check 阶段保留完整，其他阶段摘要）

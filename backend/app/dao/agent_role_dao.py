@@ -3,6 +3,7 @@
 提供角色列表、单条查询、upsert、删除（内置不可删）与批量按 ID 查询。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,15 +20,10 @@ async def list_agent_roles(active_only: bool = False) -> list[dict[str, Any]]:
     async with async_session_factory() as session:
         if active_only:
             result = await session.execute(
-                text(
-                    "SELECT * FROM agent_roles WHERE is_active = 1 "
-                    "ORDER BY is_builtin DESC, display_name ASC"
-                )
+                text("SELECT * FROM agent_roles WHERE is_active = 1 ORDER BY is_builtin DESC, display_name ASC")
             )
         else:
-            result = await session.execute(
-                text("SELECT * FROM agent_roles ORDER BY is_builtin DESC, display_name ASC")
-            )
+            result = await session.execute(text("SELECT * FROM agent_roles ORDER BY is_builtin DESC, display_name ASC"))
         rows = result.mappings().all()
         return [_row_to_role_dict(r) for r in rows]
 
@@ -121,9 +117,9 @@ async def get_agent_roles_by_ids(role_ids: list[str]) -> list[dict[str, Any]]:
     if not role_ids:
         return []
     async with async_session_factory() as session:
-        stmt = text(
-            "SELECT * FROM agent_roles WHERE id IN :role_ids AND is_active = 1"
-        ).bindparams(bindparam("role_ids", expanding=True))
+        stmt = text("SELECT * FROM agent_roles WHERE id IN :role_ids AND is_active = 1").bindparams(
+            bindparam("role_ids", expanding=True)
+        )
         result = await session.execute(stmt, {"role_ids": role_ids})
         rows = result.mappings().all()
         role_map = {r["id"]: _row_to_role_dict(r) for r in rows}

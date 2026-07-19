@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.agents.compute import execute_think, build_intra_prompt, build_intra_react_prompt
+from app.agents.compute import build_intra_prompt, build_intra_react_prompt, execute_think
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
-
 from app.orchestrator.stage_runners import run_intra_team
+
 from ._helpers import (
     _match_role,
-    _run_with_consistency,
     _resolve_model_for_call,
+    _run_with_consistency,
 )
 
 
@@ -48,18 +48,27 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             req.model = _resolve_model_for_call(state, role.value, "intra_team")
             resp = await execute_think(req)
             return resp.result
+
         result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
-        return {"role": role.value, "stance": stance, "claims": result.get("claims", []), "confidence": confidence, "react": False}
+        return {
+            "role": role.value,
+            "stance": stance,
+            "claims": result.get("claims", []),
+            "confidence": confidence,
+            "react": False,
+        }
 
     parallel_results = await asyncio.gather(*[_think_one(r, s) for r, s in parallel_members])
 
     prior_conclusions: list[dict[str, Any]] = []
     for rr in parallel_results:
-        prior_conclusions.append({
-            "role": rr["role"],
-            "stance": rr["stance"],
-            "claims": rr["claims"],
-        })
+        prior_conclusions.append(
+            {
+                "role": rr["role"],
+                "stance": rr["stance"],
+                "claims": rr["claims"],
+            }
+        )
 
     role_results: list[dict[str, Any]] = list(parallel_results)
 
@@ -72,8 +81,15 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
                 req.model = _resolve_model_for_call(state, role.value, "intra_team")
                 resp = await execute_think(req)
                 return resp.result
+
             result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
-            return {"role": role.value, "stance": stance, "claims": result.get("claims", []), "confidence": confidence, "react": True}
+            return {
+                "role": role.value,
+                "stance": stance,
+                "claims": result.get("claims", []),
+                "confidence": confidence,
+                "react": True,
+            }
 
         react_result = await _think_react(last_role, last_stance, prior_conclusions)
         role_results.append(react_result)

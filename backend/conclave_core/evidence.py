@@ -24,12 +24,14 @@ def _synthesize_evidence_for_produce(state: MeetingState) -> dict[str, Any]:
             if source and source not in evidence_sources:
                 evidence_sources.append(source)
             if quote:
-                evidence_quotes.append({
-                    "quote": quote[:200],
-                    "source": source,
-                    "supports": a.get("supports", "neutral"),
-                    "conflict_id": es.get("conflict_id", ""),
-                })
+                evidence_quotes.append(
+                    {
+                        "quote": quote[:200],
+                        "source": source,
+                        "supports": a.get("supports", "neutral"),
+                        "conflict_id": es.get("conflict_id", ""),
+                    }
+                )
 
     decisions = (state.decision_record or {}).get("decisions", [])
     adopted = (state.decision_record or {}).get("adopted_claims", [])

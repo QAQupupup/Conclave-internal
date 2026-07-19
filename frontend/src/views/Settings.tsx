@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
-import { apiGetKeys, apiSaveKey, apiGetPreferences, apiSetPreference } from '../lib/api';
+import { apiGetKeys, apiSaveKey, apiGetPreferences, apiSetPreference, apiDeletePreference } from '../lib/api';
+import { useToast } from '../components/Toast';
 
 interface LlmKey {
   provider?: string;
@@ -20,6 +21,7 @@ const KEY_PROVIDERS: { value: string; label: string }[] = [
 
 export default function Settings() {
   const { theme, toggleTheme, logOpen, toggleLog, appendLog } = useApp();
+  const toast = useToast();
 
   // Key 列表
   const [keys, setKeys] = useState<LlmKey[]>([]);
@@ -30,6 +32,8 @@ export default function Settings() {
   const [prefs, setPrefs] = useState<Record<string, any>>({});
   const [prefsLoading, setPrefsLoading] = useState(true);
   const [prefsError, setPrefsError] = useState<string | null>(null);
+  const [editingPref, setEditingPref] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
 
   // 添加 Key 表单
   const [searchParams] = useSearchParams();
@@ -70,7 +74,7 @@ export default function Settings() {
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   async function reloadKeys() {
@@ -123,11 +127,54 @@ export default function Settings() {
     setPrefs((p) => ({ ...p, [k]: v }));
     try {
       await apiSetPreference(k, v);
-      appendLog(`偏好已更新: ${k}`, 'info');
+      toast.show(`偏好已更新: ${k}`, 'success');
     } catch (e: any) {
       setPrefs((p) => ({ ...p, [k]: prev }));
-      appendLog('偏好保存失败: ' + (e?.message || '未知错误'), 'error');
+      toast.show('偏好保存失败: ' + (e?.message || '未知错误'), 'error');
     }
+  }
+
+  function startEditPref(k: string, currentVal: any) {
+    setEditingPref(k);
+    setEditValue(typeof currentVal === 'object' ? JSON.stringify(currentVal) : String(currentVal ?? ''));
+  }
+
+  function cancelEditPref() {
+    setEditingPref(null);
+    setEditValue('');
+  }
+
+  async function saveEditPref(k: string) {
+    // 尝试解析 JSON，失败则作为字符串
+    let parsed: any = editValue;
+    const trimmed = editValue.trim();
+    if (trimmed === 'true') parsed = true;
+    else if (trimmed === 'false') parsed = false;
+    else if (trimmed === 'null') parsed = null;
+    else if (!isNaN(Number(trimmed)) && trimmed !== '') parsed = Number(trimmed);
+    else {
+      try { parsed = JSON.parse(trimmed); } catch { /* keep as string */ }
+    }
+    setEditingPref(null);
+    setEditValue('');
+    await handlePrefChange(k, parsed);
+  }
+
+  async function deletePref(k: string) {
+    const prev = prefs[k];
+    setPrefs((p) => { const n = { ...p }; delete n[k]; return n; });
+    try {
+      await apiDeletePreference(k);
+      toast.show(`已删除偏好: ${k}`, 'success');
+    } catch (e: any) {
+      setPrefs((p) => ({ ...p, [k]: prev }));
+      toast.show('删除失败: ' + (e?.message || '未知错误'), 'error');
+    }
+  }
+
+  /** 判断偏好值是否可直接用 toggle 编辑（布尔类型） */
+  function isBoolPref(v: any): boolean {
+    return typeof v === 'boolean';
   }
 
   const prefEntries = Object.entries(prefs);
@@ -244,9 +291,45 @@ export default function Settings() {
               <div style={{ fontSize: 13, color: 'var(--text-3)' }}>暂无偏好设置</div>
             ) : (
               prefEntries.map(([k, v]) => (
-                <div className="pref-item" key={k}>
-                  <span className="pref-label">{k}</span>
-                  <span className="pref-value">{String(v)}</span>
+                <div className="pref-item" key={k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="pref-label" style={{ minWidth: 120, fontSize: 13 }}>{k}</span>
+                  {editingPref === k ? (
+                    <>
+                      <input
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEditPref(k);
+                          if (e.key === 'Escape') cancelEditPref();
+                        }}
+                        style={{ flex: 1, padding: '4px 8px', fontSize: 13 }}
+                        autoFocus
+                      />
+                      <button className="ctrl-btn" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => saveEditPref(k)}>✓</button>
+                      <button className="ctrl-btn" style={{ padding: '2px 8px', fontSize: 12 }} onClick={cancelEditPref}>✕</button>
+                    </>
+                  ) : isBoolPref(v) ? (
+                    <>
+                      <button
+                        className={`ctrl-btn ${v ? 'primary' : ''}`}
+                        style={{ padding: '2px 10px', fontSize: 12 }}
+                        onClick={() => handlePrefChange(k, !v)}
+                      >
+                        {v ? '已开启' : '已关闭'}
+                      </button>
+                      <span style={{ flex: 1 }} />
+                      <button className="ctrl-btn" style={{ padding: '2px 8px', fontSize: 12, opacity: 0.6 }} onClick={() => deletePref(k)} title="删除">🗑</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="pref-value" style={{ flex: 1, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }} onClick={() => startEditPref(k, v)}>
+                        {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                      </span>
+                      <button className="ctrl-btn" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => startEditPref(k, v)}>编辑</button>
+                      <button className="ctrl-btn" style={{ padding: '2px 8px', fontSize: 12, opacity: 0.6 }} onClick={() => deletePref(k)} title="删除">🗑</button>
+                    </>
+                  )}
                 </div>
               ))
             )}

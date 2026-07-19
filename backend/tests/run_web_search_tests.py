@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Web Search 手写集成测试（替代 pytest，避免事件循环重建导致浏览器断连）
 
@@ -11,6 +11,7 @@ SessionPool 按 session_key 复用 Context，验证话题一致性。
 运行方式（宿主机）：
   cd backend && python tests/run_web_search_tests.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -50,16 +51,21 @@ class TestReport:
         else:
             self.failed += 1
             status = "FAILED"
-        self.results.append({
-            "name": name, "status": status, "detail": detail, "elapsed": elapsed,
-        })
+        self.results.append(
+            {
+                "name": name,
+                "status": status,
+                "detail": detail,
+                "elapsed": elapsed,
+            }
+        )
         print(f"  [{status}] {name} ({elapsed:.1f}s)" + (f" - {detail}" if detail else ""))
 
     def summary(self):
         total = self.passed + self.failed + self.skipped
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  总计: {total} | 通过: {self.passed} | 失败: {self.failed} | 跳过: {self.skipped}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         return self.failed == 0
 
 
@@ -67,10 +73,10 @@ class TestReport:
 async def test_basic_english(report: TestReport):
     """测试 1: 基础英文搜索"""
     from app.tools import get_web_search
+
     ws = get_web_search()
     start = time.monotonic()
-    results = await ws.search("Python 3.13 new features", top_k=3, language="en-US",
-                                session_key="test_basic")
+    results = await ws.search("Python 3.13 new features", top_k=3, language="en-US", session_key="test_basic")
     elapsed = time.monotonic() - start
 
     ok = len(results) > 0
@@ -84,10 +90,10 @@ async def test_basic_english(report: TestReport):
 async def test_chinese_translated(report: TestReport):
     """测试 2: 中文搜索 → 自动翻译为英文"""
     from app.tools import get_web_search
+
     ws = get_web_search()
     start = time.monotonic()
-    results = await ws.search("微服务架构最佳实践", top_k=3, language="zh-CN",
-                                session_key="test_chinese")
+    results = await ws.search("微服务架构最佳实践", top_k=3, language="zh-CN", session_key="test_chinese")
     elapsed = time.monotonic() - start
 
     ok = len(results) > 0 and elapsed < 30.0
@@ -101,10 +107,11 @@ async def test_chinese_translated(report: TestReport):
 async def test_session_pool_reuse(report: TestReport):
     """测试 3: SessionPool 复用 — 同一 session_key 两次搜索，第二次应更快"""
     from app.tools import get_web_search
+
     ws = get_web_search()
 
     results = []
-    for i, q in enumerate(["Python async patterns", "Python design patterns"]):
+    for _i, q in enumerate(["Python async patterns", "Python design patterns"]):
         start = time.monotonic()
         r = await ws.search(q, top_k=2, language="en-US", session_key="test_reuse")
         elapsed = time.monotonic() - start
@@ -121,31 +128,30 @@ async def test_session_pool_reuse(report: TestReport):
 async def test_session_pool_isolation(report: TestReport):
     """测试 4: SessionPool 隔离 — 不同 session_key 使用不同 Context"""
     from app.tools import get_web_search
+
     ws = get_web_search()
 
     results = {}
     for agent_id in ["agent_alpha", "agent_beta", "agent_gamma"]:
         start = time.monotonic()
-        r = await ws.search("Kubernetes basics", top_k=2, language="en-US",
-                              session_key=agent_id)
+        r = await ws.search("Kubernetes basics", top_k=2, language="en-US", session_key=agent_id)
         elapsed = time.monotonic() - start
         results[agent_id] = (elapsed, len(r))
 
     ok = all(cnt > 0 for _, cnt in results.values())
     detail = ", ".join(f"{k}:{v:.1f}s/{c}r" for k, (v, c) in results.items())
-    report.add("SessionPool 隔离 (3 agents)", ok, detail,
-               sum(v for v, _ in results.values()))
+    report.add("SessionPool 隔离 (3 agents)", ok, detail, sum(v for v, _ in results.values()))
 
 
 async def test_concurrent_different_sessions(report: TestReport):
     """测试 5: 并发搜索（不同 session_key，模拟多 Agent 同时搜索）"""
     from app.tools import get_web_search
+
     ws = get_web_search()
 
     async def search_one(query, session_key):
         try:
-            results = await ws.search(query, top_k=2, language="en-US",
-                                       session_key=session_key)
+            results = await ws.search(query, top_k=2, language="en-US", session_key=session_key)
             return len(results)
         except Exception as e:
             print(f"      [{session_key}] 错误: {e}")
@@ -169,6 +175,7 @@ async def test_concurrent_different_sessions(report: TestReport):
 async def test_fetch_url(report: TestReport):
     """测试 6: URL 直接抓取"""
     from app.tools import get_web_fetch
+
     f = get_web_fetch()
     start = time.monotonic()
     result = await f.fetch_url("https://www.example.com", max_chars=2000)
@@ -183,6 +190,7 @@ async def test_fetch_url(report: TestReport):
 async def test_ssrf_protection(report: TestReport):
     """测试 7: SSRF 防护"""
     from app.tools import get_web_fetch
+
     f = get_web_fetch()
 
     test_cases = [
@@ -205,10 +213,10 @@ async def test_ssrf_protection(report: TestReport):
 async def test_result_quality(report: TestReport):
     """测试 8: 结果质量验证"""
     from app.tools import get_web_search
+
     ws = get_web_search()
     start = time.monotonic()
-    results = await ws.search("Python FastAPI async tutorial", top_k=5, language="en-US",
-                                session_key="test_quality")
+    results = await ws.search("Python FastAPI async tutorial", top_k=5, language="en-US", session_key="test_quality")
     elapsed = time.monotonic() - start
 
     has_quote = any(r.get("quote") for r in results)
@@ -223,6 +231,7 @@ async def test_result_quality(report: TestReport):
 async def test_translation_chunking(report: TestReport):
     """测试 9: 翻译分块 — 超长查询应自动分块翻译"""
     from app.tools import get_web_search
+
     ws = get_web_search()
 
     # 构造一个超长查询（> 2000 字符）
@@ -252,8 +261,7 @@ async def test_translation_chunking(report: TestReport):
     ) * 2  # 确保 > 2000 chars
 
     start = time.monotonic()
-    results = await ws.search(long_query, top_k=3, language="zh-CN",
-                                session_key="test_chunking")
+    results = await ws.search(long_query, top_k=3, language="zh-CN", session_key="test_chunking")
     elapsed = time.monotonic() - start
 
     # 只要不崩溃且返回了结果就算通过（分块翻译可能较慢）
@@ -335,8 +343,9 @@ async def main():
     # 清理
     try:
         from app.tools import get_web_search
+
         ws = get_web_search()
-        if hasattr(ws, 'close'):
+        if hasattr(ws, "close"):
             await ws.close()
     except Exception:
         pass

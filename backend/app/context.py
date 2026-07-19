@@ -8,38 +8,24 @@ import uuid
 # ---------- contextvars ----------
 
 # request_id：每个 HTTP 请求唯一（入口中间件分配）
-_request_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "request_id", default="-"
-)
+_request_id: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
 # meeting_id：当前请求关联的会议 ID（运行会议时设置）
-_meeting_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "meeting_id", default="-"
-)
+_meeting_id: contextvars.ContextVar[str] = contextvars.ContextVar("meeting_id", default="-")
 
 # runner_session_id：Runner 执行会话 ID（每次 run() 调用分配）
 # 用于关联一次会议运行期间的所有日志、事件、LLM 调用
-_runner_session_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "runner_session_id", default="-"
-)
+_runner_session_id: contextvars.ContextVar[str] = contextvars.ContextVar("runner_session_id", default="-")
 
 # agent_role：当前 LLM 调用的 Agent 角色（每次 think/complete 调用前设置）
 # 用于在日志/trace/cost 中标识是哪个角色发出的调用
-_agent_role: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "agent_role", default=""
-)
+_agent_role: contextvars.ContextVar[str] = contextvars.ContextVar("agent_role", default="")
 
 # user_id / username：当前请求的认证用户（认证中间件设置）
 # 用于审计日志中标识操作者身份
-_user_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "user_id", default="-"
-)
-_username: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "username", default="-"
-)
-_user_role: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "user_role", default=""
-)
+_user_id: contextvars.ContextVar[str] = contextvars.ContextVar("user_id", default="-")
+_username: contextvars.ContextVar[str] = contextvars.ContextVar("username", default="-")
+_user_role: contextvars.ContextVar[str] = contextvars.ContextVar("user_role", default="")
 
 
 def new_request_id() -> str:
@@ -115,17 +101,22 @@ def reset_agent_role(token: contextvars.Token[str]) -> None:
 def get_user_id() -> str:
     return _user_id.get()
 
+
 def set_user_id(uid: str) -> contextvars.Token[str]:
     return _user_id.set(uid)
+
 
 def get_username() -> str:
     return _username.get()
 
+
 def set_username(name: str) -> contextvars.Token[str]:
     return _username.set(name)
 
+
 def get_user_role() -> str:
     return _user_role.get()
+
 
 def set_user_role(role: str) -> contextvars.Token[str]:
     return _user_role.set(role)

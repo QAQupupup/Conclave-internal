@@ -16,6 +16,7 @@
 - 抓取失败时回退到内置的硬编码价格表
 - 不依赖Playwright，仅用httpx+正则解析HTML中的内嵌JSON数据
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +29,8 @@ from typing import Any
 
 import httpx
 
+from app.lazy_asyncio import LazyLock
+
 logger = logging.getLogger(__name__)
 
 _PRICING_URL = "https://siliconflow.cn/pricing"
@@ -36,19 +39,97 @@ _CACHE_TTL_SECONDS = 24 * 60 * 60  # 24小时
 
 # 内置回退价格表（当动态抓取失败时使用，2026-07-11从官网同步）
 _FALLBACK_PRICING: dict[str, dict[str, Any]] = {
-    "deepseek-ai/DeepSeek-V4-Pro": {"input": 12.0, "output": 24.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "deepseek-ai/DeepSeek-V4-Flash": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "fast", "source": "fallback"},
-    "deepseek-ai/DeepSeek-V3.2": {"input": 4.0, "output": 6.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
-    "deepseek-ai/DeepSeek-V3.1-Terminus": {"input": 4.0, "output": 12.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
-    "deepseek-ai/DeepSeek-V3": {"input": 2.0, "output": 8.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
-    "deepseek-ai/DeepSeek-R1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "reasoning", "source": "fallback"},
-    "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free", "source": "fallback"},
-    "Pro/deepseek-ai/DeepSeek-V4-Pro": {"input": 12.0, "output": 24.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "Pro/deepseek-ai/DeepSeek-V4-Flash": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "Pro/deepseek-ai/DeepSeek-V3.2": {"input": 4.0, "output": 6.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "Pro/deepseek-ai/DeepSeek-V3": {"input": 2.0, "output": 8.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "Pro/deepseek-ai/DeepSeek-V3.1-Terminus": {"input": 4.0, "output": 12.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "Pro/deepseek-ai/DeepSeek-R1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
+    "deepseek-ai/DeepSeek-V4-Pro": {
+        "input": 12.0,
+        "output": 24.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
+    "deepseek-ai/DeepSeek-V4-Flash": {
+        "input": 1.0,
+        "output": 2.0,
+        "currency": "CNY",
+        "tier": "fast",
+        "source": "fallback",
+    },
+    "deepseek-ai/DeepSeek-V3.2": {
+        "input": 4.0,
+        "output": 6.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
+    "deepseek-ai/DeepSeek-V3.1-Terminus": {
+        "input": 4.0,
+        "output": 12.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
+    "deepseek-ai/DeepSeek-V3": {
+        "input": 2.0,
+        "output": 8.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
+    "deepseek-ai/DeepSeek-R1": {
+        "input": 4.0,
+        "output": 16.0,
+        "currency": "CNY",
+        "tier": "reasoning",
+        "source": "fallback",
+    },
+    "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B": {
+        "input": 0.0,
+        "output": 0.0,
+        "currency": "CNY",
+        "tier": "free",
+        "source": "fallback",
+    },
+    "Pro/deepseek-ai/DeepSeek-V4-Pro": {
+        "input": 12.0,
+        "output": 24.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
+    "Pro/deepseek-ai/DeepSeek-V4-Flash": {
+        "input": 1.0,
+        "output": 2.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
+    "Pro/deepseek-ai/DeepSeek-V3.2": {
+        "input": 4.0,
+        "output": 6.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
+    "Pro/deepseek-ai/DeepSeek-V3": {
+        "input": 2.0,
+        "output": 8.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
+    "Pro/deepseek-ai/DeepSeek-V3.1-Terminus": {
+        "input": 4.0,
+        "output": 12.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
+    "Pro/deepseek-ai/DeepSeek-R1": {
+        "input": 4.0,
+        "output": 16.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
     # Qwen LLM 系列已排除：全系不支持 response_format: json_object
     "THUDM/GLM-Z1-9B-0414": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free", "source": "fallback"},
     "zai-org/GLM-5.1": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
@@ -56,22 +137,76 @@ _FALLBACK_PRICING: dict[str, dict[str, Any]] = {
     "Pro/zai-org/GLM-5.1": {"input": 6.0, "output": 24.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
     "moonshotai/Kimi-K2.6": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
     "Pro/moonshotai/Kimi-K2.6": {"input": 6.5, "output": 27.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "moonshotai/Kimi-K2.7-Code": {"input": 6.5, "output": 27.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
-    "MiniMaxAI/MiniMax-M2.5": {"input": 2.1, "output": 8.4, "currency": "CNY", "tier": "standard", "source": "fallback"},
+    "moonshotai/Kimi-K2.7-Code": {
+        "input": 6.5,
+        "output": 27.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
+    "MiniMaxAI/MiniMax-M2.5": {
+        "input": 2.1,
+        "output": 8.4,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
     "Pro/MiniMaxAI/MiniMax-M2.5": {"input": 2.1, "output": 8.4, "currency": "CNY", "tier": "pro", "source": "fallback"},
     "tencent/Hunyuan-MT-7B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free", "source": "fallback"},
-    "tencent/Hunyuan-A13B-Instruct": {"input": 1.0, "output": 4.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
-    "meituan-longcat/LongCat-2.0": {"input": 5.0, "output": 20.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
+    "tencent/Hunyuan-A13B-Instruct": {
+        "input": 1.0,
+        "output": 4.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
+    "meituan-longcat/LongCat-2.0": {
+        "input": 5.0,
+        "output": 20.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
     "nex-agi/Nex-N2-Pro": {"input": 1.75, "output": 7.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
-    "ByteDance-Seed/Seed-OSS-36B-Instruct": {"input": 1.5, "output": 4.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
+    "ByteDance-Seed/Seed-OSS-36B-Instruct": {
+        "input": 1.5,
+        "output": 4.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
     "stepfun-ai/Step-3.5-Flash": {"input": 0.7, "output": 2.1, "currency": "CNY", "tier": "fast", "source": "fallback"},
-    "inclusionAI/Ling-flash-2.0": {"input": 1.0, "output": 4.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
-    "inclusionAI/Ling-mini-2.0": {"input": 0.5, "output": 2.0, "currency": "CNY", "tier": "cheap", "source": "fallback"},
+    "inclusionAI/Ling-flash-2.0": {
+        "input": 1.0,
+        "output": 4.0,
+        "currency": "CNY",
+        "tier": "standard",
+        "source": "fallback",
+    },
+    "inclusionAI/Ling-mini-2.0": {
+        "input": 0.5,
+        "output": 2.0,
+        "currency": "CNY",
+        "tier": "cheap",
+        "source": "fallback",
+    },
     "BAAI/bge-m3": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free", "source": "fallback"},
     "BAAI/bge-reranker-v2-m3": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free", "source": "fallback"},
     "Pro/BAAI/bge-m3": {"input": 0.07, "output": 0.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "Pro/BAAI/bge-reranker-v2-m3": {"input": 0.07, "output": 0.0, "currency": "CNY", "tier": "pro", "source": "fallback"},
-    "Qwen/Qwen3-VL-Embedding-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free", "source": "fallback"},
+    "Pro/BAAI/bge-reranker-v2-m3": {
+        "input": 0.07,
+        "output": 0.0,
+        "currency": "CNY",
+        "tier": "pro",
+        "source": "fallback",
+    },
+    "Qwen/Qwen3-VL-Embedding-8B": {
+        "input": 0.0,
+        "output": 0.0,
+        "currency": "CNY",
+        "tier": "free",
+        "source": "fallback",
+    },
     "Qwen/Qwen3-VL-Reranker-8B": {"input": 0.0, "output": 0.0, "currency": "CNY", "tier": "free", "source": "fallback"},
     "deepseek-chat": {"input": 2.0, "output": 8.0, "currency": "CNY", "tier": "standard", "source": "fallback"},
     "deepseek-reasoner": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "reasoning", "source": "fallback"},
@@ -82,7 +217,7 @@ _FALLBACK_PRICING: dict[str, dict[str, Any]] = {
 
 # 模块级缓存
 _dynamic_pricing: dict[str, dict[str, Any]] = {}
-_fetch_lock = asyncio.Lock()
+_fetch_lock = LazyLock()
 _last_fetch_time: float = 0
 _fetch_started = False
 
@@ -128,7 +263,7 @@ def _resolve_flight_rows(text: str) -> dict[str, Any]:
     # 匹配 $HEXID:JSON_VALUE 的模式
     # HEXID是十六进制字符串（如5cb, 5b9, 5ba, L10等）
     # JSON_VALUE可以是对象{}、数组[]、字符串"..."、数字、布尔值、null
-    row_pattern = re.compile(r'(?:^|\n)([0-9a-zA-Z]+):')
+    row_pattern = re.compile(r"(?:^|\n)([0-9a-zA-Z]+):")
 
     # 策略：找到所有看起来像行定义的起始位置，然后尝试解析JSON
     pos = 0
@@ -141,7 +276,7 @@ def _resolve_flight_rows(text: str) -> dict[str, Any]:
 
         # 尝试从json_start解析JSON值
         # 跳过空白
-        while json_start < len(text) and text[json_start] in ' \t':
+        while json_start < len(text) and text[json_start] in " \t":
             json_start += 1
         if json_start >= len(text):
             pos = m.end()
@@ -149,7 +284,7 @@ def _resolve_flight_rows(text: str) -> dict[str, Any]:
 
         json_str = None
         try:
-            if text[json_start] == '{':
+            if text[json_start] == "{":
                 # 找配对的}
                 depth = 0
                 in_str = False
@@ -159,7 +294,7 @@ def _resolve_flight_rows(text: str) -> dict[str, Any]:
                     if escape:
                         escape = False
                         continue
-                    if c == '\\':
+                    if c == "\\":
                         escape = True
                         continue
                     if c == '"':
@@ -167,14 +302,14 @@ def _resolve_flight_rows(text: str) -> dict[str, Any]:
                         continue
                     if in_str:
                         continue
-                    if c == '{':
+                    if c == "{":
                         depth += 1
-                    elif c == '}':
+                    elif c == "}":
                         depth -= 1
                         if depth == 0:
-                            json_str = text[json_start:i+1]
+                            json_str = text[json_start : i + 1]
                             break
-            elif text[json_start] == '[':
+            elif text[json_start] == "[":
                 depth = 0
                 in_str = False
                 escape = False
@@ -183,7 +318,7 @@ def _resolve_flight_rows(text: str) -> dict[str, Any]:
                     if escape:
                         escape = False
                         continue
-                    if c == '\\':
+                    if c == "\\":
                         escape = True
                         continue
                     if c == '"':
@@ -191,12 +326,12 @@ def _resolve_flight_rows(text: str) -> dict[str, Any]:
                         continue
                     if in_str:
                         continue
-                    if c == '[':
+                    if c == "[":
                         depth += 1
-                    elif c == ']':
+                    elif c == "]":
                         depth -= 1
                         if depth == 0:
-                            json_str = text[json_start:i+1]
+                            json_str = text[json_start : i + 1]
                             break
         except Exception:
             pass
@@ -254,12 +389,16 @@ def _extract_pricing_from_model(model: dict[str, Any], rows: dict[str, Any]) -> 
         elif isinstance(pricing_data, dict):
             for key in ("prompt", "input"):
                 if key in pricing_data:
-                    p = _parse_price(pricing_data[key].get("price") if isinstance(pricing_data[key], dict) else pricing_data[key])
+                    p = _parse_price(
+                        pricing_data[key].get("price") if isinstance(pricing_data[key], dict) else pricing_data[key]
+                    )
                     if p is not None:
                         input_price = p
             for key in ("completion", "output"):
                 if key in pricing_data:
-                    p = _parse_price(pricing_data[key].get("price") if isinstance(pricing_data[key], dict) else pricing_data[key])
+                    p = _parse_price(
+                        pricing_data[key].get("price") if isinstance(pricing_data[key], dict) else pricing_data[key]
+                    )
                     if p is not None:
                         output_price = p
 
@@ -322,7 +461,7 @@ def _parse_flight_data(html: str) -> dict[str, dict[str, Any]]:
             if escape:
                 escape = False
                 continue
-            if c == '\\':
+            if c == "\\":
                 escape = True
                 continue
             if c == '"':
@@ -330,9 +469,9 @@ def _parse_flight_data(html: str) -> dict[str, dict[str, Any]]:
                 continue
             if in_str:
                 continue
-            if c == '{':
+            if c == "{":
                 depth += 1
-            elif c == '}':
+            elif c == "}":
                 depth -= 1
                 if depth == 0:
                     obj_end = i + 1
@@ -347,7 +486,7 @@ def _parse_flight_data(html: str) -> dict[str, dict[str, Any]]:
         except json.JSONDecodeError:
             # 可能包含$HEXID引用，先替换再解析
             # 将 "$HEXID" 替换为 null 以允许JSON解析
-            cleaned = re.sub(r'"[$][0-9a-zA-Z]+"', 'null', obj_str)
+            cleaned = re.sub(r'"[$][0-9a-zA-Z]+"', "null", obj_str)
             try:
                 model = json.loads(cleaned)
             except json.JSONDecodeError:
@@ -398,13 +537,16 @@ def _load_cache() -> dict[str, dict[str, Any]] | None:
     try:
         if not _CACHE_FILE.exists():
             return None
-        data = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        data: Any = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or "pricing" not in data:
             return None
         age = time.time() - data.get("fetched_at", 0)
         if age > _CACHE_TTL_SECONDS:
             return None
-        return data["pricing"]
+        pricing = data["pricing"]
+        if isinstance(pricing, dict):
+            return pricing
+        return None
     except Exception as e:
         logger.warning(f"加载定价缓存失败: {e}")
         return None
@@ -414,11 +556,15 @@ def _save_cache(pricing: dict[str, dict[str, Any]]) -> None:
     try:
         _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         _CACHE_FILE.write_text(
-            json.dumps({
-                "fetched_at": time.time(),
-                "pricing": pricing,
-                "model_count": len(pricing),
-            }, ensure_ascii=False, indent=2),
+            json.dumps(
+                {
+                    "fetched_at": time.time(),
+                    "pricing": pricing,
+                    "model_count": len(pricing),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
     except Exception as e:

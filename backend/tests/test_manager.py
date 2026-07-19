@@ -2,8 +2,8 @@
 
 使用 monkeypatch 替换 compute 层，避免真实 LLM 调用。
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 import pytest
 
@@ -24,39 +24,57 @@ class StageAwareStubCompute:
     async def think(self, req: ThinkRequest) -> ThinkResponse:
         stage = req.stage
         if stage == "clarify":
-            return ThinkResponse(success=True, result={
-                "clarified_topic": "开发一个 FastAPI + React 的 Wiki 系统",
-                "key_questions": ["如何支持 Markdown？", "权限模型是什么？"],
-                "team_config": [
-                    {"role": "product_architect", "stance": "重价值与边界"},
-                    {"role": "engineer", "stance": "重可行性与风险"},
-                ],
-                "complexity": "full",
-            })
+            return ThinkResponse(
+                success=True,
+                result={
+                    "clarified_topic": "开发一个 FastAPI + React 的 Wiki 系统",
+                    "key_questions": ["如何支持 Markdown？", "权限模型是什么？"],
+                    "team_config": [
+                        {"role": "product_architect", "stance": "重价值与边界"},
+                        {"role": "engineer", "stance": "重可行性与风险"},
+                    ],
+                    "complexity": "full",
+                },
+            )
         if stage == "intra_team":
-            return ThinkResponse(success=True, result={
-                "claims": [{"claim": "需要 Markdown 编辑支持", "confidence": 0.9, "evidence": "Wiki 核心功能"}],
-            })
+            return ThinkResponse(
+                success=True,
+                result={
+                    "claims": [{"claim": "需要 Markdown 编辑支持", "confidence": 0.9, "evidence": "Wiki 核心功能"}],
+                },
+            )
         if stage == "cross_team":
-            return ThinkResponse(success=True, result={
-                "conflicts": [],
-                "consensus": "一致同意需要 Markdown 支持",
-            })
+            return ThinkResponse(
+                success=True,
+                result={
+                    "conflicts": [],
+                    "consensus": "一致同意需要 Markdown 支持",
+                },
+            )
         if stage == "evidence_check":
-            return ThinkResponse(success=True, result={
-                "evidence_set": [],
-            })
+            return ThinkResponse(
+                success=True,
+                result={
+                    "evidence_set": [],
+                },
+            )
         if stage == "arbitrate":
-            return ThinkResponse(success=True, result={
-                "decisions": [],
-                "adopted_claims": [],
-                "action_brief": "无需仲裁",
-            })
+            return ThinkResponse(
+                success=True,
+                result={
+                    "decisions": [],
+                    "adopted_claims": [],
+                    "action_brief": "无需仲裁",
+                },
+            )
         if stage == "produce":
-            return ThinkResponse(success=True, result={
-                "prd": {"title": "Wiki 系统", "goal": "个人知识管理"},
-                "openapi": "openapi: 3.0.0",
-            })
+            return ThinkResponse(
+                success=True,
+                result={
+                    "prd": {"title": "Wiki 系统", "goal": "个人知识管理"},
+                    "openapi": "openapi: 3.0.0",
+                },
+            )
         return ThinkResponse(success=True, result={})
 
     async def think_batch(self, requests: list[ThinkRequest]) -> list[ThinkResponse]:

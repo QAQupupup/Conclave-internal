@@ -1,16 +1,26 @@
 # 状态机 + 控制信号处理
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from app.models import MeetingState, MeetingStatus, Stage
 from conclave_core.charter_logic import is_already_borrowed, register_borrow
 
-
 # ---------- 控制信号 ----------
 
-VALID_SIGNALS = {"pause", "resume", "abort", "inject", "loan", "reject_user", "approve_borrow", "reject_borrow", "freeze_borrow"}
+VALID_SIGNALS = {
+    "pause",
+    "resume",
+    "abort",
+    "inject",
+    "loan",
+    "reject_user",
+    "approve_borrow",
+    "reject_borrow",
+    "freeze_borrow",
+}
 
 
 class ControlError(Exception):
@@ -20,6 +30,7 @@ class ControlError(Exception):
 # ---------- 信号处理器（命令模式）----------
 # 每个信号对应一个 handler: (state, payload) -> state
 # 新增信号只需实现 handler 并注册到 _SIGNAL_HANDLERS，无需改 apply_signal（开闭原则）
+
 
 def _handle_pause(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
     """pause: 保存快照，标记 paused"""
@@ -60,7 +71,7 @@ def _handle_resume(state: MeetingState, payload: dict[str, Any]) -> MeetingState
             # stage保持在失败的阶段（runner会重新执行该阶段）
             return state
         else:
-            raise ControlError(f"会议已失败且无可恢复的检查点")
+            raise ControlError("会议已失败且无可恢复的检查点")
     else:
         raise ControlError(f"当前状态 {state.status} 不可恢复")
 
@@ -74,6 +85,7 @@ def _handle_abort(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
 def _handle_inject(state: MeetingState, payload: dict[str, Any]) -> MeetingState:
     """inject: 追加注入消息，下一轮可见"""
     import uuid
+
     msg = payload.get("message", payload.get("content", ""))
     if msg:
         msg_id = f"inject-{uuid.uuid4().hex[:8]}"
@@ -171,7 +183,7 @@ def _handle_reject_user(state: MeetingState, payload: dict[str, Any]) -> Meeting
         return state
 
     # 初始化 user_rejections 字典
-    if not hasattr(state, 'user_rejections') or state.user_rejections is None:
+    if not hasattr(state, "user_rejections") or state.user_rejections is None:
         state.user_rejections = {}
 
     if target_message_id not in state.user_rejections:
@@ -236,56 +248,66 @@ def _handle_approve_borrow(state: MeetingState, payload: dict[str, Any]) -> Meet
         raise ControlError("会议宪章尚未建立，无法借调")
     if is_already_borrowed(charter, target_role):
         state.pending_borrow_request = None
-        state.injected_messages.append({
-            "signal": "approve_borrow",
-            "request_id": pending.get("id"),
-            "target_role": target_role,
-            "verdict": "reject",
-            "reason": f"角色 {target_role} 已借调过",
-            "at_stage": state.stage.value,
-        })
+        state.injected_messages.append(
+            {
+                "signal": "approve_borrow",
+                "request_id": pending.get("id"),
+                "target_role": target_role,
+                "verdict": "reject",
+                "reason": f"角色 {target_role} 已借调过",
+                "at_stage": state.stage.value,
+            }
+        )
         return state
     if len(state.borrowed_agents) >= 2:
         state.pending_borrow_request = None
-        state.injected_messages.append({
-            "signal": "approve_borrow",
-            "request_id": pending.get("id"),
-            "target_role": target_role,
-            "verdict": "reject",
-            "reason": "借调数量已达上限（2）",
-            "at_stage": state.stage.value,
-        })
+        state.injected_messages.append(
+            {
+                "signal": "approve_borrow",
+                "request_id": pending.get("id"),
+                "target_role": target_role,
+                "verdict": "reject",
+                "reason": "借调数量已达上限（2）",
+                "at_stage": state.stage.value,
+            }
+        )
         return state
 
     # 批准借调
     register_borrow(charter, target_role, "approve_temporary")
-    state.borrowed_agents.append({
-        "role": target_role,
-        "verdict": "approve_temporary",
-        "spoken": False,
-        "request": {
-            "target_role": target_role,
-            "goal": pending.get("goal", ""),
-            "necessary": pending.get("necessary", ""),
-            "no_loan_cost": pending.get("no_loan_cost", ""),
-            "stance": payload.get("stance", ""),
-        },
-    })
+    state.borrowed_agents.append(
+        {
+            "role": target_role,
+            "verdict": "approve_temporary",
+            "spoken": False,
+            "request": {
+                "target_role": target_role,
+                "goal": pending.get("goal", ""),
+                "necessary": pending.get("necessary", ""),
+                "no_loan_cost": pending.get("no_loan_cost", ""),
+                "stance": payload.get("stance", ""),
+            },
+        }
+    )
     # 记录历史
-    state.borrow_request_history.append({
-        **pending,
-        "verdict": "approved_by_user",
-        "approved_at": datetime.now(timezone.utc).isoformat(),
-    })
+    state.borrow_request_history.append(
+        {
+            **pending,
+            "verdict": "approved_by_user",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     state.pending_borrow_request = None
-    state.injected_messages.append({
-        "signal": "approve_borrow",
-        "request_id": pending.get("id"),
-        "target_role": target_role,
-        "verdict": "approve_temporary",
-        "reason": "用户批准借调",
-        "at_stage": state.stage.value,
-    })
+    state.injected_messages.append(
+        {
+            "signal": "approve_borrow",
+            "request_id": pending.get("id"),
+            "target_role": target_role,
+            "verdict": "approve_temporary",
+            "reason": "用户批准借调",
+            "at_stage": state.stage.value,
+        }
+    )
     return state
 
 
@@ -300,21 +322,25 @@ def _handle_reject_borrow(state: MeetingState, payload: dict[str, Any]) -> Meeti
 
     target_role = pending.get("target_role", "")
     reason = str(payload.get("reason", "用户拒绝借调")).strip()
-    state.borrow_request_history.append({
-        **pending,
-        "verdict": "rejected_by_user",
-        "rejected_at": datetime.now(timezone.utc).isoformat(),
-        "reject_reason": reason,
-    })
+    state.borrow_request_history.append(
+        {
+            **pending,
+            "verdict": "rejected_by_user",
+            "rejected_at": datetime.now(timezone.utc).isoformat(),
+            "reject_reason": reason,
+        }
+    )
     state.pending_borrow_request = None
-    state.injected_messages.append({
-        "signal": "reject_borrow",
-        "request_id": pending.get("id"),
-        "target_role": target_role,
-        "verdict": "reject",
-        "reason": reason,
-        "at_stage": state.stage.value,
-    })
+    state.injected_messages.append(
+        {
+            "signal": "reject_borrow",
+            "request_id": pending.get("id"),
+            "target_role": target_role,
+            "verdict": "reject",
+            "reason": reason,
+            "at_stage": state.stage.value,
+        }
+    )
     return state
 
 
@@ -323,18 +349,22 @@ def _handle_freeze_borrow(state: MeetingState, payload: dict[str, Any]) -> Meeti
     state.borrow_frozen = True
     pending = state.pending_borrow_request
     if pending is not None:
-        state.borrow_request_history.append({
-            **pending,
-            "verdict": "frozen_by_user",
-            "frozen_at": datetime.now(timezone.utc).isoformat(),
-        })
+        state.borrow_request_history.append(
+            {
+                **pending,
+                "verdict": "frozen_by_user",
+                "frozen_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         state.pending_borrow_request = None
-    state.injected_messages.append({
-        "signal": "freeze_borrow",
-        "frozen": True,
-        "at_stage": state.stage.value,
-        "pending_request_id": pending.get("id") if pending else None,
-    })
+    state.injected_messages.append(
+        {
+            "signal": "freeze_borrow",
+            "frozen": True,
+            "at_stage": state.stage.value,
+            "pending_request_id": pending.get("id") if pending else None,
+        }
+    )
     return state
 
 

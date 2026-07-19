@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import ipaddress
 import logging
 import re
 import time
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from .playwright_search import _STEALTH_JS, _USER_AGENT
@@ -29,21 +30,22 @@ logger = logging.getLogger("app.tools.browser_tool")
 # ================================================================
 
 # 资源限制
-MAX_CONTEXTS = 10                # 最多 10 个并行 meeting
-MAX_TABS_PER_CONTEXT = 5         # 每个 meeting 最多 5 个标签
-IDLE_TIMEOUT_SECONDS = 600       # 空闲 10 分钟回收 Context
-MAX_NAVIGATION_DEPTH = 15        # 最大导航跳转深度
-MAX_ACTIONS_PER_MINUTE = 30      # 操作频率限流
-SCREENSHOT_MAX_BYTES = 2 * 1024 * 1024   # 截图最大 2MB
-EVALUATE_MAX_RETURN_BYTES = 1024 * 1024   # evaluate 返回最大 1MB
-EVALUATE_TIMEOUT_SECONDS = 10             # evaluate 超时 10s
-LOG_SUMMARY_MAX_BYTES = 2048             # 日志摘要最大 2KB
+MAX_CONTEXTS = 10  # 最多 10 个并行 meeting
+MAX_TABS_PER_CONTEXT = 5  # 每个 meeting 最多 5 个标签
+IDLE_TIMEOUT_SECONDS = 600  # 空闲 10 分钟回收 Context
+MAX_NAVIGATION_DEPTH = 15  # 最大导航跳转深度
+MAX_ACTIONS_PER_MINUTE = 30  # 操作频率限流
+SCREENSHOT_MAX_BYTES = 2 * 1024 * 1024  # 截图最大 2MB
+EVALUATE_MAX_RETURN_BYTES = 1024 * 1024  # evaluate 返回最大 1MB
+EVALUATE_TIMEOUT_SECONDS = 10  # evaluate 超时 10s
+LOG_SUMMARY_MAX_BYTES = 2048  # 日志摘要最大 2KB
 
 # 域名白名单（空列表 = 允许所有公网域名，但拒绝私网）
 ALLOWED_DOMAINS: list[str] = []  # 通配符格式: "*.github.com" 或 "example.com"
 
 # 始终拒绝的 scheme
 _BLOCKED_SCHEMES = {"file", "data", "javascript", "vbscript", "about", "blob"}
+
 
 # 私网 IP 范围
 def _is_private_ip(hostname: str) -> bool:
@@ -105,9 +107,8 @@ def _is_url_allowed(url: str) -> tuple[bool, str]:
             return False, f"URL userinfo 绕过检测：声称 '{hostname}' 实际 '{real_host}'"
 
     # 白名单校验（如果配置了）
-    if ALLOWED_DOMAINS:
-        if not any(_matches_domain(hostname, p) for p in ALLOWED_DOMAINS):
-            return False, f"hostname '{hostname}' 不在白名单中"
+    if ALLOWED_DOMAINS and not any(_matches_domain(hostname, p) for p in ALLOWED_DOMAINS):
+        return False, f"hostname '{hostname}' 不在白名单中"
 
     return True, "ok"
 
@@ -172,6 +173,7 @@ _EXTRACT_JS = """
 # Page 包装：串行锁 + 统一等待 + 审计
 # ================================================================
 
+
 class _PageSession:
     """单个 Page 的会话上下文
 
@@ -181,7 +183,7 @@ class _PageSession:
     - 操作计数与频率限流
     """
 
-    def __init__(self, page: Any, meeting_id: str, context: "_ContextSession"):
+    def __init__(self, page: Any, meeting_id: str, context: _ContextSession):
         self.page = page
         self.meeting_id = meeting_id
         self.context = context
@@ -219,13 +221,15 @@ class _PageSession:
                 result = raw_result if isinstance(raw_result, dict) else {"status": "ok", "data": raw_result}
             except Exception as e:
                 result = {"status": "error", "error": str(e)[:200]}
-                logger.warning("BrowserTool 操作失败: meeting=%s action=%s err=%s",
-                               self.meeting_id, action_name, str(e)[:100])
+                logger.warning(
+                    "BrowserTool 操作失败: meeting=%s action=%s err=%s", self.meeting_id, action_name, str(e)[:100]
+                )
 
             duration_ms = int((time.time() - start_time) * 1000)
 
             # 审计日志（P0-3 + N9）
             from app.observability.log_bus import log_bus
+
             log_bus.emit(
                 "INFO",
                 f"browser_action: {action_name}",
@@ -235,7 +239,7 @@ class _PageSession:
                     "action": action_name,
                     "duration_ms": duration_ms,
                     "status": result.get("status", "ok"),
-                    "url": _sanitize_for_log(self.page.url, 200) if hasattr(self.page, 'url') else "",
+                    "url": _sanitize_for_log(self.page.url, 200) if hasattr(self.page, "url") else "",
                     "result_summary": _sanitize_for_log(str(result.get("error", result.get("data", ""))), 500),
                 },
             )
@@ -249,19 +253,16 @@ class _PageSession:
         1. wait_for_load_state('domcontentloaded') — DOM 解析完成
         2. 短暂等待动态内容渲染（500ms）
         """
-        try:
+        with contextlib.suppress(Exception):
             await self.page.wait_for_load_state("domcontentloaded", timeout=timeout * 1000)
-        except Exception:
-            pass  # 页面可能已卸载或超时，不阻断后续操作
-        try:
+        with contextlib.suppress(Exception):
             await self.page.wait_for_timeout(500)
-        except Exception:
-            pass
 
 
 # ================================================================
 # Context 会话：按 meeting_id 隔离
 # ================================================================
+
 
 class _ContextSession:
     """单个 meeting 的浏览器会话
@@ -273,7 +274,7 @@ class _ContextSession:
     - 空闲超时检测
     """
 
-    def __init__(self, context: Any, meeting_id: str, pool: "BrowserPool"):
+    def __init__(self, context: Any, meeting_id: str, pool: BrowserPool):
         self.context = context
         self.meeting_id = meeting_id
         self.pool = pool
@@ -292,10 +293,8 @@ class _ContextSession:
             if len(self.pages) >= MAX_TABS_PER_CONTEXT:
                 # 关闭最老的标签页
                 oldest = self.pages.pop(0)
-                try:
+                with contextlib.suppress(Exception):
                     await oldest.page.close()
-                except Exception:
-                    pass
             new_page = await self.context.new_page()
             session = _PageSession(new_page, self.meeting_id, self)
             self.pages.append(session)
@@ -325,21 +324,18 @@ class _ContextSession:
     async def close(self) -> None:
         """关闭 Context 及所有 Page"""
         for ps in self.pages:
-            try:
+            with contextlib.suppress(Exception):
                 await ps.page.close()
-            except Exception:
-                pass
         self.pages.clear()
-        try:
+        with contextlib.suppress(Exception):
             await self.context.close()
-        except Exception:
-            pass
         logger.info("Context 已关闭: meeting=%s", self.meeting_id)
 
 
 # ================================================================
 # BrowserPool：核心管理器
 # ================================================================
+
 
 class BrowserPool:
     """浏览器资源池：1 Chromium → N Context（按 meeting_id 隔离）
@@ -355,8 +351,8 @@ class BrowserPool:
     """
 
     def __init__(self) -> None:
-        self._browser = None
-        self._playwright = None
+        self._browser: Any = None
+        self._playwright: Any = None
         self._contexts: dict[str, _ContextSession] = {}
         self._lock = asyncio.Lock()
         self._idle_check_task: asyncio.Task | None = None
@@ -442,9 +438,13 @@ class BrowserPool:
             self._contexts[meeting_id] = session
 
             from app.observability.log_bus import log_bus
-            log_bus.emit("INFO", f"browser_context_created: meeting={meeting_id}",
-                         logger="app.tools.browser_tool",
-                         extra={"meeting_id": meeting_id, "total_contexts": len(self._contexts)})
+
+            log_bus.emit(
+                "INFO",
+                f"browser_context_created: meeting={meeting_id}",
+                logger="app.tools.browser_tool",
+                extra={"meeting_id": meeting_id, "total_contexts": len(self._contexts)},
+            )
 
             return session
 
@@ -456,9 +456,13 @@ class BrowserPool:
         # 清理排他锁
         self._exclusive_locks.pop(meeting_id, None)
         from app.observability.log_bus import log_bus
-        log_bus.emit("INFO", f"browser_context_released: meeting={meeting_id}",
-                     logger="app.tools.browser_tool",
-                     extra={"meeting_id": meeting_id, "remaining_contexts": len(self._contexts)})
+
+        log_bus.emit(
+            "INFO",
+            f"browser_context_released: meeting={meeting_id}",
+            logger="app.tools.browser_tool",
+            extra={"meeting_id": meeting_id, "remaining_contexts": len(self._contexts)},
+        )
 
     def get_exclusive_lock(self, meeting_id: str) -> asyncio.Lock:
         """获取指定 meeting 的排他锁（NavigationSkill 使用）
@@ -502,24 +506,18 @@ class BrowserPool:
         """关闭所有资源（应用关闭时调用）"""
         if self._idle_check_task:
             self._idle_check_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._idle_check_task
-            except asyncio.CancelledError:
-                pass
 
         for meeting_id in list(self._contexts.keys()):
             await self.release_context(meeting_id)
 
         if self._browser:
-            try:
+            with contextlib.suppress(Exception):
                 await self._browser.close()
-            except Exception:
-                pass
         if self._playwright:
-            try:
+            with contextlib.suppress(Exception):
                 await self._playwright.stop()
-            except Exception:
-                pass
         self._browser = None
         self._playwright = None
         logger.info("BrowserPool 已关闭")
@@ -528,6 +526,7 @@ class BrowserPool:
 # ================================================================
 # BrowserTool v2：Agent 友好的高级 API
 # ================================================================
+
 
 class BrowserTool:
     """Agent 浏览器操作工具（v2）
@@ -577,8 +576,9 @@ class BrowserTool:
     # 1. 导航
     # ================================================================
 
-    async def goto(self, meeting_id: str, url: str, wait_until: str = "domcontentloaded",
-                   timeout: int = 30000, page_index: int = 0) -> dict[str, Any]:
+    async def goto(
+        self, meeting_id: str, url: str, wait_until: str = "domcontentloaded", timeout: int = 30000, page_index: int = 0
+    ) -> dict[str, Any]:
         """导航到指定 URL（含安全校验 + 重定向验证 + 导航深度检查）"""
         # 安全校验
         allowed, reason = self._check_url(url)
@@ -621,39 +621,45 @@ class BrowserTool:
     async def back(self, meeting_id: str, page_index: int = 0) -> dict[str, Any]:
         """后退"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             response = await page.go_back(wait_until="domcontentloaded")
             await page.wait_for_timeout(500)
             return {"url": page.url, "status": "ok" if response else "no_history"}
+
         return await ps.execute("back", _do)
 
     async def forward(self, meeting_id: str, page_index: int = 0) -> dict[str, Any]:
         """前进"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             response = await page.go_forward(wait_until="domcontentloaded")
             await page.wait_for_timeout(500)
             return {"url": page.url, "status": "ok" if response else "no_history"}
+
         return await ps.execute("forward", _do)
 
     async def reload(self, meeting_id: str, page_index: int = 0) -> dict[str, Any]:
         """重新加载"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             await page.reload(wait_until="domcontentloaded")
             await page.wait_for_timeout(1000)
             return {"url": page.url, "status": "ok"}
+
         return await ps.execute("reload", _do)
 
     async def get_url(self, meeting_id: str, page_index: int = 0) -> str:
         """获取当前 URL"""
         ps = await self._get_page(meeting_id, page_index)
-        return ps.page.url
+        return ps.page.url  # type: ignore[no-any-return]
 
     async def get_title(self, meeting_id: str, page_index: int = 0) -> str:
         """获取页面标题"""
         ps = await self._get_page(meeting_id, page_index)
-        return await ps.page.title()
+        return await ps.page.title()  # type: ignore[no-any-return]
 
     # ================================================================
     # 2. 交互
@@ -687,40 +693,64 @@ class BrowserTool:
         else:
             return page.locator(selector)
 
-    async def click(self, meeting_id: str, selector: str, strategy: str = "auto",
-                    timeout: int = 10000, page_index: int = 0) -> dict[str, Any]:
+    async def click(
+        self, meeting_id: str, selector: str, strategy: str = "auto", timeout: int = 10000, page_index: int = 0
+    ) -> dict[str, Any]:
         """点击元素"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             await loc.click(timeout=timeout)
             return {"status": "ok", "selector": selector}
+
         return await ps.execute("click", _do)
 
-    async def fill(self, meeting_id: str, selector: str, value: str, strategy: str = "auto",
-                   timeout: int = 10000, page_index: int = 0) -> dict[str, Any]:
+    async def fill(
+        self,
+        meeting_id: str,
+        selector: str,
+        value: str,
+        strategy: str = "auto",
+        timeout: int = 10000,
+        page_index: int = 0,
+    ) -> dict[str, Any]:
         """清空并填入文本"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             await loc.fill(value, timeout=timeout)
             return {"status": "ok", "selector": selector}
+
         return await ps.execute("fill", _do)
 
-    async def type(self, meeting_id: str, selector: str, text: str, strategy: str = "auto",
-                   delay: int = 50, timeout: int = 10000, page_index: int = 0) -> dict[str, Any]:
+    async def type(
+        self,
+        meeting_id: str,
+        selector: str,
+        text: str,
+        strategy: str = "auto",
+        delay: int = 50,
+        timeout: int = 10000,
+        page_index: int = 0,
+    ) -> dict[str, Any]:
         """逐字符输入"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             await loc.type(text, delay=delay, timeout=timeout)
             return {"status": "ok", "selector": selector}
+
         return await ps.execute("type", _do)
 
-    async def press(self, meeting_id: str, key: str, selector: Optional[str] = None,
-                    strategy: str = "auto", page_index: int = 0) -> dict[str, Any]:
+    async def press(
+        self, meeting_id: str, key: str, selector: str | None = None, strategy: str = "auto", page_index: int = 0
+    ) -> dict[str, Any]:
         """按键"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             if selector:
                 loc = self._resolve_locator(page, selector, strategy)
@@ -728,12 +758,20 @@ class BrowserTool:
             else:
                 await page.keyboard.press(key)
             return {"status": "ok", "key": key}
+
         return await ps.execute("press", _do)
 
-    async def scroll(self, meeting_id: str, direction: str = "down", amount: int = 500,
-                     selector: Optional[str] = None, page_index: int = 0) -> dict[str, Any]:
+    async def scroll(
+        self,
+        meeting_id: str,
+        direction: str = "down",
+        amount: int = 500,
+        selector: str | None = None,
+        page_index: int = 0,
+    ) -> dict[str, Any]:
         """滚动"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             if selector:
                 loc = self._resolve_locator(page, selector, "auto")
@@ -743,22 +781,34 @@ class BrowserTool:
                 await page.mouse.wheel(0, delta)
                 await page.wait_for_timeout(300)
             return {"status": "ok", "direction": direction, "amount": amount}
+
         return await ps.execute("scroll", _do)
 
-    async def hover(self, meeting_id: str, selector: str, strategy: str = "auto",
-                    timeout: int = 10000, page_index: int = 0) -> dict[str, Any]:
+    async def hover(
+        self, meeting_id: str, selector: str, strategy: str = "auto", timeout: int = 10000, page_index: int = 0
+    ) -> dict[str, Any]:
         """悬停"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             await loc.hover(timeout=timeout)
             return {"status": "ok", "selector": selector}
+
         return await ps.execute("hover", _do)
 
-    async def select(self, meeting_id: str, selector: str, value: Optional[str] = None,
-                     label: Optional[str] = None, strategy: str = "auto", page_index: int = 0) -> dict[str, Any]:
+    async def select(
+        self,
+        meeting_id: str,
+        selector: str,
+        value: str | None = None,
+        label: str | None = None,
+        strategy: str = "auto",
+        page_index: int = 0,
+    ) -> dict[str, Any]:
         """下拉选择"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             if label:
@@ -768,12 +818,15 @@ class BrowserTool:
             else:
                 return {"status": "error", "error": "需指定 value 或 label"}
             return {"status": "ok", "selector": selector}
+
         return await ps.execute("select", _do)
 
-    async def check(self, meeting_id: str, selector: str, strategy: str = "auto",
-                    checked: bool = True, page_index: int = 0) -> dict[str, Any]:
+    async def check(
+        self, meeting_id: str, selector: str, strategy: str = "auto", checked: bool = True, page_index: int = 0
+    ) -> dict[str, Any]:
         """勾选/取消勾选"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             if checked:
@@ -781,39 +834,48 @@ class BrowserTool:
             else:
                 await loc.uncheck()
             return {"status": "ok", "selector": selector}
+
         return await ps.execute("check", _do)
 
-    async def drag(self, meeting_id: str, source: str, target: str, strategy: str = "auto",
-                   page_index: int = 0) -> dict[str, Any]:
+    async def drag(
+        self, meeting_id: str, source: str, target: str, strategy: str = "auto", page_index: int = 0
+    ) -> dict[str, Any]:
         """拖拽"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             src_loc = self._resolve_locator(page, source, strategy)
             tgt_loc = self._resolve_locator(page, target, strategy)
             await src_loc.drag_to(tgt_loc)
             return {"status": "ok", "source": source, "target": target}
+
         return await ps.execute("drag", _do)
 
     # ================================================================
     # 3. 内容提取（含渐进式降级 N3 + N7）
     # ================================================================
 
-    async def get_text(self, meeting_id: str, selector: Optional[str] = None,
-                       strategy: str = "auto", page_index: int = 0) -> str:
+    async def get_text(
+        self, meeting_id: str, selector: str | None = None, strategy: str = "auto", page_index: int = 0
+    ) -> str:
         """获取元素文本"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             if selector:
                 loc = self._resolve_locator(page, selector, strategy)
                 return await loc.text_content() or ""
             return await page.inner_text("body")
+
         result = await ps.execute("get_text", _do)
         return result.get("data", "") if result.get("status") == "ok" else ""
 
-    async def get_html(self, meeting_id: str, selector: Optional[str] = None,
-                       strategy: str = "auto", page_index: int = 0) -> str:
+    async def get_html(
+        self, meeting_id: str, selector: str | None = None, strategy: str = "auto", page_index: int = 0
+    ) -> str:
         """获取元素 HTML"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             if selector:
                 loc = self._resolve_locator(page, selector, strategy)
@@ -824,21 +886,24 @@ class BrowserTool:
             if len(html) > EVALUATE_MAX_RETURN_BYTES:
                 html = html[:EVALUATE_MAX_RETURN_BYTES] + "...[truncated]"
             return html
+
         result = await ps.execute("get_html", _do)
         return result.get("data", "") if result.get("status") == "ok" else ""
 
-    async def get_attribute(self, meeting_id: str, selector: str, attribute: str,
-                            strategy: str = "auto", page_index: int = 0) -> Optional[str]:
+    async def get_attribute(
+        self, meeting_id: str, selector: str, attribute: str, strategy: str = "auto", page_index: int = 0
+    ) -> str | None:
         """获取元素属性"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             return await loc.get_attribute(attribute)
+
         result = await ps.execute("get_attribute", _do)
         return result.get("data") if result.get("status") == "ok" else None
 
-    async def extract_content(self, meeting_id: str, max_length: int = 5000,
-                              page_index: int = 0) -> str:
+    async def extract_content(self, meeting_id: str, max_length: int = 5000, page_index: int = 0) -> str:
         """提取页面正文（渐进式降级 N3 + N7）
 
         降级链：
@@ -861,8 +926,7 @@ class BrowserTool:
             except asyncio.TimeoutError:
                 logger.warning("evaluate 超时，降级到 inner_text: meeting=%s", meeting_id)
             except Exception as e:
-                logger.warning("evaluate 失败，降级到 inner_text: meeting=%s err=%s",
-                               meeting_id, str(e)[:100])
+                logger.warning("evaluate 失败，降级到 inner_text: meeting=%s err=%s", meeting_id, str(e)[:100])
 
             # 策略 2: inner_text 纯文本提取（降级）
             try:
@@ -877,10 +941,12 @@ class BrowserTool:
         result = await ps.execute("extract_content", _do)
         return result.get("data", "") if result.get("status") == "ok" else ""
 
-    async def extract_structured(self, meeting_id: str, selector: str, fields: dict[str, str],
-                                 strategy: str = "auto", page_index: int = 0) -> dict[str, Any]:
+    async def extract_structured(
+        self, meeting_id: str, selector: str, fields: dict[str, str], strategy: str = "auto", page_index: int = 0
+    ) -> dict[str, Any]:
         """结构化数据提取"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             count = await loc.count()
@@ -909,13 +975,21 @@ class BrowserTool:
                         item[field_name] = None
                 items.append(item)
             return {"count": count, "items": items}
+
         return await ps.execute("extract_structured", _do)
 
-    async def screenshot(self, meeting_id: str, path: Optional[str] = None, full_page: bool = False,
-                         selector: Optional[str] = None, strategy: str = "auto",
-                         page_index: int = 0) -> dict[str, Any]:
+    async def screenshot(
+        self,
+        meeting_id: str,
+        path: str | None = None,
+        full_page: bool = False,
+        selector: str | None = None,
+        strategy: str = "auto",
+        page_index: int = 0,
+    ) -> dict[str, Any]:
         """截图（N8: 协议层截断）"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             if selector:
                 loc = self._resolve_locator(page, selector, strategy)
@@ -936,16 +1010,19 @@ class BrowserTool:
                     if len(buf) > SCREENSHOT_MAX_BYTES:
                         return {"status": "error", "error": f"截图过大 ({len(buf)} bytes)"}
                     return {"status": "ok", "base64": base64.b64encode(buf).decode(), "full_page": full_page}
+
         return await ps.execute("screenshot", _do)
 
     # ================================================================
     # 4. 元素查询
     # ================================================================
 
-    async def find_elements(self, meeting_id: str, selector: str, strategy: str = "auto",
-                            page_index: int = 0) -> list[dict[str, Any]]:
+    async def find_elements(
+        self, meeting_id: str, selector: str, strategy: str = "auto", page_index: int = 0
+    ) -> list[dict[str, Any]]:
         """查找元素列表"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             count = min(await loc.count(), 50)  # 限制返回数量
@@ -962,13 +1039,16 @@ class BrowserTool:
                         info[attr] = val[:100]
                 results.append(info)
             return results
+
         result = await ps.execute("find_elements", _do)
         return result.get("data", []) if result.get("status") == "ok" else []
 
-    async def find_by_text(self, meeting_id: str, text: str, exact: bool = False,
-                           page_index: int = 0) -> list[dict[str, Any]]:
+    async def find_by_text(
+        self, meeting_id: str, text: str, exact: bool = False, page_index: int = 0
+    ) -> list[dict[str, Any]]:
         """按可见文本查找"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = page.get_by_text(text, exact=exact)
             count = min(await loc.count(), 50)
@@ -980,13 +1060,16 @@ class BrowserTool:
                 visible = await el.is_visible()
                 results.append({"index": i, "tag": tag, "text": el_text, "visible": visible})
             return results
+
         result = await ps.execute("find_by_text", _do)
         return result.get("data", []) if result.get("status") == "ok" else []
 
-    async def find_by_role(self, meeting_id: str, role: str, name: Optional[str] = None,
-                           page_index: int = 0) -> list[dict[str, Any]]:
+    async def find_by_role(
+        self, meeting_id: str, role: str, name: str | None = None, page_index: int = 0
+    ) -> list[dict[str, Any]]:
         """按 ARIA 角色查找"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = page.get_by_role(role, name=name) if name else page.get_by_role(role)
             count = min(await loc.count(), 50)
@@ -998,28 +1081,37 @@ class BrowserTool:
                 visible = await el.is_visible()
                 results.append({"index": i, "tag": tag, "text": text, "visible": visible})
             return results
+
         result = await ps.execute("find_by_role", _do)
         return result.get("data", []) if result.get("status") == "ok" else []
 
-    async def wait_for_element(self, meeting_id: str, selector: str, strategy: str = "auto",
-                               state: str = "visible", timeout: int = 10000,
-                               page_index: int = 0) -> dict[str, Any]:
+    async def wait_for_element(
+        self,
+        meeting_id: str,
+        selector: str,
+        strategy: str = "auto",
+        state: str = "visible",
+        timeout: int = 10000,
+        page_index: int = 0,
+    ) -> dict[str, Any]:
         """等待元素"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             await loc.wait_for(state=state, timeout=timeout)
             return {"status": "ok", "selector": selector}
+
         return await ps.execute("wait_for_element", _do)
 
     # ================================================================
     # 5. JS 注入（含超时 + 截断 + 降级）
     # ================================================================
 
-    async def evaluate(self, meeting_id: str, expression: str, arg: Any = None,
-                       page_index: int = 0) -> Any:
+    async def evaluate(self, meeting_id: str, expression: str, arg: Any = None, page_index: int = 0) -> Any:
         """在页面执行 JS（10s 超时 + 1MB 截断）"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             try:
                 result = await asyncio.wait_for(
@@ -1033,12 +1125,21 @@ class BrowserTool:
             if len(result_str) > EVALUATE_MAX_RETURN_BYTES:
                 return {"status": "ok", "data": result_str[:EVALUATE_MAX_RETURN_BYTES] + "...[truncated]"}
             return {"status": "ok", "data": result}
+
         return await ps.execute("evaluate", _do)
 
-    async def evaluate_on(self, meeting_id: str, selector: str, expression: str,
-                          strategy: str = "auto", arg: Any = None, page_index: int = 0) -> Any:
+    async def evaluate_on(
+        self,
+        meeting_id: str,
+        selector: str,
+        expression: str,
+        strategy: str = "auto",
+        arg: Any = None,
+        page_index: int = 0,
+    ) -> Any:
         """在匹配元素上执行 JS"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             loc = self._resolve_locator(page, selector, strategy)
             try:
@@ -1052,23 +1153,21 @@ class BrowserTool:
             if len(result_str) > EVALUATE_MAX_RETURN_BYTES:
                 return {"status": "ok", "data": result_str[:EVALUATE_MAX_RETURN_BYTES] + "...[truncated]"}
             return {"status": "ok", "data": result}
+
         return await ps.execute("evaluate_on", _do)
 
     # ================================================================
     # 6. 标签页管理
     # ================================================================
 
-    async def new_tab(self, meeting_id: str, url: Optional[str] = None,
-                      page_index: int = 0) -> dict[str, Any]:
+    async def new_tab(self, meeting_id: str, url: str | None = None, page_index: int = 0) -> dict[str, Any]:
         """新建标签页"""
         ctx = await self._pool.get_context(meeting_id)
         if len(ctx.pages) >= MAX_TABS_PER_CONTEXT:
             # 关闭最老标签（P1-1）
             oldest = ctx.pages.pop(0)
-            try:
+            with contextlib.suppress(Exception):
                 await oldest.page.close()
-            except Exception:
-                pass
 
         page = await ctx.context.new_page()
         ps = _PageSession(page, meeting_id, ctx)
@@ -1090,14 +1189,12 @@ class BrowserTool:
             # 通过将目标 page 移到列表末尾使其成为 "active"
             page = ctx.pages.pop(index)
             ctx.pages.append(page)
-            try:
+            with contextlib.suppress(Exception):
                 await page.page.bring_to_front()
-            except Exception:
-                pass
             return {"status": "ok", "tab_index": index, "url": page.page.url}
         return {"status": "error", "error": f"标签页索引 {index} 超出范围（共 {len(ctx.pages)} 个）"}
 
-    async def close_tab(self, meeting_id: str, index: Optional[int] = None) -> dict[str, Any]:
+    async def close_tab(self, meeting_id: str, index: int | None = None) -> dict[str, Any]:
         """关闭标签页"""
         ctx = await self._pool.get_context(meeting_id)
         if not ctx.pages:
@@ -1105,10 +1202,8 @@ class BrowserTool:
         target_idx = index if index is not None else len(ctx.pages) - 1
         if 0 <= target_idx < len(ctx.pages):
             ps = ctx.pages.pop(target_idx)
-            try:
+            with contextlib.suppress(Exception):
                 await ps.page.close()
-            except Exception:
-                pass
             return {"status": "ok", "closed_index": target_idx, "remaining": len(ctx.pages)}
         return {"status": "error", "error": f"标签页索引 {target_idx} 超出范围"}
 
@@ -1121,12 +1216,14 @@ class BrowserTool:
                 title = await ps.page.title()
             except Exception:
                 title = ""
-            tabs.append({
-                "index": i,
-                "url": ps.page.url,
-                "title": title,
-                "active": i == len(ctx.pages) - 1,
-            })
+            tabs.append(
+                {
+                    "index": i,
+                    "url": ps.page.url,
+                    "title": title,
+                    "active": i == len(ctx.pages) - 1,
+                }
+            )
         return tabs
 
     # ================================================================
@@ -1136,6 +1233,7 @@ class BrowserTool:
     async def get_links(self, meeting_id: str, page_index: int = 0) -> list[dict[str, str]]:
         """提取页面所有链接"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             return await page.evaluate("""
                 () => Array.from(document.querySelectorAll('a[href]')).map(a => ({
@@ -1143,12 +1241,14 @@ class BrowserTool:
                     href: a.href,
                 })).filter(l => l.href)
             """)
+
         result = await ps.execute("get_links", _do)
         return result.get("data", []) if result.get("status") == "ok" else []
 
     async def get_forms(self, meeting_id: str, page_index: int = 0) -> list[dict[str, Any]]:
         """提取页面所有表单"""
         ps = await self._get_page(meeting_id, page_index)
+
         async def _do(page):
             return await page.evaluate("""
                 () => Array.from(document.forms).map(form => ({
@@ -1163,6 +1263,7 @@ class BrowserTool:
                     })).filter(f => f.name || f.type === 'submit'),
                 }))
             """)
+
         result = await ps.execute("get_forms", _do)
         return result.get("data", []) if result.get("status") == "ok" else []
 
@@ -1187,8 +1288,7 @@ class BrowserTool:
 
             # Cloudflare 检测
             if "just a moment" in title or "attention required" in title:
-                return {"detected": True, "type": "cloudflare",
-                        "message": "Cloudflare 验证页面，建议换源或降低频率"}
+                return {"detected": True, "type": "cloudflare", "message": "Cloudflare 验证页面，建议换源或降低频率"}
 
             # reCAPTCHA 检测
             has_recaptcha = await page.evaluate("""
@@ -1199,24 +1299,28 @@ class BrowserTool:
                 }
             """)
             if has_recaptcha:
-                return {"detected": True, "type": "recaptcha",
-                        "message": "reCAPTCHA 验证码，建议换搜索入口或换源"}
+                return {"detected": True, "type": "recaptcha", "message": "reCAPTCHA 验证码，建议换搜索入口或换源"}
 
             # hCaptcha 检测
             has_hcaptcha = await page.evaluate("""
                 () => !!document.querySelector('iframe[src*="hcaptcha"], .h-captcha')
             """)
             if has_hcaptcha:
-                return {"detected": True, "type": "hcaptcha",
-                        "message": "hCaptcha 验证码，建议换搜索入口或换源"}
+                return {"detected": True, "type": "hcaptcha", "message": "hCaptcha 验证码，建议换搜索入口或换源"}
 
             # 403 检测（常见 IP 封禁页面）
             body_text = await page.inner_text("body")
-            if len(body_text) < 200 and any(kw in body_text.lower() for kw in [
-                "403", "forbidden", "access denied", "blocked", "rate limit",
-            ]):
-                return {"detected": True, "type": "blocked",
-                        "message": "页面被拦截（403/封禁），建议换代理或降低频率"}
+            if len(body_text) < 200 and any(
+                kw in body_text.lower()
+                for kw in [
+                    "403",
+                    "forbidden",
+                    "access denied",
+                    "blocked",
+                    "rate limit",
+                ]
+            ):
+                return {"detected": True, "type": "blocked", "message": "页面被拦截（403/封禁），建议换代理或降低频率"}
 
         except Exception:
             pass
@@ -1230,21 +1334,51 @@ class BrowserTool:
 
 _pool_instance: BrowserPool | None = None
 _tool_instance: BrowserTool | None = None
+_pool_loop: asyncio.AbstractEventLoop | None = None
+_tool_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _current_loop() -> asyncio.AbstractEventLoop | None:
+    try:
+        loop = asyncio.get_running_loop()
+        return None if loop.is_closed() else loop
+    except RuntimeError:
+        return None
 
 
 def get_browser_pool() -> BrowserPool:
-    """获取全局 BrowserPool 单例"""
-    global _pool_instance
-    if _pool_instance is None:
+    """获取全局 BrowserPool 单例（循环感知：不同循环自动重建）"""
+    global _pool_instance, _pool_loop
+    cur = _current_loop()
+    need_new = (
+        _pool_instance is None
+        or _pool_loop is None
+        or _pool_loop.is_closed()
+        or cur is None
+        or _pool_loop is not cur
+    )
+    if need_new:
         _pool_instance = BrowserPool()
+        _pool_loop = cur
+    assert _pool_instance is not None
     return _pool_instance
 
 
 def get_browser_tool() -> BrowserTool:
-    """获取全局 BrowserTool 单例"""
-    global _tool_instance
-    if _tool_instance is None:
+    """获取全局 BrowserTool 单例（循环感知：不同循环自动重建）"""
+    global _tool_instance, _tool_loop
+    cur = _current_loop()
+    need_new = (
+        _tool_instance is None
+        or _tool_loop is None
+        or _tool_loop.is_closed()
+        or cur is None
+        or _tool_loop is not cur
+    )
+    if need_new:
         _tool_instance = BrowserTool()
+        _tool_loop = cur
+    assert _tool_instance is not None
     return _tool_instance
 
 

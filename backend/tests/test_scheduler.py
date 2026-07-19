@@ -2,6 +2,7 @@
 
 不调用真实 LLM，只验证调度逻辑。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -54,17 +55,17 @@ async def test_run_plan_sequential_and_parallel():
 @pytest.mark.asyncio
 async def test_recursive_sub_tasks():
     """验证子任务递归调度，受 max_recursion_depth 限制"""
+
     async def executor_with_subtasks(task: SubTask, context: dict) -> dict:
         return {
             "id": task.id,
             "sub_tasks": [{"id": "sub1", "stage": "produce", "role": "engineer", "description": "sub"}]
-            if ":" not in task.id else [],
+            if ":" not in task.id
+            else [],
         }
 
     scheduler = Scheduler(executor_with_subtasks, max_recursion_depth=1)
-    plan = ExecutionPlan(
-        tasks=[SubTask(id="root", stage="produce", role="engineer", description="root")]
-    )
+    plan = ExecutionPlan(tasks=[SubTask(id="root", stage="produce", role="engineer", description="root")])
     results = await scheduler.run_plan(plan, shared_state={})
     assert "sub_results" in results["root"]
     # 第二层子任务不应再展开

@@ -9,6 +9,7 @@ from typing import Any
 @dataclass
 class RequiredArtifact:
     """单个必需产物"""
+
     name: str
     description: str
     output_schema: str = ""
@@ -25,6 +26,7 @@ class TaskBaseline:
     - 质量门
     - 默认交付物类型
     """
+
     domain: str
     name: str
     description: str

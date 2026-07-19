@@ -40,7 +40,7 @@ def _load_constraints_from_file() -> list[str]:
             return DEFAULT_CONSTRAINTS
 
         # 2. 仅读取和解析 YAML（不执行代码）
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             raw = f.read()
 
         # 3. 脱敏：移除潜在的模板注入模式
@@ -59,7 +59,7 @@ def _load_constraints_from_file() -> list[str]:
 
         # 4. 提取和校验每条约束
         result: list[str] = []
-        for item in constraints_data[: _MAX_TOTAL_CONSTRAINTS]:
+        for item in constraints_data[:_MAX_TOTAL_CONSTRAINTS]:
             if not isinstance(item, dict):
                 continue
             text = str(item.get("text", "")).strip()
@@ -86,6 +86,7 @@ DEFAULT_CONSTRAINTS: list[str] = [
 
 class DriftCheck(BaseModel):
     """漂移检查结果"""
+
     is_drift: bool = False
     reason: str = ""
     severity: str = "none"  # "none" | "minor" | "major"
@@ -102,6 +103,7 @@ class MeetingCharter(BaseModel):
     - forbidden_topics：禁止话题（防漂移）
     - borrow_history：已拒绝/批准的借调角色记录（防重复借调）
     """
+
     meeting_id: str
     original_topic: str
     clarified_topic: str = ""

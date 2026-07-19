@@ -4,8 +4,10 @@
 并提供 payload 精简工具函数。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import datetime
 from typing import Any
@@ -13,7 +15,6 @@ from typing import Any
 from sqlalchemy import text
 
 from app.db.engine import async_session_factory
-
 
 # 需要从 payload 中分离的 aux 字段名列表
 _AUX_KEYS = ("llm_trace", "evidence_set", "conclusion_chain", "borrowed_agents")
@@ -74,10 +75,8 @@ async def get_meeting_aux(meeting_id: str) -> dict[str, Any]:
             )
             rows = result.mappings().all()
             for row in rows:
-                try:
+                with contextlib.suppress(json.JSONDecodeError, KeyError):
                     aux[row["key"]] = json.loads(row["value_json"])
-                except (json.JSONDecodeError, KeyError):
-                    pass  # 损坏的 aux 数据跳过，不影响主流程
     except Exception:
         # 表可能不存在（旧数据库），静默返回空 dict
         pass

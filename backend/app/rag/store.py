@@ -13,6 +13,7 @@ from app.rag.chunker import Chunk
 
 class Embedding(Protocol):
     """嵌入接口"""
+
     def embed(self, text: str) -> list[float]: ...
     def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
 
@@ -75,7 +76,7 @@ class SiliconFlowEmbedding:
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     if len(a) != len(b):
         raise ValueError("向量维度不一致")
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0 or nb == 0:
@@ -135,7 +136,7 @@ class InMemoryVectorStore:
             return
         texts = [c.text for c in chunks]
         vecs = self._embedding.embed_batch(texts)
-        for chunk, vec in zip(chunks, vecs):
+        for chunk, vec in zip(chunks, vecs, strict=False):
             self._store[chunk.chunk_id] = (chunk, vec)
         # 原文缓存：仅在 store_raw_text 未调用时作为兜底
         # 优先用 store_raw_text 存入完整文档原文，此处只标记文档存在
@@ -203,7 +204,7 @@ class InMemoryVectorStore:
                 break
             current = nxt[0]
             next_chunks.append(current.text)
-        parts = prev_chunks + [chunk.text] + next_chunks
+        parts = [*prev_chunks, chunk.text, *next_chunks]
         return "\n\n".join(parts)
 
     def get_chunk(self, chunk_id: str) -> Chunk | None:
@@ -227,19 +228,13 @@ class InMemoryVectorStore:
 
         # 1. 向量检索
         qvec = self._embedding.embed(query)
-        vec_scored = [
-            (chunk, cosine_similarity(qvec, vec))
-            for chunk, vec in self._store.values()
-        ]
+        vec_scored = [(chunk, cosine_similarity(qvec, vec)) for chunk, vec in self._store.values()]
         vec_scored.sort(key=lambda x: x[1], reverse=True)
         vec_candidates = vec_scored[: top_k * 2]
 
         # 2. 关键词检索（TF-IDF 简化版）
         query_terms = _tokenize_query(query)
-        kw_scored = [
-            (chunk, _keyword_score(chunk.text, query_terms))
-            for chunk, _ in self._store.values()
-        ]
+        kw_scored = [(chunk, _keyword_score(chunk.text, query_terms)) for chunk, _ in self._store.values()]
         kw_scored.sort(key=lambda x: x[1], reverse=True)
         kw_candidates = kw_scored[: top_k * 2]
 
@@ -248,7 +243,7 @@ class InMemoryVectorStore:
         for rank, (chunk, score) in enumerate(vec_candidates, start=1):
             rrf = 1.0 / (rrf_k + rank)
             chunk_ranks[chunk.chunk_id] = (chunk, rrf, score)
-        for rank, (chunk, kw_score) in enumerate(kw_candidates, start=1):
+        for rank, (chunk, _kw_score) in enumerate(kw_candidates, start=1):
             rrf = 1.0 / (rrf_k + rank)
             if chunk.chunk_id in chunk_ranks:
                 existing = chunk_ranks[chunk.chunk_id]
@@ -284,12 +279,14 @@ class QdrantVectorStore(InMemoryVectorStore):
     def _get_client(self):
         if self._client is None:
             from qdrant_client import QdrantClient
+
             self._client = QdrantClient(url=self._url)
         return self._client
 
     def ensure_collection(self) -> None:
         """确保 collection 存在，不存在则创建"""
         from qdrant_client.models import Distance, VectorParams
+
         client = self._get_client()
         collections = client.get_collections().collections
         names = [c.name for c in collections]
@@ -306,21 +303,24 @@ class QdrantVectorStore(InMemoryVectorStore):
         if not chunks:
             return
         from qdrant_client.models import PointStruct
+
         texts = [c.text for c in chunks]
         vecs = self._embedding.embed_batch(texts)
         client = self._get_client()
         points = []
-        for chunk, vec in zip(chunks, vecs):
+        for chunk, vec in zip(chunks, vecs, strict=False):
             # 内存也存一份（惰性展开用）
             self._store[chunk.chunk_id] = (chunk, vec)
             if chunk.doc_id not in self._raw_texts:
                 self._raw_texts[chunk.doc_id] = ""  # 占位，优先用 store_raw_text
             # Qdrant 存 payload
-            points.append(PointStruct(
-                id=hash(chunk.chunk_id) % (2**63),
-                vector=vec,
-                payload=chunk.to_dict(),
-            ))
+            points.append(
+                PointStruct(
+                    id=hash(chunk.chunk_id) % (2**63),
+                    vector=vec,
+                    payload=chunk.to_dict(),
+                )
+            )
         client.upsert(collection_name=self._collection, points=points)
 
     def search(self, query: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
@@ -356,10 +356,7 @@ class QdrantVectorStore(InMemoryVectorStore):
 
             # 2. 关键词检索（内存中计分）
             query_terms = _tokenize_query(query)
-            kw_scored = [
-                (chunk, _keyword_score(chunk.text, query_terms))
-                for chunk, _ in self._store.values()
-            ]
+            kw_scored = [(chunk, _keyword_score(chunk.text, query_terms)) for chunk, _ in self._store.values()]
             kw_scored.sort(key=lambda x: x[1], reverse=True)
             kw_candidates = kw_scored[: top_k * 2]
 
@@ -369,7 +366,7 @@ class QdrantVectorStore(InMemoryVectorStore):
             for rank, (chunk, score) in enumerate(vec_candidates, start=1):
                 rrf = 1.0 / (rrf_k + rank)
                 chunk_ranks[chunk.chunk_id] = (chunk, rrf, score)
-            for rank, (chunk, kw_score) in enumerate(kw_candidates, start=1):
+            for rank, (chunk, _kw_score) in enumerate(kw_candidates, start=1):
                 rrf = 1.0 / (rrf_k + rank)
                 if chunk.chunk_id in chunk_ranks:
                     existing = chunk_ranks[chunk.chunk_id]
@@ -382,6 +379,7 @@ class QdrantVectorStore(InMemoryVectorStore):
 
         except Exception:
             import logging
+
             logging.getLogger("app.rag.store").warning(
                 "Qdrant 混合检索失败，回退内存混合检索（内存缓存: %d 条）",
                 len(self._store),

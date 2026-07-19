@@ -14,7 +14,7 @@ from app.net_auth import (
     list_auth_requests,
     review_auth_request,
 )
-from app.schemas.net_auth import ReviewRequest, AuthRequestSummary
+from app.schemas.net_auth import ReviewRequest
 
 router = APIRouter(prefix="/net-auth", tags=["net-auth"])
 
@@ -55,9 +55,7 @@ async def get_pending(meeting_id: str) -> list[dict[str, Any]]:
 
 
 @router.post("/requests/{request_id}/review")
-async def review_request(
-    request_id: str, body: ReviewRequest
-) -> dict[str, Any]:
+async def review_request(request_id: str, body: ReviewRequest) -> dict[str, Any]:
     """批复申请单
 
     action: approved / denied
@@ -72,16 +70,18 @@ async def review_request(
 
     # 发布批复事件，通知等待中的沙箱
     meeting_id = result["meeting_id"]
-    await bus.publish(make_event(
-        "net_auth.reviewed",
-        meeting_id,
-        {
-            "request_id": request_id,
-            "action": body.action,
-            "comment": body.comment,
-            "approved_level": result["requested_level"] if body.action == "approved" else None,
-        },
-    ))
+    await bus.publish(
+        make_event(
+            "net_auth.reviewed",
+            meeting_id,
+            {
+                "request_id": request_id,
+                "action": body.action,
+                "comment": body.comment,
+                "approved_level": result["requested_level"] if body.action == "approved" else None,
+            },
+        )
+    )
 
     return {"status": "ok", "request_id": request_id, "action": body.action}
 

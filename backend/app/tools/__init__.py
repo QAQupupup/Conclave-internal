@@ -17,6 +17,7 @@
 - get_web_search()   : 工厂函数，返回配置的搜索实例
 - get_web_fetch()    : 获取URL内容抓取工具（复用搜索实例）
 """
+
 from __future__ import annotations
 
 import logging
@@ -88,6 +89,7 @@ class RemoteWebSearch:
 
     def _get_client(self) -> Any:
         import httpx
+
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(65.0, connect=5.0),
@@ -120,11 +122,10 @@ class RemoteWebSearch:
             resp.raise_for_status()
             data = resp.json()
             self._failures = 0  # 成功，重置失败计数
-            return data.get("results", [])
+            return data.get("results", [])  # type: ignore[no-any-return]
         except Exception as e:
             self._failures += 1
-            logger.warning("RemoteWebSearch 搜索失败 (%d/%d): %s",
-                          self._failures, self._max_failures, str(e)[:100])
+            logger.warning("RemoteWebSearch 搜索失败 (%d/%d): %s", self._failures, self._max_failures, str(e)[:100])
             return []
 
     async def fetch_url(self, url: str, max_chars: int = 5000) -> dict[str, Any]:
@@ -151,8 +152,9 @@ class RemoteWebSearch:
             }
         except Exception as e:
             self._failures += 1
-            logger.warning("RemoteWebSearch fetch_url失败 (%d/%d): %s",
-                          self._failures, self._max_failures, str(e)[:100])
+            logger.warning(
+                "RemoteWebSearch fetch_url失败 (%d/%d): %s", self._failures, self._max_failures, str(e)[:100]
+            )
             return {"url": url, "title": "", "content": "", "chunks": [], "error": str(e)}
 
 
@@ -165,6 +167,7 @@ class TavilyWebSearch:
 
     def _get_client(self) -> Any:
         import httpx
+
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=20.0)
         return self._client
@@ -196,18 +199,20 @@ class TavilyWebSearch:
             results = []
             for i, item in enumerate(data.get("results", [])[:top_k]):
                 content = item.get("content", "") or ""
-                results.append({
-                    "evidence_id": f"web-{i}",
-                    "quote": content[:500],
-                    "source": f"web:{item.get('url', '')}",
-                    "url": item.get("url", ""),
-                    "source_tier": "B",
-                    "signals": {
-                        "title": item.get("title", ""),
-                        "score": item.get("score", 0),
-                        "engine": "tavily",
-                    },
-                })
+                results.append(
+                    {
+                        "evidence_id": f"web-{i}",
+                        "quote": content[:500],
+                        "source": f"web:{item.get('url', '')}",
+                        "url": item.get("url", ""),
+                        "source_tier": "B",
+                        "signals": {
+                            "title": item.get("title", ""),
+                            "score": item.get("score", 0),
+                            "engine": "tavily",
+                        },
+                    }
+                )
             return results
         except Exception as e:
             logger.warning("Tavily 搜索失败: %s", e)
@@ -275,6 +280,7 @@ def get_web_search() -> ToolPort:
     elif mode == "playwright":
         try:
             from app.tools.playwright_search import PlaywrightWebSearch
+
             logger.info("Web Search: 使用 Playwright 本地爬取模式")
             _instance = PlaywrightWebSearch()
         except Exception as e:

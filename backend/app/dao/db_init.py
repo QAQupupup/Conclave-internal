@@ -3,6 +3,7 @@
 包含建表 DDL 执行与连接池关闭逻辑。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
 from sqlalchemy import text
@@ -23,10 +24,12 @@ async def init_db() -> None:
         CREATE TABLE IF NOT EXISTS meetings (
             id TEXT PRIMARY KEY,
             topic TEXT NOT NULL,
+            owner_username TEXT NOT NULL DEFAULT 'system',
             status TEXT NOT NULL,
             stage TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            payload TEXT NOT NULL
+            payload TEXT NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 1
         )
         """,
         """
@@ -106,6 +109,12 @@ async def init_db() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_meeting_aux_meeting ON meeting_aux(meeting_id)",
+        # 兼容旧数据库：为已有表添加缺失列
+        "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS owner_username TEXT NOT NULL DEFAULT 'system'",
+        "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1",
+        "CREATE INDEX IF NOT EXISTS idx_meetings_owner ON meetings(owner_username)",
+        "CREATE INDEX IF NOT EXISTS idx_meetings_status ON meetings(status)",
+        "CREATE INDEX IF NOT EXISTS idx_meetings_created ON meetings(created_at)",
     ]
     async with async_session_factory() as session:
         for stmt in ddl_statements:

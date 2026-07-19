@@ -29,6 +29,7 @@
   - 自动清理   --rm
   - 超时控制   asyncio.wait_for
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,11 +39,12 @@ import re
 import shlex
 import subprocess
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from app.lazy_asyncio import LazyLock
 from app.observability.log_bus import log_bus
 
 # ---- 远程 Docker 主机支持 ----
@@ -61,6 +63,7 @@ def set_docker_target_env(env: dict[str, str] | None) -> None:
 async def docker_host_context(host_config: dict[str, Any] | None):
     """异步上下文管理器：在块内将 docker 命令指向指定主机。"""
     from app.docker_hosts import build_docker_env
+
     if host_config:
         env = build_docker_env(host_config)
         token = _docker_target_env.set(env)
@@ -70,6 +73,7 @@ async def docker_host_context(host_config: dict[str, Any] | None):
             _docker_target_env.reset(token)
     else:
         yield
+
 
 # ---- 网络分级 ----
 
@@ -83,8 +87,11 @@ SandboxNetworkLevel = Literal["L1", "L2", "L3"]
 # dnsmasq 容器仅解析白名单域名，其他域名返回 0.0.0.0（黑洞）
 # 注意：pip 配置使用清华镜像时需要 pypi.tuna.tsinghua.edu.cn
 L2_ALLOWED_DOMAINS = [
-    "pypi.org", "files.pythonhosted.org", "pypi.python.org",
-    "pypi.tuna.tsinghua.edu.cn", "mirrors.tuna.tsinghua.edu.cn",
+    "pypi.org",
+    "files.pythonhosted.org",
+    "pypi.python.org",
+    "pypi.tuna.tsinghua.edu.cn",
+    "mirrors.tuna.tsinghua.edu.cn",
 ]
 
 # L2 沙箱使用的自定义网络名（在 docker-compose.yml 中定义）
@@ -123,9 +130,7 @@ SANDBOX_TMPFS_SIZE = os.environ.get("CONCLAVE_SANDBOX_TMPFS", "64m")
 WORKSPACE_VOLUME = os.environ.get("CONCLAVE_WORKSPACE_VOLUME", "conclave-workspace")
 
 # 沙箱模式: auto(默认,尝试Docker,失败拒绝) / docker(强制容器) / host(直接宿主机,仅开发)
-SANDBOX_MODE: Literal["auto", "docker", "host"] = os.environ.get(
-    "CONCLAVE_SANDBOX_MODE", "auto"
-)  # type: ignore[assignment]
+SANDBOX_MODE: Literal["auto", "docker", "host"] = os.environ.get("CONCLAVE_SANDBOX_MODE", "auto")  # type: ignore[assignment]
 
 # 是否允许宿主机降级（默认 False，安全优先）
 SANDBOX_ALLOW_HOST_FALLBACK = os.environ.get("CONCLAVE_SANDBOX_ALLOW_HOST", "") == "1"
@@ -144,56 +149,63 @@ ALLOWED_COMMANDS: set[str] = set(
 )
 # 危险模式：在 allowlist 之上额外拦截的反模式
 BLOCKED_PATTERNS: list[str] = [
-    r"\brm\s+-rf\s+/",          # rm -rf /
-    r"\brm\s+-rf\s+~",          # rm -rf ~
+    r"\brm\s+-rf\s+/",  # rm -rf /
+    r"\brm\s+-rf\s+~",  # rm -rf ~
     r"\brm\s+(-\w*r\w*|--recursive)\s+/",  # rm -r /
-    r"\bdd\s+if=",              # 磁盘擦除
-    r":\(\)\s*\{.*\};:",         # fork bomb
+    r"\bdd\s+if=",  # 磁盘擦除
+    r":\(\)\s*\{.*\};:",  # fork bomb
     r"curl\s+.*\|\s*(bash|sh|zsh|ksh)",  # 远程脚本执行
     r"wget\s+.*\|\s*(bash|sh|zsh|ksh)",
-    r"\bchmod\s+777\s+/",       # 全开权限到根目录
+    r"\bchmod\s+777\s+/",  # 全开权限到根目录
     # [H-07 修复] 阻止 python/node -c "..." 内联代码执行（单引号和双引号都匹配）
     r"\bpython(?:3)?\s+-c\s+['\"]",
     r"\bnode\s+-e\s+['\"]",
     r"\bperl\s+-e\s+['\"]",
     r"\bruby\s+-e\s+['\"]",
     r"\bphp\s+-r\s+['\"]",
-    r">\s*/dev/",               # 写入块设备
-    r"\bmkfs\b",                # 格式化磁盘
+    r">\s*/dev/",  # 写入块设备
+    r"\bmkfs\b",  # 格式化磁盘
     r"\b(?:shutdown|reboot|halt|poweroff|init\s+[06])\b",  # 系统关机/重启
     r"\b(?:iptables|ufw|firewall-cmd)\b",  # 防火墙操作
     r"\b(?:apt|apt-get|yum|dnf|apk|brew|pacman|zypper)\s+(?:install|remove|purge|update)\b",  # 包管理器修改
     r"/etc/(?:passwd|shadow|sudoers|ssh)",  # 访问敏感系统文件
-    r"\bssh\b",                 # SSH 连接
-    r"\bnc\b.*-e",              # netcat 反弹 shell
+    r"\bssh\b",  # SSH 连接
+    r"\bnc\b.*-e",  # netcat 反弹 shell
     r"\bncat\b.*-e",
     r"\bbase64\b.*\|.*(?:sh|bash)",  # base64 解码后管道执行
-    r"\beval\b",                # eval 命令注入
-    r"\$\(",                    # 命令替换 $(...)
-    r"`[^`]+`",                 # 反引号命令替换
-    r"\.\s+/etc/",              # source /etc/ 下文件
-    r"\bsudo\b",                # sudo 提权
-    r"\bsu\s+-",                # su 切换用户
-    r"\bchown\b",               # 改变文件所有者
-    r"\bmount\b",               # 挂载文件系统
-    r"\bumount\b",              # 卸载文件系统
-    r">\s*/etc/",               # 写入系统配置目录
-    r"\bkill\s+-9\s+-1\b",      # 杀所有进程
-    r">/proc/",                 # 写入procfs
-    r">\s*/sys/",               # 写入sysfs
+    r"\beval\b",  # eval 命令注入
+    r"\$\(",  # 命令替换 $(...)
+    r"`[^`]+`",  # 反引号命令替换
+    r"\.\s+/etc/",  # source /etc/ 下文件
+    r"\bsudo\b",  # sudo 提权
+    r"\bsu\s+-",  # su 切换用户
+    r"\bchown\b",  # 改变文件所有者
+    r"\bmount\b",  # 挂载文件系统
+    r"\bumount\b",  # 卸载文件系统
+    r">\s*/etc/",  # 写入系统配置目录
+    r"\bkill\s+-9\s+-1\b",  # 杀所有进程
+    r">/proc/",  # 写入procfs
+    r">\s*/sys/",  # 写入sysfs
     # [H-07 新增] 阻止明显的容器逃逸尝试
-    r"/var/run/docker\.sock",    # 访问 Docker socket
+    r"/var/run/docker\.sock",  # 访问 Docker socket
     r"\bdocker\s+(?:run|exec|build)\b",  # 容器内运行 docker (DinD)
-    r"\bkubectl\b",             # kubectl
-    r"\bcrontab\b",             # 定时任务持久化
-    r"\binsmod\b|\bmodprobe\b", # 加载内核模块
-    r"\bunshare\b",             # 创建新命名空间
-    r"\bnsenter\b",             # 进入其他命名空间
-    r"\bsetuid\b|\bsetgid\b",   # 调用setuid/setgid
-    r"/proc/(?:sys|self)/",     # 访问 /proc/sys 或 /proc/self 敏感路径
+    r"\bkubectl\b",  # kubectl
+    r"\bcrontab\b",  # 定时任务持久化
+    r"\binsmod\b|\bmodprobe\b",  # 加载内核模块
+    r"\bunshare\b",  # 创建新命名空间
+    r"\bnsenter\b",  # 进入其他命名空间
+    r"\bsetuid\b|\bsetgid\b",  # 调用setuid/setgid
+    r"/proc/(?:sys|self)/",  # 访问 /proc/sys 或 /proc/self 敏感路径
     r"\bmsync\b|\bclone\b.*CLONE_NEW",  # 某些 syscall
-    r"\bctypes\b.*\bCDLL\b",    # python ctypes 加载动态库（通过命令行文本匹配，非python层面）
-    r"\bopen\s*\(.*['\"]/proc/", # 打开proc文件
+    r"\bctypes\b.*\bCDLL\b",  # python ctypes 加载动态库（通过命令行文本匹配，非python层面）
+    r"\bopen\s*\(.*['\"]/proc/",  # 打开proc文件
+    # [SECURITY-FIX] 额外防御：工作区保护 + 持久化阻止
+    r"\brm\s+-rf\s+(?:\*|\.\*|\./\*)",  # rm -rf * 在工作区内删除所有文件
+    r"\bchmod\s+(?:\+s|u\+s)",  # 设置 SUID/SGID 位
+    r"\bnpm\s+install\s+-g\b",  # npm 全局安装（可能污染容器环境）
+    r"\bpip\s+install\s+.*(?:git\+|http://|https://)",  # pip 从非 PyPI 源安装（供应链风险）
+    r">>\s*~?/\.bashrc|>>\s*~?/\.profile|>>\s*~?/\.zshrc",  # shell 持久化
+    r"\b(?:wget|curl)\s+-O\s*/(?:etc|usr|bin|sbin)/",  # 下载到系统目录
 ]
 
 # Docker socket 路径（容器内挂载位置）
@@ -241,7 +253,7 @@ def _check_command_safety(command: str) -> tuple[bool, str]:
         first_token_remainder = first_token[1].split(maxsplit=1) if len(first_token) > 1 else []
         if not first_token_remainder:
             return False, "仅含变量赋值"
-        first_token = [first_token_remainder[0]] + first_token_remainder[1:]
+        first_token = [first_token_remainder[0], *first_token_remainder[1:]]
         cmd_name = first_token[0]
 
     # 取可执行文件 basename（处理 /usr/bin/python 等绝对路径）
@@ -441,27 +453,42 @@ def _build_security_args(
     args = [
         "--rm",
         "-i",
-        "--memory", SANDBOX_MEM_LIMIT,
-        "--memory-swap", SANDBOX_MEM_LIMIT,  # 禁止 swap 使用，防止内存耗尽影响宿主机
-        "--cpus", SANDBOX_CPU_LIMIT,
-        "--pids-limit", "64",  # [H-07] 限制进程数，防 fork bomb
-        "--ulimit", "nofile=256:512",  # [H-07] 限制文件描述符数
-        "--ulimit", "core=0",  # 禁止 core dump
+        "--memory",
+        SANDBOX_MEM_LIMIT,
+        "--memory-swap",
+        SANDBOX_MEM_LIMIT,  # 禁止 swap 使用，防止内存耗尽影响宿主机
+        "--cpus",
+        SANDBOX_CPU_LIMIT,
+        "--pids-limit",
+        "64",  # [H-07] 限制进程数，防 fork bomb
+        "--ulimit",
+        "nofile=256:512",  # [H-07] 限制文件描述符数
+        "--ulimit",
+        "core=0",  # 禁止 core dump
         "--read-only",
-        "--tmpfs", f"/tmp:size={SANDBOX_TMPFS_SIZE},noexec,nosuid,nodev",
-        "--tmpfs", "/home/nobody:size=16m,noexec,nosuid,nodev",  # 非root用户home目录
-        "--user", "65534:65534",
-        "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges",
+        "--tmpfs",
+        f"/tmp:size={SANDBOX_TMPFS_SIZE},noexec,nosuid,nodev",
+        "--tmpfs",
+        "/home/nobody:size=16m,noexec,nosuid,nodev",  # 非root用户home目录
+        "--user",
+        "65534:65534",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
         # [H-07] 隔离命名空间
-        "--ipc", "private",
-        "--uts", "private",
+        "--ipc",
+        "private",
+        "--uts",
+        "private",
         # [H-07] 禁止特权容器
         "--privileged=false",
         # [H-07] 工作区挂载为 rw（代码执行需要写输出文件），但根文件系统是 --read-only
         # [修复] 卷名从环境变量读取，不再硬编码
-        "-v", f"{WORKSPACE_VOLUME}:/workspace",
-        "-w", container_cwd,  # [修复] 根据 workspace_root 设置正确的工作目录
+        "-v",
+        f"{WORKSPACE_VOLUME}:/workspace",
+        "-w",
+        container_cwd,  # [修复] 根据 workspace_root 设置正确的工作目录
     ]
 
     # 网络分级
@@ -562,7 +589,7 @@ async def _run_in_container(
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise TimeoutError(f"沙箱执行超时（{timeout}s）")
+        raise TimeoutError(f"沙箱执行超时（{timeout}s）") from None
 
     return ExecResult(
         exit_code=proc.returncode or 0,
@@ -592,16 +619,20 @@ async def _run_on_host(
     - 超时 kill 防止挂死
     """
     import shlex as _shlex
+
     _tmp_code_file: str | None = None
     if code is not None:
         # 代码执行：写入临时文件后执行，避免命令行长度限制和转义问题
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', dir=str(workspace_root),
-                                          delete=False, encoding='utf-8') as tf:
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", dir=str(workspace_root), delete=False, encoding="utf-8"
+        ) as tf:
             tf.write(code)
             _tmp_code_file = tf.name
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, _tmp_code_file,
+            sys.executable,
+            _tmp_code_file,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace_root),
@@ -613,13 +644,19 @@ async def _run_on_host(
             argv = _shlex.split(command)
         except ValueError:
             return ExecResult(
-                exit_code=127, stdout="", stderr="命令解析失败：引号不匹配",
-                sandboxed=False, fallback_reason="host_fallback_parse_error",
+                exit_code=127,
+                stdout="",
+                stderr="命令解析失败：引号不匹配",
+                sandboxed=False,
+                fallback_reason="host_fallback_parse_error",
             )
         if not argv:
             return ExecResult(
-                exit_code=127, stdout="", stderr="空命令",
-                sandboxed=False, fallback_reason="host_fallback_empty",
+                exit_code=127,
+                stdout="",
+                stderr="空命令",
+                sandboxed=False,
+                fallback_reason="host_fallback_empty",
             )
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -629,20 +666,16 @@ async def _run_on_host(
         )
 
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise TimeoutError(f"宿主机执行超时（{timeout}s）")
+        raise TimeoutError(f"宿主机执行超时（{timeout}s）") from None
     finally:
         # 清理临时代码文件
         if _tmp_code_file:
-            try:
+            with suppress(OSError):
                 os.unlink(_tmp_code_file)
-            except OSError:
-                pass
 
     return ExecResult(
         exit_code=proc.returncode or 0,
@@ -675,8 +708,12 @@ async def run_python(
     if SANDBOX_MODE == "docker" or await _check_docker():
         try:
             return await _run_in_container(
-                code, None, workspace_root, timeout,
-                image=image, network_level=network_level,
+                code,
+                None,
+                workspace_root,
+                timeout,
+                image=image,
+                network_level=network_level,
             )
         except RuntimeError:
             if SANDBOX_MODE == "docker":
@@ -728,11 +765,16 @@ async def run_command(
         # 审计：危险命令被阻断
         try:
             from app.observability.audit import audit
-            audit("sandbox.command_executed", "blocked", {
-                "command": command[:500],
-                "reason": reason,
-                "network_level": network_level,
-            })
+
+            audit(
+                "sandbox.command_executed",
+                "blocked",
+                {
+                    "command": command[:500],
+                    "reason": reason,
+                    "network_level": network_level,
+                },
+            )
         except Exception:
             pass
         return ExecResult(
@@ -749,8 +791,12 @@ async def run_command(
     if SANDBOX_MODE == "docker" or await _check_docker():
         try:
             return await _run_in_container(
-                None, command, workspace_root, timeout,
-                image=image, network_level=network_level,
+                None,
+                command,
+                workspace_root,
+                timeout,
+                image=image,
+                network_level=network_level,
             )
         except RuntimeError:
             if SANDBOX_MODE == "docker":
@@ -792,6 +838,7 @@ async def get_status() -> dict:
 
 # ---- 启动预热 ----
 
+
 async def warmup_sandbox() -> dict:
     """启动时预热沙箱环境（后台任务，不阻塞应用启动）
 
@@ -804,6 +851,7 @@ async def warmup_sandbox() -> dict:
     返回预热结果 dict，包含状态和耗时。
     """
     import time
+
     t0 = time.time()
     log = log_bus.info
     log_warn = log_bus.warning
@@ -819,8 +867,11 @@ async def warmup_sandbox() -> dict:
     # 1. 检测 Docker
     docker_ok = await _check_docker()
     if not docker_ok:
-        log_warn("[sandbox-warmup] Docker daemon 不可用，沙箱功能将被禁用。"
-                 "请确认 /var/run/docker.sock 已挂载且当前用户有权限访问。", logger="sandbox")
+        log_warn(
+            "[sandbox-warmup] Docker daemon 不可用，沙箱功能将被禁用。"
+            "请确认 /var/run/docker.sock 已挂载且当前用户有权限访问。",
+            logger="sandbox",
+        )
         return {"ok": False, "reason": "docker_unavailable", "elapsed": time.time() - t0}
 
     # 2. 预拉取标准镜像
@@ -858,13 +909,21 @@ async def warmup_sandbox() -> dict:
     # 4. 最小化自检：运行 echo hello 验证沙箱容器能正常创建/执行/清理
     try:
         from app.config import settings
-        ws_root = Path(getattr(settings, 'workspace_root', None) or os.environ.get("CONCLAVE_WORKSPACE_DIR", "/workspace"))
+
+        ws_root = Path(
+            getattr(settings, "workspace_root", None) or os.environ.get("CONCLAVE_WORKSPACE_DIR", "/workspace")
+        )
         result = await run_command("echo sandbox-warmup-ok", ws_root, timeout=15, network_level="L1")
         if result.exit_code == 0 and "sandbox-warmup-ok" in result.stdout:
-            log(f"[sandbox-warmup] 自检通过 ✓ （耗时 {time.time() - t0:.1f}s，沙箱容器正常创建/执行/清理）", logger="sandbox")
+            log(
+                f"[sandbox-warmup] 自检通过 ✓ （耗时 {time.time() - t0:.1f}s，沙箱容器正常创建/执行/清理）",
+                logger="sandbox",
+            )
             return {"ok": True, "image": image, "elapsed": time.time() - t0}
         else:
-            log_warn(f"[sandbox-warmup] 自检异常: exit={result.exit_code}, stderr={result.stderr[:200]}", logger="sandbox")
+            log_warn(
+                f"[sandbox-warmup] 自检异常: exit={result.exit_code}, stderr={result.stderr[:200]}", logger="sandbox"
+            )
             return {"ok": False, "reason": "self_test_failed", "elapsed": time.time() - t0}
     except Exception as e:
         log_warn(f"[sandbox-warmup] 自检异常: {type(e).__name__}: {e}", logger="sandbox")
@@ -877,16 +936,17 @@ async def warmup_sandbox() -> dict:
 _SERVICE_PORT_POOL_START = 18000
 _SERVICE_PORT_POOL_END = 18999
 _allocated_ports: set[int] = set()
-_port_lock = asyncio.Lock()
+_port_lock = LazyLock()
 
 # 跟踪运行中的服务容器: meeting_id -> {container_id, host_port, access_url, ...}
 _running_services: dict[str, dict] = {}
-_services_lock = asyncio.Lock()
+_services_lock = LazyLock()
 
 
 @dataclass
 class DeployResult:
     """服务部署结果"""
+
     ok: bool
     container_id: str = ""
     host_port: int = 0
@@ -894,7 +954,7 @@ class DeployResult:
     health_status: str = ""  # "healthy" / "unhealthy" / "start_failed"
     logs: str = ""
     error: str = ""
-    credentials: dict = None  # {"username": "...", "password": "..."}
+    credentials: dict[str, Any] | None = None  # {"username": "...", "password": "..."}
 
     def to_dict(self) -> dict:
         return {
@@ -942,11 +1002,12 @@ async def _release_port(port: int) -> None:
 
 def _docker_cmd(args: list[str]) -> str:
     """构建 docker 命令的 shell 字符串"""
-    return _shell_cmd(["docker"] + args)
+    return _shell_cmd(["docker", *args])
 
 
 async def _run_docker_cmd(
-    args: list[str], timeout: int = 30,
+    args: list[str],
+    timeout: int = 30,
     cwd: str | None = None,
     env: dict | None = None,
 ) -> tuple[int, str, str]:
@@ -982,17 +1043,18 @@ async def _run_docker_cmd(
 async def _check_port_healthy(host: str, port: int, path: str = "/health", timeout: float = 5) -> bool:
     """HTTP 健康检查（异步，不阻塞事件循环）"""
     import httpx
+
     url = f"http://{host}:{port}{path}"
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(url)
-            return 200 <= resp.status_code < 500
+            return 200 <= resp.status_code < 500  # type: ignore[no-any-return]
     except Exception:
         if path != "/":
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     resp2 = await client.get(f"http://{host}:{port}/")
-                    return 200 <= resp2.status_code < 500
+                    return 200 <= resp2.status_code < 500  # type: ignore[no-any-return]
             except Exception:
                 return False
         return False
@@ -1029,16 +1091,21 @@ async def deploy_service(
     host_config = None
     host_info = {"host_id": 0, "host_name": "local", "host_ip": "127.0.0.1"}
     if target_host_id is not None and target_host_id != 0:
+        from sqlalchemy import select
+
         from app.db.engine import async_session_factory
         from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
-        from sqlalchemy import select
+
         async with async_session_factory() as session:
             host = await session.get(DockerHostModel, target_host_id)
             if host:
-                secret = (await session.execute(
-                    select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == target_host_id)
-                )).scalar_one_or_none()
-                from app.docker_hosts import _model_to_config_dict
+                secret = (
+                    await session.execute(
+                        select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == target_host_id)
+                    )
+                ).scalar_one_or_none()
+                from app.routers.docker_hosts import _model_to_config_dict
+
                 host_config = _model_to_config_dict(host, secret)
                 host_info = {
                     "host_id": host.id,
@@ -1050,18 +1117,24 @@ async def deploy_service(
         # 自动调度：尝试选择最优主机
         try:
             from app.docker_hosts import select_deploy_target
+
             target = await select_deploy_target(strategy="least_loaded")
             if target and target.host_id != 0:
+                from sqlalchemy import select
+
                 from app.db.engine import async_session_factory
                 from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
-                from sqlalchemy import select
+
                 async with async_session_factory() as session:
                     host = await session.get(DockerHostModel, target.host_id)
                     if host:
-                        secret = (await session.execute(
-                            select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == target.host_id)
-                        )).scalar_one_or_none()
-                        from app.docker_hosts import _model_to_config_dict
+                        secret = (
+                            await session.execute(
+                                select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == target.host_id)
+                            )
+                        ).scalar_one_or_none()
+                        from app.routers.docker_hosts import _model_to_config_dict
+
                         host_config = _model_to_config_dict(host, secret)
                         host_info = {
                             "host_id": host.id,
@@ -1097,7 +1170,8 @@ def _extract_host_ip(docker_host: str) -> str:
     # ssh://user@1.2.3.4:22 -> 1.2.3.4
     # tcp://1.2.3.4:2375 -> 1.2.3.4
     import re as _re
-    m = _re.match(r'(?:ssh|tcp)://(?:[^@]+@)?([^:/]+)', docker_host)
+
+    m = _re.match(r"(?:ssh|tcp)://(?:[^@]+@)?([^:/]+)", docker_host)
     if m:
         return m.group(1)
     return "127.0.0.1"
@@ -1194,7 +1268,9 @@ async def _do_deploy(
                 and re.search(r"^\s*FROM\s+.*python:", normalized, re.MULTILINE) is not None
             )
             if needs_frontend_copy:
-                normalized = normalized.rstrip() + "\n\n# Conclave 自动追加：复制前端静态资源\nCOPY frontend /app/frontend\n"
+                normalized = (
+                    normalized.rstrip() + "\n\n# Conclave 自动追加：复制前端静态资源\nCOPY frontend /app/frontend\n"
+                )
                 log_bus.info(
                     "检测到 frontend/ 目录，已在临时 Dockerfile 中追加 COPY 指令（原文件未修改）",
                     logger="sandbox.deploy",
@@ -1238,14 +1314,22 @@ async def _do_deploy(
         run_args = [
             "run",
             "-d",
-            "--name", container_name,
-            "--memory", memory_limit,
-            "--cpus", cpu_limit,
-            "-p", f"{host_port}:{container_port}",
-            "--network", "bridge",
-            "-v", f"{WORKSPACE_VOLUME}:/workspace",  # [修复] 卷名从环境变量读取
-            "-w", f"/workspace/{meeting_id}",
-            "--restart", "no",
+            "--name",
+            container_name,
+            "--memory",
+            memory_limit,
+            "--cpus",
+            cpu_limit,
+            "-p",
+            f"{host_port}:{container_port}",
+            "--network",
+            "bridge",
+            "-v",
+            f"{WORKSPACE_VOLUME}:/workspace",  # [修复] 卷名从环境变量读取
+            "-w",
+            f"/workspace/{meeting_id}",
+            "--restart",
+            "no",
         ]
         if env_vars:
             for k, v in env_vars.items():
@@ -1267,16 +1351,24 @@ async def _do_deploy(
         run_args = [
             "run",
             "-d",  # detached 模式
-            "--name", container_name,
-            "--memory", memory_limit,
-            "--cpus", cpu_limit,
-            "-p", f"{host_port}:{container_port}",
-            "--network", "bridge",  # 全网络访问（需要pip install）
-            "-v", f"{WORKSPACE_VOLUME}:/workspace",  # [修复] 卷名从环境变量读取
-            "-w", f"/workspace/{meeting_id}",
+            "--name",
+            container_name,
+            "--memory",
+            memory_limit,
+            "--cpus",
+            cpu_limit,
+            "-p",
+            f"{host_port}:{container_port}",
+            "--network",
+            "bridge",  # 全网络访问（需要pip install）
+            "-v",
+            f"{WORKSPACE_VOLUME}:/workspace",  # [修复] 卷名从环境变量读取
+            "-w",
+            f"/workspace/{meeting_id}",
             # 不使用 --read-only（服务需要写数据库和上传文件）
             # 不使用 nobody 用户（pip install 需要写权限）
-            "--restart", "no",  # 不自动重启（由Conclave管理生命周期）
+            "--restart",
+            "no",  # 不自动重启（由Conclave管理生命周期）
         ]
 
         # 添加环境变量
@@ -1311,6 +1403,7 @@ async def _do_deploy(
         healthy = False
         last_logs = ""
         import time
+
         start_wait = time.time()
         while time.time() - start_wait < wait_seconds:
             await asyncio.sleep(3)
@@ -1321,7 +1414,7 @@ async def _do_deploy(
             )
             if rc_inspect != 0 or "true" not in inspect_out:
                 # 容器已停止，获取日志
-                rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "100", container_id], timeout=10)
+                _rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "100", container_id], timeout=10)
                 last_logs = logs_out
                 log_bus.warning(
                     f"服务容器已停止: {container_id}",
@@ -1336,7 +1429,7 @@ async def _do_deploy(
             # 或直接用容器的IP
             try:
                 # 获取容器IP
-                rc_ip, ip_out, _ = await _run_docker_cmd(
+                _rc_ip, ip_out, _ = await _run_docker_cmd(
                     ["inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_id],
                     timeout=5,
                 )
@@ -1349,16 +1442,14 @@ async def _do_deploy(
             if not healthy:
                 # 也尝试从容器内通过docker.for.win（Windows/Mac Docker Desktop）
                 # 或直接用localhost（如果后端在宿主机运行）
-                try:
+                with suppress(Exception):
                     healthy = await _check_port_healthy("127.0.0.1", host_port, health_path, timeout=2)
-                except Exception:
-                    pass
 
             if healthy:
                 break
 
         # 获取日志
-        rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "100", container_id], timeout=10)
+        _rc_logs, logs_out, _ = await _run_docker_cmd(["logs", "--tail", "100", container_id], timeout=10)
         last_logs = logs_out if logs_out else last_logs
 
         # 构建访问URL（用户从宿主机浏览器访问）
@@ -1424,6 +1515,7 @@ async def _audit_compose_file(compose_path: Path) -> tuple[bool, str, list[dict]
     返回 (ok, error_msg, services_info)。services_info 包含各服务名称、端口映射信息。
     """
     import yaml
+
     try:
         text = compose_path.read_text(encoding="utf-8")
         config = yaml.safe_load(text)
@@ -1470,13 +1562,15 @@ async def _audit_compose_file(compose_path: Path) -> tuple[bool, str, list[dict]
         # 收集端口信息
         ports = svc_cfg.get("ports") or []
         expose = svc_cfg.get("expose") or []
-        services_info.append({
-            "name": svc_name,
-            "ports": [str(p) for p in ports],
-            "expose": [str(e) for e in expose],
-            "image": svc_cfg.get("image", ""),
-            "build": bool(svc_cfg.get("build")),
-        })
+        services_info.append(
+            {
+                "name": svc_name,
+                "ports": [str(p) for p in ports],
+                "expose": [str(e) for e in expose],
+                "image": svc_cfg.get("image", ""),
+                "build": bool(svc_cfg.get("build")),
+            }
+        )
 
     return True, "", services_info
 
@@ -1496,6 +1590,7 @@ async def _deploy_compose(
 ) -> DeployResult:
     """使用 docker compose up -d 部署多服务项目"""
     import time as _time
+
     host_info = host_info or {"host_id": 0, "host_name": "local", "host_ip": "127.0.0.1"}
 
     # 安全审计
@@ -1531,7 +1626,7 @@ async def _deploy_compose(
     # 启动 compose 项目
     # 设置 COMPOSE_PROJECT_NAME 确保项目隔离
     compose_env = {**os.environ, "COMPOSE_PROJECT_NAME": compose_project}
-    up_rc, up_out, up_err = await _run_docker_cmd(
+    up_rc, _up_out, up_err = await _run_docker_cmd(
         ["compose", "-p", compose_project, "-f", str(compose_file), "up", "-d", "--build"],
         timeout=300,
         cwd=str(workspace_root / meeting_id),
@@ -1541,7 +1636,7 @@ async def _deploy_compose(
     if up_rc != 0:
         await _release_port(host_port)
         # 获取 compose 日志帮助调试
-        logs_rc, logs_out, _ = await _run_docker_cmd(
+        _rc, logs_out, _ = await _run_docker_cmd(
             ["compose", "-p", compose_project, "-f", str(compose_file), "logs", "--tail=50"],
             timeout=15,
             cwd=str(workspace_root / meeting_id),
@@ -1560,7 +1655,7 @@ async def _deploy_compose(
         )
 
     # 获取所有容器ID
-    ps_rc, ps_out, _ = await _run_docker_cmd(
+    _ps_rc, ps_out, _ = await _run_docker_cmd(
         ["compose", "-p", compose_project, "ps", "-q"],
         timeout=10,
         cwd=str(workspace_root / meeting_id),
@@ -1596,15 +1691,13 @@ async def _deploy_compose(
 
         all_running = True
         for cid in container_ids:
-            rc_inspect, inspect_out, _ = await _run_docker_cmd(
-                ["inspect", "-f", "{{.State.Running}}", cid], timeout=5
-            )
+            rc_inspect, inspect_out, _ = await _run_docker_cmd(["inspect", "-f", "{{.State.Running}}", cid], timeout=5)
             if rc_inspect != 0 or "true" not in inspect_out:
                 all_running = False
                 break
 
         if not all_running:
-            logs_rc, logs_out, _ = await _run_docker_cmd(
+            _rc, logs_out, _ = await _run_docker_cmd(
                 ["compose", "-p", compose_project, "logs", "--tail=50"],
                 timeout=10,
                 cwd=str(workspace_root / meeting_id),
@@ -1613,16 +1706,14 @@ async def _deploy_compose(
             break
 
         # HTTP 健康检查（通过宿主机端口）
-        try:
+        with suppress(Exception):
             healthy = await _check_port_healthy("127.0.0.1", host_port, health_path, timeout=3)
-        except Exception:
-            pass
 
         if healthy:
             break
 
     # 获取日志
-    logs_rc, logs_out, _ = await _run_docker_cmd(
+    _logs_rc, logs_out, _ = await _run_docker_cmd(
         ["compose", "-p", compose_project, "logs", "--tail=100"],
         timeout=15,
         cwd=str(workspace_root / meeting_id),
@@ -1690,7 +1781,7 @@ async def stop_service(meeting_id: str) -> dict:
         # Compose 多服务：使用 docker compose down 清理
         compose_project = svc.get("compose_project")
         compose_file = svc.get("compose_file")
-        meeting_workspace = str(Path(sv.get("compose_file", "")).parent) if svc.get("compose_file") else None
+        meeting_workspace = str(Path(svc.get("compose_file", "")).parent) if svc.get("compose_file") else None
         if compose_project:
             compose_down_cmd = ["compose", "-p", compose_project, "down", "-v", "--remove-orphans"]
             if compose_file:
@@ -1725,9 +1816,7 @@ async def get_service_status(meeting_id: str) -> dict | None:
     if not svc:
         return None
     # 检查容器是否还在运行
-    rc, out, _ = await _run_docker_cmd(
-        ["inspect", "-f", "{{.State.Running}}", svc["container_id"]], timeout=5
-    )
+    rc, out, _ = await _run_docker_cmd(["inspect", "-f", "{{.State.Running}}", svc["container_id"]], timeout=5)
     running = rc == 0 and "true" in out
     return {
         **svc,
@@ -1761,20 +1850,26 @@ async def run_tests_in_container(
         svc = _running_services.get(meeting_id)
 
     if not svc:
-        return {"passed": 0, "failed": 0, "failures": [], "output": "", "ok": False,
-                "error": "服务未运行，无法执行测试"}
+        return {
+            "passed": 0,
+            "failed": 0,
+            "failures": [],
+            "output": "",
+            "ok": False,
+            "error": "服务未运行，无法执行测试",
+        }
 
     container_id = svc["container_id"]
 
     # 检查容器内是否有tests目录和pytest
     # 先检查pytest是否安装
-    check_rc, check_out, check_err = await _run_docker_cmd(
+    check_rc, _check_out, _check_err = await _run_docker_cmd(
         ["exec", container_id, "python", "-c", "import pytest; print(pytest.__version__)"],
         timeout=10,
     )
     if check_rc != 0:
         # 尝试安装pytest
-        log_bus.info(f"容器内未安装pytest，尝试安装...", logger="sandbox.test")
+        log_bus.info("容器内未安装pytest，尝试安装...", logger="sandbox.test")
         await _run_docker_cmd(
             ["exec", container_id, "pip", "install", "pytest", "pytest-asyncio", "httpx", "-q"],
             timeout=60,
@@ -1782,9 +1877,18 @@ async def run_tests_in_container(
 
     # 运行pytest
     test_cmd = [
-        "exec", container_id, "python", "-m", "pytest",
-        "tests/", "-v", "--tb=short", "--no-header", "-q",
-        "-p", "no:warnings",
+        "exec",
+        container_id,
+        "python",
+        "-m",
+        "pytest",
+        "tests/",
+        "-v",
+        "--tb=short",
+        "--no-header",
+        "-q",
+        "-p",
+        "no:warnings",
     ]
     rc, out, err = await _run_docker_cmd(test_cmd, timeout=timeout)
 

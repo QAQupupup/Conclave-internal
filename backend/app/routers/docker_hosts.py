@@ -2,10 +2,9 @@
 
 提供 Docker 远程主机的 CRUD、健康检查、调度查询、预设配置、远程安装脚本。
 """
+
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -17,14 +16,13 @@ from sqlalchemy import select
 from app.db.engine import async_session_factory
 from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
 from app.docker_hosts import (
-    PRESET_CONFIGS,
     CONNECTION_TYPES,
+    PRESET_CONFIGS,
     SchedulingStrategy,
     check_host_health,
-    select_deploy_target,
     get_remote_setup_script,
     run_docker_cmd,
-    build_docker_env,
+    select_deploy_target,
 )
 
 logger = logging.getLogger(__name__)
@@ -148,9 +146,8 @@ def _model_to_config_dict(m: DockerHostModel, secret: DockerHostSecretModel | No
         "ssh_key_path": m.ssh_key_path,
         "tls_verify": m.tls_verify,
     }
-    if secret:
-        if secret.ssh_key_content:
-            cfg["_ssh_key_content"] = secret.ssh_key_content
+    if secret and secret.ssh_key_content:
+        cfg["_ssh_key_content"] = secret.ssh_key_content
     return cfg
 
 
@@ -172,17 +169,21 @@ async def create_host(body: DockerHostCreate) -> dict[str, Any]:
     """创建 Docker 主机。"""
     async with async_session_factory() as session:
         # 检查名称唯一
-        existing = await session.execute(
-            select(DockerHostModel).where(DockerHostModel.name == body.name)
-        )
+        existing = await session.execute(select(DockerHostModel).where(DockerHostModel.name == body.name))
         if existing.scalar_one_or_none():
             raise HTTPException(400, f"主机名 '{body.name}' 已存在")
 
         # 如果设为默认，清除其他默认
         if body.is_default:
-            all_hosts = (await session.execute(
-                select(DockerHostModel).where(DockerHostModel.is_default == True)  # noqa: E712
-            )).scalars().all()
+            all_hosts = (
+                (
+                    await session.execute(
+                        select(DockerHostModel).where(DockerHostModel.is_default == True)  # noqa: E712
+                    )
+                )
+                .scalars()
+                .all()
+            )
             for h in all_hosts:
                 h.is_default = False
 
@@ -251,19 +252,25 @@ async def update_host(host_id: int, body: DockerHostUpdate) -> dict[str, Any]:
             setattr(host, k, v)
 
         if base_updates.get("is_default"):
-            others = (await session.execute(
-                select(DockerHostModel).where(
-                    DockerHostModel.id != host_id,
-                    DockerHostModel.is_default == True,  # noqa: E712
+            others = (
+                (
+                    await session.execute(
+                        select(DockerHostModel).where(
+                            DockerHostModel.id != host_id,
+                            DockerHostModel.is_default == True,  # noqa: E712
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             for h in others:
                 h.is_default = False
 
         if secret_updates:
-            secret = (await session.execute(
-                select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id)
-            )).scalar_one_or_none()
+            secret = (
+                await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id))
+            ).scalar_one_or_none()
             if not secret:
                 secret = DockerHostSecretModel(host_id=host_id)
                 session.add(secret)
@@ -285,9 +292,9 @@ async def delete_host(host_id: int) -> dict[str, Any]:
         if not host:
             raise HTTPException(404, "主机不存在")
         # 删除关联 secret
-        secret = (await session.execute(
-            select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id)
-        )).scalar_one_or_none()
+        secret = (
+            await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id))
+        ).scalar_one_or_none()
         if secret:
             await session.delete(secret)
         await session.delete(host)
@@ -303,9 +310,9 @@ async def health_check_host(host_id: int) -> dict[str, Any]:
         host = await session.get(DockerHostModel, host_id)
         if not host:
             raise HTTPException(404, "主机不存在")
-        secret = (await session.execute(
-            select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id)
-        )).scalar_one_or_none()
+        secret = (
+            await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id))
+        ).scalar_one_or_none()
 
         config = _model_to_config_dict(host, secret)
 
@@ -352,24 +359,26 @@ async def health_check_all() -> dict[str, Any]:
         hosts = list(result.scalars().all())
         secrets = {}
         for h in hosts:
-            s = (await session.execute(
-                select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == h.id)
-            )).scalar_one_or_none()
+            s = (
+                await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == h.id))
+            ).scalar_one_or_none()
             secrets[h.id] = s
 
     results = []
     for host in hosts:
         config = _model_to_config_dict(host, secrets.get(host.id))
         health = await check_host_health(config)
-        results.append({
-            "host_id": host.id,
-            "name": host.name,
-            "ok": health.ok,
-            "version": health.docker_version,
-            "running": health.running_containers,
-            "latency_ms": health.latency_ms,
-            "error": health.error,
-        })
+        results.append(
+            {
+                "host_id": host.id,
+                "name": host.name,
+                "ok": health.ok,
+                "version": health.docker_version,
+                "running": health.running_containers,
+                "latency_ms": health.latency_ms,
+                "error": health.error,
+            }
+        )
 
     # 批量更新状态
     async with async_session_factory() as session:
@@ -419,11 +428,7 @@ async def select_target(
 @router.get("/scheduling/strategies")
 async def list_strategies() -> dict[str, Any]:
     """列出可用调度策略。"""
-    return {
-        "strategies": [
-            {"key": s.value, "label": s.name} for s in SchedulingStrategy
-        ]
-    }
+    return {"strategies": [{"key": s.value, "label": s.name} for s in SchedulingStrategy]}
 
 
 # ─── 预设配置 ────────────────────────────────────────
@@ -431,14 +436,8 @@ async def list_strategies() -> dict[str, Any]:
 async def list_presets() -> dict[str, Any]:
     """获取7套预设连接配置模板。"""
     return {
-        "presets": [
-            {"key": k, "config": v, "fields": _get_preset_fields(k)}
-            for k, v in PRESET_CONFIGS.items()
-        ],
-        "connection_types": [
-            {"value": t[0], "label": t[1], "description": t[2]}
-            for t in CONNECTION_TYPES
-        ],
+        "presets": [{"key": k, "config": v, "fields": _get_preset_fields(k)} for k, v in PRESET_CONFIGS.items()],
+        "connection_types": [{"value": t[0], "label": t[1], "description": t[2]} for t in CONNECTION_TYPES],
         "required_fields": _get_required_fields_map(),
     }
 
@@ -451,23 +450,55 @@ def _get_preset_fields(key: str) -> list[dict[str, Any]]:
             {"key": "docker_host", "label": "Docker Host", "placeholder": "tcp://127.0.0.1:2375", "required": True},
         ],
         "remote_tcp_tls": [
-            {"key": "docker_host", "label": "Docker Host", "placeholder": "tcp://your-server-ip:2376", "required": True},
+            {
+                "key": "docker_host",
+                "label": "Docker Host",
+                "placeholder": "tcp://your-server-ip:2376",
+                "required": True,
+            },
             {"key": "tls_ca_content", "label": "CA 证书", "type": "textarea", "required": True},
             {"key": "tls_cert_content", "label": "客户端证书", "type": "textarea", "required": True},
             {"key": "tls_key_content", "label": "客户端私钥", "type": "textarea", "required": True},
         ],
         "ssh_key_root": [
-            {"key": "docker_host", "label": "Docker Host (SSH地址)", "placeholder": "ssh://root@your-server-ip:22", "required": True},
+            {
+                "key": "docker_host",
+                "label": "Docker Host (SSH地址)",
+                "placeholder": "ssh://root@your-server-ip:22",
+                "required": True,
+            },
             {"key": "ssh_user", "label": "SSH 用户", "default": "root", "required": True},
-            {"key": "ssh_key_content", "label": "SSH 私钥内容", "type": "textarea", "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----\n...", "required": True},
+            {
+                "key": "ssh_key_content",
+                "label": "SSH 私钥内容",
+                "type": "textarea",
+                "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+                "required": True,
+            },
         ],
         "ssh_key_ubuntu": [
-            {"key": "docker_host", "label": "Docker Host (SSH地址)", "placeholder": "ssh://ubuntu@your-server-ip:22", "required": True},
+            {
+                "key": "docker_host",
+                "label": "Docker Host (SSH地址)",
+                "placeholder": "ssh://ubuntu@your-server-ip:22",
+                "required": True,
+            },
             {"key": "ssh_user", "label": "SSH 用户", "default": "ubuntu", "required": True},
-            {"key": "ssh_key_content", "label": "SSH 私钥内容", "type": "textarea", "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----\n...", "required": True},
+            {
+                "key": "ssh_key_content",
+                "label": "SSH 私钥内容",
+                "type": "textarea",
+                "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+                "required": True,
+            },
         ],
         "ssh_password": [
-            {"key": "docker_host", "label": "Docker Host (SSH地址)", "placeholder": "ssh://user@your-server-ip:22", "required": True},
+            {
+                "key": "docker_host",
+                "label": "Docker Host (SSH地址)",
+                "placeholder": "ssh://user@your-server-ip:22",
+                "required": True,
+            },
             {"key": "ssh_user", "label": "SSH 用户", "required": True},
             {"key": "ssh_password", "label": "SSH 密码", "type": "password", "required": True},
         ],
@@ -504,9 +535,7 @@ async def get_setup_script() -> dict[str, Any]:
             "5. 推荐使用 SSH 密钥方式连接（安全）",
         ],
         "quick_install": (
-            "curl -fsSL https://get.docker.com | bash && "
-            "systemctl enable --now docker && "
-            "usermod -aG docker $USER"
+            "curl -fsSL https://get.docker.com | bash && systemctl enable --now docker && usermod -aG docker $USER"
         ),
     }
 
@@ -519,9 +548,9 @@ async def list_containers(host_id: int) -> dict[str, Any]:
         host = await session.get(DockerHostModel, host_id)
         if not host:
             raise HTTPException(404, "主机不存在")
-        secret = (await session.execute(
-            select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id)
-        )).scalar_one_or_none()
+        secret = (
+            await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id))
+        ).scalar_one_or_none()
         config = _model_to_config_dict(host, secret)
 
     rc, stdout, stderr = await run_docker_cmd(
@@ -538,11 +567,13 @@ async def list_containers(host_id: int) -> dict[str, Any]:
             continue
         parts = line.split("|")
         if len(parts) >= 5:
-            containers.append({
-                "id": parts[0][:12],
-                "name": parts[1],
-                "image": parts[2],
-                "status": parts[3],
-                "ports": parts[4],
-            })
+            containers.append(
+                {
+                    "id": parts[0][:12],
+                    "name": parts[1],
+                    "image": parts[2],
+                    "status": parts[3],
+                    "ports": parts[4],
+                }
+            )
     return {"ok": True, "containers": containers, "host": host.name}

@@ -2,11 +2,10 @@
 # 验证：成功路径、失败修正、重复检测终止、网络授权触发
 from unittest.mock import MagicMock
 
-
-from app.orchestrator.refine_loop import refine_python_code, _summarize_task
-
+from app.orchestrator.refine_loop import _summarize_task, refine_python_code
 
 # ---------- 成功路径 ----------
+
 
 async def test_refine_success_first_round():
     """第一轮执行就成功（exit_code=0），应立即返回"""
@@ -50,6 +49,7 @@ async def test_refine_success_after_retry():
     mock_llm.complete = mock_complete
 
     import app.orchestrator.refine_loop as refine_mod
+
     original_get_llm = refine_mod.get_llm
     refine_mod.get_llm = lambda: mock_llm
     try:
@@ -69,6 +69,7 @@ async def test_refine_success_after_retry():
 
 # ---------- 失败 + 重复检测终止 ----------
 
+
 async def test_refine_no_change_terminate():
     """LLM 返回的代码和上一轮相同，应终止"""
     call_count = 0
@@ -87,6 +88,7 @@ async def test_refine_no_change_terminate():
     mock_llm.complete = mock_complete
 
     import app.orchestrator.refine_loop as refine_mod
+
     original_get_llm = refine_mod.get_llm
     refine_mod.get_llm = lambda: mock_llm
     try:
@@ -105,6 +107,7 @@ async def test_refine_no_change_terminate():
 
 
 # ---------- max_rounds 限制 ----------
+
 
 async def test_refine_max_rounds():
     """达到 max_rounds 仍未成功，应终止并返回 success=False"""
@@ -127,6 +130,7 @@ async def test_refine_max_rounds():
     mock_llm.complete = mock_complete
 
     import app.orchestrator.refine_loop as refine_mod
+
     original_get_llm = refine_mod.get_llm
     refine_mod.get_llm = lambda: mock_llm
     try:
@@ -144,6 +148,7 @@ async def test_refine_max_rounds():
 
 
 # ---------- _summarize_task 辅助函数 ----------
+
 
 def test_summarize_task_code_analysis():
     """_summarize_task 正确生成 code_analysis 任务摘要"""
@@ -174,6 +179,7 @@ def test_summarize_task_tested_system():
 
 # ---------- 网络授权触发 ----------
 
+
 async def test_refine_triggers_net_auth():
     """L1 网络下代码失败（网络错误），应触发网络授权申请"""
     call_count = 0
@@ -197,11 +203,13 @@ async def test_refine_triggers_net_auth():
 
     # mock 网络授权管理器返回自动通过
     import app.orchestrator.refine_loop as refine_mod
+
     original_get_llm = refine_mod.get_llm
     refine_mod.get_llm = lambda: mock_llm
 
     # mock request_network_access 返回 approved
     import app.net_auth_manager as nam_mod
+
     original_request = nam_mod.request_network_access
 
     auth_called = False
@@ -253,10 +261,12 @@ async def test_refine_net_auth_denied_continues():
     mock_llm.complete = mock_complete
 
     import app.orchestrator.refine_loop as refine_mod
+
     original_get_llm = refine_mod.get_llm
     refine_mod.get_llm = lambda: mock_llm
 
     import app.net_auth_manager as nam_mod
+
     original_request = nam_mod.request_network_access
 
     async def mock_request(*args, **kwargs):

@@ -2,6 +2,7 @@
 
 提供 lifespan 初始化 + FastAPI Depends 注入。
 """
+
 from __future__ import annotations
 
 import redis.asyncio as aioredis

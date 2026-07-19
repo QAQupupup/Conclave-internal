@@ -14,11 +14,11 @@ from app.orchestrator import runner as runner_mod
 from app.orchestrator.nodes import clarify_node
 from app.orchestrator.runner import Runner
 from app.rag.chunker import chunk_markdown
-from app.rag.store import StubEmbedding, cosine_similarity, InMemoryVectorStore
+from app.rag.store import InMemoryVectorStore, StubEmbedding, cosine_similarity
 from app.routers import meetings as meetings_mod
 
-
 # ---------- fixtures ----------
+
 
 @pytest.fixture()
 def client():
@@ -36,6 +36,7 @@ def _reset_state():
     bus._subs.clear()
     bus._history.clear()
     from app.rag import store as store_mod
+
     store_mod._stores.clear()
     yield
     runner_mod._states.clear()
@@ -64,16 +65,10 @@ def _run_to_done(meeting_id: str):
 
 # ---------- 基础工具测试 ----------
 
+
 def test_chunker_splits_by_heading():
     """切块器：按 # / ## 切分"""
-    md = (
-        "# 用户调研\n"
-        "目标用户为中小团队\n"
-        "## 架构\n"
-        "系统应支持异步任务处理\n"
-        "## 范围\n"
-        "MVP 不应引入额外中间件\n"
-    )
+    md = "# 用户调研\n目标用户为中小团队\n## 架构\n系统应支持异步任务处理\n## 范围\nMVP 不应引入额外中间件\n"
     chunks = chunk_markdown(md, "research")
     assert len(chunks) >= 2
     sections = [c.section for c in chunks]
@@ -115,6 +110,7 @@ def test_vector_store_search():
 
 
 # ---------- 端到端会议流程测试 ----------
+
 
 def test_health(client):
     """健康检查"""
@@ -192,7 +188,7 @@ def test_full_meeting_flow(client):
     assert detail["artifact"]["prd"]["title"]
 
     # 6. 断言事件被广播
-    events = bus.history(meeting_id)
+    events = bus.get_events(meeting_id)
     event_types = set(e.type for e in events)
     assert "meeting.created" in event_types
     assert "stage.changed" in event_types
@@ -288,6 +284,7 @@ def test_list_meetings(client):
 
 # ---------- WebSocket 测试 ----------
 
+
 def test_websocket_snapshot_and_events(client):
     """WS：连接回放快照 + replay.done（完整回放跳过历史事件避免与快照重复）"""
     # 先创建并 run 完一场会议
@@ -315,6 +312,7 @@ def test_websocket_snapshot_and_events(client):
 
 
 # ---------- 改造一：run 异步化测试 ----------
+
 
 def test_run_async_returns_running(client):
     """run 端点异步化后立即返回 202 Accepted，不阻塞等待完成"""
@@ -360,6 +358,7 @@ def test_run_done_meeting_returns_done(client):
 
 
 # ---------- 改造二：审计端点测试 ----------
+
 
 def test_trace_endpoint(client):
     """GET /meetings/{id}/trace 返回 LLM 调用追踪摘要"""
@@ -434,6 +433,7 @@ def test_charter_not_found(client):
 
 # ---------- 改造三：借调完整流程测试 ----------
 
+
 def test_loan_borrow_full_flow(client):
     """借调完整流程：申请 → 登记 → 防重复 → 上限 → 发言"""
     resp = client.post("/meetings", json={"topic": "借调流程测试"})
@@ -500,11 +500,8 @@ def test_loan_borrow_full_flow(client):
     # 所有借调 agent 都已发言
     assert all(a["spoken"] for a in state.borrowed_agents)
     # 借调发言事件应被广播
-    events = bus.history(meeting_id)
-    borrow_events = [
-        e for e in events
-        if e.type == "agent.spoke" and e.payload.get("borrowed") is True
-    ]
+    events = bus.get_events(meeting_id)
+    borrow_events = [e for e in events if e.type == "agent.spoke" and e.payload.get("borrowed") is True]
     assert len(borrow_events) >= 2
 
 

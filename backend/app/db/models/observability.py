@@ -1,10 +1,15 @@
 """可观测性 ORM 模型：cost_records（LLM/工具调用成本记录）。"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, Text, Integer, DateTime, Index,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,11 +24,12 @@ class CostRecordModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meeting_id: Mapped[str] = mapped_column(
-        String(36), nullable=True, index=True,
+        String(36),
+        nullable=True,
+        index=True,
     )
     stage: Mapped[str] = mapped_column(String(30), nullable=False, default="")
-    node: Mapped[str] = mapped_column(String(50), nullable=False, default="",
-                                      comment="调用节点: llm|tool|sandbox")
+    node: Mapped[str] = mapped_column(String(50), nullable=False, default="", comment="调用节点: llm|tool|sandbox")
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="")
     provider: Mapped[str] = mapped_column(String(50), nullable=False, default="")
     model: Mapped[str] = mapped_column(String(100), nullable=False, default="")
@@ -35,7 +41,8 @@ class CostRecordModel(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ok")
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
 

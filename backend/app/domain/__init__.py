@@ -7,60 +7,61 @@
 - meeting: 会议核心模型
 - agent_role: 角色模型
 """
+
 from __future__ import annotations
 
-from app.domain.enums import (
-    Role,
-    ClaimType,
-    ConflictType,
-    Stage,
-    MeetingStatus,
-)
-from app.domain.message import (
-    Message,
-    Claim,
-    Conflict,
-    Evidence,
-    EvidenceAssessment,
-    Decision,
-    DecisionRecord,
-    EvidenceSet,
-)
-from app.domain.meeting import (
-    PRD,
-    Artifact,
-    Meeting,
-    BorrowRequest,
-    MeetingState,
-)
 from app.domain.agent_role import (
     AgentRole,
     AgentRoleListResponse,
 )
+from app.domain.enums import (
+    ClaimType,
+    ConflictType,
+    MeetingStatus,
+    Role,
+    Stage,
+)
+from app.domain.meeting import (
+    PRD,
+    Artifact,
+    BorrowRequest,
+    Meeting,
+    MeetingState,
+)
+from app.domain.message import (
+    Claim,
+    Conflict,
+    Decision,
+    DecisionRecord,
+    Evidence,
+    EvidenceAssessment,
+    EvidenceSet,
+    Message,
+)
 
 __all__ = [
-    # enums
-    "Role",
-    "ClaimType",
-    "ConflictType",
-    "Stage",
-    "MeetingStatus",
-    # message
-    "Message",
-    "Claim",
-    "Conflict",
-    "Evidence",
-    "EvidenceAssessment",
-    "Decision",
-    "DecisionRecord",
-    "EvidenceSet",
     # meeting
     "PRD",
-    "Artifact",
-    "Meeting",
-    "BorrowRequest",
-    "MeetingState",
     # agent_role
     "AgentRole",
     "AgentRoleListResponse",
+    "Artifact",
+    "BorrowRequest",
+    "Claim",
+    "ClaimType",
+    "Conflict",
+    "ConflictType",
+    "Decision",
+    "DecisionRecord",
+    "Evidence",
+    "EvidenceAssessment",
+    "EvidenceSet",
+    "Meeting",
+    "MeetingState",
+    "MeetingStatus",
+    # message
+    "Message",
+    # enums
+    "Role",
+    "Stage",
 ]

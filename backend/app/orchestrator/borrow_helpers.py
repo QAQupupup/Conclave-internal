@@ -6,22 +6,25 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from app.agents.compute import execute_think, build_intra_prompt, ThinkRequest
+from app.agents.compute import ThinkRequest, build_intra_prompt, execute_think
 from app.agents.role_templates import get_borrow_prompt
 from app.config import settings
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 from app.observability.log_bus import log_bus
-from conclave_core.charter_logic import is_already_borrowed, register_borrow
-from conclave_core.roles import match_role as _match_role
-from conclave_core.anchor import get_full_anchor as _full_anchor
-from conclave_core.text import format_claims_as_text as _format_claims_as_text
-
+from app.orchestrator.stage_common import (
+    record_drift as _record_drift,
+)
 from app.orchestrator.stage_common import (
     record_message as _record_message,
-    record_drift as _record_drift,
+)
+from app.orchestrator.stage_common import (
     resolve_model_for_call as _resolve_model_for_call,
 )
+from conclave_core.anchor import get_full_anchor as _full_anchor
+from conclave_core.charter_logic import is_already_borrowed, register_borrow
+from conclave_core.roles import match_role as _match_role
+from conclave_core.text import format_claims_as_text as _format_claims_as_text
 
 # 角色ID -> 中文名称映射（用于借调prompt）
 _ROLE_NAMES = {
@@ -114,15 +117,19 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
                 content = _format_claims_as_text(claims, role_str)
                 msg = _record_message(state, matched_role, stage, content, claim_ids)
                 await bus.publish(
-                    make_event("agent.spoke", state.meeting_id, {
-                        "meeting_id": state.meeting_id,
-                        "role": role_str,
-                        "stage": stage.value,
-                        "content": content,
-                        "claim_refs": claim_ids,
-                        "message_id": msg["id"],
-                        "borrowed": True,
-                    })
+                    make_event(
+                        "agent.spoke",
+                        state.meeting_id,
+                        {
+                            "meeting_id": state.meeting_id,
+                            "role": role_str,
+                            "stage": stage.value,
+                            "content": content,
+                            "claim_refs": claim_ids,
+                            "message_id": msg["id"],
+                            "borrowed": True,
+                        },
+                    )
                 )
                 _record_drift(state, matched_role, stage, content)
                 agent_info["spoken"] = True
@@ -149,7 +156,8 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
             "evidence_refs": [],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        state.messages.append(msg)
+        # [SECURITY-FIX] 使用安全追加方法防止消息列表无限增长
+        state.append_message(msg)
         await bus.publish(
             make_event(
                 "agent.spoke",
@@ -170,6 +178,7 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
 
 
 # ---------- 自动借调评估：主持人判断是否需要补充角色 ----------
+
 
 async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
     """主持人评估当前团队是否需要借调额外角色
@@ -199,18 +208,11 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
 
     # 取最近的发言（最多20条）作为评估上下文
     recent_msgs = state.messages[-20:] if len(state.messages) > 20 else state.messages
-    recent_text = "\n".join(
-        f"[{m.get('agent_role', '?')}] {m.get('content', '')[:200]}"
-        for m in recent_msgs
-    )
+    recent_text = "\n".join(f"[{m.get('agent_role', '?')}] {m.get('content', '')[:200]}" for m in recent_msgs)
 
     topic = state.clarified_topic or state.topic
-    current_role_names = ", ".join(
-        tc.get("role", "") for tc in state.team_config
-    )
-    available_role_desc = "\n".join(
-        f"- {r['id']}({r['name']}): {r['desc']}" for r in available_roles
-    )
+    current_role_names = ", ".join(tc.get("role", "") for tc in state.team_config)
+    available_role_desc = "\n".join(f"- {r['id']}({r['name']}): {r['desc']}" for r in available_roles)
 
     assess_prompt = f"""[系统] 你是 Conclave 会议主持人。当前正在进行「{stage.value}」阶段。
 
@@ -283,42 +285,52 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
         if state.auto_borrow_count < AUTO_BORROW_THRESHOLD:
             # 主持人自动审批通过
             register_borrow(state.charter, target_role, "approve_temporary")
-            state.borrowed_agents.append({
-                "role": target_role,
-                "verdict": "approve_temporary",
-                "spoken": False,
-                "request": {
-                    "target_role": target_role,
-                    "goal": borrow_request["goal"],
-                    "necessary": borrow_request["necessary"],
-                    "no_loan_cost": borrow_request["no_loan_cost"],
-                    "stance": "",
-                },
-                "auto_approved": True,
-            })
+            state.borrowed_agents.append(
+                {
+                    "role": target_role,
+                    "verdict": "approve_temporary",
+                    "spoken": False,
+                    "request": {
+                        "target_role": target_role,
+                        "goal": borrow_request["goal"],
+                        "necessary": borrow_request["necessary"],
+                        "no_loan_cost": borrow_request["no_loan_cost"],
+                        "stance": "",
+                    },
+                    "auto_approved": True,
+                }
+            )
             state.auto_borrow_count += 1
-            state.borrow_request_history.append({
-                **borrow_request,
-                "verdict": "auto_approved",
-                "approved_at": datetime.now(timezone.utc).isoformat(),
-            })
-            state.injected_messages.append({
-                "signal": "borrow_auto_approved",
-                "request_id": request_id,
-                "target_role": target_role,
-                "goal": borrow_request["goal"],
-                "at_stage": stage.value,
-            })
-            # 广播事件：自动批准借调
-            await bus.publish(
-                make_event("borrow.auto_approved", state.meeting_id, {
-                    "meeting_id": state.meeting_id,
+            state.borrow_request_history.append(
+                {
+                    **borrow_request,
+                    "verdict": "auto_approved",
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            state.injected_messages.append(
+                {
+                    "signal": "borrow_auto_approved",
                     "request_id": request_id,
                     "target_role": target_role,
-                    "target_role_name": valid_role["name"],
                     "goal": borrow_request["goal"],
-                    "auto_borrow_count": state.auto_borrow_count,
-                })
+                    "at_stage": stage.value,
+                }
+            )
+            # 广播事件：自动批准借调
+            await bus.publish(
+                make_event(
+                    "borrow.auto_approved",
+                    state.meeting_id,
+                    {
+                        "meeting_id": state.meeting_id,
+                        "request_id": request_id,
+                        "target_role": target_role,
+                        "target_role_name": valid_role["name"],
+                        "goal": borrow_request["goal"],
+                        "auto_borrow_count": state.auto_borrow_count,
+                    },
+                )
             )
             # 主持人发言通知
             notice = (
@@ -328,35 +340,45 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
             )
             msg = _record_message(state, Role.MODERATOR, stage, notice)
             await bus.publish(
-                make_event("agent.spoke", state.meeting_id, {
-                    "meeting_id": state.meeting_id,
-                    "role": Role.MODERATOR.value,
-                    "stage": stage.value,
-                    "content": notice,
-                    "claim_refs": [],
-                    "message_id": msg["id"],
-                    "system_notice": True,
-                })
+                make_event(
+                    "agent.spoke",
+                    state.meeting_id,
+                    {
+                        "meeting_id": state.meeting_id,
+                        "role": Role.MODERATOR.value,
+                        "stage": stage.value,
+                        "content": notice,
+                        "claim_refs": [],
+                        "message_id": msg["id"],
+                        "system_notice": True,
+                    },
+                )
             )
         else:
             # 超过阈值，挂起等待用户审批
             state.pending_borrow_request = borrow_request
-            state.borrow_request_history.append({
-                **borrow_request,
-                "verdict": "pending_user",
-            })
+            state.borrow_request_history.append(
+                {
+                    **borrow_request,
+                    "verdict": "pending_user",
+                }
+            )
             # 广播事件：需要用户审批
             await bus.publish(
-                make_event("borrow.awaiting_user", state.meeting_id, {
-                    "meeting_id": state.meeting_id,
-                    "request_id": request_id,
-                    "target_role": target_role,
-                    "target_role_name": valid_role["name"],
-                    "goal": borrow_request["goal"],
-                    "necessary": borrow_request["necessary"],
-                    "no_loan_cost": borrow_request["no_loan_cost"],
-                    "auto_borrow_count": state.auto_borrow_count,
-                })
+                make_event(
+                    "borrow.awaiting_user",
+                    state.meeting_id,
+                    {
+                        "meeting_id": state.meeting_id,
+                        "request_id": request_id,
+                        "target_role": target_role,
+                        "target_role_name": valid_role["name"],
+                        "goal": borrow_request["goal"],
+                        "necessary": borrow_request["necessary"],
+                        "no_loan_cost": borrow_request["no_loan_cost"],
+                        "auto_borrow_count": state.auto_borrow_count,
+                    },
+                )
             )
             # 主持人发言通知
             notice = (
@@ -365,15 +387,19 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
             )
             msg = _record_message(state, Role.MODERATOR, stage, notice)
             await bus.publish(
-                make_event("agent.spoke", state.meeting_id, {
-                    "meeting_id": state.meeting_id,
-                    "role": Role.MODERATOR.value,
-                    "stage": stage.value,
-                    "content": notice,
-                    "claim_refs": [],
-                    "message_id": msg["id"],
-                    "system_notice": True,
-                })
+                make_event(
+                    "agent.spoke",
+                    state.meeting_id,
+                    {
+                        "meeting_id": state.meeting_id,
+                        "role": Role.MODERATOR.value,
+                        "stage": stage.value,
+                        "content": notice,
+                        "claim_refs": [],
+                        "message_id": msg["id"],
+                        "system_notice": True,
+                    },
+                )
             )
     except Exception as e:
         # 评估失败不阻塞流程

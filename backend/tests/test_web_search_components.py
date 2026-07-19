@@ -85,11 +85,7 @@ async def test_tavily_fetch_url(monkeypatch):
     async def fake_post(url, *, json=None, **kwargs):
         mock_resp = MagicMock()
         mock_resp.raise_for_status = lambda: None
-        mock_resp.json = lambda: {
-            "results": [
-                {"title": "Example", "raw_content": "long content here"}
-            ]
-        }
+        mock_resp.json = lambda: {"results": [{"title": "Example", "raw_content": "long content here"}]}
         return mock_resp
 
     monkeypatch.setattr(tavily._get_client(), "post", fake_post)

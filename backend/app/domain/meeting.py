@@ -2,23 +2,25 @@
 
 从 app/models.py 迁移而来，原样保留，仅调整文件位置。
 """
+
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.agents.trace import CallTrace
+from app.domain.enums import MeetingStatus, Role, Stage
+from app.domain.message import Message
 from conclave_core.charter import MeetingCharter
 from conclave_core.conclusion_chain import ConclusionChain
-
-from app.domain.enums import Role, Stage, MeetingStatus
-from app.domain.message import Message
 
 
 class PRD(BaseModel):
     """产品需求文档"""
+
     title: str
     goal: str
     scope: str
@@ -30,6 +32,7 @@ class PRD(BaseModel):
 
 class Artifact(BaseModel):
     """会议产出物：PRD + OpenAPI"""
+
     meeting_id: str
     prd: PRD
     openapi: str
@@ -37,38 +40,42 @@ class Artifact(BaseModel):
 
 class Meeting(BaseModel):
     """会议聚合根（对外视图）"""
+
     id: str
     topic: str
     status: str
     stage: str
     created_at: datetime
     messages: list[Message] = Field(default_factory=list)
-    artifact: Optional[Artifact] = None
+    artifact: Artifact | None = None
 
 
 class BorrowRequest(BaseModel):
     """借调三问表单"""
+
     id: str
     requester: Role
     target_role: str
     goal: str
     necessary: str
     no_loan_cost: str
-    verdict: Optional[str] = None  # reject|defer|approve_temporary|approve_frozen_scope
+    verdict: str | None = None  # reject|defer|approve_temporary|approve_frozen_scope
 
 
 # ---------- 状态机状态对象 ----------
+
 
 class MeetingState(BaseModel):
     """状态机运行态（见 §1.4）
 
     各节点以纯函数风格读写该对象，副作用通过事件总线外溢。
     """
+
     meeting_id: str
     topic: str
     stage: Stage = Stage.CLARIFY
     status: MeetingStatus = MeetingStatus.RUNNING
-    clarified_topic: Optional[str] = None
+    clarified_topic: str | None = None
     team_config: list[dict[str, Any]] = Field(default_factory=list)  # [{role, stance}]
     # 角色配置：从 agent_roles 表加载的完整角色定义列表
     # 每项: {id, display_name, perspective, expertise_domains, risk_appetite,
@@ -85,8 +92,8 @@ class MeetingState(BaseModel):
     claims: list[dict[str, Any]] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     evidence_set: list[dict[str, Any]] = Field(default_factory=list)
-    decision_record: Optional[dict[str, Any]] = None
-    artifact: Optional[dict[str, Any]] = None
+    decision_record: dict[str, Any] | None = None
+    artifact: dict[str, Any] | None = None
     # 产出类型（创建会议时指定，produce 阶段据此切换模板）
     deliverable_type: str = "prd_openapi"
     # 议题执行模式（flow_plan）：Runner 据此决定走 instant 还是 standard 六阶段管线
@@ -110,12 +117,12 @@ class MeetingState(BaseModel):
     # 格式: {role_or_stage: "provider_id:model_id"}
     # key 可以是角色 id（如 "engineer"）或 @阶段名（如 "@arbitrate"）
     resolved_models: dict[str, str] = Field(default_factory=dict)
-    paused_snapshot: Optional[dict[str, Any]] = None
+    paused_snapshot: dict[str, Any] | None = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
     reference_meeting_ids: list[str] = Field(default_factory=list)  # 引用的历史会议 ID 列表
     reference_context: str = ""  # 引用会议摘要文本（注入 prompt）
     # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）
-    charter: Optional[MeetingCharter] = None
+    charter: MeetingCharter | None = None
     # 漂移检查日志（非阻塞，记录每条发言的 drift 判定）
     drift_log: list[dict[str, Any]] = Field(default_factory=list)
     # 第2层：结论锁定链（记录每阶段锁定结论，供后续引用和一致性校验）
@@ -134,30 +141,35 @@ class MeetingState(BaseModel):
     # 待用户审批的借调申请（超过自动通过阈值后挂起）
     # 格式: {"id": "...", "target_role": "...", "goal": "...", "necessary": "...",
     #        "no_loan_cost": "...", "requested_by": "moderator", "requested_at": "..."}
-    pending_borrow_request: Optional[dict[str, Any]] = None
+    pending_borrow_request: dict[str, Any] | None = None
     borrow_frozen: bool = False  # 是否冻结借调（用户选择不再允许借调）
     # 借调申请历史（含自动通过和用户审批的所有申请）
     borrow_request_history: list[dict[str, Any]] = Field(default_factory=list)
     # Agent 反馈评估结果（feedback.py evaluate_agents 写入）
     # {role: {"adoption_rate": float, "evidence_accuracy": float, "overall_score": float, ...}}
-    agent_evaluations: Optional[dict[str, Any]] = None
+    agent_evaluations: dict[str, Any] | None = None
     # 流水线优化：cross_team 阶段预检索的证据（evidence_check 优先使用）
     # 格式: {conflict_id: [evidence_chunks]}
     # [UNIQ-07 修复] 原字段名 _prefetched_evidence（下划线前缀）不会被 Pydantic
     # 序列化，导致会议状态快照+SQLite 持久化时丢失该字段，进程重启后
     # evidence_check 节点需要重新检索。改为 prefetched_evidence（无下划线）。
-    prefetched_evidence: Optional[dict[str, list[dict]]] = Field(default=None)
+    prefetched_evidence: dict[str, list[dict]] | None = Field(default=None)
     # Agent 拒绝权：用户注入消息后，Agent 可投票拒绝（需证据支撑，至少 2 票）
     # 格式: {message_id: [{"agent_role": "...", "evidence_refs": [...], "reason": "..."}]}
     user_rejections: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # [AUDIT-FIX P0-2/P0-4] 新增：异常终态记录，用于审计可追溯性
-    completed_at: Optional[datetime] = None
-    error_detail: Optional[str] = None  # 节点异常或超时时记录错误信息
+    completed_at: datetime | None = None
+    error_detail: str | None = None  # 节点异常或超时时记录错误信息
+    # [SECURITY-FIX] 会议所有权：创建会议时记录创建者，用于访问控制
+    owner_username: str | None = None
+    owner_uid: str | None = None
+    # 参与者列表（通过 WS 加入的用户）
+    participants: list[str] = Field(default_factory=list)
     # === 断点续传 & 自我迭代支持 ===
     # checkpoint: 记录最近一次成功完成的阶段，用于断点恢复
     # 格式: {"stage": "produce", "completed_at": "...", "substep": "code_generated", "retry_count": 0}
-    checkpoint: Optional[dict[str, Any]] = None
+    checkpoint: dict[str, Any] | None = None
     # stage_retry_count: 各阶段重试次数 {stage_name: int}
     stage_retry_count: dict[str, int] = Field(default_factory=dict)
     max_stage_retries: int = 2  # 每个阶段最大重试次数
@@ -166,12 +178,15 @@ class MeetingState(BaseModel):
     iteration_count: int = 0
     max_iterations: int = 2  # 最大迭代轮次（防止无限循环）
     # quality_score: 产出质量评分（0-100），由质量门禁评估
-    quality_score: Optional[float] = None
-    quality_feedback: Optional[str] = None  # 质量门禁的反馈意见（用于下一轮迭代）
+    quality_score: float | None = None
+    quality_feedback: str | None = None  # 质量门禁的反馈意见（用于下一轮迭代）
     # iteration_history: 历次迭代记录 [{iteration, quality_score, feedback, changes}]
     iteration_history: list[dict[str, Any]] = Field(default_factory=list)
     # auto_iterate: 是否自动迭代直到质量达标（用户可设置）
     auto_iterate: bool = False
+
+    # [SECURITY-FIX] 消息列表上限：超过此数量时裁剪最旧消息（保留上下文窗口）
+    MAX_MESSAGES: int = 500
 
     def model_post_init(self, __context: Any) -> None:
         """初始化后确保 conclusion_chain 和 llm_trace 的 meeting_id 正确"""
@@ -179,6 +194,15 @@ class MeetingState(BaseModel):
             self.conclusion_chain.meeting_id = self.meeting_id
         if not self.llm_trace.meeting_id:
             self.llm_trace.meeting_id = self.meeting_id
+
+    def append_message(self, msg: dict[str, Any]) -> None:
+        """安全添加消息，超过上限时裁剪最旧消息"""
+        self.messages.append(msg)
+        if len(self.messages) > self.MAX_MESSAGES:
+            # 保留最近的 MAX_MESSAGES 条消息，最旧的被裁剪
+            # LLM 上下文构建时使用 state.messages[-N:]，裁剪不影响上下文质量
+            excess = len(self.messages) - self.MAX_MESSAGES
+            del self.messages[:excess]
 
     # ---------- Aux 大字段分离（MeetingState 瘦身）----------
 
@@ -223,22 +247,18 @@ class MeetingState(BaseModel):
         Args:
             aux: extract_aux() 返回的 dict，或从 DB 加载的等效数据
         """
-        if "llm_trace" in aux and aux["llm_trace"]:
-            try:
+        if aux.get("llm_trace"):
+            with contextlib.suppress(Exception):
                 self.llm_trace = CallTrace.model_validate(aux["llm_trace"])
-            except Exception:
-                pass  # 数据损坏时保留默认空值
 
-        if "evidence_set" in aux and aux["evidence_set"]:
+        if aux.get("evidence_set"):
             self.evidence_set = list(aux["evidence_set"])
 
-        if "conclusion_chain" in aux and aux["conclusion_chain"]:
-            try:
+        if aux.get("conclusion_chain"):
+            with contextlib.suppress(Exception):
                 self.conclusion_chain = ConclusionChain.model_validate(aux["conclusion_chain"])
-            except Exception:
-                pass
 
-        if "borrowed_agents" in aux and aux["borrowed_agents"]:
+        if aux.get("borrowed_agents"):
             self.borrowed_agents = list(aux["borrowed_agents"])
 
     def snapshot_lite(self) -> dict[str, Any]:
@@ -247,7 +267,7 @@ class MeetingState(BaseModel):
         与 snapshot() 不同，此方法不包含 llm_trace / evidence_set /
         conclusion_chain / borrowed_agents 的实际数据。
         """
-        data = self.model_dump(mode="json")
+        data: dict[str, Any] = self.model_dump(mode="json")
         # 将大字段替换为占位标记，表明数据存储在 aux 表
         for key in self._AUX_KEYS:
             if key in data:
@@ -256,4 +276,4 @@ class MeetingState(BaseModel):
 
     def snapshot(self) -> dict[str, Any]:
         """生成快照用于 pause 暂存 / WS 回放"""
-        return self.model_dump(mode="json")
+        return self.model_dump(mode="json")  # type: ignore[no-any-return]

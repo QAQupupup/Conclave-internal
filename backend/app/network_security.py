@@ -7,30 +7,36 @@
 既不跟随也不校验后续跳；改为手动跟随重定向，每一跳都做协议/DNS/IP 校验，
 防止攻击者通过 302 -> 302 -> 内网 多跳绕过 SSRF 检查。
 """
+
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import ipaddress
 import logging
 import socket
-from typing import Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
+
+from app.lazy_asyncio import LazyLock
+
+if TYPE_CHECKING:
+    import httpx
 
 logger = logging.getLogger("network_security")
 
 # ---- 黑名单：禁止访问的 IP 段 ----
 _BLOCKED_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),          # loopback
-    ipaddress.ip_network("10.0.0.0/8"),           # private class A
-    ipaddress.ip_network("172.16.0.0/12"),        # private class B
-    ipaddress.ip_network("192.168.0.0/16"),       # private class C
-    ipaddress.ip_network("169.254.0.0/16"),       # link-local (含云元数据 169.254.169.254)
-    ipaddress.ip_network("100.64.0.0/10"),        # CGNAT
-    ipaddress.ip_network("0.0.0.0/8"),            # 任意地址
-    ipaddress.ip_network("::1/128"),              # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),             # IPv6 ULA
-    ipaddress.ip_network("fe80::/10"),            # IPv6 link-local
-    ipaddress.ip_network("::ffff:0:0/96"),        # IPv4-mapped IPv6
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback
+    ipaddress.ip_network("10.0.0.0/8"),  # private class A
+    ipaddress.ip_network("172.16.0.0/12"),  # private class B
+    ipaddress.ip_network("192.168.0.0/16"),  # private class C
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local (含云元数据 169.254.169.254)
+    ipaddress.ip_network("100.64.0.0/10"),  # CGNAT
+    ipaddress.ip_network("0.0.0.0/8"),  # 任意地址
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),  # IPv6 ULA
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
+    ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped IPv6
 ]
 
 # 显式禁止的主机名（云元数据端点等）
@@ -47,8 +53,8 @@ DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_TIMEOUT = 10.0
 
 # 模块级 AsyncClient 连接池（lazy 初始化）
-_async_client: Optional["httpx.AsyncClient"] = None  # type: ignore[name-defined]
-_client_lock = asyncio.Lock()
+_async_client: httpx.AsyncClient | None = None
+_client_lock = LazyLock()
 
 
 def _is_blocked_ip(ip_str: str) -> bool:
@@ -63,7 +69,7 @@ def _is_blocked_ip(ip_str: str) -> bool:
 def validate_url(
     url: str,
     *,
-    allowed_domains: Optional[set[str]] = None,
+    allowed_domains: set[str] | None = None,
     resolve_dns: bool = True,
 ) -> tuple[bool, str]:
     """验证 URL 是否安全可访问。
@@ -121,8 +127,8 @@ def validate_url(
         except socket.gaierror as e:
             return False, f"DNS 解析失败: {e}"
         seen_ips: set[str] = set()
-        for family, _type, _proto, _canon, sockaddr in infos:
-            ip_str = sockaddr[0]
+        for _family, _type, _proto, _canon, sockaddr in infos:
+            ip_str = str(sockaddr[0])
             if ip_str in seen_ips:
                 continue
             seen_ips.add(ip_str)
@@ -132,7 +138,7 @@ def validate_url(
     return True, "ok"
 
 
-async def _get_async_client() -> "httpx.AsyncClient":  # type: ignore[name-defined]
+async def _get_async_client() -> httpx.AsyncClient:
     """获取或创建模块级 AsyncClient 连接池"""
     global _async_client
     if _async_client is not None:
@@ -141,6 +147,7 @@ async def _get_async_client() -> "httpx.AsyncClient":  # type: ignore[name-defin
         if _async_client is not None:
             return _async_client
         import httpx
+
         _async_client = httpx.AsyncClient(
             timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=5.0),
             follow_redirects=False,  # 我们手动跟随，以便每跳做 SSRF 校验
@@ -156,21 +163,19 @@ async def shutdown_async_client() -> None:
     global _async_client
     async with _client_lock:
         if _async_client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await _async_client.aclose()
-            except Exception:
-                pass
             _async_client = None
 
 
 async def safe_fetch(
     url: str,
     *,
-    allowed_domains: Optional[set[str]] = None,
+    allowed_domains: set[str] | None = None,
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: int = DEFAULT_MAX_BYTES,
     method: str = "GET",
-    headers: Optional[dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
     max_redirects: int = MAX_REDIRECTS,
 ) -> tuple[bool, str | bytes]:
     """带 SSRF 防护的异步 HTTP 请求。
@@ -202,15 +207,20 @@ async def safe_fetch(
             # 审计：SSRF 阻断
             try:
                 from app.observability.audit import audit
-                audit("security.ssrf_blocked", "blocked", {
-                    "url": current_url[:500],
-                    "original_url": url[:500],
-                    "hop": hop + 1,
-                    "reason": reason,
-                })
+
+                audit(
+                    "security.ssrf_blocked",
+                    "blocked",
+                    {
+                        "url": current_url[:500],
+                        "original_url": url[:500],
+                        "hop": hop + 1,
+                        "reason": reason,
+                    },
+                )
             except Exception:
                 pass
-            return False, f"SSRF 检查失败（第{hop+1}跳）: {reason}"
+            return False, f"SSRF 检查失败（第{hop + 1}跳）: {reason}"
 
         # 防止循环重定向
         if current_url in seen_urls:
@@ -229,11 +239,11 @@ async def safe_fetch(
                 timeout=httpx.Timeout(timeout, connect=5.0),
             )
         except httpx.TimeoutException:
-            return False, f"请求超时（第{hop+1}跳）"
+            return False, f"请求超时（第{hop + 1}跳）"
         except httpx.ConnectError as e:
-            return False, f"连接失败（第{hop+1}跳）: {e}"
+            return False, f"连接失败（第{hop + 1}跳）: {e}"
         except Exception as e:
-            return False, f"请求失败（第{hop+1}跳）: {type(e).__name__}: {e}"
+            return False, f"请求失败（第{hop + 1}跳）: {type(e).__name__}: {e}"
 
         # 处理重定向
         if resp.status_code in (301, 302, 303, 307, 308):
@@ -273,7 +283,7 @@ async def safe_fetch(
 async def safe_fetch_text(
     url: str,
     *,
-    allowed_domains: Optional[set[str]] = None,
+    allowed_domains: set[str] | None = None,
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: int = DEFAULT_MAX_BYTES,
     encoding: str = "utf-8",

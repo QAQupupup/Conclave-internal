@@ -18,7 +18,8 @@ from conclave_core.charter import build_charter_from_clarify
 from conclave_core.conclusion_logic import lock_conclusion
 from conclave_core.confidence import worst_confidence
 from conclave_core.roles import match_role
-from conclave_core.state import get_skipped_stages, next_stage as _next_stage
+from conclave_core.state import get_skipped_stages
+from conclave_core.state import next_stage as _next_stage
 from conclave_core.text import (
     compress_decisions_to_brief,
     format_arbitrate_as_text,
@@ -45,10 +46,7 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
     state.confidence_flags["clarify"] = confidence
 
     topic_text = state.clarified_topic.rstrip("。.！!？?")
-    summary = (
-        f"议题已澄清：{topic_text}。"
-        f"关键问题 {len(state.key_questions)} 个，团队 {len(state.team_config)} 人。"
-    )
+    summary = f"议题已澄清：{topic_text}。关键问题 {len(state.key_questions)} 个，团队 {len(state.team_config)} 人。"
     await emit_agent_spoke(state, Role.MODERATOR, Stage.CLARIFY, summary)
     record_drift(state, Role.MODERATOR, Stage.CLARIFY, summary)
 
@@ -61,15 +59,17 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
         depth_map = {"simple": "light", "standard": "standard", "full": "deep"}
         state.debate_depth = depth_map.get(complexity, "standard")
 
-    await bus.publish(make_event(
-        "flow_plan.set",
-        state.meeting_id,
-        {
-            "flow_plan": state.flow_plan,
-            "debate_depth": state.debate_depth,
-            "skipped_stages": [s.value for s in get_skipped_stages(state.flow_plan)],
-        },
-    ))
+    await bus.publish(
+        make_event(
+            "flow_plan.set",
+            state.meeting_id,
+            {
+                "flow_plan": state.flow_plan,
+                "debate_depth": state.debate_depth,
+                "skipped_stages": [s.value for s in get_skipped_stages(state.flow_plan)],
+            },
+        )
+    )
 
     nxt = _next_stage(Stage.CLARIFY, state.flow_plan)
     state.stage = nxt or Stage.INTRA_TEAM
@@ -198,8 +198,9 @@ async def run_intra_team(
     role_results 每项结构：
         {"role": str, "stance": str, "claims": list[dict], "confidence": str, "react": bool}
     """
-    from app.orchestrator.borrow_helpers import _let_borrowed_agents_speak, _moderator_assess_borrow
     import uuid
+
+    from app.orchestrator.borrow_helpers import _let_borrowed_agents_speak, _moderator_assess_borrow
 
     if not state.team_config:
         state.team_config = [
@@ -224,7 +225,7 @@ async def run_intra_team(
     worst_conf = "high"
 
     # 保证按 members 顺序处理结果，与 role_results 顺序一致（Scheduler 拓扑层保证）
-    for (role, stance), rr in zip(members, role_results):
+    for (role, stance), rr in zip(members, role_results, strict=False):
         conf = rr.get("confidence", "high")
         worst_conf = worst_confidence(worst_conf, conf)
         claims = rr.get("claims", [])
@@ -305,15 +306,10 @@ async def run_evidence_check(
     state.confidence_flags["evidence_check"] = worst_conf
 
     total_ev = sum(len(es.get("assessments", [])) for es in evidence_set)
-    supporting = sum(
-        1 for es in evidence_set
-        for a in es.get("assessments", [])
-        if a.get("supports") in ("a", "b")
-    )
+    supporting = sum(1 for es in evidence_set for a in es.get("assessments", []) if a.get("supports") in ("a", "b"))
     neutral = total_ev - supporting
     summary = (
-        f"证据对照完成：共检索 {total_ev} 条证据，"
-        f"其中 {supporting} 条明确支持某一方观点，{neutral} 条为中性/通用知识。"
+        f"证据对照完成：共检索 {total_ev} 条证据，其中 {supporting} 条明确支持某一方观点，{neutral} 条为中性/通用知识。"
     )
     await emit_agent_spoke(state, Role.MODERATOR, Stage.EVIDENCE_CHECK, summary)
 
@@ -337,11 +333,16 @@ async def run_produce(
 
     from app.config import settings
 
+    # 确保 artifact 已初始化（produce 阶段上游应已设置，但做防御性处理）
+    if state.artifact is None:
+        state.artifact = {}
+
     # 附件扫描：代码/服务类产出收集工作区文件
     if state.deliverable_type in ("code_analysis", "tested_system", "deployable_service"):
         ws_root = Path(settings.workspace_root) / state.meeting_id
         try:
             from app.orchestrator.produce_helpers import _scan_artifacts
+
             attachments = _scan_artifacts(ws_root, state.meeting_id)
             if attachments:
                 state.artifact["attachments"] = attachments
@@ -384,6 +385,7 @@ async def run_produce(
     # 发送进度：产出完成
     try:
         from app.orchestrator.produce_helpers import _emit_progress
+
         await _emit_progress(state, "done", "产出物生成完成！", 100)
     except Exception as e:
         _logger.warning(f"produce: 进度事件发送失败（不影响主流程）: {e}")
@@ -394,6 +396,7 @@ async def run_produce(
 
     # 终态
     from datetime import datetime, timezone
+
     state.stage = Stage.PRODUCE
     state.status = MeetingStatus.DONE
     state.completed_at = datetime.now(timezone.utc)
@@ -402,20 +405,23 @@ async def run_produce(
     # LLM 降级检测
     fallback_stages = [s for s, flag in state.confidence_flags.items() if flag == "fallback"]
     if fallback_stages:
-        await bus.publish(make_event(
-            "meeting.fallback_warning",
-            state.meeting_id,
-            {
-                "fallback_stages": fallback_stages,
-                "message": f"以下阶段使用了降级数据（非真实 LLM 输出）：{', '.join(fallback_stages)}。产出物可能不可靠，请谨慎参考。",
-                "severity": "warning",
-            },
-        ))
+        await bus.publish(
+            make_event(
+                "meeting.fallback_warning",
+                state.meeting_id,
+                {
+                    "fallback_stages": fallback_stages,
+                    "message": f"以下阶段使用了降级数据（非真实 LLM 输出）：{', '.join(fallback_stages)}。产出物可能不可靠，请谨慎参考。",
+                    "severity": "warning",
+                },
+            )
+        )
         _logger.warning(f"会议完成但有 {len(fallback_stages)} 个阶段降级：{fallback_stages}")
 
     # 记忆提取
     try:
         from app.memory.profile import trigger_extraction
+
         await trigger_extraction(state)
         _logger.info("produce: 记忆提取完成")
     except Exception as e:
@@ -424,6 +430,7 @@ async def run_produce(
     # Agent 反馈闭环
     try:
         from app.agents.feedback import evaluate_agents
+
         evaluations = await evaluate_agents(state)
         if evaluations:
             _logger.info(

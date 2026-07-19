@@ -4,9 +4,10 @@
 # 导致截断、幻觉、超时。改为管线式分阶段生成，每次LLM调用只输出2-5个聚焦文件。
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from app.agents.compute import ThinkRequest, execute_think
 from app.models import MeetingState, Role
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModuleDef:
     """模块定义"""
+
     name: str
     resource: str
     description: str = ""
@@ -28,6 +30,7 @@ class ModuleDef:
 @dataclass
 class ArchitecturePlan:
     """Phase 1 输出：架构规划"""
+
     title: str = ""
     description: str = ""
     complexity_level: str = "medium"
@@ -44,6 +47,7 @@ class ArchitecturePlan:
 @dataclass
 class PhasedGenerationResult:
     """分阶段生成最终结果，与 DeployableServiceArtifact 结构兼容"""
+
     title: str = ""
     description: str = ""
     complexity_level: str = "medium"
@@ -60,10 +64,12 @@ class PhasedGenerationResult:
     phases_executed: list[str] = field(default_factory=list)
     total_llm_calls: int = 0
     errors: list[str] = field(default_factory=list)
+    plan: ArchitecturePlan | None = None
 
     def to_result_dict(self) -> dict[str, Any]:
         """转换为与原有ProduceResult兼容的dict，供下游部署流程使用"""
         import json
+
         # 合并所有代码文件：后端 + 前端 + 测试 + 根目录文件
         all_files: dict[str, str] = {}
         all_files.update(self.project_tree)
@@ -107,7 +113,9 @@ class PhasedGenerationResult:
                 "modules": [
                     {"name": m.name, "resource": m.resource, "api_endpoints": m.api_endpoints}
                     for m in self.plan.modules
-                ] if getattr(self, 'plan', None) else [],
+                ]
+                if self.plan is not None
+                else [],
                 "phased_generation": {
                     "total_llm_calls": self.total_llm_calls,
                     "phases_executed": self.phases_executed,
@@ -116,7 +124,7 @@ class PhasedGenerationResult:
                     "frontend_file_count": len(self.frontend_tree),
                     "test_file_count": len(self.test_tree),
                 },
-            }
+            },
         }
 
     @staticmethod
@@ -127,7 +135,7 @@ class PhasedGenerationResult:
         for path in sorted(files.keys()):
             parts = path.split("/")
             for i in range(len(parts) - 1):
-                dir_path = "/".join(parts[:i+1])
+                dir_path = "/".join(parts[: i + 1])
                 if dir_path not in dirs_added:
                     dirs_added.add(dir_path)
                     items.append({"name": parts[i], "type": "dir", "indent": i})
@@ -136,19 +144,20 @@ class PhasedGenerationResult:
         return items
 
 
-async def _call_llm(prompt: str, schema_hint: str,
-                    state: MeetingState, temperature: float = 0.1) -> dict[str, Any]:
+async def _call_llm(prompt: str, schema_hint: str, state: MeetingState, temperature: float = 0.1) -> dict[str, Any]:
     """统一LLM调用封装"""
     from app.agents.compute import _inject_profile, _inject_skills
+
     prompt = _inject_profile(prompt, Role.ENGINEER.value)
-    prompt = _inject_skills(prompt, stage="produce",
-                            deliverable_type="deployable_service",
-                            role=Role.ENGINEER.value)
+    prompt = _inject_skills(prompt, stage="produce", deliverable_type="deployable_service", role=Role.ENGINEER.value)
     req = ThinkRequest(
         meeting_id=state.meeting_id,
-        agent_role=Role.ENGINEER.value, stage="produce",
-        prompt=prompt, schema_hint=schema_hint,
-        temperature=temperature, seed=42,
+        agent_role=Role.ENGINEER.value,
+        stage="produce",
+        prompt=prompt,
+        schema_hint=schema_hint,
+        temperature=temperature,
+        seed=42,
     )
     resp = await execute_think(req)
     if not resp.success:
@@ -194,8 +203,7 @@ def _phase1_prompt(topic: str, decision_record: dict, quality_feedback: str) -> 
 
 def _phase2_prompt(plan: ArchitecturePlan) -> str:
     mods = "\n".join(
-        f"- {m.name}({m.resource}): {m.description}; APIs: {', '.join(m.api_endpoints[:6])}"
-        for m in plan.modules
+        f"- {m.name}({m.resource}): {m.description}; APIs: {', '.join(m.api_endpoints[:6])}" for m in plan.modules
     )
     return f"""[分阶段生成 Phase 2/7: OpenAPI规范+PRD]
 
@@ -247,7 +255,7 @@ def _phase4_prompt(plan: ArchitecturePlan) -> str:
 生成基础设施文件，不写业务逻辑。
 
 【项目】{plan.title} - {plan.description}
-【复杂度】{plan.complexity_level}  【栈】{', '.join(plan.tech_stack)}
+【复杂度】{plan.complexity_level}  【栈】{", ".join(plan.tech_stack)}
 【端口】{plan.port}  【DB】{plan.db_type}  【认证】{plan.has_auth}  【前端】{plan.needs_frontend}
 
 【需要生成】
@@ -267,19 +275,22 @@ def _phase4_prompt(plan: ArchitecturePlan) -> str:
 输出JSON: {{"files": {{"app/config.py":"...","app/main.py":"...",...}}}} 每文件完整无省略。"""
 
 
-def _phase5_module_prompt(plan: ArchitecturePlan, module: ModuleDef,
-                          existing: dict[str, str], is_first: bool) -> str:
+def _phase5_module_prompt(plan: ArchitecturePlan, module: ModuleDef, existing: dict[str, str], is_first: bool) -> str:
     ctx_keys = ("app/db/base.py", "app/db/engine.py", "app/config.py", "app/dependencies.py")
-    ctx = "\n\n".join(f"=== {k} ===\n{existing[k][:1200]}" for k in ctx_keys if k in existing)
-    extra = """
-【首个模块额外生成】app/db/models/__init__.py(re-export所有模型), app/schemas/common.py(PageResponse)""" if is_first else ""
-    fields = "\n".join(f"  - {f['name']}({f['type']}): {f.get('description','')}" for f in module.data_fields)
+    "\n\n".join(f"=== {k} ===\n{existing[k][:1200]}" for k in ctx_keys if k in existing)
+    extra = (
+        """
+【首个模块额外生成】app/db/models/__init__.py(re-export所有模型), app/schemas/common.py(PageResponse)"""
+        if is_first
+        else ""
+    )
+    fields = "\n".join(f"  - {f['name']}({f['type']}): {f.get('description', '')}" for f in module.data_fields)
     return f"""[分阶段生成 Phase 5/7: 后端模块 - {module.name}]
 
 只生成当前模块代码。
 
 【模块】{module.name} /{module.resource}: {module.description}
-【API】{', '.join(module.api_endpoints)}
+【API】{", ".join(module.api_endpoints)}
 【字段】
 {fields}
 {extra}
@@ -297,7 +308,7 @@ def _phase5_module_prompt(plan: ArchitecturePlan, module: ModuleDef,
 
 
 def _phase6_fe_scaffold_prompt(plan: ArchitecturePlan) -> str:
-    if plan.complexity_level in ("micro","small") or not plan.needs_frontend:
+    if plan.complexity_level in ("micro", "small") or not plan.needs_frontend:
         return "{}"
     return f"""[分阶段生成 Phase 6/7a: 前端骨架]
 
@@ -326,7 +337,7 @@ def _phase6_fe_scaffold_prompt(plan: ArchitecturePlan) -> str:
 
 
 def _phase6_fe_code_prompt(plan: ArchitecturePlan, openapi_spec: str) -> str:
-    if plan.complexity_level in ("micro","small") or not plan.needs_frontend:
+    if plan.complexity_level in ("micro", "small") or not plan.needs_frontend:
         return "{}"
     return f"""[分阶段生成 Phase 6/7b: 前端业务代码]
 
@@ -349,15 +360,11 @@ def _phase6_fe_code_prompt(plan: ArchitecturePlan, openapi_spec: str) -> str:
 输出JSON: {{"files": {{...}}}} 每文件完整TSX/CSS。"""
 
 
-def _phase7_integrate_prompt(plan: ArchitecturePlan,
-                            existing: dict[str, str]) -> dict[str, str]:
+def _phase7_integrate_prompt(plan: ArchitecturePlan, existing: dict[str, str]) -> dict[str, str]:
     """Phase 7: 整合 - 补全docker-compose.yml和routers/__init__.py，返回{path: content}"""
-    has_frontend = plan.needs_frontend and plan.complexity_level not in ("micro","small")
+    has_frontend = plan.needs_frontend and plan.complexity_level not in ("micro", "small")
 
-    routers_import = "\n".join(
-        f"from app.routers.{m.name} import router as {m.name}_router"
-        for m in plan.modules
-    )
+    routers_import = "\n".join(f"from app.routers.{m.name} import router as {m.name}_router" for m in plan.modules)
 
     # 构建docker-compose（避免f-string中复杂条件）
     compose_lines = [
@@ -365,7 +372,7 @@ def _phase7_integrate_prompt(plan: ArchitecturePlan,
         "services:",
         "  backend:",
         "    build: .",
-        f"    ports: [\"{plan.port}:{plan.port}\"]",
+        f'    ports: ["{plan.port}:{plan.port}"]',
         "    environment:",
         "      - DATABASE_URL=postgresql+asyncpg://conclave:conclave@db:5432/conclave",
         "      - SECRET_KEY=dev-change-me",
@@ -388,7 +395,7 @@ def _phase7_integrate_prompt(plan: ArchitecturePlan,
         "      POSTGRES_USER: conclave",
         "      POSTGRES_PASSWORD: conclave",
         "      POSTGRES_DB: conclave",
-        "    volumes: [\"pgdata:/var/lib/postgresql/data\"]",
+        '    volumes: ["pgdata:/var/lib/postgresql/data"]',
         "    healthcheck:",
         '      test: ["CMD-SHELL", "pg_isready -U conclave"]',
         "      interval: 5s",
@@ -401,7 +408,7 @@ def _phase7_integrate_prompt(plan: ArchitecturePlan,
     routers_init = f"""# Auto-generated routers init
 {routers_import}
 
-__all__ = [{', '.join(f'"{m.name}_router"' for m in plan.modules)}]
+__all__ = [{", ".join(f'"{m.name}_router"' for m in plan.modules)}]
 """
 
     # 检查main.py是否include了routers
@@ -420,7 +427,7 @@ __all__ = [{', '.join(f'"{m.name}_router"' for m in plan.modules)}]
             patched = patched.replace(
                 "from fastapi",
                 "from app.routers import " + ", ".join(f"{m.name}_router" for m in plan.modules) + "\nfrom fastapi",
-                1
+                1,
             )
         if "include_router" not in patched:
             patched += "\n\n# Auto-included routers\n"
@@ -474,7 +481,9 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     asyncio.run(run_migrations_online())"""
-        files["alembic/versions/0001_initial.py"] = '"""initial schema"""\nfrom alembic import op\nimport sqlalchemy as sa\n\nrevision = "0001"\ndown_revision = None\nbranch_labels = None\ndepends_on = None\n\ndef upgrade():\n    pass  # Auto-generated; run `alembic revision --autogenerate` after model creation\n\ndef downgrade():\n    pass'
+        files["alembic/versions/0001_initial.py"] = (
+            '"""initial schema"""\nfrom alembic import op\nimport sqlalchemy as sa\n\nrevision = "0001"\ndown_revision = None\nbranch_labels = None\ndepends_on = None\n\ndef upgrade():\n    pass  # Auto-generated; run `alembic revision --autogenerate` after model creation\n\ndef downgrade():\n    pass'
+        )
 
     return files
 
@@ -489,12 +498,12 @@ async def generate_deployable_service_phased(
 
     async def _p(step: str, msg: str, pct: int):
         if on_progress:
-            try: await on_progress(step, msg, pct)
-            except Exception: pass
+            with contextlib.suppress(Exception):
+                await on_progress(step, msg, pct)
 
     topic = state.clarified_topic or state.topic or "generated-service"
     decision_record = state.decision_record or {}
-    qf = state.quality_feedback if state.iteration_count > 0 else ""
+    qf = (state.quality_feedback or "") if state.iteration_count > 0 else ""
 
     # Phase 1: 架构规划
     await _p("phase1", "Phase 1/7: 架构规划...", 5)
@@ -505,32 +514,54 @@ async def generate_deployable_service_phased(
         return result
 
     plan = ArchitecturePlan(
-        title=r.get("title","generated-service"), description=r.get("description",""),
-        complexity_level=r.get("complexity_level","medium"),
-        tech_stack=r.get("tech_stack",["FastAPI","SQLAlchemy","PostgreSQL"]),
-        port=int(r.get("port",8000)),
-        needs_frontend=r.get("needs_frontend",True),
-        needs_database=r.get("needs_database",True),
-        db_type=r.get("db_type","postgresql"),
-        has_auth=r.get("has_auth",False),
+        title=r.get("title", "generated-service"),
+        description=r.get("description", ""),
+        complexity_level=r.get("complexity_level", "medium"),
+        tech_stack=r.get("tech_stack", ["FastAPI", "SQLAlchemy", "PostgreSQL"]),
+        port=int(r.get("port", 8000)),
+        needs_frontend=r.get("needs_frontend", True),
+        needs_database=r.get("needs_database", True),
+        db_type=r.get("db_type", "postgresql"),
+        has_auth=r.get("has_auth", False),
     )
-    for m in r.get("modules",[]):
-        plan.modules.append(ModuleDef(
-            name=m.get("name","items"), resource=m.get("resource","items"),
-            description=m.get("description",""), has_crud=m.get("has_crud",True),
-            api_endpoints=m.get("api_endpoints",[]), data_fields=m.get("data_fields",[]),
-        ))
+    for m in r.get("modules", []):
+        plan.modules.append(
+            ModuleDef(
+                name=m.get("name", "items"),
+                resource=m.get("resource", "items"),
+                description=m.get("description", ""),
+                has_crud=m.get("has_crud", True),
+                api_endpoints=m.get("api_endpoints", []),
+                data_fields=m.get("data_fields", []),
+            )
+        )
     if not plan.modules:
-        plan.modules.append(ModuleDef("items","items","主资源",True,
-            ["GET /api/v1/items","POST /api/v1/items","GET /api/v1/items/{id}",
-             "PUT /api/v1/items/{id}","DELETE /api/v1/items/{id}"],
-            [{"name":"id","type":"int","required":True,"description":"主键"},
-             {"name":"name","type":"str","required":True,"description":"名称"}]))
+        plan.modules.append(
+            ModuleDef(
+                "items",
+                "items",
+                "主资源",
+                True,
+                [
+                    "GET /api/v1/items",
+                    "POST /api/v1/items",
+                    "GET /api/v1/items/{id}",
+                    "PUT /api/v1/items/{id}",
+                    "DELETE /api/v1/items/{id}",
+                ],
+                [
+                    {"name": "id", "type": "int", "required": True, "description": "主键"},
+                    {"name": "name", "type": "str", "required": True, "description": "名称"},
+                ],
+            )
+        )
 
-    result.title=plan.title; result.description=plan.description
-    result.complexity_level=plan.complexity_level
-    result.tech_stack=plan.tech_stack; result.port=plan.port
-    result.run_command=plan.run_command
+    result.title = plan.title
+    result.description = plan.description
+    result.complexity_level = plan.complexity_level
+    result.tech_stack = plan.tech_stack
+    result.port = plan.port
+    result.run_command = plan.run_command
     result.plan = plan  # 保存完整plan供to_result_dict使用
     result.phases_executed.append("plan")
     await _p("phase1_done", f"架构规划完成: {plan.complexity_level}, {len(plan.modules)}模块", 14)
@@ -554,8 +585,9 @@ async def generate_deployable_service_phased(
         r = await _call_llm(_phase3_prompt(plan, result.openapi), "phased_tests", state)
         llm_calls += 1
         if "_error" not in r:
-            for p,c in r.get("files",{}).items():
-                if isinstance(c,str) and len(c)>10: result.test_tree[p]=c
+            for p, c in r.get("files", {}).items():
+                if isinstance(c, str) and len(c) > 10:
+                    result.test_tree[p] = c
         else:
             result.errors.append(f"Phase3: {r['_error']}")
     result.phases_executed.append("tests")
@@ -567,70 +599,90 @@ async def generate_deployable_service_phased(
     llm_calls += 1
     scaffold_files = {}
     if "_error" not in r:
-        for p,c in r.get("files",{}).items():
-            if isinstance(c,str) and len(c)>5:
-                result.project_tree[p]=c; scaffold_files[p]=c
-                if "/" not in p: result.root_files[p]=c
+        for p, c in r.get("files", {}).items():
+            if isinstance(c, str) and len(c) > 5:
+                result.project_tree[p] = c
+                scaffold_files[p] = c
+                if "/" not in p:
+                    result.root_files[p] = c
     else:
         result.errors.append(f"Phase4: {r['_error']}")
     # 确保__init__.py
-    for pkg in ["app","app/routers","app/schemas","app/services","app/dao",
-                "app/db","app/db/models","app/domain"]:
+    for pkg in [
+        "app",
+        "app/routers",
+        "app/schemas",
+        "app/services",
+        "app/dao",
+        "app/db",
+        "app/db/models",
+        "app/domain",
+    ]:
         if f"{pkg}/__init__.py" not in result.project_tree:
-            result.project_tree[f"{pkg}/__init__.py"]=""
+            result.project_tree[f"{pkg}/__init__.py"] = ""
     result.phases_executed.append("scaffold")
     await _p("phase4_done", f"骨架完成: {len(scaffold_files)}文件", 48)
 
     # Phase 5: 逐模块
     total_mods = len(plan.modules)
-    pct_end = 68 if (plan.needs_frontend and plan.complexity_level not in ("micro","small")) else 82
+    pct_end = 68 if (plan.needs_frontend and plan.complexity_level not in ("micro", "small")) else 82
     for idx, mod in enumerate(plan.modules):
-        pct = 50 + int((pct_end-50) * idx / max(total_mods,1))
-        await _p(f"phase5_{mod.name}", f"Phase 5/7: 模块{mod.name}({idx+1}/{total_mods})...", pct)
-        existing = dict(result.project_tree); existing.update(result.root_files)
-        r = await _call_llm(
-            _phase5_module_prompt(plan, mod, existing, idx==0), "phased_module", state)
+        pct = 50 + int((pct_end - 50) * idx / max(total_mods, 1))
+        await _p(f"phase5_{mod.name}", f"Phase 5/7: 模块{mod.name}({idx + 1}/{total_mods})...", pct)
+        existing = dict(result.project_tree)
+        existing.update(result.root_files)
+        r = await _call_llm(_phase5_module_prompt(plan, mod, existing, idx == 0), "phased_module", state)
         llm_calls += 1
         if "_error" not in r:
-            for p,c in r.get("files",{}).items():
-                if isinstance(c,str) and len(c)>5: result.project_tree[p]=c
+            for p, c in r.get("files", {}).items():
+                if isinstance(c, str) and len(c) > 5:
+                    result.project_tree[p] = c
         else:
             result.errors.append(f"Phase5 {mod.name}: {r['_error']}")
     result.phases_executed.append("modules")
     await _p("phase5_done", f"后端模块完成: {total_mods}模块", pct_end)
 
     # Phase 6: 前端
-    if plan.needs_frontend and plan.complexity_level not in ("micro","small"):
-        await _p("phase6a", "Phase 6/7: 前端骨架...", pct_end+3)
+    if plan.needs_frontend and plan.complexity_level not in ("micro", "small"):
+        await _p("phase6a", "Phase 6/7: 前端骨架...", pct_end + 3)
         r = await _call_llm(_phase6_fe_scaffold_prompt(plan), "phased_frontend", state)
         llm_calls += 1
         if "_error" not in r:
-            for p,c in r.get("files",{}).items():
-                if isinstance(c,str) and len(c)>5: result.frontend_tree[p]=c
-        await _p("phase6b", "Phase 6/7: 前端业务代码...", pct_end+8)
+            for p, c in r.get("files", {}).items():
+                if isinstance(c, str) and len(c) > 5:
+                    result.frontend_tree[p] = c
+        await _p("phase6b", "Phase 6/7: 前端业务代码...", pct_end + 8)
         r = await _call_llm(_phase6_fe_code_prompt(plan, result.openapi), "phased_frontend", state)
         llm_calls += 1
         if "_error" not in r:
-            for p,c in r.get("files",{}).items():
-                if isinstance(c,str) and len(c)>5: result.frontend_tree[p]=c
+            for p, c in r.get("files", {}).items():
+                if isinstance(c, str) and len(c) > 5:
+                    result.frontend_tree[p] = c
         result.phases_executed.append("frontend")
-        await _p("phase6_done", f"前端完成: {len(result.frontend_tree)}文件", pct_end+14)
+        await _p("phase6_done", f"前端完成: {len(result.frontend_tree)}文件", pct_end + 14)
 
     # Phase 7: 整合
     await _p("phase7", "Phase 7/7: 整合补全...", 88)
-    existing_all = dict(result.project_tree); existing_all.update(result.root_files)
+    existing_all = dict(result.project_tree)
+    existing_all.update(result.root_files)
     integrate_files = _phase7_integrate_prompt(plan, existing_all)
-    for p,c in integrate_files.items():
-        if isinstance(c,str) and len(c)>0:
+    for p, c in integrate_files.items():
+        if isinstance(c, str) and len(c) > 0:
             if "/" in p and not p.startswith("docker"):
-                result.project_tree[p]=c
+                result.project_tree[p] = c
             else:
-                result.root_files[p]=c
+                result.root_files[p] = c
                 if p == "docker-compose.yml":
-                    result.project_tree[p]=c
+                    result.project_tree[p] = c
     result.phases_executed.append("integrate")
     result.total_llm_calls = llm_calls
 
-    await _p("done", f"生成完成: {len(result.project_tree)}后端+{len(result.frontend_tree)}前端+{len(result.test_tree)}测试文件", 100)
-    logger.info(f"PhasedGen complete: {len(result.project_tree)}+{len(result.frontend_tree)}+{len(result.test_tree)} files, {llm_calls} LLM calls, errors={len(result.errors)}")
+    await _p(
+        "done",
+        f"生成完成: {len(result.project_tree)}后端+{len(result.frontend_tree)}前端+{len(result.test_tree)}测试文件",
+        100,
+    )
+    logger.info(
+        f"PhasedGen complete: {len(result.project_tree)}+{len(result.frontend_tree)}+{len(result.test_tree)} files, {llm_calls} LLM calls, errors={len(result.errors)}"
+    )
     return result

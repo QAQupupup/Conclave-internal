@@ -11,20 +11,21 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.auth import init_auth as init_jwt_auth
+from app.db.base import Base
+from app.db.engine import async_session_factory
+from app.db.redis import close_redis, init_redis
 from app.db_legacy import init_db
 from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware
-from app.db.redis import init_redis, close_redis
-from app.db.engine import async_session_factory
-from app.db.base import Base
 from app.net_auth import init_auth_table
-from app.auth import init_auth as init_jwt_auth
 from app.routers import agent_roles as agent_roles_router
+from app.routers import audit_logs as audit_router
 from app.routers import auth as auth_router
 from app.routers import captcha as captcha_router
+from app.routers import docker_hosts as docker_hosts_router
 from app.routers import documents as documents_router
 from app.routers import meetings as meetings_router
 from app.routers import metrics as metrics_router
@@ -33,8 +34,6 @@ from app.routers import preferences as preferences_router
 from app.routers import regression as regression_router
 from app.routers import workspace as workspace_router
 from app.routers import ws as ws_router
-from app.routers import audit_logs as audit_router
-from app.routers import docker_hosts as docker_hosts_router
 from app.utils.tasks import create_supervised_task
 
 # 应用启动时初始化日志系统
@@ -50,6 +49,7 @@ def _cleanup_orphaned_workspaces() -> None:
     """
     try:
         from app.config import settings as _settings
+
         ws_root = Path(_settings.workspace_root)
         if not ws_root.exists():
             return
@@ -86,12 +86,12 @@ async def lifespan(app: FastAPI):
 
     # PostgreSQL 表结构初始化（SQLAlchemy ORM，含记忆子系统表）
     if settings.db_mode == "postgresql":
-        async with async_session_factory() as session:
-            async with session.bind.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
+        async with async_session_factory() as session, session.bind.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     # 记忆子系统初始化（从 PG 恢复画像/特征/原始发言到内存）
     from app.memory.store import memory_store
+
     await memory_store.init()
 
     logger.info("db_mode=%s", settings.db_mode)
@@ -104,6 +104,7 @@ async def lifespan(app: FastAPI):
 
     # 崩溃恢复：把上次未完成的 RUNNING 会议标记为 PAUSED
     from app.orchestrator.runner import recover_crashed_meetings
+
     recovered = await recover_crashed_meetings()
     if recovered:
         logger.info("崩溃恢复：%d 个会议标记为 PAUSED", len(recovered))
@@ -111,25 +112,30 @@ async def lifespan(app: FastAPI):
     # 启动后台指标采集（测试模式下可禁用，避免事件循环冲突）
     if os.environ.get("CONCLAVE_DISABLE_METRICS") != "1":
         from app.observability.metrics_store import get_metrics_store
+
         get_metrics_store().start()
 
     # 沙箱预热：启动时检测 Docker 可用性 + 预拉取镜像（不阻塞启动）
     if os.environ.get("CONCLAVE_DISABLE_SANDBOX_WARMUP") != "1":
         from app.sandbox import warmup_sandbox
+
         create_supervised_task(warmup_sandbox(), name="sandbox-warmup")
 
     # 动态定价抓取：启动时后台加载硅基流动实时定价
     if os.environ.get("CONCLAVE_DISABLE_PRICING_LOADER") != "1":
         from app.pricing_fetcher import ensure_pricing_loaded
+
         create_supervised_task(ensure_pricing_loaded(), name="pricing-loader")
 
     # 加载持久化的 BYOK API Key 到内存 Provider 配置
     if os.environ.get("CONCLAVE_DISABLE_KEY_LOADER") != "1":
         from app.services.key_store import load_keys_to_providers
+
         create_supervised_task(load_keys_to_providers(), name="key-loader")
 
     # 启动速率限制定期清理任务（修复 H-08 内存泄漏）
     from app.middleware import start_rate_limit_cleanup, stop_rate_limit_cleanup
+
     start_rate_limit_cleanup()
 
     yield
@@ -144,24 +150,28 @@ async def lifespan(app: FastAPI):
     # 清理所有沙箱服务容器
     try:
         from app.sandbox import cleanup_all_services
+
         await cleanup_all_services()
     except Exception:
         pass
     # 关闭 LLM 底层 httpx 连接池
     try:
         from app.agents.compute import shutdown_compute
+
         await shutdown_compute()
     except Exception:
         pass
     # 关闭 Playwright 浏览器
     try:
-        from app.tools.browser_tool import browser_pool
-        await browser_pool.shutdown()
+        from app.tools.browser_tool import close_browser_tool
+
+        await close_browser_tool()
     except Exception:
         pass
     # 关闭 network_security 的异步 httpx 连接池
     try:
         from app.network_security import shutdown_async_client
+
         await shutdown_async_client()
     except Exception:
         pass
@@ -197,8 +207,27 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # [SECURITY-FIX] 请求体大小限制（默认 20MB，文件上传端点单独放宽）
+    _max_body_size = int(os.environ.get("CONCLAVE_MAX_BODY_SIZE", str(20 * 1024 * 1024)))
+
+    @app.middleware("http")
+    async def limit_request_size(request: Request, call_next):
+        if request.method in ("POST", "PUT", "PATCH"):
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > _max_body_size:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": f"请求体过大（{int(content_length) // 1024}KB），上限 {_max_body_size // 1024 // 1024}MB"
+                    },
+                )
+        return await call_next(request)
+
     # API 认证中间件
     from app.middleware import setup_auth_middleware
+
     setup_auth_middleware(app)
     # 请求追踪中间件
     setup_trace_middleware(app)
@@ -221,6 +250,7 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, Any]:
         """健康检查：检查关键依赖可用性"""
         from app.config import settings
+
         checks: dict[str, str] = {}
         _test_mode = os.environ.get("CONCLAVE_TEST_MODE") == "1"
 
@@ -236,6 +266,7 @@ def create_app() -> FastAPI:
         if not _test_mode:
             try:
                 import redis.asyncio as aioredis
+
                 r = await aioredis.from_url(settings.redis_url, socket_connect_timeout=3)
                 await r.ping()
                 await r.close()
@@ -247,6 +278,7 @@ def create_app() -> FastAPI:
         if settings.qdrant_url:
             try:
                 import httpx
+
                 async with httpx.AsyncClient(timeout=3) as client:
                     resp = await client.get(f"{settings.qdrant_url}/healthz")
                     checks["qdrant"] = "ok" if resp.status_code == 200 else f"error: {resp.status_code}"
@@ -257,7 +289,8 @@ def create_app() -> FastAPI:
         if not _test_mode:
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "docker", "info",
+                    "docker",
+                    "info",
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
@@ -269,6 +302,7 @@ def create_app() -> FastAPI:
         # LLM 熔断器状态
         try:
             from app.agents.llm import get_circuit_breaker
+
             cb = get_circuit_breaker()
             checks["llm_circuit"] = cb.state
         except Exception:
@@ -283,17 +317,20 @@ def create_app() -> FastAPI:
         """应用关闭时清理资源"""
         try:
             from app.tools.playwright_search import close_playwright_search
+
             await close_playwright_search()
         except Exception:
             pass
         try:
             from app.tools.browser_tool import close_browser_tool
+
             await close_browser_tool()
         except Exception:
             pass
 
     _app_env = os.environ.get("APP_ENV", "dev").lower()
     if _app_env != "production":
+
         @app.get("/debug/auth-info", tags=["debug"])
         async def debug_auth_info(request: Request) -> dict[str, Any]:
             """认证信息查询端点（仅开发/测试模式可用）。"""

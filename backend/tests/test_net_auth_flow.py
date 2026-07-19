@@ -2,17 +2,16 @@
 # 验证：网络错误检测、申请创建、自动通过、手动批复、超时降级
 import asyncio
 import uuid
-from datetime import datetime, timezone, timedelta
-
+from datetime import datetime, timedelta, timezone
 
 from app.net_auth import (
-    init_auth_table,
     create_auth_request,
+    expire_pending_requests,
     get_auth_request,
+    get_pending_for_meeting,
+    init_auth_table,
     list_auth_requests,
     review_auth_request,
-    expire_pending_requests,
-    get_pending_for_meeting,
 )
 from app.net_auth_manager import (
     detect_network_failure,
@@ -20,11 +19,10 @@ from app.net_auth_manager import (
     request_network_access,
 )
 
-
 # ---------- 网络错误检测 ----------
 
-class TestDetectNetworkFailure:
 
+class TestDetectNetworkFailure:
     def test_connection_refused(self):
         """连接被拒绝 → 网络错误"""
         r = detect_network_failure(
@@ -80,8 +78,8 @@ class TestDetectNetworkFailure:
 
 # ---------- 网络级别判断 ----------
 
-class TestDetermineNeededLevel:
 
+class TestDetermineNeededLevel:
     def test_requests_needs_l3(self):
         """代码含 requests → L3"""
         level = determine_needed_level(
@@ -117,8 +115,8 @@ class TestDetermineNeededLevel:
 
 # ---------- 申请单 CRUD ----------
 
-class TestAuthRequestCRUD:
 
+class TestAuthRequestCRUD:
     async def test_create_and_get(self):
         """创建申请单并查询"""
         await init_auth_table()
@@ -294,12 +292,13 @@ class TestAuthRequestCRUD:
 
 # ---------- 授权流程（自动通过/手动批复/超时） ----------
 
-class TestAuthFlow:
 
+class TestAuthFlow:
     async def test_auto_approve(self, monkeypatch):
         """AUTO_APPROVE=1 时自动通过"""
         # 设置自动通过
         import app.net_auth_manager as nam
+
         monkeypatch.setattr(nam, "AUTO_APPROVE", True)
 
         await init_auth_table()
@@ -325,6 +324,7 @@ class TestAuthFlow:
     async def test_timeout_degrade(self, monkeypatch):
         """超时未批复 → 降级处理"""
         import app.net_auth_manager as nam
+
         monkeypatch.setattr(nam, "AUTO_APPROVE", False)
         monkeypatch.setattr(nam, "AUTH_TIMEOUT_SECONDS", 2)  # 2 秒超时
 
@@ -344,20 +344,23 @@ class TestAuthFlow:
     async def test_manual_approve(self, monkeypatch):
         """手动批复：创建申请 → 批准 → 等待方收到"""
         import app.net_auth_manager as nam
+
         monkeypatch.setattr(nam, "AUTO_APPROVE", False)
         monkeypatch.setattr(nam, "AUTH_TIMEOUT_SECONDS", 30)
 
         await init_auth_table()
 
         # 异步发起申请
-        task = asyncio.create_task(request_network_access(
-            meeting_id="mtg-manual-test",
-            stage="produce",
-            code="import requests",
-            detected_level="L1",
-            failure_reason="缺少模块 requests",
-            stderr="ModuleNotFoundError: No module named 'requests'",
-        ))
+        task = asyncio.create_task(
+            request_network_access(
+                meeting_id="mtg-manual-test",
+                stage="produce",
+                code="import requests",
+                detected_level="L1",
+                failure_reason="缺少模块 requests",
+                stderr="ModuleNotFoundError: No module named 'requests'",
+            )
+        )
 
         # 等申请创建
         await asyncio.sleep(1)
@@ -375,19 +378,22 @@ class TestAuthFlow:
     async def test_manual_deny(self, monkeypatch):
         """手动批复：拒绝 → 返回 denied"""
         import app.net_auth_manager as nam
+
         monkeypatch.setattr(nam, "AUTO_APPROVE", False)
         monkeypatch.setattr(nam, "AUTH_TIMEOUT_SECONDS", 30)
 
         await init_auth_table()
 
-        task = asyncio.create_task(request_network_access(
-            meeting_id="mtg-deny-flow",
-            stage="produce",
-            code="import requests",
-            detected_level="L1",
-            failure_reason="缺少模块 requests",
-            stderr="ModuleNotFoundError: No module named 'requests'",
-        ))
+        task = asyncio.create_task(
+            request_network_access(
+                meeting_id="mtg-deny-flow",
+                stage="produce",
+                code="import requests",
+                detected_level="L1",
+                failure_reason="缺少模块 requests",
+                stderr="ModuleNotFoundError: No module named 'requests'",
+            )
+        )
 
         await asyncio.sleep(1)
 

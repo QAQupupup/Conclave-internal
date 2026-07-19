@@ -62,54 +62,55 @@ def __getattr__(name: str) -> object:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module_name = _LAZY_SYMBOLS[name]
     import importlib
+
     module = importlib.import_module(module_name)
     return getattr(module, name)
 
 
 __all__ = [
-    # charter
-    "DriftCheck",
-    "MeetingCharter",
-    "build_charter_from_clarify",
-    # charter_logic
-    "to_prompt_anchor",
-    "check_drift",
-    "is_already_borrowed",
-    "register_borrow",
+    "STAGE_ORDER",
+    # state
+    "VALID_SIGNALS",
+    # roles
+    "_ROLE_KEYWORDS",
     # conclusion_chain
     "ConclusionChain",
     "ConsistencyResult",
-    "LockedConclusion",
-    # conclusion_logic
-    "lock_conclusion",
-    "get_locked_context",
-    "check_consistency",
-    "get_chain_summary",
+    "ControlError",
+    # charter
+    "DriftCheck",
     # scheduler
     "ExecutionPlan",
+    "LockedConclusion",
+    "MeetingCharter",
     "Scheduler",
     "SubTask",
-    # state
-    "VALID_SIGNALS",
-    "ControlError",
+    # evidence
+    "_synthesize_evidence_for_produce",
     "apply_signal",
-    "STAGE_ORDER",
-    "get_skipped_stages",
-    "next_stage",
-    "is_terminal",
-    "should_pause",
-    # roles
-    "_ROLE_KEYWORDS",
-    "match_role",
-    # confidence
-    "worst_confidence",
+    "build_charter_from_clarify",
+    "check_consistency",
+    "check_drift",
+    "compress_decisions_to_brief",
+    "format_arbitrate_as_text",
     # text
     "format_claims_as_text",
-    "format_arbitrate_as_text",
-    "compress_decisions_to_brief",
+    "get_chain_summary",
     # anchor
     "get_charter_anchor",
     "get_full_anchor",
-    # evidence
-    "_synthesize_evidence_for_produce",
+    "get_locked_context",
+    "get_skipped_stages",
+    "is_already_borrowed",
+    "is_terminal",
+    # conclusion_logic
+    "lock_conclusion",
+    "match_role",
+    "next_stage",
+    "register_borrow",
+    "should_pause",
+    # charter_logic
+    "to_prompt_anchor",
+    # confidence
+    "worst_confidence",
 ]

@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import json
+import re as _re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import re as _re
-
 from fastapi import APIRouter, HTTPException
 
 from app.orchestrator.runner import get_state
-from app.schemas.regression import BaselineRequest, BaselineSummary
+from app.schemas.regression import BaselineRequest
 
 router = APIRouter(prefix="/regression", tags=["regression"])
 
@@ -28,6 +27,7 @@ _BASELINE_ID_PATTERN = _re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 # ---------- 指标提取 ----------
+
 
 def _extract_metrics(state: Any) -> dict[str, Any]:
     """从会议状态提取完整指标集
@@ -70,9 +70,7 @@ def _extract_metrics(state: Any) -> dict[str, Any]:
         "stages_completed": stages_completed,
         "claims_count": len(state.claims),
         "conflicts_count": len(state.conflicts),
-        "evidence_count": sum(
-            len(es.get("assessments", [])) for es in state.evidence_set
-        ),
+        "evidence_count": sum(len(es.get("assessments", [])) for es in state.evidence_set),
         "adopted_claims_count": len(adopted_claims),
         "api_endpoints_count": len(api_endpoints),
         "openapi_length": len(openapi),
@@ -99,6 +97,7 @@ def _extract_metrics(state: Any) -> dict[str, Any]:
 
 
 # ---------- 存储操作 ----------
+
 
 def _ensure_dir() -> None:
     """确保基线数据目录存在"""
@@ -134,7 +133,7 @@ def _load_baseline(baseline_id: str) -> dict[str, Any] | None:
         raise HTTPException(status_code=400, detail="baseline_id 越界")
     if not filepath.exists():
         return None
-    return json.loads(filepath.read_text(encoding="utf-8"))
+    return json.loads(filepath.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
 def _list_baseline_files() -> list[Path]:
@@ -149,6 +148,7 @@ def _list_baseline_files() -> list[Path]:
 
 
 # ---------- 端点 ----------
+
 
 @router.post("/baseline")
 async def create_baseline(req: BaselineRequest) -> dict[str, Any]:
@@ -183,15 +183,17 @@ async def list_baselines() -> list[dict[str, Any]]:
     for filepath in _list_baseline_files():
         try:
             data = json.loads(filepath.read_text(encoding="utf-8"))
-            baselines.append({
-                "baseline_id": data["baseline_id"],
-                "created_at": data["created_at"],
-                "meeting_id": data["meeting_id"],
-                "topic": data.get("topic", ""),
-                "stages_completed": data.get("metrics", {}).get("stages_completed", 0),
-                "claims_count": data.get("metrics", {}).get("claims_count", 0),
-                "confidence_all_high": data.get("metrics", {}).get("confidence_all_high", False),
-            })
+            baselines.append(
+                {
+                    "baseline_id": data["baseline_id"],
+                    "created_at": data["created_at"],
+                    "meeting_id": data["meeting_id"],
+                    "topic": data.get("topic", ""),
+                    "stages_completed": data.get("metrics", {}).get("stages_completed", 0),
+                    "claims_count": data.get("metrics", {}).get("claims_count", 0),
+                    "confidence_all_high": data.get("metrics", {}).get("confidence_all_high", False),
+                }
+            )
         except (json.JSONDecodeError, KeyError):
             continue
     return baselines

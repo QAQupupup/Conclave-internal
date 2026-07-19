@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.memory.models import FeatureMemory, ProfileMemory, RawMemory
@@ -22,14 +22,38 @@ logger = logging.getLogger(__name__)
 
 # StubLLM 模式规则提炼用的关键词表
 _RISK_HIGH_KEYWORDS: list[str] = [
-    "高风险", "危险", "风险", "不可行", "阻塞", "严重", "critical", "high risk",
-    "隐患", "漏洞", "威胁",
+    "高风险",
+    "危险",
+    "风险",
+    "不可行",
+    "阻塞",
+    "严重",
+    "critical",
+    "high risk",
+    "隐患",
+    "漏洞",
+    "威胁",
 ]
 _RISK_LOW_KEYWORDS: list[str] = [
-    "低风险", "安全", "可控", "可行", "稳健", "low risk", "无忧", "成熟",
+    "低风险",
+    "安全",
+    "可控",
+    "可行",
+    "稳健",
+    "low risk",
+    "无忧",
+    "成熟",
 ]
 _COLLAB_KEYWORDS: list[str] = [
-    "建议", "补充", "同意", "认可", "协作", "配合", "协商", "折中", "共识",
+    "建议",
+    "补充",
+    "同意",
+    "认可",
+    "协作",
+    "配合",
+    "协商",
+    "折中",
+    "共识",
 ]
 
 
@@ -60,7 +84,7 @@ class MemoryStore:
             return
         try:
             from app.db.engine import async_session_factory
-            from app.db.models import RawMemoryModel, FeatureMemoryModel, ProfileMemoryModel
+            from app.db.models import RawMemoryModel
 
             async with async_session_factory() as session:
                 async with session.bind.begin() as conn:
@@ -76,11 +100,12 @@ class MemoryStore:
                 sum(len(v) for v in self._features.values()),
                 sum(len(v) for v in self._raw.values()),
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("记忆初始化失败（使用空内存）: %s", e)
 
     async def _load_profiles(self, session) -> None:
         from app.db.models import ProfileMemoryModel
+
         result = await session.execute(select(ProfileMemoryModel))
         for row in result.scalars():
             self._profiles[row.agent_role] = ProfileMemory(
@@ -96,6 +121,7 @@ class MemoryStore:
 
     async def _load_features(self, session) -> None:
         from app.db.models import FeatureMemoryModel
+
         result = await session.execute(select(FeatureMemoryModel))
         for row in result.scalars():
             fm = FeatureMemory(
@@ -111,13 +137,13 @@ class MemoryStore:
             self._features.setdefault(fm.agent_role, []).append(fm)
 
     async def _load_raw(self, session) -> None:
-        from app.db.models import RawMemoryModel
         from sqlalchemy import desc
+
+        from app.db.models import RawMemoryModel
+
         # 仅加载最近的记录，每个agent最多加载 _MAX_HISTORY_PER_MEETING * 10 条（跨会议）
         # 防止全量加载导致内存暴涨
-        result = await session.execute(
-            select(RawMemoryModel).order_by(desc(RawMemoryModel.created_at)).limit(5000)
-        )
+        result = await session.execute(select(RawMemoryModel).order_by(desc(RawMemoryModel.created_at)).limit(5000))
         for row in result.scalars():
             rm = RawMemory(
                 id=row.id,
@@ -167,7 +193,7 @@ class MemoryStore:
                 self._raw[agent_role] = self._raw[agent_role][-_MAX_RAW_PER_AGENT:]
             await self._persist_raw(mem)
             return mem
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("record_raw 失败: %s", e)
             return RawMemory(
                 id=f"raw-err-{uuid.uuid4().hex[:6]}",
@@ -184,29 +210,34 @@ class MemoryStore:
         try:
             from app.db.engine import async_session_factory
             from app.db.models import RawMemoryModel
+
             async with async_session_factory() as session:
-                stmt = pg_insert(RawMemoryModel).values(
-                    id=mem.id,
-                    agent_role=mem.agent_role,
-                    meeting_id=mem.meeting_id,
-                    stage=mem.stage,
-                    content=mem.content,
-                    evidence_refs=json.dumps(mem.evidence_refs or []),
-                    adopted=mem.adopted,
-                    corrected_by=mem.corrected_by,
-                    created_at=mem.created_at,
-                ).on_conflict_do_update(
-                    index_elements=["id"],
-                    set_={
-                        "content": mem.content,
-                        "evidence_refs": json.dumps(mem.evidence_refs or []),
-                        "adopted": mem.adopted,
-                        "corrected_by": mem.corrected_by,
-                    },
+                stmt = (
+                    pg_insert(RawMemoryModel)
+                    .values(
+                        id=mem.id,
+                        agent_role=mem.agent_role,
+                        meeting_id=mem.meeting_id,
+                        stage=mem.stage,
+                        content=mem.content,
+                        evidence_refs=json.dumps(mem.evidence_refs or []),
+                        adopted=mem.adopted,
+                        corrected_by=mem.corrected_by,
+                        created_at=mem.created_at,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={
+                            "content": mem.content,
+                            "evidence_refs": json.dumps(mem.evidence_refs or []),
+                            "adopted": mem.adopted,
+                            "corrected_by": mem.corrected_by,
+                        },
+                    )
                 )
                 await session.execute(stmt)
                 await session.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("原始记忆持久化失败: %s", e)
 
     def get_raw(self, agent_role: str) -> list[RawMemory]:
@@ -262,16 +293,18 @@ class MemoryStore:
                 stance_value = "aggressive"
             else:
                 stance_value = "balanced"
-            features.append(FeatureMemory(
-                id=f"feat-{uuid.uuid4().hex[:8]}",
-                agent_role=agent_role,
-                feature_type="stance_style",
-                feature_value=stance_value,
-                confidence=confidence,
-                sample_count=sample_count,
-                source_meeting_ids=[meeting_id],
-                extracted_at=now,
-            ))
+            features.append(
+                FeatureMemory(
+                    id=f"feat-{uuid.uuid4().hex[:8]}",
+                    agent_role=agent_role,
+                    feature_type="stance_style",
+                    feature_value=stance_value,
+                    confidence=confidence,
+                    sample_count=sample_count,
+                    source_meeting_ids=[meeting_id],
+                    extracted_at=now,
+                )
+            )
 
             # 2. evidence_dependency
             avg_evidence = evidence_count / max(1, sample_count)
@@ -281,16 +314,18 @@ class MemoryStore:
                 ev_value = "medium"
             else:
                 ev_value = "low"
-            features.append(FeatureMemory(
-                id=f"feat-{uuid.uuid4().hex[:8]}",
-                agent_role=agent_role,
-                feature_type="evidence_dependency",
-                feature_value=ev_value,
-                confidence=confidence,
-                sample_count=sample_count,
-                source_meeting_ids=[meeting_id],
-                extracted_at=now,
-            ))
+            features.append(
+                FeatureMemory(
+                    id=f"feat-{uuid.uuid4().hex[:8]}",
+                    agent_role=agent_role,
+                    feature_type="evidence_dependency",
+                    feature_value=ev_value,
+                    confidence=confidence,
+                    sample_count=sample_count,
+                    source_meeting_ids=[meeting_id],
+                    extracted_at=now,
+                )
+            )
 
             # 3. risk_appetite
             if risk_high_count > sample_count * 0.5:
@@ -299,16 +334,18 @@ class MemoryStore:
                 risk_value = "aggressive"
             else:
                 risk_value = "balanced"
-            features.append(FeatureMemory(
-                id=f"feat-{uuid.uuid4().hex[:8]}",
-                agent_role=agent_role,
-                feature_type="risk_appetite",
-                feature_value=risk_value,
-                confidence=confidence,
-                sample_count=sample_count,
-                source_meeting_ids=[meeting_id],
-                extracted_at=now,
-            ))
+            features.append(
+                FeatureMemory(
+                    id=f"feat-{uuid.uuid4().hex[:8]}",
+                    agent_role=agent_role,
+                    feature_type="risk_appetite",
+                    feature_value=risk_value,
+                    confidence=confidence,
+                    sample_count=sample_count,
+                    source_meeting_ids=[meeting_id],
+                    extracted_at=now,
+                )
+            )
 
             # 4. collaboration
             collab_ratio = collab_count / max(1, sample_count)
@@ -318,21 +355,23 @@ class MemoryStore:
                 collab_value = "bridging"
             else:
                 collab_value = "independent"
-            features.append(FeatureMemory(
-                id=f"feat-{uuid.uuid4().hex[:8]}",
-                agent_role=agent_role,
-                feature_type="collaboration",
-                feature_value=collab_value,
-                confidence=confidence,
-                sample_count=sample_count,
-                source_meeting_ids=[meeting_id],
-                extracted_at=now,
-            ))
+            features.append(
+                FeatureMemory(
+                    id=f"feat-{uuid.uuid4().hex[:8]}",
+                    agent_role=agent_role,
+                    feature_type="collaboration",
+                    feature_value=collab_value,
+                    confidence=confidence,
+                    sample_count=sample_count,
+                    source_meeting_ids=[meeting_id],
+                    extracted_at=now,
+                )
+            )
 
             self._features.setdefault(agent_role, []).extend(features)
             await self._persist_features(features)
             return features
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("extract_features 失败: %s", e)
             return []
 
@@ -340,29 +379,34 @@ class MemoryStore:
         try:
             from app.db.engine import async_session_factory
             from app.db.models import FeatureMemoryModel
+
             async with async_session_factory() as session:
                 for f in features:
-                    stmt = pg_insert(FeatureMemoryModel).values(
-                        id=f.id,
-                        agent_role=f.agent_role,
-                        feature_type=f.feature_type,
-                        feature_value=f.feature_value,
-                        confidence=f.confidence,
-                        sample_count=f.sample_count,
-                        source_meeting_ids=json.dumps(f.source_meeting_ids or []),
-                        extracted_at=f.extracted_at,
-                    ).on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={
-                            "feature_value": f.feature_value,
-                            "confidence": f.confidence,
-                            "sample_count": f.sample_count,
-                            "source_meeting_ids": json.dumps(f.source_meeting_ids or []),
-                        },
+                    stmt = (
+                        pg_insert(FeatureMemoryModel)
+                        .values(
+                            id=f.id,
+                            agent_role=f.agent_role,
+                            feature_type=f.feature_type,
+                            feature_value=f.feature_value,
+                            confidence=f.confidence,
+                            sample_count=f.sample_count,
+                            source_meeting_ids=json.dumps(f.source_meeting_ids or []),
+                            extracted_at=f.extracted_at,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["id"],
+                            set_={
+                                "feature_value": f.feature_value,
+                                "confidence": f.confidence,
+                                "sample_count": f.sample_count,
+                                "source_meeting_ids": json.dumps(f.source_meeting_ids or []),
+                            },
+                        )
                     )
                     await session.execute(stmt)
                 await session.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("行为特征持久化失败: %s", e)
 
     def get_features(self, agent_role: str) -> list[FeatureMemory]:
@@ -388,7 +432,7 @@ class MemoryStore:
             )
             self._profiles[agent_role] = profile
             return profile
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("get_or_create_profile 失败: %s", e)
             return ProfileMemory(agent_role=agent_role)
 
@@ -440,7 +484,7 @@ class MemoryStore:
             self._profiles[agent_role] = profile
             await self._persist_profile(profile)
             return profile
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("update_profile 失败: %s", e)
             return self.get_or_create_profile(agent_role)
 
@@ -448,31 +492,36 @@ class MemoryStore:
         try:
             from app.db.engine import async_session_factory
             from app.db.models import ProfileMemoryModel
+
             async with async_session_factory() as session:
-                stmt = pg_insert(ProfileMemoryModel).values(
-                    agent_role=profile.agent_role,
-                    default_stance_style=profile.default_stance_style,
-                    ambiguity_tolerance=profile.ambiguity_tolerance,
-                    evidence_dependency_level=profile.evidence_dependency_level,
-                    collaboration_preference=profile.collaboration_preference,
-                    escalation_threshold=profile.escalation_threshold,
-                    updated_at=profile.updated_at,
-                    version=profile.version,
-                ).on_conflict_do_update(
-                    index_elements=["agent_role"],
-                    set_={
-                        "default_stance_style": profile.default_stance_style,
-                        "ambiguity_tolerance": profile.ambiguity_tolerance,
-                        "evidence_dependency_level": profile.evidence_dependency_level,
-                        "collaboration_preference": profile.collaboration_preference,
-                        "escalation_threshold": profile.escalation_threshold,
-                        "updated_at": profile.updated_at,
-                        "version": profile.version,
-                    },
+                stmt = (
+                    pg_insert(ProfileMemoryModel)
+                    .values(
+                        agent_role=profile.agent_role,
+                        default_stance_style=profile.default_stance_style,
+                        ambiguity_tolerance=profile.ambiguity_tolerance,
+                        evidence_dependency_level=profile.evidence_dependency_level,
+                        collaboration_preference=profile.collaboration_preference,
+                        escalation_threshold=profile.escalation_threshold,
+                        updated_at=profile.updated_at,
+                        version=profile.version,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["agent_role"],
+                        set_={
+                            "default_stance_style": profile.default_stance_style,
+                            "ambiguity_tolerance": profile.ambiguity_tolerance,
+                            "evidence_dependency_level": profile.evidence_dependency_level,
+                            "collaboration_preference": profile.collaboration_preference,
+                            "escalation_threshold": profile.escalation_threshold,
+                            "updated_at": profile.updated_at,
+                            "version": profile.version,
+                        },
+                    )
                 )
                 await session.execute(stmt)
                 await session.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("画像持久化失败: %s", e)
 
     def get_profile_anchor(self, agent_role: str) -> str:
@@ -490,7 +539,7 @@ class MemoryStore:
                 f"- 模糊容忍：{profile.ambiguity_tolerance}",
             ]
             return "\n".join(lines)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("get_profile_anchor 失败: %s", e)
             return ""
 
@@ -503,13 +552,14 @@ class MemoryStore:
         self._profiles.clear()
         try:
             from app.db.engine import async_session_factory
-            from app.db.models import RawMemoryModel, FeatureMemoryModel, ProfileMemoryModel
+            from app.db.models import FeatureMemoryModel, ProfileMemoryModel, RawMemoryModel
+
             async with async_session_factory() as session:
                 await session.execute(delete(RawMemoryModel))
                 await session.execute(delete(FeatureMemoryModel))
                 await session.execute(delete(ProfileMemoryModel))
                 await session.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("记忆清理失败: %s", e)
 
 

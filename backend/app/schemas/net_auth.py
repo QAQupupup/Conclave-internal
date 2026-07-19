@@ -6,12 +6,14 @@ from pydantic import BaseModel
 
 class ReviewRequest(BaseModel):
     """审批请求"""
+
     action: str  # approved / denied
     comment: str = ""
 
 
 class AuthRequestSummary(BaseModel):
     """鉴权请求摘要 VO"""
+
     id: str
     meeting_id: str
     stage: str

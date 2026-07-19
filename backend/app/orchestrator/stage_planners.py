@@ -6,7 +6,7 @@
 # Phase 3 再进一步细化（如 produce 的子产物递归、intra_team 的 ReAct 迭代等）。
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from app.agents.task_baseline import TaskBaseline
 from app.models import MeetingState

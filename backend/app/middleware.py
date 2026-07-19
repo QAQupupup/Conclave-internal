@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import os
@@ -14,18 +15,16 @@ from threading import Lock
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from app.context import new_request_id, set_request_id, reset_request_id
+from app.context import new_request_id, reset_request_id, set_request_id
 from app.logging_config import get_logger
 
 logger = get_logger("middleware.trace")
 
 # API 认证 token（留空则不启用认证，仅开发模式）
 _API_TOKEN = os.environ.get("CONCLAVE_API_TOKEN", "")
-_DEV_TOKEN_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), ".dev_token"
-)
+_DEV_TOKEN_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".dev_token")
 
 
 def _load_or_create_dev_token() -> str:
@@ -33,7 +32,7 @@ def _load_or_create_dev_token() -> str:
     if _API_TOKEN:
         return _API_TOKEN
     if os.path.exists(_DEV_TOKEN_PATH):
-        with open(_DEV_TOKEN_PATH, "r", encoding="utf-8") as f:
+        with open(_DEV_TOKEN_PATH, encoding="utf-8") as f:
             tok = f.read().strip()
         if tok:
             return tok
@@ -58,7 +57,12 @@ _DEV_TOKEN = _load_or_create_dev_token()
 
 # 免认证路径前缀
 _PUBLIC_PATHS = {
-    "/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/debug/auth-info",
+    "/health",
+    "/metrics",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/debug/auth-info",
     "/auth/login",
 }
 # WebSocket 升级路径免认证（WebSocket 在 query 参数中传 token）
@@ -131,7 +135,7 @@ def _do_periodic_cleanup() -> None:
                     if log:
                         ips_with_time.append((log[-1], ip))
                 ips_with_time.sort()
-                for _, ip in ips_with_time[:to_remove - removed]:
+                for _, ip in ips_with_time[: to_remove - removed]:
                     _request_log.pop(ip, None)
                     _fail_log.pop(ip, None)
                     _blocked_ips.pop(ip, None)
@@ -177,7 +181,7 @@ def _client_ip(request: Request) -> str:
     """提取客户端 IP（优先 X-Forwarded-For 首段，再退化到 client.host）"""
     xff = request.headers.get("X-Forwarded-For")
     if xff:
-        return xff.split(",")[0].strip()
+        return xff.split(",")[0].strip()  # type: ignore[no-any-return]
     return request.client.host if request.client else "unknown"
 
 
@@ -265,9 +269,15 @@ def setup_auth_middleware(app: FastAPI) -> None:
         path = request.url.path
         client_ip_str = _client_ip(request)
 
-        # 测试模式：完全跳过认证与限流（仅在 APP_ENV=test + CONCLAVE_TEST_DISABLE_AUTH=1 时生效）
+        # 测试模式：跳过认证与限流，但注入测试 admin 用户以通过 auth_guard 权限检查
         # [C-03 修复] 与 HTTP 中间件一致，要求双重条件，防止生产环境误设一个环境变量绕过
         if os.environ.get("APP_ENV") == "test" and os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
+            request.state.auth_user = {"username": "test", "role": "admin", "uid": None}
+            from app.context import set_user_id, set_user_role, set_username
+
+            set_user_id("test")
+            set_username("test")
+            set_user_role("admin")
             return await call_next(request)
 
         # 速率限制（所有请求包括公开路径都限流）
@@ -299,6 +309,13 @@ def setup_auth_middleware(app: FastAPI) -> None:
             token = auth_header[6:].strip()
 
         if not token:
+            ok, reason = _check_rate_limit(client_ip_str, is_failed_attempt=True)
+            if not ok:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"认证失败过多：{reason}"},
+                    headers={"Retry-After": str(_RATE_BLOCK_SECONDS)},
+                )
             return JSONResponse(
                 status_code=401,
                 content={"detail": "未授权：请先登录"},
@@ -306,6 +323,13 @@ def setup_auth_middleware(app: FastAPI) -> None:
 
         # token 长度限制（防 DoS）
         if len(token) > 4096:
+            ok, reason = _check_rate_limit(client_ip_str, is_failed_attempt=True)
+            if not ok:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"认证失败过多：{reason}"},
+                    headers={"Retry-After": str(_RATE_BLOCK_SECONDS)},
+                )
             return JSONResponse(
                 status_code=401,
                 content={"detail": "认证失败：token 格式无效"},
@@ -315,6 +339,7 @@ def setup_auth_middleware(app: FastAPI) -> None:
         auth_user = None
         try:
             from app.auth import decode_token
+
             auth_user = decode_token(token)
         except Exception:
             auth_user = None
@@ -322,7 +347,9 @@ def setup_auth_middleware(app: FastAPI) -> None:
         if auth_user:
             request.state.auth_user = auth_user
             # 设置用户上下文（用于日志/审计追踪）
-            from app.context import set_user_id, set_username, set_user_role as _set_ur
+            from app.context import set_user_id, set_username
+            from app.context import set_user_role as _set_ur
+
             set_user_id(str(auth_user.get("uid", "") or ""))
             set_username(auth_user.get("username", ""))
             _set_ur(auth_user.get("role", ""))
@@ -334,7 +361,9 @@ def setup_auth_middleware(app: FastAPI) -> None:
             _DEV_TOKEN.encode("utf-8"),
         ):
             request.state.auth_user = {"username": "dev", "role": "admin", "uid": None}
-            from app.context import set_user_id, set_username, set_user_role as _set_ur2
+            from app.context import set_user_id, set_username
+            from app.context import set_user_role as _set_ur2
+
             set_user_id("dev")
             set_username("dev")
             _set_ur2("admin")
@@ -347,10 +376,16 @@ def setup_auth_middleware(app: FastAPI) -> None:
             # 审计：触发封禁
             try:
                 from app.observability.audit import audit
-                audit("security.rate_limited", "blocked", {
-                    "reason": "auth_failures_exceeded",
-                    "path": path,
-                }, ip=client_ip_str)
+
+                audit(
+                    "security.rate_limited",
+                    "blocked",
+                    {
+                        "reason": "auth_failures_exceeded",
+                        "path": path,
+                    },
+                    ip=client_ip_str,
+                )
             except Exception:
                 pass
             return JSONResponse(
@@ -361,11 +396,17 @@ def setup_auth_middleware(app: FastAPI) -> None:
         # 审计：未授权访问尝试
         try:
             from app.observability.audit import audit
-            audit("security.unauthorized_access", "failure", {
-                "path": path,
-                "method": request.method,
-                "has_auth_header": bool(auth_header),
-            }, ip=client_ip_str)
+
+            audit(
+                "security.unauthorized_access",
+                "failure",
+                {
+                    "path": path,
+                    "method": request.method,
+                    "has_auth_header": bool(auth_header),
+                },
+                ip=client_ip_str,
+            )
         except Exception:
             pass
         return JSONResponse(
@@ -397,10 +438,7 @@ _DANGEROUS_PATTERNS = [
 def is_dangerous_command(command: str) -> bool:
     """检测命令是否包含危险模式"""
     cmd = command.strip()
-    for pattern in _DANGEROUS_PATTERNS:
-        if re.search(pattern, cmd, re.IGNORECASE):
-            return True
-    return False
+    return any(re.search(pattern, cmd, re.IGNORECASE) for pattern in _DANGEROUS_PATTERNS)
 
 
 def setup_trace_middleware(app: FastAPI) -> None:
@@ -426,7 +464,11 @@ def setup_trace_middleware(app: FastAPI) -> None:
             elapsed = (time.monotonic() - t0) * 1000
             logger.error(
                 "request_id=%s %s %s 500 %.0fms [异常: %s]",
-                rid, method, path, elapsed, type(e).__name__,
+                rid,
+                method,
+                path,
+                elapsed,
+                type(e).__name__,
             )
             raise
         finally:
@@ -437,6 +479,7 @@ def setup_trace_middleware(app: FastAPI) -> None:
 
         try:
             from app.observability.metrics_store import get_metrics_store
+
             get_metrics_store().record_request(elapsed)
         except Exception:
             pass
@@ -444,25 +487,45 @@ def setup_trace_middleware(app: FastAPI) -> None:
         if status >= 500:
             logger.error(
                 "request_id=%s %s %s %d %.0fms",
-                rid, method, path, status, elapsed,
+                rid,
+                method,
+                path,
+                status,
+                elapsed,
             )
             # 审计：5xx 错误
             try:
                 from app.observability.audit import audit
-                audit("system.error", "error", {
-                    "method": method, "path": path, "status": status,
-                }, duration_ms=int(elapsed))
+
+                audit(
+                    "system.error",
+                    "error",
+                    {
+                        "method": method,
+                        "path": path,
+                        "status": status,
+                    },
+                    duration_ms=int(elapsed),
+                )
             except Exception:
                 pass
         elif status >= 400:
             logger.warning(
                 "request_id=%s %s %s %d %.0fms",
-                rid, method, path, status, elapsed,
+                rid,
+                method,
+                path,
+                status,
+                elapsed,
             )
         else:
             logger.info(
                 "request_id=%s %s %s %d %.0fms",
-                rid, method, path, status, elapsed,
+                rid,
+                method,
+                path,
+                status,
+                elapsed,
             )
 
         # 审计：写操作（POST/PUT/DELETE/PATCH）自动记录
@@ -471,6 +534,7 @@ def setup_trace_middleware(app: FastAPI) -> None:
             if path not in _NO_AUDIT_PATHS and not path.startswith("/docs"):
                 try:
                     from app.observability.audit import audit
+
                     # 推断操作类型
                     action_map = {
                         "POST": _infer_audit_action(path, "create"),
@@ -479,9 +543,17 @@ def setup_trace_middleware(app: FastAPI) -> None:
                         "PATCH": _infer_audit_action(path, "update"),
                     }
                     action = action_map.get(method, "system.request")
-                    audit(action, "success" if status < 400 else "failure", {
-                        "method": method, "path": path, "status": status,
-                    }, duration_ms=int(elapsed), ip=_client_ip(request))
+                    audit(
+                        action,
+                        "success" if status < 400 else "failure",
+                        {
+                            "method": method,
+                            "path": path,
+                            "status": status,
+                        },
+                        duration_ms=int(elapsed),
+                        ip=_client_ip(request),
+                    )
                 except Exception:
                     pass
 
@@ -560,10 +632,8 @@ def _infer_audit_action(path: str, method_fallback: str) -> str:
 
 def record_auth_failure(ip: str) -> None:
     """供 auth router 记录登录失败（best effort）"""
-    try:
+    with contextlib.suppress(Exception):
         _check_rate_limit(ip or "unknown", is_failed_attempt=True)
-    except Exception:
-        pass
 
 
 def reset_auth_failures(ip: str) -> None:
@@ -586,6 +656,7 @@ def verify_ws_token(token: str) -> dict | None:
     # JWT
     try:
         from app.auth import decode_token
+
         user = decode_token(token)
         if user:
             return user

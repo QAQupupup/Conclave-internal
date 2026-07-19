@@ -1,14 +1,16 @@
 # §4 WebSocket 事件：DomainEvent + InMemoryEventBus
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from pydantic import BaseModel
 
 
 class DomainEvent(BaseModel):
     """领域事件，所有 WS 推送与内部通信的统一信封"""
+
     type: str
     meeting_id: str
     payload: dict[str, Any]
@@ -43,10 +45,10 @@ class InMemoryEventBus:
 
     async def publish(self, event: DomainEvent) -> None:
         """发布事件：写入 PostgreSQL + 内存缓存，广播给订阅者"""
-        # 持久化到 PostgreSQL 并获取自增 seq
-        # db_legacy 已迁移到 SQLAlchemy async，直接 await
-        from app.db_legacy import save_event
         import logging
+
+        from app.db_legacy import save_event
+
         logger = logging.getLogger(__name__)
         ts_str = event.ts.isoformat() if hasattr(event.ts, "isoformat") else str(event.ts)
         try:
@@ -57,56 +59,65 @@ class InMemoryEventBus:
                 ts=ts_str,
                 trace_id=event.trace_id,
             )
-            # 用 PostgreSQL 的自增 seq 作为全局唯一序列号
             event.seq = db_seq
         except Exception as e:
-            # 持久化失败不阻止事件广播，但记录错误日志
             logger.error(
                 "Failed to persist event to DB: meeting_id=%s type=%s error=%s: %s",
-                event.meeting_id, event.type, type(e).__name__, str(e)[:200],
+                event.meeting_id,
+                event.type,
+                type(e).__name__,
+                str(e)[:200],
             )
-            # 审计：事件持久化失败（关键告警信号）
             try:
                 from app.observability.audit import audit
-                audit("system.error", "error", {
-                    "component": "event_bus",
-                    "operation": "persist_event",
-                    "event_type": event.type,
-                    "meeting_id": event.meeting_id,
-                    "error_type": type(e).__name__,
-                    "error": str(e)[:300],
-                })
+
+                audit(
+                    "system.error",
+                    "error",
+                    {
+                        "component": "event_bus",
+                        "operation": "persist_event",
+                        "event_type": event.type,
+                        "meeting_id": event.meeting_id,
+                        "error_type": type(e).__name__,
+                        "error": str(e)[:300],
+                    },
+                )
             except Exception:
                 pass
-            # 使用内存计数器作为兜底 seq，避免 seq 不一致导致前端混乱
             fallback = self._history.get(event.meeting_id, [])
             event.seq = (fallback[-1].seq + 1) if fallback else 0
 
-        # 写入内存历史，超限裁剪最旧事件
+        # 写入内存历史，按 seq 排序保证并发场景下顺序一致
         history = self._history.setdefault(event.meeting_id, [])
         history.append(event)
+        history.sort(key=lambda e: e.seq)
         if len(history) > self._MAX_HISTORY_PER_MEETING:
-            # 裁剪掉超出上限的最旧事件，保留最近 N 条
             del history[: len(history) - self._MAX_HISTORY_PER_MEETING]
 
-        # 广播给 topic 级订阅者
+        # 广播给订阅者
         for sub in list(self._subs.get(event.meeting_id, [])):
             try:
                 await sub(event)
-            except Exception as e:  # noqa: BLE001 单个订阅者失败不影响其它
+            except Exception as e:
                 logger.warning(
                     "Event subscriber failed for meeting=%s type=%s: %s: %s",
-                    event.meeting_id, event.type, type(e).__name__, str(e)[:200],
+                    event.meeting_id,
+                    event.type,
+                    type(e).__name__,
+                    str(e)[:200],
                 )
-        # 广播给通配订阅者（但避免当 event.meeting_id == "*" 时重复投递）
         if event.meeting_id != "*":
             for sub in list(self._subs.get("*", [])):
                 try:
                     await sub(event)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     logger.warning(
                         "Wildcard event subscriber failed for meeting=%s type=%s: %s: %s",
-                        event.meeting_id, event.type, type(e).__name__, str(e)[:200],
+                        event.meeting_id,
+                        event.type,
+                        type(e).__name__,
+                        str(e)[:200],
                     )
 
     def subscribe(self, meeting_id: str, handler: Subscriber) -> Callable[[], None]:
@@ -127,15 +138,30 @@ class InMemoryEventBus:
         return _unsubscribe
 
     async def history(self, meeting_id: str) -> list[DomainEvent]:
-        """取某会议已发布事件，优先从内存取，内存空则从 PostgreSQL 恢复"""
+        """取某会议已发布事件，优先从内存取，内存空则从 PostgreSQL 恢复（异步）"""
         mem_events = self._history.get(meeting_id)
         if mem_events:
             return list(mem_events)
         # 内存无缓存，从 PostgreSQL 恢复
         return await self._restore_from_db(meeting_id)
 
+    def get_events(self, meeting_id: str) -> list[DomainEvent]:
+        """同步获取事件：优先内存，内存空时通过 asyncio.run 从 DB 加载"""
+        mem_events = self._history.get(meeting_id)
+        if mem_events:
+            return list(mem_events)
+        import asyncio as _asyncio
+        try:
+            _loop = _asyncio.get_running_loop()
+        except RuntimeError:
+            _loop = None
+        if _loop is None:
+            return _asyncio.run(self._restore_from_db(meeting_id))
+        # 在异步上下文中被同步调用，返回内存副本或空列表
+        return []
+
     async def replay(self, meeting_id: str, from_seq: int = 0) -> list[DomainEvent]:
-        """增量回放：from_seq=0 返回全部事件，from_seq>0 返回 seq > from_seq 的事件"""
+        """增量回放：from_seq=0 返回全部事件，from_seq>0 返回 seq > from_seq 的事件（异步）"""
         events = self._history.get(meeting_id)
         if not events:
             # 内存无缓存，从 PostgreSQL 恢复
@@ -144,14 +170,37 @@ class InMemoryEventBus:
             return list(events)
         return [e for e in events if e.seq > from_seq]
 
+    def replay_sync(self, meeting_id: str, from_seq: int = 0) -> list[DomainEvent]:
+        """同步版本的 replay"""
+        events = self.get_events(meeting_id)
+        if from_seq <= 0:
+            return list(events)
+        return [e for e in events if e.seq > from_seq]
+
     async def last_seq(self, meeting_id: str) -> int:
-        """取某会议最后一条事件的 seq，无事件返回 0"""
+        """取某会议最后一条事件的 seq，无事件返回 0（异步）"""
         events = self._history.get(meeting_id)
         if events:
             return events[-1].seq
         # 内存无缓存，从 PostgreSQL 取
         from app.db_legacy import last_event_seq
+
         return await last_event_seq(meeting_id)
+
+    def last_seq_sync(self, meeting_id: str) -> int:
+        """同步版本的 last_seq"""
+        events = self._history.get(meeting_id)
+        if events:
+            return events[-1].seq
+        import asyncio as _asyncio
+        try:
+            _loop = _asyncio.get_running_loop()
+        except RuntimeError:
+            _loop = None
+        if _loop is None:
+            from app.db_legacy import last_event_seq as _les
+            return _asyncio.run(_les(meeting_id))
+        return 0
 
     def clear(self, meeting_id: str) -> None:
         """清理某会议的内存缓存（PostgreSQL 保留）"""
@@ -160,6 +209,7 @@ class InMemoryEventBus:
     async def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
         """从 PostgreSQL 恢复事件到内存缓存（限制最近 _MAX_HISTORY_PER_MEETING 条）"""
         from app.db_legacy import load_events
+
         rows = await load_events(meeting_id, from_seq=0, limit=self._MAX_HISTORY_PER_MEETING)
         events = []
         for row in rows:
@@ -167,14 +217,16 @@ class InMemoryEventBus:
                 ts = datetime.fromisoformat(row["ts"])
             except (ValueError, TypeError):
                 ts = datetime.now(timezone.utc)
-            events.append(DomainEvent(
-                type=row["type"],
-                meeting_id=row["meeting_id"],
-                payload=row["payload"],
-                ts=ts,
-                trace_id=row.get("trace_id"),
-                seq=row["seq"],
-            ))
+            events.append(
+                DomainEvent(
+                    type=row["type"],
+                    meeting_id=row["meeting_id"],
+                    payload=row["payload"],
+                    ts=ts,
+                    trace_id=row.get("trace_id"),
+                    seq=row["seq"],
+                )
+            )
         # 缓存到内存
         if events:
             self._history[meeting_id] = events
@@ -199,6 +251,7 @@ def make_event(
     if trace_id is None:
         # 从追踪上下文取 request_id（异步安全）
         from app.context import get_request_id
+
         rid = get_request_id()
         trace_id = rid if rid != "-" else None
 

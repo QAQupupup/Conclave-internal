@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 _FILLER_CHARS = set("的了是这一个那和与及或等在对为地把被将又也都很已还就这那之其而")
 
 
-def to_prompt_anchor(charter: "MeetingCharter") -> str:
+def to_prompt_anchor(charter: MeetingCharter) -> str:
     """生成注入每个 agent prompt 的锚点文本"""
     lines: list[str] = ["【会议宪章锚点 - 请严格遵守，不得漂移】"]
     lines.append(f"原始议题：{charter.original_topic}")
@@ -19,9 +19,7 @@ def to_prompt_anchor(charter: "MeetingCharter") -> str:
     if charter.meeting_goal:
         lines.append(f"会议目标：{charter.meeting_goal}")
     lines.append(f"议题边界：{('；'.join(charter.scope)) if charter.scope else '未限定'}")
-    lines.append(
-        f"行为约束：{('；'.join(charter.constraints)) if charter.constraints else '无'}"
-    )
+    lines.append(f"行为约束：{('；'.join(charter.constraints)) if charter.constraints else '无'}")
     if charter.forbidden_topics:
         lines.append(f"禁止话题：{('，'.join(charter.forbidden_topics))}")
     if charter.borrow_history:
@@ -30,7 +28,7 @@ def to_prompt_anchor(charter: "MeetingCharter") -> str:
     return "\n".join(lines)
 
 
-def check_drift(charter: "MeetingCharter", content: str) -> "DriftCheck":
+def check_drift(charter: MeetingCharter, content: str) -> DriftCheck:
     """检查发言是否偏离宪章
 
     首期简单实现：
@@ -68,7 +66,7 @@ def check_drift(charter: "MeetingCharter", content: str) -> "DriftCheck":
     return DriftCheck(is_drift=False, reason="符合宪章", severity="none")
 
 
-def _scope_keywords(charter: "MeetingCharter") -> list[str]:
+def _scope_keywords(charter: MeetingCharter) -> list[str]:
     """从 clarified_topic 与 scope 中抽取 2-gram 关键词，过滤填充字"""
     raw = charter.clarified_topic + " " + " ".join(charter.scope)
     # 去掉中英文标点与空白
@@ -91,7 +89,7 @@ def _scope_keywords(charter: "MeetingCharter") -> list[str]:
     return keywords
 
 
-def register_borrow(charter: "MeetingCharter", target_role: str, verdict: str) -> None:
+def register_borrow(charter: MeetingCharter, target_role: str, verdict: str) -> None:
     """记录借调裁决，防重复"""
     if not target_role:
         return
@@ -100,7 +98,7 @@ def register_borrow(charter: "MeetingCharter", target_role: str, verdict: str) -
         charter.borrow_history.append(entry)
 
 
-def is_already_borrowed(charter: "MeetingCharter", target_role: str) -> bool:
+def is_already_borrowed(charter: MeetingCharter, target_role: str) -> bool:
     """检查是否已借调过该角色"""
     if not target_role:
         return False

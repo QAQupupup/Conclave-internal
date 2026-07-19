@@ -23,8 +23,9 @@ class _TokenBucket:
     - tokens: 当前令牌数
     - last_refill: 上次补充时间
     """
-    capacity: float = 3.0        # 默认 3 次突发
-    refill_rate: float = 1.0     # 默认 1 次/秒
+
+    capacity: float = 3.0  # 默认 3 次突发
+    refill_rate: float = 1.0  # 默认 1 次/秒
     tokens: float = 3.0
     last_refill: float = field(default_factory=time.monotonic)
 

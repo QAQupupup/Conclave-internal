@@ -8,8 +8,10 @@
 
 审计事件持久化到 SQLite 数据库（独立表），同时通过 log_bus 输出到日志。
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -19,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.context import get_request_id, get_meeting_id, get_user_id, get_username, get_user_role
+from app.context import get_meeting_id, get_request_id, get_user_id, get_user_role, get_username
 
 # 审计事件类型分类
 AUDIT_CATEGORIES = {
@@ -77,7 +79,8 @@ class AuditLogger:
 
     def __init__(self, db_path: str | None = None, max_records: int = 100000) -> None:
         self._db_path = db_path or os.environ.get(
-            "CONCLAVE_AUDIT_DB", str(Path(os.environ.get("CONCLAVE_DB_PATH", "/app/data/conclave.db")).parent / "audit.db")
+            "CONCLAVE_AUDIT_DB",
+            str(Path(os.environ.get("CONCLAVE_DB_PATH", "/app/data/conclave.db")).parent / "audit.db"),
         )
         self._max_records = max_records
         self._lock = threading.Lock()
@@ -218,7 +221,7 @@ class AuditLogger:
                 columns = [desc[0] for desc in cursor.description]
                 rows = []
                 for row in cursor.fetchall():
-                    record = dict(zip(columns, row))
+                    record = dict(zip(columns, row, strict=False))
                     try:
                         record["details"] = json.loads(record.get("details", "{}"))
                     except Exception:
@@ -233,14 +236,12 @@ class AuditLogger:
         """获取审计统计信息（用于监控面板）"""
         if not self._conn:
             return {}
-        since = datetime.now(timezone.utc).isoformat()
+        datetime.now(timezone.utc).isoformat()
         # 简单统计
         try:
             with self._lock:
                 total = self._conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
-                errors = self._conn.execute(
-                    "SELECT COUNT(*) FROM audit_log WHERE status = 'error'"
-                ).fetchone()[0]
+                errors = self._conn.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'error'").fetchone()[0]
                 by_action = self._conn.execute(
                     "SELECT action, COUNT(*) as cnt FROM audit_log GROUP BY action ORDER BY cnt DESC LIMIT 20"
                 ).fetchall()
@@ -258,10 +259,8 @@ class AuditLogger:
 
     def close(self) -> None:
         if self._conn:
-            try:
+            with contextlib.suppress(Exception):
                 self._conn.close()
-            except Exception:
-                pass
             self._conn = None
 
 
@@ -287,10 +286,8 @@ def audit(
     **kwargs: Any,
 ) -> None:
     """便捷函数：记录审计事件"""
-    try:
+    with contextlib.suppress(Exception):
         get_audit_logger().log(action, status, details, duration_ms, **kwargs)
-    except Exception:
-        pass  # 审计失败不影响主流程
 
 
 class AuditTimer:
@@ -302,7 +299,7 @@ class AuditTimer:
         self.kwargs = kwargs
         self.start = 0.0
 
-    def __enter__(self) -> "AuditTimer":
+    def __enter__(self) -> AuditTimer:
         self.start = time.monotonic()
         return self
 
@@ -312,4 +309,3 @@ class AuditTimer:
         if exc_val:
             self.details["error"] = str(exc_val)
         audit(self.action, status, self.details, duration_ms=duration, **self.kwargs)
-        return False

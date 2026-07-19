@@ -12,32 +12,34 @@ from pydantic import BaseModel, Field
 
 class LLMCallRecord(BaseModel):
     """单次 LLM 调用记录"""
+
     call_id: str
     timestamp: str
-    stage: str = ""               # 阶段名（与 schema_hint 一致）
+    stage: str = ""  # 阶段名（与 schema_hint 一致）
     model: str = ""
     temperature: float = 0.0
     seed: int = 42
-    prompt: str = ""              # 完整 prompt
-    raw_response: str = ""        # LLM 原始返回
+    prompt: str = ""  # 完整 prompt
+    raw_response: str = ""  # LLM 原始返回
     parsed_result: dict[str, Any] | None = None
-    validation_status: str = "valid"       # "valid" | "invalid" | "fallback_stub"
+    validation_status: str = "valid"  # "valid" | "invalid" | "fallback_stub"
     consistency_status: str = "consistent"  # "consistent" | "inconsistent_retry" | "low_confidence"
-    attempt: int = 1              # 第几次尝试（校验重试）
+    attempt: int = 1  # 第几次尝试（校验重试）
     latency_ms: int = 0
-    input_tokens: int = 0          # prompt tokens
-    output_tokens: int = 0         # completion tokens
-    total_tokens: int = 0          # 总 tokens
-    agent_role: str = ""          # 发起调用的 Agent 角色（如 engineer, moderator）
-    provider_id: str = ""         # 实际使用的 provider（siliconflow, deepseek 等）
-    error_detail: str = ""        # 错误详情（HTTP 错误响应体、异常信息等，便于排查）
-    request_id: str = ""          # 关联的 HTTP 请求 ID（全链路追踪）
-    meeting_id: str = ""          # 关联的会议 ID（全链路追踪）
-    runner_session_id: str = ""   # 关联的 Runner 执行会话 ID（因果链）
+    input_tokens: int = 0  # prompt tokens
+    output_tokens: int = 0  # completion tokens
+    total_tokens: int = 0  # 总 tokens
+    agent_role: str = ""  # 发起调用的 Agent 角色（如 engineer, moderator）
+    provider_id: str = ""  # 实际使用的 provider（siliconflow, deepseek 等）
+    error_detail: str = ""  # 错误详情（HTTP 错误响应体、异常信息等，便于排查）
+    request_id: str = ""  # 关联的 HTTP 请求 ID（全链路追踪）
+    meeting_id: str = ""  # 关联的会议 ID（全链路追踪）
+    runner_session_id: str = ""  # 关联的 Runner 执行会话 ID（因果链）
 
 
 class CallTrace(BaseModel):
     """一次会议的完整 LLM 调用追踪"""
+
     meeting_id: str = ""
     calls: list[LLMCallRecord] = Field(default_factory=list)
 
@@ -170,7 +172,7 @@ def record_call(
     自动注入 request_id 和 meeting_id 实现全链路追踪。
     """
     # 从追踪上下文取 request_id 和 meeting_id
-    from app.context import get_request_id, get_meeting_id, get_runner_session_id
+    from app.context import get_meeting_id, get_request_id, get_runner_session_id
 
     meeting_id = get_meeting_id()
     trace = _current_trace.get()
@@ -179,6 +181,7 @@ def record_call(
         trace = _get_trace_fallback(meeting_id)
     if trace is None:
         import logging
+
         logging.getLogger("agents.trace").warning(
             f"record_call 跳过：当前无活跃 trace (stage={stage}, model={model}, meeting_id={meeting_id})"
         )

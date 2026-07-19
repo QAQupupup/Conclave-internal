@@ -1,10 +1,16 @@
 """记忆子系统 ORM 模型：raw_memories / feature_memories / profile_memories。"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, Text, Integer, Boolean, DateTime, Index,
+    Boolean,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,7 +32,8 @@ class RawMemoryModel(Base):
     adopted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     corrected_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
 
@@ -50,13 +57,12 @@ class FeatureMemoryModel(Base):
     sample_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source_meeting_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     extracted_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
 
-    __table_args__ = (
-        Index("idx_feature_memories_agent", "agent_role"),
-    )
+    __table_args__ = (Index("idx_feature_memories_agent", "agent_role"),)
 
 
 # ============================================================
@@ -67,18 +73,25 @@ class ProfileMemoryModel(Base):
 
     agent_role: Mapped[str] = mapped_column(String(50), primary_key=True)
     default_stance_style: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="balanced",
+        String(20),
+        nullable=False,
+        default="balanced",
     )
     ambiguity_tolerance: Mapped[float] = mapped_column(nullable=False, default=0.5)
     evidence_dependency_level: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="medium",
+        String(20),
+        nullable=False,
+        default="medium",
     )
     collaboration_preference: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="collaborative",
+        String(20),
+        nullable=False,
+        default="collaborative",
     )
     escalation_threshold: Mapped[float] = mapped_column(nullable=False, default=0.6)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -10,11 +11,12 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.db_legacy import save_meeting
 from app.events import DomainEvent, bus, make_event
-from app.middleware import verify_ws_token, _check_rate_limit
+from app.lazy_asyncio import LazyLock
+from app.middleware import _check_rate_limit, verify_ws_token
 from app.orchestrator.runner import get_state, set_state
 from conclave_core.state import apply_signal
-from app.db_legacy import save_meeting
 
 logger = logging.getLogger("ws")
 
@@ -27,7 +29,7 @@ WS_MAX_INBOUND_PER_MIN = int(os.environ.get("CONCLAVE_WS_INBOUND_RATE", "120"))
 # WS 队列最大长度：防止慢客户端导致内存无限堆积
 WS_QUEUE_MAXSIZE = int(os.environ.get("CONCLAVE_WS_QUEUE_MAX", "500"))
 _ws_event_log: dict[str, list[float]] = {}
-_ws_event_lock = asyncio.Lock()
+_ws_event_lock = LazyLock()
 # 批量发送配置：同一帧内到达的事件最多等待 BATCH_MAX_WAIT 秒后合并发送
 WS_BATCH_MAX_WAIT = float(os.environ.get("CONCLAVE_WS_BATCH_WAIT", "0.05"))  # 50ms
 
@@ -36,9 +38,9 @@ def _ws_client_ip(ws: WebSocket) -> str:
     """提取 WebSocket 客户端 IP"""
     xff = ws.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",")[0].strip()
+        return str(xff.split(",")[0].strip())
     if ws.client:
-        return ws.client.host
+        return str(ws.client.host)
     return "unknown"
 
 
@@ -165,9 +167,16 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     # 认证：HTTP 中间件不拦截 WS，需在 accept 前手动检查
     user = _check_ws_token(ws)
     if not user:
-        await _ws_close_error(ws, 4401, "Unauthorized", {
-            "type": "error", "meeting_id": meeting_id, "message": "未授权：请先登录",
-        })
+        await _ws_close_error(
+            ws,
+            4401,
+            "Unauthorized",
+            {
+                "type": "error",
+                "meeting_id": meeting_id,
+                "message": "未授权：请先登录",
+            },
+        )
         return
 
     # [H-02 修复] 权限校验
@@ -176,41 +185,73 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     client_ip = _ws_client_ip(ws)
 
     if not allowed:
-        await _ws_close_error(ws, 4403, "Forbidden", {
-            "type": "error", "meeting_id": meeting_id, "message": reason,
-        })
+        await _ws_close_error(
+            ws,
+            4403,
+            "Forbidden",
+            {
+                "type": "error",
+                "meeting_id": meeting_id,
+                "message": reason,
+            },
+        )
         logger.warning("WS 权限拒绝: user=%s meeting=%s reason=%s", user.get("username"), meeting_id, reason)
         # 审计：WS 权限拒绝
         try:
             from app.observability.audit import audit
-            audit("security.unauthorized_access", "denied", {
-                "channel": "ws", "meeting_id": meeting_id, "reason": reason,
-            }, ip=client_ip, username=user.get("username"), meeting_id=meeting_id)
+
+            audit(
+                "security.unauthorized_access",
+                "denied",
+                {
+                    "channel": "ws",
+                    "meeting_id": meeting_id,
+                    "reason": reason,
+                },
+                ip=client_ip,
+                username=user.get("username"),
+                meeting_id=meeting_id,
+            )
         except Exception:
             pass
         return
 
     ok, rate_reason = _check_rate_limit(client_ip, is_failed_attempt=False)
     if not ok:
-        await _ws_close_error(ws, 4429, "Too Many Requests", {
-            "type": "error", "meeting_id": meeting_id, "message": f"速率限制：{rate_reason}",
-        })
+        await _ws_close_error(
+            ws,
+            4429,
+            "Too Many Requests",
+            {
+                "type": "error",
+                "meeting_id": meeting_id,
+                "message": f"速率限制：{rate_reason}",
+            },
+        )
         return
 
     await ws.accept()
 
     # 审计：WS 连接建立
     try:
+        from app.context import set_meeting_id, set_user_id, set_user_role, set_username
         from app.observability.audit import audit
-        from app.context import set_user_id, set_username, set_user_role, set_meeting_id
+
         set_user_id(str(user.get("uid") or ""))
         set_username(user.get("username", ""))
         set_user_role(user.get("role", ""))
         set_meeting_id(meeting_id)
-        audit("system.ws_connected", "success", {
-            "from_seq": from_seq,
-            "access_reason": reason,
-        }, ip=client_ip, username=user.get("username"), meeting_id=meeting_id)
+        audit(
+            "system.ws_connected",
+            "success",
+            {
+                "from_seq": from_seq,
+                "access_reason": reason,
+            },
+            ip=client_ip,
+            username=user.get("username"),
+            meeting_id=meeting_id,
+        )
     except Exception:
         pass
 
@@ -255,25 +296,38 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     subscribe_seq = await bus.last_seq(meeting_id)
     snapshot_seq = subscribe_seq
 
+    ev: DomainEvent | None  # 预声明类型，避免 for 循环变量与后续 queue.get() 类型冲突
+
     if from_seq > 0:
         new_events = await bus.replay(meeting_id, from_seq)
         for ev in new_events:
             await _send_event(ws, ev)
         snapshot_seq = await bus.last_seq(meeting_id)
-        await _send_json(ws, {
-            "type": "replay.done", "meeting_id": meeting_id,
-            "events": len(new_events), "from_seq": from_seq,
-            "last_seq": snapshot_seq,
-        })
+        await _send_json(
+            ws,
+            {
+                "type": "replay.done",
+                "meeting_id": meeting_id,
+                "events": len(new_events),
+                "from_seq": from_seq,
+                "last_seq": snapshot_seq,
+            },
+        )
     else:
         state = get_state(meeting_id)
         snapshot_seq = await bus.last_seq(meeting_id)
         snapshot: dict[str, Any] = state.snapshot() if state else {}
         await _send_json(ws, {"type": "snapshot", "meeting_id": meeting_id, "payload": snapshot})
-        await _send_json(ws, {
-            "type": "replay.done", "meeting_id": meeting_id,
-            "events": 0, "from_seq": 0, "last_seq": snapshot_seq,
-        })
+        await _send_json(
+            ws,
+            {
+                "type": "replay.done",
+                "meeting_id": meeting_id,
+                "events": 0,
+                "from_seq": 0,
+                "last_seq": snapshot_seq,
+            },
+        )
 
     drain_cutoff_seq = snapshot_seq if from_seq == 0 else subscribe_seq
     while not queue.empty():
@@ -297,10 +351,14 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                     continue
                 # [M-04 修复] 入站消息速率限制
                 if not inbound_limiter.check():
-                    await _send_json(ws, {
-                        "type": "error", "meeting_id": meeting_id,
-                        "message": f"发送消息过快，限制为每分钟 {WS_MAX_INBOUND_PER_MIN} 条",
-                    })
+                    await _send_json(
+                        ws,
+                        {
+                            "type": "error",
+                            "meeting_id": meeting_id,
+                            "message": f"发送消息过快，限制为每分钟 {WS_MAX_INBOUND_PER_MIN} 条",
+                        },
+                    )
                     continue
                 msg = json.loads(raw)
                 if msg.get("type") == "pong":
@@ -316,10 +374,14 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                             current_state.snapshot().get("owner") if hasattr(current_state, "snapshot") else None
                         )
                         if owner and owner != user.get("username"):
-                            await _send_json(ws, {
-                                "type": "error", "meeting_id": meeting_id,
-                                "message": "仅会议创建者或管理员可发送控制信号",
-                            })
+                            await _send_json(
+                                ws,
+                                {
+                                    "type": "error",
+                                    "meeting_id": meeting_id,
+                                    "message": "仅会议创建者或管理员可发送控制信号",
+                                },
+                            )
                             continue
                     state = get_state(meeting_id)
                     if state is not None:
@@ -328,6 +390,7 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                         # 审计：控制信号
                         try:
                             from app.observability.audit import audit
+
                             sig_action = {
                                 "approve_borrow": "meeting.borrow_approved",
                                 "reject_borrow": "meeting.borrow_rejected",
@@ -336,13 +399,20 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                                 "abort": "meeting.aborted",
                                 "intervene": "meeting.intervened",
                             }.get(signal, "meeting.control")
-                            audit(sig_action, "success", {
-                                "signal": signal,
-                                "payload_keys": list(payload.keys()) if isinstance(payload, dict) else [],
-                            }, username=user.get("username"), meeting_id=meeting_id, ip=client_ip)
+                            audit(
+                                sig_action,
+                                "success",
+                                {
+                                    "signal": signal,
+                                    "payload_keys": list(payload.keys()) if isinstance(payload, dict) else [],
+                                },
+                                username=user.get("username"),
+                                meeting_id=meeting_id,
+                                ip=client_ip,
+                            )
                         except Exception:
                             pass
-                        try:
+                        with contextlib.suppress(Exception):
                             await save_meeting(
                                 meeting_id=meeting_id,
                                 topic=state.topic,
@@ -351,43 +421,65 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                                 created_at=state.created_at,
                                 payload=state.snapshot(),
                             )
-                        except Exception:
-                            pass
-                        try:
-                            await bus.publish(make_event(
-                                "control.signal", meeting_id,
-                                {"signal": signal, "status": state.status.value, "payload": payload},
-                            ))
-                        except Exception:
-                            pass
+                        with contextlib.suppress(Exception):
+                            await bus.publish(
+                                make_event(
+                                    "control.signal",
+                                    meeting_id,
+                                    {"signal": signal, "status": state.status.value, "payload": payload},
+                                )
+                            )
                         try:
                             if signal == "approve_borrow":
-                                await bus.publish(make_event("borrow.approved_by_user", meeting_id, {
-                                    "meeting_id": meeting_id,
-                                    "request_id": payload.get("request_id", ""),
-                                    "pending_borrow_request": None,
-                                    "borrow_frozen": state.borrow_frozen,
-                                }))
+                                await bus.publish(
+                                    make_event(
+                                        "borrow.approved_by_user",
+                                        meeting_id,
+                                        {
+                                            "meeting_id": meeting_id,
+                                            "request_id": payload.get("request_id", ""),
+                                            "pending_borrow_request": None,
+                                            "borrow_frozen": state.borrow_frozen,
+                                        },
+                                    )
+                                )
                             elif signal == "reject_borrow":
-                                await bus.publish(make_event("borrow.rejected_by_user", meeting_id, {
-                                    "meeting_id": meeting_id,
-                                    "request_id": payload.get("request_id", ""),
-                                    "pending_borrow_request": None,
-                                    "reason": payload.get("reason", ""),
-                                    "borrow_frozen": state.borrow_frozen,
-                                }))
+                                await bus.publish(
+                                    make_event(
+                                        "borrow.rejected_by_user",
+                                        meeting_id,
+                                        {
+                                            "meeting_id": meeting_id,
+                                            "request_id": payload.get("request_id", ""),
+                                            "pending_borrow_request": None,
+                                            "reason": payload.get("reason", ""),
+                                            "borrow_frozen": state.borrow_frozen,
+                                        },
+                                    )
+                                )
                             elif signal == "freeze_borrow":
-                                await bus.publish(make_event("borrow.frozen", meeting_id, {
-                                    "meeting_id": meeting_id,
-                                    "pending_borrow_request": None,
-                                    "borrow_frozen": True,
-                                }))
+                                await bus.publish(
+                                    make_event(
+                                        "borrow.frozen",
+                                        meeting_id,
+                                        {
+                                            "meeting_id": meeting_id,
+                                            "pending_borrow_request": None,
+                                            "borrow_frozen": True,
+                                        },
+                                    )
+                                )
                         except Exception:
                             pass
-                        await _send_json(ws, {
-                            "type": "control.ack", "meeting_id": meeting_id,
-                            "signal": signal, "status": state.status.value,
-                        })
+                        await _send_json(
+                            ws,
+                            {
+                                "type": "control.ack",
+                                "meeting_id": meeting_id,
+                                "signal": signal,
+                                "status": state.status.value,
+                            },
+                        )
             except asyncio.TimeoutError:
                 continue
             except WebSocketDisconnect:
@@ -399,16 +491,12 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             await _send_json(ws, {"type": "error", "meeting_id": meeting_id, "message": str(e)})
-        except Exception:
-            pass
     finally:
         heartbeat_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
-        except asyncio.CancelledError:
-            pass
         unsubscribe()
         # 清理出站限流记录
         async with _ws_event_lock:
@@ -416,9 +504,17 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         # 审计：WS 断开
         try:
             from app.observability.audit import audit
-            audit("system.ws_disconnected", "success", {
-                "dropped_events": _dropped_count,
-            }, ip=client_ip, username=user.get("username"), meeting_id=meeting_id)
+
+            audit(
+                "system.ws_disconnected",
+                "success",
+                {
+                    "dropped_events": _dropped_count,
+                },
+                ip=client_ip,
+                username=user.get("username"),
+                meeting_id=meeting_id,
+            )
         except Exception:
             pass
 
@@ -437,18 +533,30 @@ async def system_ws(ws: WebSocket) -> None:
 
     # [H-02 修复] /ws/system 仅管理员可连接（涉及系统级事件广播）
     if user.get("role") != "admin":
-        await _ws_close_error(ws, 4403, "Forbidden", {
-            "type": "error", "message": "仅管理员可连接系统 WS",
-        })
+        await _ws_close_error(
+            ws,
+            4403,
+            "Forbidden",
+            {
+                "type": "error",
+                "message": "仅管理员可连接系统 WS",
+            },
+        )
         logger.warning("WS /ws/system 权限拒绝: user=%s role=%s", user.get("username"), user.get("role"))
         return
 
     client_ip = _ws_client_ip(ws)
     ok, reason = _check_rate_limit(client_ip, is_failed_attempt=False)
     if not ok:
-        await _ws_close_error(ws, 4429, "Too Many Requests", {
-            "type": "error", "message": f"速率限制：{reason}",
-        })
+        await _ws_close_error(
+            ws,
+            4429,
+            "Too Many Requests",
+            {
+                "type": "error",
+                "message": f"速率限制：{reason}",
+            },
+        )
         return
 
     await ws.accept()
@@ -461,8 +569,12 @@ async def system_ws(ws: WebSocket) -> None:
 
     async def _on_event(event: DomainEvent) -> None:
         nonlocal _sys_dropped
-        if event.type.startswith("system.") or event.type.startswith("captcha.") \
-                or event.type.startswith("net_auth.") or event.type.startswith("service."):
+        if (
+            event.type.startswith("system.")
+            or event.type.startswith("captcha.")
+            or event.type.startswith("net_auth.")
+            or event.type.startswith("service.")
+        ):
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
@@ -503,10 +615,13 @@ async def system_ws(ws: WebSocket) -> None:
                 if raw.strip() == "pong":
                     continue
                 if not inbound_limiter.check():
-                    await _send_json(ws, {
-                        "type": "error",
-                        "message": f"发送消息过快，限制为每分钟 60 条",
-                    })
+                    await _send_json(
+                        ws,
+                        {
+                            "type": "error",
+                            "message": "发送消息过快，限制为每分钟 60 条",
+                        },
+                    )
                     continue
                 msg = json.loads(raw) if raw else {}
                 if msg.get("type") == "pong":
@@ -521,10 +636,8 @@ async def system_ws(ws: WebSocket) -> None:
         pass
     finally:
         heartbeat_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
-        except asyncio.CancelledError:
-            pass
         unsubscribe()
         async with _ws_event_lock:
             _ws_event_log.pop(conn_key, None)

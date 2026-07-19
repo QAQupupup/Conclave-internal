@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from app.lazy_asyncio import LazyLock
+
 logger = logging.getLogger("app.tools.captcha_guard")
 
 
@@ -38,6 +40,7 @@ class CaptchaStatus(str, Enum):
 @dataclass
 class CaptchaSession:
     """一个待人工处理的验证码会话"""
+
     session_id: str
     url: str
     captcha_types: list[str]
@@ -116,11 +119,11 @@ class CaptchaGuard:
                 return True
 
             try:
-
                 # 检查必要的二进制是否存在
                 for cmd in ["Xvfb", "x11vnc", "websockify"]:
                     result = await asyncio.create_subprocess_exec(
-                        "which", cmd,
+                        "which",
+                        cmd,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
@@ -134,8 +137,14 @@ class CaptchaGuard:
 
                 # 启动 Xvfb（虚拟 X 服务器）
                 await asyncio.create_subprocess_exec(
-                    "Xvfb", ":99", "-screen", "0", "1280x800x24", "-ac",
-                    "-nolisten", "tcp",
+                    "Xvfb",
+                    ":99",
+                    "-screen",
+                    "0",
+                    "1280x800x24",
+                    "-ac",
+                    "-nolisten",
+                    "tcp",
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
@@ -143,9 +152,18 @@ class CaptchaGuard:
 
                 # 启动 x11vnc（VNC 服务器）
                 await asyncio.create_subprocess_exec(
-                    "x11vnc", "-display", ":99", "-forever", "-nopw",
-                    "-rfbport", "5900", "-shared", "-noxdamage",
-                    "-wait", "50", "-bg",
+                    "x11vnc",
+                    "-display",
+                    ":99",
+                    "-forever",
+                    "-nopw",
+                    "-rfbport",
+                    "5900",
+                    "-shared",
+                    "-noxdamage",
+                    "-wait",
+                    "50",
+                    "-bg",
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
@@ -162,8 +180,11 @@ class CaptchaGuard:
                         break
 
                 await asyncio.create_subprocess_exec(
-                    "websockify", "6080", "localhost:5900",
-                    "--web", novnc_web_dir,
+                    "websockify",
+                    "6080",
+                    "localhost:5900",
+                    "--web",
+                    novnc_web_dir,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
@@ -247,26 +268,32 @@ class CaptchaGuard:
             # 广播 captcha.pending 事件到系统总线
             try:
                 from app.events import bus, make_event
-                await bus.publish(make_event(
-                    "captcha.pending",
-                    meeting_id or "system",
-                    {
-                        "session_id": session_id,
-                        "url": url,
-                        "captcha_types": captcha_types,
-                        "page_title": page_title,
-                        "has_screenshot": bool(screenshot_b64),
-                        "vnc_ready": self._vnc_ready,
-                        "vnc_url": session.snapshot()["vnc_url"] if self._vnc_ready else None,
-                        "timeout": timeout,
-                    },
-                ))
+
+                await bus.publish(
+                    make_event(
+                        "captcha.pending",
+                        meeting_id or "system",
+                        {
+                            "session_id": session_id,
+                            "url": url,
+                            "captcha_types": captcha_types,
+                            "page_title": page_title,
+                            "has_screenshot": bool(screenshot_b64),
+                            "vnc_ready": self._vnc_ready,
+                            "vnc_url": session.snapshot()["vnc_url"] if self._vnc_ready else None,
+                            "timeout": timeout,
+                        },
+                    )
+                )
             except Exception as e:
                 logger.warning("广播 captcha.pending 事件失败: %s", str(e)[:100])
 
             logger.warning(
                 "CAPTCHA 拦截: session=%s url=%s types=%s vnc=%s 等待人工处理...",
-                session_id, url[:60], captcha_types, self._vnc_ready,
+                session_id,
+                url[:60],
+                captcha_types,
+                self._vnc_ready,
             )
 
             # 等待用户处理或超时
@@ -274,17 +301,21 @@ class CaptchaGuard:
                 await asyncio.wait_for(session._resume_event.wait(), timeout=timeout)
                 session.status = CaptchaStatus.RESOLVED
                 session.resolved_at = time.time()
-                logger.info("CAPTCHA 已人工解决: session=%s 耗时%.1fs",
-                           session_id, session.resolved_at - session.created_at)
+                logger.info(
+                    "CAPTCHA 已人工解决: session=%s 耗时%.1fs", session_id, session.resolved_at - session.created_at
+                )
 
                 # 通知前端验证码已解决
                 try:
                     from app.events import bus, make_event
-                    await bus.publish(make_event(
-                        "captcha.resolved",
-                        meeting_id or "system",
-                        {"session_id": session_id},
-                    ))
+
+                    await bus.publish(
+                        make_event(
+                            "captcha.resolved",
+                            meeting_id or "system",
+                            {"session_id": session_id},
+                        )
+                    )
                 except Exception:
                     pass
 
@@ -298,11 +329,14 @@ class CaptchaGuard:
 
                 try:
                     from app.events import bus, make_event
-                    await bus.publish(make_event(
-                        "captcha.timeout",
-                        meeting_id or "system",
-                        {"session_id": session_id},
-                    ))
+
+                    await bus.publish(
+                        make_event(
+                            "captcha.timeout",
+                            meeting_id or "system",
+                            {"session_id": session_id},
+                        )
+                    )
                 except Exception:
                     pass
 
@@ -333,10 +367,7 @@ class CaptchaGuard:
 
     def get_pending_sessions(self) -> list[dict[str, Any]]:
         """获取所有待处理的验证码会话"""
-        return [
-            s.snapshot() for s in self._sessions.values()
-            if s.status == CaptchaStatus.PENDING
-        ]
+        return [s.snapshot() for s in self._sessions.values() if s.status == CaptchaStatus.PENDING]
 
     def get_all_sessions(self) -> list[dict[str, Any]]:
         """获取所有验证码会话"""
@@ -362,7 +393,8 @@ class CaptchaGuard:
         """清理过期会话（默认10分钟前的）"""
         now = time.time()
         to_remove = [
-            sid for sid, s in self._sessions.items()
+            sid
+            for sid, s in self._sessions.items()
             if s.status != CaptchaStatus.PENDING and (now - s.created_at) > max_age
         ]
         for sid in to_remove:
@@ -378,7 +410,7 @@ class CaptchaGuard:
 
 # 全局单例
 _guard_instance: CaptchaGuard | None = None
-_guard_lock = asyncio.Lock()
+_guard_lock = LazyLock()
 
 
 async def get_captcha_guard() -> CaptchaGuard:

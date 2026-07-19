@@ -18,6 +18,7 @@
 - 每个测试前后清理速率限制进程级状态，避免跨测试泄漏
 - 不发起真实网络或数据库调用
 """
+
 from __future__ import annotations
 
 import time
@@ -28,7 +29,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app import middleware as mw
-
 
 # ============================================================================
 # 公共 fixtures
@@ -109,7 +109,7 @@ class TestApiTokenAuth:
         """携带错误 token 应返回 401。"""
         r = client.get("/secure", headers={"Authorization": "Bearer wrong-token"})
         assert r.status_code == 401
-        assert "未授权" in r.json()["detail"]
+        assert "认证失败" in r.json()["detail"]
 
     def test_token_via_query_param_rejected(self, client):
         """[C-04] HTTP 请求不再接受 ?token= 查询参数（防 token 在 URL/日志/Referer 中泄露），应返回 401。
@@ -219,13 +219,10 @@ class TestRateLimit:
         """不同 IP 的请求计数应独立。"""
         monkeypatch.setattr(mw, "_RATE_LIMIT_PER_MIN", 2)
         # IP A 用满额度
-        client.get("/secure", headers={"Authorization": "Bearer secret-test-token",
-                                       "X-Forwarded-For": "1.1.1.1"})
-        client.get("/secure", headers={"Authorization": "Bearer secret-test-token",
-                                       "X-Forwarded-For": "1.1.1.1"})
+        client.get("/secure", headers={"Authorization": "Bearer secret-test-token", "X-Forwarded-For": "1.1.1.1"})
+        client.get("/secure", headers={"Authorization": "Bearer secret-test-token", "X-Forwarded-For": "1.1.1.1"})
         # IP B 仍可访问
-        r = client.get("/secure", headers={"Authorization": "Bearer secret-test-token",
-                                           "X-Forwarded-For": "2.2.2.2"})
+        r = client.get("/secure", headers={"Authorization": "Bearer secret-test-token", "X-Forwarded-For": "2.2.2.2"})
         assert r.status_code == 200
 
 

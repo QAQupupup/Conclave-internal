@@ -1,4 +1,4 @@
-﻿"""
+"""
 Web Search Docker 集成测试（在 Docker 容器内运行，验证 Playwright 搜索真实可用）
 
 运行方式：
@@ -14,18 +14,23 @@ Web Search Docker 集成测试（在 Docker 容器内运行，验证 Playwright 
 6. SSRF 防护是否生效
 7. 并发搜索稳定性
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
-import sys
 import time
-import traceback
 
 import pytest
 
 # 强制使用 playwright 模式
 os.environ.setdefault("CONCLAVE_WEB_SEARCH_MODE", "playwright")
+
+
+# 标准 CI（无外网）默认跳过 web_search 集成测试；
+# 需要验证 Playwright 搜索时设置 CONCLAVE_RUN_WEBSEARCH_TESTS=1
+_run_websearch = os.environ.get("CONCLAVE_RUN_WEBSEARCH_TESTS", "") == "1"
+pytestmark = pytest.mark.skipif(not _run_websearch, reason="需要外网+Playwright 环境，设置 CONCLAVE_RUN_WEBSEARCH_TESTS=1 启用")
 
 
 # ── 测试 1: 基础搜索 ──────────────────────────────────────────
@@ -44,7 +49,7 @@ async def test_web_search_basic():
 
     print(f"  耗时: {elapsed:.1f}s, 结果数: {len(results)}")
     for i, r in enumerate(results):
-        print(f"  [{i+1}] {r.get('title', 'N/A')[:60]}")
+        print(f"  [{i + 1}] {r.get('title', 'N/A')[:60]}")
         print(f"      URL: {r.get('url', 'N/A')[:80]}")
         print(f"      Tier: {r.get('source_tier', '?')}")
 
@@ -68,7 +73,7 @@ async def test_web_search_chinese():
 
     print(f"\n  [test_web_search_chinese] 耗时: {elapsed:.1f}s, 结果数: {len(results)}")
     for i, r in enumerate(results):
-        print(f"  [{i+1}] {r.get('title', 'N/A')[:80]}")
+        print(f"  [{i + 1}] {r.get('title', 'N/A')[:80]}")
         print(f"      URL: {r.get('url', 'N/A')[:80]}")
 
     # v3 改进：中文查询现在翻译为英文，应在 30s 内完成（之前 60s 超时）
@@ -107,7 +112,7 @@ async def test_web_search_session_warmup():
     print(f"  加速比: {first / third:.1f}x" if third > 0 else "")
 
     # 所有查询都应返回结果
-    for q, lang, elapsed, count in results:
+    for q, _lang, _elapsed, count in results:
         assert count > 0, f"'{q[:30]}...' 应返回至少一条结果"
 
 
@@ -173,8 +178,7 @@ async def test_web_search_ssrf_protection():
         content = result.get("content", "")
         error = result.get("error", "")
         blocked = not content
-        print(f"  [{label}] {url} → {'已拦截' if blocked else '⚠ 未拦截'}" +
-              (f" (error: {error})" if error else ""))
+        print(f"  [{label}] {url} → {'已拦截' if blocked else '⚠ 未拦截'}" + (f" (error: {error})" if error else ""))
         assert blocked, f"SSRF: {label} ({url}) 应被拦截"
 
 
@@ -201,11 +205,11 @@ async def test_web_search_concurrent():
             return 0
 
     start = time.monotonic()
-    counts = await asyncio.gather(*[search_one(q, l) for q, l in queries])
+    counts = await asyncio.gather(*[search_one(q, lang_item) for q, lang_item in queries])
     elapsed = time.monotonic() - start
 
     print(f"\n  [test_web_search_concurrent] 耗时: {elapsed:.1f}s")
-    for (q, _), c in zip(queries, counts):
+    for (q, _), c in zip(queries, counts, strict=False):
         print(f"  [{q[:30]}...] → {c} 条结果")
 
     assert all(c > 0 for c in counts), f"并发搜索应全部成功，结果: {counts}"

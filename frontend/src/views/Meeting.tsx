@@ -75,7 +75,7 @@ export default function Meeting() {
     if (id && id !== meeting.currentMeetingId) {
       openMeeting(id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [id]);
 
   // 自动展开当前阶段

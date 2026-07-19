@@ -30,6 +30,7 @@ import { useApp } from '../state/AppContext';
 import { apiGetReportLayout } from '../lib/api';
 import ServiceViewer from '../components/ServiceViewer';
 import PhasedProgress from '../components/PhasedProgress';
+import { useToast } from '../components/Toast';
 
 /* ════════════════════════════════════════════════════════════════
  *  Block 渲染器（15 种 + raw/unknown 兜底）
@@ -38,9 +39,10 @@ import PhasedProgress from '../components/PhasedProgress';
 
 /** 溯源标签 */
 function TraceTag({ trace }: { trace?: string }) {
+  const toast = useToast();
   if (!trace) return null;
   return (
-    <span className="report-trace-tag" onClick={() => alert('跳转到来源: ' + trace)}>
+    <span className="report-trace-tag" onClick={() => toast.show('来源: ' + trace, 'info')}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M9 6l6 6-6 6"/></svg>
       {trace}
     </span>
@@ -373,11 +375,12 @@ function TeamConfigBlock({ data }: { data: any }) {
 }
 
 function AttachmentsBlock({ data }: { data: any }) {
+  const toast = useToast();
   const items: any[] = data?.items || [];
   return (
     <div className="report-attachments">
       {items.map((att, i) => (
-        <div className="report-attachment" key={i} onClick={() => alert('下载 ' + att.filename)}>
+        <div className="report-attachment" key={i} onClick={() => toast.show('准备下载: ' + (att.filename || '附件'), 'info')}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4M5 20h14" /></svg>
           <span>{att.filename || ''}</span>
           <span className="report-attachment-size">{((att.size || 0) / 1024).toFixed(1)}KB</span>
@@ -802,7 +805,7 @@ export default function Report() {
     if (routeId && routeId !== meeting.currentMeetingId) {
       openMeeting(routeId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [routeId]);
 
   /* 进入视图时尝试获取真实布局 */
@@ -831,7 +834,7 @@ export default function Report() {
     const id = meeting.currentMeetingId;
     if (!id) { setRemoteLayout(null); return; }
     fetchLayout(id, currentReportType);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [meeting.currentMeetingId, currentReportType, fetchLayout]);
 
   const handleSwitchType = (id: string) => {

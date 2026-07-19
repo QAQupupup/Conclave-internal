@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.agents.compute import (
     AgentCompute,
@@ -103,6 +104,7 @@ class ToolRegistry:
 
 # ---------- tool_history 裁剪（Phase B-4） ----------
 
+
 def prune_tool_history(
     history: list[ToolResult],
     keep_full: int = 2,
@@ -133,15 +135,17 @@ def prune_tool_history(
     for tr in to_collapse:
         # 将 result 折叠为摘要
         summary = _summarize_tool_result(tr, max_quote_tokens * 4)
-        collapsed.append(ToolResult(
-            tool_name=tr.tool_name,
-            arguments=tr.arguments,
-            success=tr.success,
-            result=summary,  # 摘要替代完整结果
-            error=tr.error,
-            latency_ms=tr.latency_ms,
-            iteration=tr.iteration,
-        ))
+        collapsed.append(
+            ToolResult(
+                tool_name=tr.tool_name,
+                arguments=tr.arguments,
+                success=tr.success,
+                result=summary,  # 摘要替代完整结果
+                error=tr.error,
+                latency_ms=tr.latency_ms,
+                iteration=tr.iteration,
+            )
+        )
 
     return collapsed + to_keep
 
@@ -190,6 +194,7 @@ def _summarize_tool_result(tr: ToolResult, max_chars: int = 400) -> dict[str, An
 
 # ---------- 循环检测 ----------
 
+
 def _is_loop_detected(tool_calls: list[ToolCall], history: list[ToolResult]) -> bool:
     """检测循环：连续两次相同工具+相同参数
 
@@ -212,7 +217,7 @@ def _is_loop_detected(tool_calls: list[ToolCall], history: list[ToolResult]) -> 
         return False
 
     # 逐个比较工具名和参数
-    for call, result in zip(tool_calls, last_results):
+    for call, result in zip(tool_calls, last_results, strict=False):
         if call.tool_name != result.tool_name:
             return False
         if call.arguments != result.arguments:
@@ -222,6 +227,7 @@ def _is_loop_detected(tool_calls: list[ToolCall], history: list[ToolResult]) -> 
 
 
 # ---------- ReAct 循环控制器 ----------
+
 
 class ReactLoop:
     """ReAct 循环控制器：think → act → observe → think
@@ -335,7 +341,8 @@ class ReactLoop:
                 # 记录到 CostTracker
                 try:
                     from app.observability.cost_tracker import get_cost_tracker
-                    get_cost_tracker().record_tool(
+
+                    await get_cost_tracker().record_tool(
                         node=req.stage,
                         tool_name=call.tool_name,
                         latency_ms=result.latency_ms,
@@ -383,6 +390,7 @@ class ReactLoop:
 
 # ---------- 默认工具注册表工厂 ----------
 
+
 def create_default_tool_registry() -> ToolRegistry:
     """创建默认工具注册表（web_search + browser 操作 + workspace 文件/命令工具）
 
@@ -393,13 +401,14 @@ def create_default_tool_registry() -> ToolRegistry:
     # ========== 网络搜索工具 ==========
     async def _web_search(args: dict[str, Any]) -> Any:
         from app.tools import get_web_search
+
         query = args.get("query", "")
         top_k = args.get("top_k", 5)
         tool = get_web_search()
         # 传递可选参数：language, time_range, country, session_key
         kwargs: dict[str, Any] = {}
         for key in ("language", "time_range", "country"):
-            if key in args and args[key]:
+            if args.get(key):
                 kwargs[key] = args[key]
         # 使用 meeting_id 作为 session_key，保证同一会议内搜索复用 Context
         meeting_id = args.get("meeting_id", "")
@@ -423,6 +432,7 @@ def create_default_tool_registry() -> ToolRegistry:
     # web_fetch 工具：直接抓取指定 URL 内容
     async def _web_fetch(args: dict[str, Any]) -> Any:
         from app.tools import get_web_fetch
+
         url = args.get("url", "")
         max_chars = args.get("max_chars", 5000)
         tool = get_web_fetch()
@@ -443,6 +453,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_goto(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         url = str(args.get("url", ""))
         meeting_id = str(args.get("meeting_id", ""))
@@ -457,6 +468,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_extract(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         max_length = int(args.get("max_length", 5000))
@@ -471,6 +483,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_click(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         selector = str(args.get("selector", ""))
@@ -485,6 +498,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_scroll(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         amount = int(args.get("amount", 500))
@@ -499,6 +513,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_evaluate(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         expression = str(args.get("expression", "document.title"))
@@ -514,11 +529,11 @@ def create_default_tool_registry() -> ToolRegistry:
     # ========== 工作区文件/命令工具 ==========
     try:
         from app.tools.workspace_tools import register_workspace_tools
+
         register_workspace_tools(registry)
     except Exception as e:
         import logging
-        logging.getLogger("orchestrator.react_loop").warning(
-            "工作区工具注册失败: %s", str(e)[:200]
-        )
+
+        logging.getLogger("orchestrator.react_loop").warning("工作区工具注册失败: %s", str(e)[:200])
 
     return registry

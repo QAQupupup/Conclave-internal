@@ -52,8 +52,9 @@ def setup_logging(level: str | None = None) -> None:
     root = logging.getLogger()
     root.setLevel(numeric_level)
     # 避免重复 handler（热重载时可能多次调用）
-    if not any(isinstance(h, logging.StreamHandler) and isinstance(h.formatter, logging.Formatter)
-               for h in root.handlers):
+    if not any(
+        isinstance(h, logging.StreamHandler) and isinstance(h.formatter, logging.Formatter) for h in root.handlers
+    ):
         root.addHandler(handler)
     else:
         # 更新已有 handler 的 formatter（确保追踪格式生效）

@@ -4,16 +4,25 @@
 由 SQLAlchemy 在 mapper 配置阶段通过共享 Base 注册表惰性解析，无需导入
 MeetingModel，从而避免循环导入。
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    String, Text, DateTime, ForeignKey, Index,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.db.models.meeting import MeetingModel
 
 
 # ============================================================
@@ -24,8 +33,10 @@ class MessageModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     meeting_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("meetings.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        String(36),
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     agent_role: Mapped[str] = mapped_column(String(50), nullable=False)
     stage: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -33,12 +44,11 @@ class MessageModel(Base):
     claim_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     evidence_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
 
-    meeting: Mapped["MeetingModel"] = relationship(back_populates="messages")
+    meeting: Mapped[MeetingModel] = relationship(back_populates="messages")
 
-    __table_args__ = (
-        Index("idx_messages_meeting", "meeting_id"),
-    )
+    __table_args__ = (Index("idx_messages_meeting", "meeting_id"),)

@@ -142,8 +142,11 @@ def _reset_state():
     - 异步/同步数据库连接池
     """
     import asyncio
+    import contextlib
+    from app.db.engine import dispose_async_engine
     runner_mod._states.clear()
     meetings_mod._running_tasks.clear()
+    meetings_mod._run_locks.clear()
     bus._subs.clear()
     bus._history.clear()
     # 清理 RAG 向量库
@@ -156,11 +159,59 @@ def _reset_state():
     from app.agents.compute import reset_compute
     reset_compute()
     # 清理三层记忆（内存 + PG 表）
+    # 注意：必须先 dispose 旧 engine，避免旧 engine 绑定到已关闭的事件循环导致 "different loop" 错误
     from app.memory.store import memory_store
-    asyncio.run(memory_store.clear())
+    with contextlib.suppress(Exception):
+        dispose_async_engine()
+    with contextlib.suppress(Exception):
+        asyncio.run(memory_store.clear())
+    # asyncio.run 内创建的 engine 绑定到已关闭的临时循环，必须再次 dispose
+    with contextlib.suppress(Exception):
+        dispose_async_engine()
+    # 重置 memory_store 的 _initialized 标志，让 lifespan 中的 init() 重新初始化
+    memory_store._initialized = False
+    # 清理浏览器/Playwright 单例（避免 Lock 绑定到旧循环）
+    with contextlib.suppress(Exception):
+        from app.tools import playwright_search as pw_mod
+        pw_mod._instance = None
+    with contextlib.suppress(Exception):
+        from app.tools import browser_tool as bt_mod
+        bt_mod._pool_instance = None
+        bt_mod._tool_instance = None
+    # 清理 network_security 的 httpx 客户端（绑定到旧循环）
+    with contextlib.suppress(Exception):
+        from app import network_security as ns_mod
+        ns_mod._async_client = None
+    # 清理 captcha_guard 单例
+    with contextlib.suppress(Exception):
+        from app.tools import captcha_guard as cg_mod
+        cg_mod._guard_instance = None
+    # 清理 ws 模块的事件日志
+    with contextlib.suppress(Exception):
+        from app.routers import ws as ws_mod
+        ws_mod._ws_event_log.clear()
+    # 清理 pricing_fetcher 动态缓存
+    with contextlib.suppress(Exception):
+        from app import pricing_fetcher as pf_mod
+        pf_mod._dynamic_pricing.clear()
+        pf_mod._last_fetch_time = 0
+        pf_mod._fetch_started = False
+    # 清理 sandbox 服务状态
+    with contextlib.suppress(Exception):
+        from app import sandbox as sb_mod
+        sb_mod._allocated_ports.clear()
+        sb_mod._running_services.clear()
+        sb_mod._docker_available = None
+        sb_mod._resolved_image = None
+        sb_mod._resolved_named_images.clear()
+    # 清理 web_search 单例（避免 Playwright 实例跨测试泄漏）
+    with contextlib.suppress(Exception):
+        from app import tools as tools_mod
+        tools_mod._instance = None
     yield
     runner_mod._states.clear()
     meetings_mod._running_tasks.clear()
+    meetings_mod._run_locks.clear()
     bus._subs.clear()
     bus._history.clear()
     store_mod._stores.clear()
@@ -179,14 +230,9 @@ def _reset_state():
     except Exception:
         pass
     reset_compute()
-    # 释放异步引擎与同步连接池，避免跨测试连接泄漏
-    try:
-        from app.db.engine import dispose_async_engine
-        from app.db_legacy import close_db_pool
+    # 释放异步引擎，避免跨测试连接泄漏
+    with contextlib.suppress(Exception):
         dispose_async_engine()
-        close_db_pool()
-    except Exception:
-        pass
 
 
 # ---------- 公共 fixture：同步运行会议到完成 ----------

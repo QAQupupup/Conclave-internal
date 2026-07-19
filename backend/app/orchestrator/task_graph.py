@@ -17,8 +17,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from app.logging_config import get_logger
 
@@ -36,6 +37,7 @@ class Task:
     - result: 执行结果（执行后填充）
     - status: pending / running / done / failed
     """
+
     id: str
     name: str
     dependencies: list[str] = field(default_factory=list)
@@ -131,6 +133,7 @@ class TaskScheduler:
 
         for layer_idx, layer in enumerate(layers):
             logger.info("执行第 %d 层（%d 个任务）: %s", layer_idx, len(layer), layer)
+
             # 同层并行
             async def _run_one(tid: str) -> tuple[str, Any]:
                 task = graph.get_task(tid)

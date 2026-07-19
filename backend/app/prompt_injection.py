@@ -7,10 +7,10 @@
    2. 用户输入预清洗（保留语义，去除危险模式）
    3. 输入包裹：在用户文本外加隔离标记，告知 LLM 边界
 """
+
 from __future__ import annotations
 
 import re
-from typing import Tuple
 
 # 已知 prompt injection 模式（中英文）
 _INJECTION_PATTERNS: list[tuple[str, str]] = [
@@ -50,11 +50,13 @@ def detect_injection(text: str) -> list[dict[str, str | int]]:
     for pattern, pid in _INJECTION_PATTERNS:
         m = re.search(pattern, text)
         if m:
-            hits.append({
-                "pattern_id": pid,
-                "match": m.group(0)[:80],
-                "offset": m.start(),
-            })
+            hits.append(
+                {
+                    "pattern_id": pid,
+                    "match": m.group(0)[:80],
+                    "offset": m.start(),
+                }
+            )
     return hits
 
 
@@ -63,7 +65,7 @@ def has_injection(text: str) -> bool:
     return any(re.search(p, text) for p, _ in _INJECTION_PATTERNS)
 
 
-def sanitize_user_input(text: str, *, max_length: int = 8000) -> Tuple[str, list[dict[str, str | int]]]:
+def sanitize_user_input(text: str, *, max_length: int = 8000) -> tuple[str, list[dict[str, str | int]]]:
     """对用户输入做预清洗。
 
     Args:

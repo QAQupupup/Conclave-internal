@@ -576,7 +576,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })();
     const disconnect = connectSystemWs({ onMeetingsChanged: () => { if (!demoMode) refreshBoard(); } });
     return () => { disconnect(); wsRef.current?.disconnect(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [demoMode]);
 
   /* ── elapsed 不再在 context 中每秒更新，由 Meeting 视图基于 startedAt 本地计算 ── */

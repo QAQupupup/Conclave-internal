@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
-
 from conclave_core.anchor import get_charter_anchor, get_full_anchor
 from conclave_core.charter_logic import check_drift
 from conclave_core.conclusion_logic import check_consistency
@@ -22,23 +22,24 @@ from conclave_core.text import (
 
 # 向后兼容：继续导出部分旧符号（这些函数的实现现位于 conclave_core）
 __all__ = [
+    "_ROLE_KEYWORDS",
+    "compress_decisions_to_brief",
     "emit_agent_spoke",
-    "record_drift",
-    "record_message",
-    "run_with_consistency",
-    "resolve_model_for_call",
+    "format_arbitrate_as_text",
+    "format_claims_as_text",
     "get_charter_anchor",
     "get_full_anchor",
-    "worst_confidence",
     "match_role",
-    "_ROLE_KEYWORDS",
-    "format_claims_as_text",
-    "format_arbitrate_as_text",
-    "compress_decisions_to_brief",
+    "record_drift",
+    "record_message",
+    "resolve_model_for_call",
+    "run_with_consistency",
+    "worst_confidence",
 ]
 
 
 # ---- 消息与事件 ----
+
 
 def record_message(
     state: MeetingState,
@@ -59,7 +60,8 @@ def record_message(
         "evidence_refs": evidence_refs or [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    state.messages.append(msg)
+    # [SECURITY-FIX] 使用安全追加方法防止消息列表无限增长
+    state.append_message(msg)
     return msg
 
 
@@ -89,6 +91,7 @@ async def emit_agent_spoke(
 
 # ---- 漂移检查 ----
 
+
 def record_drift(state: MeetingState, role: Role | str, stage: Stage, content: str) -> None:
     """对发言做宪章漂移检查并记录到 drift_log（非阻塞）"""
     if state.charter is None or not content:
@@ -109,13 +112,16 @@ def record_drift(state: MeetingState, role: Role | str, stage: Stage, content: s
 
 # ---- 模型解析 ----
 
+
 def resolve_model_for_call(state: MeetingState, role: str = "", stage: str = "") -> str:
     """从 resolved_models 快照解析当前 LLM 调用应使用的模型"""
     from app.llm_providers import resolve_model_from_snapshot
+
     return resolve_model_from_snapshot(state.resolved_models, agent_role=role, stage=stage)
 
 
 # ---- 一致性自检 ----
+
 
 def _update_trace_consistency(state: MeetingState, start_pos: int, status: str) -> None:
     """更新 trace 中自 start_pos 以来所有记录的 consistency_status"""

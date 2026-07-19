@@ -1,22 +1,24 @@
 # Produce stage node + helpers: _synthesize_evidence_for_produce, _detect_network_level, _scan_artifacts
 from __future__ import annotations
 
+import contextlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.agents.compute import execute_think, build_produce_prompt, ThinkRequest
+from app.agents.compute import build_produce_prompt, execute_think
 from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 
-from ._helpers import _run_with_consistency, _resolve_model_for_call, _emit_agent_spoke
+from ._helpers import _emit_agent_spoke, _resolve_model_for_call, _run_with_consistency
 
 
 def _current_src_loc(depth: int = 1) -> dict[str, Any]:
     """返回当前代码位置（文件路径 + 行号），用于审计日志和降级事件"""
     import inspect
+
     frame = inspect.currentframe()
     if frame is None:
         return {"file": "unknown", "line": 0}
@@ -30,7 +32,7 @@ def _current_src_loc(depth: int = 1) -> dict[str, Any]:
 
 async def _emit_progress(state: MeetingState, step: str, message: str, percent: int = 0) -> None:
     """发送 produce 阶段进度事件到前端"""
-    try:
+    with contextlib.suppress(Exception):
         await bus.publish(
             make_event(
                 "produce.progress",
@@ -43,8 +45,6 @@ async def _emit_progress(state: MeetingState, step: str, message: str, percent: 
                 },
             )
         )
-    except Exception:
-        pass  # 进度事件失败不影响主流程
 
 
 async def _emit_degradation_event(
@@ -115,10 +115,8 @@ async def _emit_degradation_event(
         "call_record": call_record,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    try:
+    with contextlib.suppress(Exception):
         await bus.publish(make_event("produce.degradation", state.meeting_id, payload))
-    except Exception:
-        pass
 
 
 def _detect_network_level(code: str) -> str:
@@ -137,19 +135,26 @@ def _detect_network_level(code: str) -> str:
 
     # L3: 外部 HTTP 请求
     http_indicators = [
-        "import requests", "from requests",
-        "import urllib", "from urllib",
-        "import httpx", "from httpx",
-        "import aiohttp", "from aiohttp",
-        "http://", "https://",
-        "urlopen", "requests.get", "requests.post",
+        "import requests",
+        "from requests",
+        "import urllib",
+        "from urllib",
+        "import httpx",
+        "from httpx",
+        "import aiohttp",
+        "from aiohttp",
+        "http://",
+        "https://",
+        "urlopen",
+        "requests.get",
+        "requests.post",
     ]
     for indicator in http_indicators:
         if indicator in code_lower:
             return "L3"
 
     # L2: pip install
-    if "pip install" in code_lower or "subprocess" in code_lower and "pip" in code_lower:
+    if "pip install" in code_lower or ("subprocess" in code_lower and "pip" in code_lower):
         return "L2"
 
     # L1: 默认纯计算
@@ -168,12 +173,42 @@ def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
     # 支持的文件扩展名（含代码文件）
     supported_exts = {
         # 代码
-        ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".vue", ".java", ".go", ".rs",
-        ".yml", ".yaml", ".toml", ".ini", ".cfg", ".sh", ".bat", ".ps1", ".sql",
+        ".py",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".html",
+        ".css",
+        ".vue",
+        ".java",
+        ".go",
+        ".rs",
+        ".yml",
+        ".yaml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".sh",
+        ".bat",
+        ".ps1",
+        ".sql",
         # 文档/数据
-        ".md", ".txt", ".json", ".csv", ".log", ".pdf", ".doc", ".docx",
+        ".md",
+        ".txt",
+        ".json",
+        ".csv",
+        ".log",
+        ".pdf",
+        ".doc",
+        ".docx",
         # 图片
-        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".webp",
     }
     # 无扩展名但重要的文件
     supported_noext = {"Dockerfile", "Makefile", "README", "LICENSE", ".env", ".gitignore"}
@@ -206,19 +241,16 @@ def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
             continue
         # 附件"path"字段是相对于 workspace 根的路径（便于 API 下载）
         # 找到 workspace 根（即包含 meeting_id 作为其子目录的那个目录）
-        if ws_root.name == meeting_id:
-            rel_path = f"{meeting_id}/{f.name}"
-        elif (ws_root / meeting_id).exists():
-            rel_path = f"{meeting_id}/{f.name}"
-        else:
-            rel_path = f.name
-        attachments.append({
-            "filename": f.name,
-            "path": rel_path,
-            "size": stat.st_size,
-            "ext": f.suffix.lower().lstrip(".") if f.suffix else "",
-            "meeting_id": meeting_id,
-        })
+        rel_path = f"{meeting_id}/{f.name}" if ws_root.name == meeting_id or (ws_root / meeting_id).exists() else f.name
+        attachments.append(
+            {
+                "filename": f.name,
+                "path": rel_path,
+                "size": stat.st_size,
+                "ext": f.suffix.lower().lstrip(".") if f.suffix else "",
+                "meeting_id": meeting_id,
+            }
+        )
     return attachments
 
 
@@ -240,12 +272,14 @@ def _synthesize_evidence_for_produce(state: MeetingState) -> dict[str, Any]:
             if source and source not in evidence_sources:
                 evidence_sources.append(source)
             if quote:
-                evidence_quotes.append({
-                    "quote": quote[:200],
-                    "source": source,
-                    "supports": a.get("supports", "neutral"),
-                    "conflict_id": es.get("conflict_id", ""),
-                })
+                evidence_quotes.append(
+                    {
+                        "quote": quote[:200],
+                        "source": source,
+                        "supports": a.get("supports", "neutral"),
+                        "conflict_id": es.get("conflict_id", ""),
+                    }
+                )
 
     decisions = (state.decision_record or {}).get("decisions", [])
     adopted = (state.decision_record or {}).get("adopted_claims", [])
@@ -271,14 +305,14 @@ async def produce_node(state: MeetingState) -> MeetingState:
     # 设置 trace 上下文
     set_current_trace(state.llm_trace)
     from app.observability.log_bus import log_bus as _lb
+
     _lb.info(
-        f"produce: === 进入produce节点 ==="
-        f" deliverable_type={state.deliverable_type}"
-        f" iteration={state.iteration_count}",
+        f"produce: === 进入produce节点 === deliverable_type={state.deliverable_type} iteration={state.iteration_count}",
         logger="orchestrator.nodes.produce",
     )
     # 根据产出类型选择模板
     from app.agents.prompts import get_produce_template
+
     template = get_produce_template(state.deliverable_type)
 
     # === 迭代反馈注入 ===
@@ -297,15 +331,17 @@ async def produce_node(state: MeetingState) -> MeetingState:
             extra={"quality_score": state.quality_score},
         )
         await _emit_progress(state, "iterating", f"第{state.iteration_count}轮质量迭代改进中...", 5)
-        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                f"[质量迭代 第{state.iteration_count}轮] 根据质量评估反馈进行改进...")
+        await _emit_agent_spoke(
+            state, Role.ENGINEER, Stage.PRODUCE, f"[质量迭代 第{state.iteration_count}轮] 根据质量评估反馈进行改进..."
+        )
 
     # === 跨会议演进：加载引用会议的baseline代码 ===
     baseline_anchor = ""
     if state.reference_meeting_ids and state.deliverable_type == "deployable_service":
         try:
             from app.config import settings as _settings
-            baseline_projects = []
+
+            baseline_projects: list[dict[str, Any]] = []
             for ref_id in state.reference_meeting_ids[-1:]:  # 只取最近一个引用作为baseline，避免prompt过大
                 ref_ws = Path(_settings.workspace_root) / ref_id
                 if not ref_ws.exists():
@@ -313,7 +349,18 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 # 扫描baseline项目结构
                 ref_files = {}
                 for f in ref_ws.rglob("*"):
-                    if f.is_file() and f.suffix in (".py", ".tsx", ".ts", ".json", ".yml", ".yaml", ".md", ".css", ".html", ".txt"):
+                    if f.is_file() and f.suffix in (
+                        ".py",
+                        ".tsx",
+                        ".ts",
+                        ".json",
+                        ".yml",
+                        ".yaml",
+                        ".md",
+                        ".css",
+                        ".html",
+                        ".txt",
+                    ):
                         rel = str(f.relative_to(ref_ws)).replace("\\", "/")
                         if any(skip in rel for skip in ["__pycache__", ".pyc", "node_modules", "__init__.py"]):
                             continue
@@ -325,12 +372,14 @@ async def produce_node(state: MeetingState) -> MeetingState:
                             pass
                 if ref_files:
                     file_list = list(ref_files.keys())[:20]
-                    baseline_projects.append({
-                        "meeting_id": ref_id,
-                        "file_count": len(ref_files),
-                        "files": ref_files,
-                        "file_list": file_list,
-                    })
+                    baseline_projects.append(
+                        {
+                            "meeting_id": ref_id,
+                            "file_count": len(ref_files),
+                            "files": ref_files,
+                            "file_list": file_list,
+                        }
+                    )
                     _lb.info(
                         f"produce: 加载baseline会议 {ref_id}，{len(ref_files)}个文件",
                         logger="orchestrator.nodes.produce",
@@ -349,8 +398,9 @@ async def produce_node(state: MeetingState) -> MeetingState:
                             baseline_anchor += f"\n=== {fname} ===\n{fcontent}\n"
                             injected_count += 1
                     baseline_anchor += "\n请在上述代码基础上进行改进和扩展，保持已有功能完整性，添加新的需求功能。\n"
-                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                        f"已加载{len(baseline_projects)}个历史项目版本作为演进基线")
+                await _emit_agent_spoke(
+                    state, Role.ENGINEER, Stage.PRODUCE, f"已加载{len(baseline_projects)}个历史项目版本作为演进基线"
+                )
         except Exception as be:
             _lb.warning(f"produce: 加载baseline失败: {be}", logger="orchestrator.nodes.produce")
 
@@ -402,12 +452,14 @@ async def produce_node(state: MeetingState) -> MeetingState:
     # === 分阶段生成管线：deployable_service 使用7阶段子管线替代单次LLM调用 ===
     if state.deliverable_type == "deployable_service":
         from app.orchestrator.phased_generation import generate_deployable_service_phased
+
         _lb.info(
             "produce: 启用分阶段生成管线（工业级服务生成升级）",
             logger="orchestrator.nodes.produce",
         )
-        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                "启动分阶段代码生成管线：规划→规格→测试→骨架→模块→前端→整合")
+        await _emit_agent_spoke(
+            state, Role.ENGINEER, Stage.PRODUCE, "启动分阶段代码生成管线：规划→规格→测试→骨架→模块→前端→整合"
+        )
 
         # 合并anchor上下文
         extra_anchor_parts = []
@@ -415,7 +467,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             extra_anchor_parts.append(iteration_anchor)
         if baseline_anchor:
             extra_anchor_parts.append(baseline_anchor)
-        extra_anchor = "\n".join(extra_anchor_parts) if extra_anchor_parts else ""
+        "\n".join(extra_anchor_parts) if extra_anchor_parts else ""
 
         async def _phased_progress(stage_name: str, message: str, percent: int) -> None:
             """子阶段进度回调"""
@@ -446,12 +498,14 @@ async def produce_node(state: MeetingState) -> MeetingState:
             await _emit_progress(state, "phased_done", "分阶段生成完成", 95)
         except Exception as pe:
             import traceback
+
             _lb.error(
                 f"produce: 分阶段生成失败，回退到单次LLM调用: {pe}\n{traceback.format_exc()}",
                 logger="orchestrator.nodes.produce",
             )
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    f"分阶段生成异常({type(pe).__name__})，回退到传统生成模式")
+            await _emit_agent_spoke(
+                state, Role.ENGINEER, Stage.PRODUCE, f"分阶段生成异常({type(pe).__name__})，回退到传统生成模式"
+            )
             # 回退到原来的单次LLM调用
             result, confidence = await _run_with_consistency(state, "produce", call_fn)
 
@@ -481,8 +535,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
         _confidence_before = confidence
         loc = _current_src_loc(depth=1)
         _lb.warning(
-            f"produce: LLM 返回内容不完整 — 空字段: {_empty_fields} "
-            f"(触发位置: {loc['file']}:{loc['line']})",
+            f"produce: LLM 返回内容不完整 — 空字段: {_empty_fields} (触发位置: {loc['file']}:{loc['line']})",
             logger="orchestrator.nodes.produce",
             extra={
                 "deliverable_type": state.deliverable_type,
@@ -510,9 +563,16 @@ async def produce_node(state: MeetingState) -> MeetingState:
             confidence_after=confidence,
         )
 
-    _lb.info("produce: LLM 调用+一致性检查完成", logger="orchestrator.nodes.produce",
-             extra={"confidence": confidence, "deliverable_type": state.deliverable_type,
-                    "has_prd": bool(result.get("prd")), "openapi_len": len(result.get("openapi", ""))})
+    _lb.info(
+        "produce: LLM 调用+一致性检查完成",
+        logger="orchestrator.nodes.produce",
+        extra={
+            "confidence": confidence,
+            "deliverable_type": state.deliverable_type,
+            "has_prd": bool(result.get("prd")),
+            "openapi_len": len(result.get("openapi", "")),
+        },
+    )
 
     # 发送进度：LLM生成完成，开始后续处理
     await _emit_progress(state, "llm_done", "大模型生成完成，正在处理产出内容...", 40)
@@ -534,45 +594,70 @@ async def produce_node(state: MeetingState) -> MeetingState:
         summary = (
             f"产出完成：{prd_title}\n"
             f"产品目标：{prd.get('goal', 'N/A')[:200]}\n"
-            f"OpenAPI 规范：{len(openapi)} 字符"
-            + (f"，包含 {api_count} 个 API 端点" if api_count else "")
+            f"OpenAPI 规范：{len(openapi)} 字符" + (f"，包含 {api_count} 个 API 端点" if api_count else "")
         )
         await _emit_agent_spoke(state, Role.PRODUCT_ARCHITECT, Stage.PRODUCE, summary)
         if openapi:
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    f"已生成 OpenAPI 规范（{len(openapi)} 字符），包含完整的接口定义和数据模型。")
+            await _emit_agent_spoke(
+                state,
+                Role.ENGINEER,
+                Stage.PRODUCE,
+                f"已生成 OpenAPI 规范（{len(openapi)} 字符），包含完整的接口定义和数据模型。",
+            )
     elif state.deliverable_type in ("code_analysis", "data_science"):
         code_data = result.get("code_analysis", {})
         code_len = len(code_data.get("code", ""))
         if code_len == 0:
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    "代码生成失败：LLM 返回的代码为空，跳过沙箱执行。产出物可能不完整，建议重试。")
+            await _emit_agent_spoke(
+                state,
+                Role.ENGINEER,
+                Stage.PRODUCE,
+                "代码生成失败：LLM 返回的代码为空，跳过沙箱执行。产出物可能不完整，建议重试。",
+            )
         else:
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    f"代码生成完成：{code_len} 字符，准备沙箱执行验证...")
+            await _emit_agent_spoke(
+                state, Role.ENGINEER, Stage.PRODUCE, f"代码生成完成：{code_len} 字符，准备沙箱执行验证..."
+            )
     elif state.deliverable_type == "tested_system":
         ts_data = result.get("tested_system", {})
         main_len = len(ts_data.get("main_code", ""))
         test_len = len(ts_data.get("test_code", ""))
         if main_len == 0 and test_len == 0:
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    "代码生成失败：LLM 返回的主代码和测试代码均为空，跳过测试执行。产出物可能不完整，建议重试。")
+            await _emit_agent_spoke(
+                state,
+                Role.ENGINEER,
+                Stage.PRODUCE,
+                "代码生成失败：LLM 返回的主代码和测试代码均为空，跳过测试执行。产出物可能不完整，建议重试。",
+            )
         else:
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    f"系统代码和测试已生成：主代码 {main_len} 字符，测试代码 {test_len} 字符，准备运行测试...")
+            await _emit_agent_spoke(
+                state,
+                Role.ENGINEER,
+                Stage.PRODUCE,
+                f"系统代码和测试已生成：主代码 {main_len} 字符，测试代码 {test_len} 字符，准备运行测试...",
+            )
     elif state.deliverable_type == "deployable_service":
         ds_data = result.get("deployable_service", {})
         app_len = len(ds_data.get("app_code", ""))
         if app_len == 0:
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    "代码生成失败：LLM 返回的应用代码为空，跳过代码审查和部署。产出物可能不完整，建议重试。")
+            await _emit_agent_spoke(
+                state,
+                Role.ENGINEER,
+                Stage.PRODUCE,
+                "代码生成失败：LLM 返回的应用代码为空，跳过代码审查和部署。产出物可能不完整，建议重试。",
+            )
         else:
-            await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                    f"可部署服务代码已生成：应用代码 {app_len} 字符，开始代码审查和Docker部署...")
+            await _emit_agent_spoke(
+                state,
+                Role.ENGINEER,
+                Stage.PRODUCE,
+                f"可部署服务代码已生成：应用代码 {app_len} 字符，开始代码审查和Docker部署...",
+            )
     elif state.deliverable_type == "design_doc":
         dd = result.get("design_doc", {})
-        await _emit_agent_spoke(state, Role.PRODUCT_ARCHITECT, Stage.PRODUCE,
-                                f"设计文档已生成：{dd.get('title', '未命名')}")
+        await _emit_agent_spoke(
+            state, Role.PRODUCT_ARCHITECT, Stage.PRODUCE, f"设计文档已生成：{dd.get('title', '未命名')}"
+        )
     elif state.deliverable_type == "comprehensive":
         await _emit_agent_spoke(state, Role.MODERATOR, Stage.PRODUCE, "综合产出已生成。")
     elif state.deliverable_type == "research_report":
@@ -580,49 +665,65 @@ async def produce_node(state: MeetingState) -> MeetingState:
     elif state.deliverable_type == "business_report":
         await _emit_agent_spoke(state, Role.MODERATOR, Stage.PRODUCE, "商业分析报告已生成。")
     else:
-        await _emit_agent_spoke(state, Role.MODERATOR, Stage.PRODUCE,
-                                f"产出物生成完成（类型：{state.deliverable_type}）。")
+        await _emit_agent_spoke(
+            state, Role.MODERATOR, Stage.PRODUCE, f"产出物生成完成（类型：{state.deliverable_type}）。"
+        )
 
     # 代码执行类产出：调用沙箱执行代码
     if state.deliverable_type in ("code_analysis", "data_science"):
         code_data = result.get("code_analysis") or {}
         code = code_data.get("code", "")
         if code:
-            from app.sandbox import run_python, SANDBOX_IMAGE_DATASCIENCE
-            from app.orchestrator.refine_loop import refine_python_code, _summarize_task
+            from app.orchestrator.refine_loop import _summarize_task, refine_python_code
+            from app.sandbox import SANDBOX_IMAGE_DATASCIENCE, run_python
+
             os.environ.get("CONCLAVE_WORKSPACE_DIR", "")
             # [CON-24 修复] 用 config.settings.workspace_root 作为持久化工作区根
             from app.config import settings
+
             ws_root = Path(settings.workspace_root) / state.meeting_id
             ws_root.mkdir(parents=True, exist_ok=True)
             try:
                 # code_analysis 模板更可能需要数据分析库，使用数据科学镜像
                 # 根据代码内容判断网络级别
                 net_level = _detect_network_level(code)
+
                 async def _run(code, level=net_level):
-                    r = await run_python(code, ws_root, timeout=30,
-                                         image=SANDBOX_IMAGE_DATASCIENCE,
-                                         network_level=level)
+                    r = await run_python(
+                        code, ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE, network_level=level
+                    )
                     return r.to_dict()
+
                 task_summary = _summarize_task("code_analysis", result)
                 refined = await refine_python_code(
-                    code, task_summary, _run, max_rounds=5,
-                    meeting_id=state.meeting_id, stage="produce",
+                    code,
+                    task_summary,
+                    _run,
+                    max_rounds=5,
+                    meeting_id=state.meeting_id,
+                    stage="produce",
                     detected_level=net_level,
                 )
                 # 网络授权获批后用新级别重试
                 if refined.get("need_retry_with_level"):
                     new_level = refined["need_retry_with_level"]
-                    _lb.info(f"produce: 网络授权获批 level={new_level}，重新执行代码",
-                             logger="orchestrator.nodes.produce")
+                    _lb.info(
+                        f"produce: 网络授权获批 level={new_level}，重新执行代码", logger="orchestrator.nodes.produce"
+                    )
+
                     async def _run_approved(code):
-                        r = await run_python(code, ws_root, timeout=30,
-                                             image=SANDBOX_IMAGE_DATASCIENCE,
-                                             network_level=new_level)
+                        r = await run_python(
+                            code, ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE, network_level=new_level
+                        )
                         return r.to_dict()
+
                     refined = await refine_python_code(
-                        refined["code"], task_summary, _run_approved, max_rounds=3,
-                        meeting_id=state.meeting_id, stage="produce",
+                        refined["code"],
+                        task_summary,
+                        _run_approved,
+                        max_rounds=3,
+                        meeting_id=state.meeting_id,
+                        stage="produce",
                         detected_level=new_level,
                     )
                 code_data["code"] = refined["code"]
@@ -638,17 +739,16 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 exec_result = refined.get("execution", {})
                 if exec_result.get("exit_code") == 0:
                     out_preview = (exec_result.get("stdout", "") or "")[:300]
-                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                            f"代码执行成功。输出预览：\n{out_preview}")
+                    await _emit_agent_spoke(
+                        state, Role.ENGINEER, Stage.PRODUCE, f"代码执行成功。输出预览：\n{out_preview}"
+                    )
                 else:
                     err_preview = (exec_result.get("stderr", "") or exec_result.get("error", ""))[:300]
-                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                            f"代码执行遇到问题：{err_preview}")
+                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"代码执行遇到问题：{err_preview}")
             except Exception as e:
                 state.artifact["code_analysis"] = code_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}
-                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                        f"代码执行异常：{str(e)[:200]}")
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"代码执行异常：{str(e)[:200]}")
         else:
             state.artifact["code_analysis"] = code_data
 
@@ -657,10 +757,11 @@ async def produce_node(state: MeetingState) -> MeetingState:
         main_code = ts_data.get("main_code", "")
         test_code = ts_data.get("test_code", "")
         if test_code:
-            from app.sandbox import run_command, SANDBOX_IMAGE_DATASCIENCE
-            from app.orchestrator.refine_loop import refine_python_code, _summarize_task
             # [CON-24 修复] 用持久化工作区
             from app.config import settings
+            from app.orchestrator.refine_loop import _summarize_task, refine_python_code
+            from app.sandbox import SANDBOX_IMAGE_DATASCIENCE, run_command
+
             ws_root = Path(settings.workspace_root) / state.meeting_id
             ws_root.mkdir(parents=True, exist_ok=True)
             ws_root.mkdir(parents=True, exist_ok=True)
@@ -673,36 +774,53 @@ async def produce_node(state: MeetingState) -> MeetingState:
                     main_file.write_text(main_code, encoding="utf-8")
                 # tested_system 模板更可能需要数据分析库，使用数据科学镜像
                 net_level = _detect_network_level(test_code)
+
                 async def _run_tests(code, level=net_level):
                     test_file.write_text(code, encoding="utf-8")
                     r = await run_command(
                         "python -m pytest test_generated.py -v",
-                        ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE,
+                        ws_root,
+                        timeout=30,
+                        image=SANDBOX_IMAGE_DATASCIENCE,
                         network_level=level,
                     )
                     return r.to_dict()
+
                 task_summary = _summarize_task("tested_system", result)
                 refined = await refine_python_code(
-                    test_code, task_summary, _run_tests, max_rounds=5,
-                    meeting_id=state.meeting_id, stage="produce",
+                    test_code,
+                    task_summary,
+                    _run_tests,
+                    max_rounds=5,
+                    meeting_id=state.meeting_id,
+                    stage="produce",
                     detected_level=net_level,
                 )
                 # 网络授权获批后用新级别重试
                 if refined.get("need_retry_with_level"):
                     new_level = refined["need_retry_with_level"]
-                    _lb.info(f"produce: 网络授权获批 level={new_level}，重新执行测试",
-                             logger="orchestrator.nodes.produce")
+                    _lb.info(
+                        f"produce: 网络授权获批 level={new_level}，重新执行测试", logger="orchestrator.nodes.produce"
+                    )
+
                     async def _run_tests_approved(code):
                         test_file.write_text(code, encoding="utf-8")
                         r = await run_command(
                             "python -m pytest test_generated.py -v",
-                            ws_root, timeout=30, image=SANDBOX_IMAGE_DATASCIENCE,
+                            ws_root,
+                            timeout=30,
+                            image=SANDBOX_IMAGE_DATASCIENCE,
                             network_level=new_level,
                         )
                         return r.to_dict()
+
                     refined = await refine_python_code(
-                        refined["code"], task_summary, _run_tests_approved, max_rounds=3,
-                        meeting_id=state.meeting_id, stage="produce",
+                        refined["code"],
+                        task_summary,
+                        _run_tests_approved,
+                        max_rounds=3,
+                        meeting_id=state.meeting_id,
+                        stage="produce",
                         detected_level=new_level,
                     )
                 ts_data["test_code"] = refined["code"]
@@ -718,17 +836,21 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 test_result = refined.get("execution", {})
                 if refined.get("success") and test_result.get("exit_code") == 0:
                     out_preview = (test_result.get("stdout", "") or "")[:300]
-                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                            f"测试全部通过（{refined.get('rounds_used', 1)}轮修复）。结果预览：\n{out_preview}")
+                    await _emit_agent_spoke(
+                        state,
+                        Role.ENGINEER,
+                        Stage.PRODUCE,
+                        f"测试全部通过（{refined.get('rounds_used', 1)}轮修复）。结果预览：\n{out_preview}",
+                    )
                 else:
                     err_preview = (test_result.get("stderr", "") or test_result.get("error", ""))[:300]
-                    await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                            f"测试执行完成，但存在问题：{err_preview}")
+                    await _emit_agent_spoke(
+                        state, Role.ENGINEER, Stage.PRODUCE, f"测试执行完成，但存在问题：{err_preview}"
+                    )
             except Exception as e:
                 state.artifact["tested_system"] = ts_data
                 state.artifact["execution"] = {"error": str(e), "exit_code": -1}
-                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                        f"测试执行异常：{str(e)[:200]}")
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"测试执行异常：{str(e)[:200]}")
         else:
             state.artifact["tested_system"] = ts_data
 
@@ -738,6 +860,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
         # 兼容新旧格式：构造DeployableServiceArtifact实例来获取有效文件树
         try:
             from app.agents.schemas import DeployableServiceArtifact
+
             ds_artifact = DeployableServiceArtifact(**ds_data)
         except Exception:
             # 降级：手动构造
@@ -774,11 +897,16 @@ async def produce_node(state: MeetingState) -> MeetingState:
             extra={"complexity": complexity, "files": total_files, "lines": total_lines},
         )
         await _emit_progress(state, "writing_files", f"正在写入 {total_files} 个项目文件（{total_lines}行代码）...", 20)
-        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                f"代码生成完成：复杂度 {complexity}，{total_files} 个文件，{total_lines} 行代码")
+        await _emit_agent_spoke(
+            state,
+            Role.ENGINEER,
+            Stage.PRODUCE,
+            f"代码生成完成：复杂度 {complexity}，{total_files} 个文件，{total_lines} 行代码",
+        )
 
         if effective_tree:
             from app.config import settings
+
             ws_root = Path(settings.workspace_root) / state.meeting_id
 
             # === 写入完整项目树 ===
@@ -810,15 +938,14 @@ async def produce_node(state: MeetingState) -> MeetingState:
             if main_py.exists():
                 main_content = main_py.read_text(encoding="utf-8")
                 if "/health" not in main_content:
-                    health_code = """
+                    health_code = f"""
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "%s"}
-""" % ds_artifact.title
+    return {{"status": "ok", "service": "{ds_artifact.title}"}}
+"""
                     if "app = create_app()" in main_content:
-                        main_content = main_content.replace("app = create_app()",
-                                                            "app = create_app()\n" + health_code)
+                        main_content = main_content.replace("app = create_app()", "app = create_app()\n" + health_code)
                     else:
                         main_content += "\n" + health_code
                     main_py.write_text(main_content, encoding="utf-8")
@@ -827,18 +954,32 @@ async def health_check():
             dockerfile_path = ws_root / "Dockerfile"
             if dockerfile_path.exists():
                 df_content = dockerfile_path.read_text(encoding="utf-8")
-                if "HEALTHCHECK" in df_content and "curl" not in df_content and "wget" not in df_content:
+                if (
+                    "HEALTHCHECK" in df_content
+                    and "curl" not in df_content
+                    and "wget" not in df_content
+                    and "CMD " in df_content
+                ):
                     # 在CMD之前插入curl安装
-                    if "CMD " in df_content:
-                        df_content = df_content.replace(
-                            "CMD ",
-                            "RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n\nCMD ",
-                            1
-                        )
-                        dockerfile_path.write_text(df_content, encoding="utf-8")
+                    df_content = df_content.replace(
+                        "CMD ",
+                        "RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n\nCMD ",
+                        1,
+                    )
+                    dockerfile_path.write_text(df_content, encoding="utf-8")
 
             # 3. 确保有__init__.py文件
-            for pkg_dir in ["app", "app/routers", "app/schemas", "app/services", "app/dao", "app/db", "app/db/models", "app/domain", "app/core"]:
+            for pkg_dir in [
+                "app",
+                "app/routers",
+                "app/schemas",
+                "app/services",
+                "app/dao",
+                "app/db",
+                "app/db/models",
+                "app/domain",
+                "app/core",
+            ]:
                 init_file = ws_root / pkg_dir / "__init__.py"
                 if (ws_root / pkg_dir).exists() and not init_file.exists():
                     init_file.write_text("", encoding="utf-8")
@@ -847,20 +988,25 @@ async def health_check():
             review_passed = True
             review_summary = ""
             review_rounds = 0
-            test_results = None
+            test_results: dict[str, Any] | None = None
 
             await _emit_progress(state, "code_review", "正在审查关键代码文件...", 40)
 
             # 收集关键文件用于审查
             key_files_content = {}
-            key_files_review = ["app/main.py", "app/config.py", "app/db/engine.py", "requirements.txt", "Dockerfile", "docker-compose.yml"]
+            key_files_review = [
+                "app/main.py",
+                "app/config.py",
+                "app/db/engine.py",
+                "requirements.txt",
+                "Dockerfile",
+                "docker-compose.yml",
+            ]
             for kf in key_files_review:
                 kf_path = ws_root / kf
                 if kf_path.exists():
-                    try:
+                    with contextlib.suppress(Exception):
                         key_files_content[kf] = kf_path.read_text(encoding="utf-8")
-                    except Exception:
-                        pass
 
             # 收集所有router/schema/dao文件做简要检查
             for subdir in ["app/routers", "app/schemas", "app/services", "app/dao", "app/db/models"]:
@@ -869,16 +1015,15 @@ async def health_check():
                     for f in subdir_path.iterdir():
                         if f.suffix == ".py" and f.name != "__init__.py":
                             rel = str(f.relative_to(ws_root)).replace("\\", "/")
-                            try:
+                            with contextlib.suppress(Exception):
                                 key_files_content[rel] = f.read_text(encoding="utf-8")[:3000]  # 截断审查
-                            except Exception:
-                                pass
 
             # 运行Python语法检查
             syntax_errors = []
             for rel_path, content in effective_tree.items():
                 if rel_path.endswith(".py") and isinstance(content, str) and len(content) > 10:
                     import ast as _ast
+
                     try:
                         _ast.parse(content)
                     except SyntaxError as se:
@@ -893,15 +1038,16 @@ async def health_check():
                 review_summary = f"语法检查通过（{files_written}个文件）"
 
             # === 沙箱部署 ===
-            deployment_info = {"ok": False, "error": "not_attempted"}
+            deployment_info: dict[str, Any] = {"ok": False, "error": "not_attempted"}
             try:
                 from app.sandbox import deploy_service
+
                 _lb.info("produce: 开始沙箱部署服务...", logger="orchestrator.nodes.produce")
                 await _emit_progress(state, "deploying", "正在Docker沙箱中构建和部署服务...", 60)
 
                 deploy_result = await deploy_service(
                     meeting_id=state.meeting_id,
-                    workspace_root=settings.workspace_root,
+                    workspace_root=Path(settings.workspace_root),
                     container_port=service_port,
                     health_path="/health",
                     wait_seconds=300,
@@ -919,13 +1065,16 @@ async def health_check():
                     },
                 )
 
-                await bus.publish(make_event(
-                    "service.deployed" if deploy_result.ok else "service.deploy_failed",
-                    state.meeting_id,
-                    deployment_info,
-                ))
+                await bus.publish(
+                    make_event(
+                        "service.deployed" if deploy_result.ok else "service.deploy_failed",
+                        state.meeting_id,
+                        deployment_info,
+                    )
+                )
             except Exception as deploy_err:
                 import traceback
+
                 _lb.error(f"produce: 服务部署异常: {deploy_err}", logger="orchestrator.nodes.produce")
                 deployment_info = {"ok": False, "error": str(deploy_err), "logs": traceback.format_exc()[:2000]}
 
@@ -935,29 +1084,39 @@ async def health_check():
                 await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, "部署成功，正在运行自动化测试...")
                 try:
                     from app.sandbox import run_tests_in_container
+
                     test_results = await run_tests_in_container(
                         meeting_id=state.meeting_id,
-                        workspace_root=settings.workspace_root,
+                        workspace_root=Path(settings.workspace_root),
                     )
                     _lb.info(
-                        f"produce: 测试结果: passed={test_results.get('passed',0)}, failed={test_results.get('failed',0)}",
+                        f"produce: 测试结果: passed={test_results.get('passed', 0)}, failed={test_results.get('failed', 0)}",
                         logger="orchestrator.nodes.produce",
                     )
                     await bus.publish(make_event("service.tested", state.meeting_id, test_results))
                     if test_results.get("failed", 0) > 0:
                         failed_tests = test_results.get("failures", [])[:3]
-                        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                                f"测试完成：{test_results.get('passed',0)}通过，{test_results.get('failed',0)}失败。"
-                                                f"失败用例: {'; '.join(failed_tests)}")
+                        await _emit_agent_spoke(
+                            state,
+                            Role.ENGINEER,
+                            Stage.PRODUCE,
+                            f"测试完成：{test_results.get('passed', 0)}通过，{test_results.get('failed', 0)}失败。"
+                            f"失败用例: {'; '.join(failed_tests)}",
+                        )
                     else:
-                        await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                                f"全部 {test_results.get('passed', 0)} 个测试通过 ✅")
+                        await _emit_agent_spoke(
+                            state, Role.ENGINEER, Stage.PRODUCE, f"全部 {test_results.get('passed', 0)} 个测试通过 ✅"
+                        )
                 except Exception as test_err:
                     _lb.warning(f"produce: 测试执行异常: {test_err}", logger="orchestrator.nodes.produce")
                     test_results = {"passed": 0, "failed": 0, "error": str(test_err)}
             elif deployment_info.get("ok") and not ds_artifact.test_tree:
-                test_results = {"passed": 0, "failed": 0, "note": "no_tests_generated",
-                                "warning": "未生成测试文件，质量门禁无法完全验证"}
+                test_results = {
+                    "passed": 0,
+                    "failed": 0,
+                    "note": "no_tests_generated",
+                    "warning": "未生成测试文件，质量门禁无法完全验证",
+                }
                 _lb.warning("produce: 部署成功但未生成测试文件", logger="orchestrator.nodes.produce")
 
             # === 汇总产出物信息 ===
@@ -984,9 +1143,11 @@ async def health_check():
 
             # 判断整体成功：部署成功 + (无测试或测试通过)
             deploy_ok = deployment_info.get("ok", False)
-            tests_pass = (test_results is None or
-                          test_results.get("failed", 0) == 0 or
-                          test_results.get("note") == "no_tests_generated")
+            tests_pass = (
+                test_results is None
+                or test_results.get("failed", 0) == 0
+                or test_results.get("note") == "no_tests_generated"
+            )
             overall_ok = deploy_ok and review_passed and tests_pass
 
             file_list_summary = list(effective_tree.keys())[:20]
@@ -1001,15 +1162,17 @@ async def health_check():
                     f"技术栈: {', '.join(ds_artifact.tech_stack[:8])}\n"
                     f"代码审查: {'通过' if review_passed else '未通过'}\n"
                     f"服务部署: {'成功 ✅ ' + deployment_info.get('access_url', '') if deploy_ok else '失败: ' + deployment_info.get('error', '未知错误')}\n"
-                    f"测试结果: " + (
+                    f"测试结果: "
+                    + (
                         f"{test_results.get('passed', 0)}通过/{test_results.get('failed', 0)}失败"
                         if test_results and test_results.get("note") != "no_tests_generated"
                         else "未生成测试文件"
-                    ) + "\n"
+                    )
+                    + "\n"
                     f"文件列表: {', '.join(file_list_summary)}"
                 ),
-                "stderr": (deployment_info.get("logs", "") if not deploy_ok else "") +
-                          ("\n" + (test_results.get("error", "") if test_results and test_results.get("error") else "")),
+                "stderr": (deployment_info.get("logs", "") if not deploy_ok else "")
+                + ("\n" + (test_results.get("error", "") if test_results and test_results.get("error") else "")),
                 "sandboxed": True,
                 "files": list(effective_tree.keys()),
             }
@@ -1019,12 +1182,10 @@ async def health_check():
                 test_msg = ""
                 if test_results and test_results.get("failed", 0) == 0 and test_results.get("passed", 0) > 0:
                     test_msg = f"，{test_results['passed']}个测试全部通过"
-                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                        f"服务部署成功！访问地址：{url}{test_msg}")
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"服务部署成功！访问地址：{url}{test_msg}")
             else:
                 err = deployment_info.get("error", "未知错误")
-                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE,
-                                        f"服务部署失败：{err}")
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"服务部署失败：{err}")
         else:
             state.artifact["deployable_service"] = ds_data
     else:
@@ -1038,6 +1199,7 @@ async def health_check():
     # 前端只需按 spec 渲染，不再硬编码任何模板
     try:
         from app.report_layout import build_report_layout
+
         meeting_meta = {
             "meeting_id": state.meeting_id,
             "topic": state.clarified_topic or state.topic,
@@ -1078,8 +1240,10 @@ async def health_check():
         state.artifact["report_layout"] = layout_spec
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning(f"[report_layout] 生成布局 spec 失败，前端将回退到本地 demo: {e}")
 
     # 统一收尾：锁定结论、发布事件、漂移检查、设置终态
     from app.orchestrator.stage_runners import run_produce
+
     return await run_produce(state, confidence)

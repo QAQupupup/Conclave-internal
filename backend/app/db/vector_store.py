@@ -3,6 +3,7 @@
 定义向量检索的标准契约，当前由 Qdrant 实现，未来可切换为 pgvector 或 seekdb。
 业务代码仅依赖此接口，不感知具体实现。
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

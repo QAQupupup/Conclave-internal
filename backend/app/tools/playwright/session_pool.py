@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -45,13 +46,10 @@ class SessionPool:
                 _ = ctx.pages
                 return ctx
             except Exception:
-                logger.warning("SessionPool: session_key=%s 的 Context 已失效，重建...",
-                               session_key[:20])
+                logger.warning("SessionPool: session_key=%s 的 Context 已失效，重建...", session_key[:20])
                 # 尝试关闭旧 Context（best-effort）
-                try:
+                with contextlib.suppress(Exception):
                     await ctx.close()
-                except Exception:
-                    pass
                 del self._contexts[session_key]
 
         async with self._lock:
@@ -62,20 +60,18 @@ class SessionPool:
             ctx = await browser.new_context(**ctx_kwargs)
             await ctx.add_init_script(_STEALTH_JS)
             self._contexts[session_key] = ctx
-            logger.info("SessionPool: 创建新 Context (session_key=%s, total=%d)",
-                        session_key[:20], len(self._contexts))
+            logger.info("SessionPool: 创建新 Context (session_key=%s, total=%d)", session_key[:20], len(self._contexts))
             return ctx
 
     async def invalidate(self, session_key: str) -> None:
         """标记 session_key 的 Context 为无效，下次 get() 将创建新的。"""
         if session_key in self._contexts:
             ctx = self._contexts.pop(session_key)
-            try:
+            with contextlib.suppress(Exception):
                 await ctx.close()
-            except Exception:
-                pass
-            logger.info("SessionPool: 销毁 Context (session_key=%s, remaining=%d)",
-                        session_key[:20], len(self._contexts))
+            logger.info(
+                "SessionPool: 销毁 Context (session_key=%s, remaining=%d)", session_key[:20], len(self._contexts)
+            )
 
     def clear(self) -> None:
         """清空所有 Context 引用（不关闭，浏览器已重启时 context 自动失效）。"""
@@ -91,9 +87,7 @@ class SessionPool:
     async def cleanup(self) -> None:
         """关闭所有 Context 并清空。"""
         for key in list(self._contexts.keys()):
-            try:
+            with contextlib.suppress(Exception):
                 await self._contexts[key].close()
-            except Exception:
-                pass
         self._contexts.clear()
         logger.info("SessionPool: 已清理全部 Context")

@@ -5,6 +5,7 @@ batch_delete_meetings 内部调用本文件内的 soft_delete_meeting / hard_del
 无需跨文件 import。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
 import json
@@ -23,30 +24,55 @@ async def save_meeting(
     stage: str,
     created_at: datetime,
     payload: dict[str, Any],
+    owner_username: str | None = None,
 ) -> None:
     """upsert 会议记录，payload 存 JSON"""
     async with async_session_factory() as session:
-        await session.execute(
-            text(
-                """
-                INSERT INTO meetings (id, topic, status, stage, created_at, payload)
-                VALUES (:meeting_id, :topic, :status, :stage, :created_at, :payload)
-                ON CONFLICT(id) DO UPDATE SET
-                    topic=excluded.topic,
-                    status=excluded.status,
-                    stage=excluded.stage,
-                    payload=excluded.payload
-                """
-            ),
-            {
-                "meeting_id": meeting_id,
-                "topic": topic,
-                "status": status,
-                "stage": stage,
-                "created_at": created_at.isoformat(),
-                "payload": json.dumps(payload, ensure_ascii=False, default=str),
-            },
-        )
+        if owner_username is not None:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO meetings (id, topic, owner_username, status, stage, created_at, payload)
+                    VALUES (:meeting_id, :topic, :owner_username, :status, :stage, :created_at, :payload)
+                    ON CONFLICT(id) DO UPDATE SET
+                        topic=excluded.topic,
+                        status=excluded.status,
+                        stage=excluded.stage,
+                        payload=excluded.payload
+                    """
+                ),
+                {
+                    "meeting_id": meeting_id,
+                    "topic": topic,
+                    "owner_username": owner_username,
+                    "status": status,
+                    "stage": stage,
+                    "created_at": created_at.isoformat(),
+                    "payload": json.dumps(payload, ensure_ascii=False, default=str),
+                },
+            )
+        else:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO meetings (id, topic, status, stage, created_at, payload)
+                    VALUES (:meeting_id, :topic, :status, :stage, :created_at, :payload)
+                    ON CONFLICT(id) DO UPDATE SET
+                        topic=excluded.topic,
+                        status=excluded.status,
+                        stage=excluded.stage,
+                        payload=excluded.payload
+                    """
+                ),
+                {
+                    "meeting_id": meeting_id,
+                    "topic": topic,
+                    "status": status,
+                    "stage": stage,
+                    "created_at": created_at.isoformat(),
+                    "payload": json.dumps(payload, ensure_ascii=False, default=str),
+                },
+            )
         await session.commit()
 
 
@@ -69,9 +95,7 @@ async def list_meetings(include_deleted: bool = False) -> list[dict[str, Any]]:
     """列出全部会议。默认排除软删除（status='deleted'）的记录。"""
     async with async_session_factory() as session:
         if include_deleted:
-            result = await session.execute(
-                text("SELECT * FROM meetings ORDER BY created_at DESC")
-            )
+            result = await session.execute(text("SELECT * FROM meetings ORDER BY created_at DESC"))
         else:
             result = await session.execute(
                 text("SELECT * FROM meetings WHERE status != 'deleted' ORDER BY created_at DESC")
@@ -228,9 +252,7 @@ def _extract_artifact_summary(artifact: dict[str, Any] | None) -> str:
 async def recover_running_meetings() -> list[dict[str, Any]]:
     """查找状态为 running 的会议（用于崩溃恢复）"""
     async with async_session_factory() as session:
-        result = await session.execute(
-            text("SELECT * FROM meetings WHERE status = 'running'")
-        )
+        result = await session.execute(text("SELECT * FROM meetings WHERE status = 'running'"))
         rows = result.mappings().all()
         return [dict(row) for row in rows]
 
@@ -317,9 +339,7 @@ async def restore_meeting(meeting_id: str) -> bool:
         return True
 
 
-async def batch_delete_meetings(
-    meeting_ids: list[str], mode: str = "soft"
-) -> dict[str, list[str]]:
+async def batch_delete_meetings(meeting_ids: list[str], mode: str = "soft") -> dict[str, list[str]]:
     """批量删除会议。
 
     - mode=soft：软删除，保留数据

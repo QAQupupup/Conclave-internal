@@ -9,6 +9,7 @@
 - 代码运行复用 sandbox.run_python（Docker 沙箱隔离）
 - 工具接受 meeting_id 参数实现会议间文件隔离
 """
+
 from __future__ import annotations
 
 import os
@@ -47,7 +48,7 @@ def _resolve_path(rel_path: str, meeting_id: str | None = None) -> Path:
     try:
         target.relative_to(base)
     except ValueError:
-        raise ValueError(f"路径越界：{rel_path} 不在工作区内")
+        raise ValueError(f"路径越界：{rel_path} 不在工作区内") from None
     return target
 
 
@@ -58,6 +59,7 @@ def _truncate(data: str, max_len: int = MAX_OUTPUT) -> str:
 
 
 # ---- 文件系统工具 ----
+
 
 async def tool_list_files(args: dict[str, Any]) -> dict[str, Any]:
     """列出工作区目录内容"""
@@ -90,12 +92,14 @@ async def tool_list_files(args: dict[str, Any]) -> dict[str, Any]:
             continue
         is_dir = child.is_dir()
         rel = str(child.relative_to(WORKSPACE_ROOT)).replace("\\", "/")
-        items.append({
-            "name": child.name,
-            "path": rel,
-            "type": "directory" if is_dir else "file",
-            "size": stat.st_size if not is_dir else 0,
-        })
+        items.append(
+            {
+                "name": child.name,
+                "path": rel,
+                "type": "directory" if is_dir else "file",
+                "size": stat.st_size if not is_dir else 0,
+            }
+        )
 
     return {
         "success": True,
@@ -181,6 +185,7 @@ async def tool_write_file(args: dict[str, Any]) -> dict[str, Any]:
 
 # ---- 命令执行工具 ----
 
+
 async def tool_run_command(args: dict[str, Any]) -> dict[str, Any]:
     """在沙箱中执行 Shell 命令"""
     command = str(args.get("command", ""))
@@ -213,7 +218,9 @@ async def tool_run_command(args: dict[str, Any]) -> dict[str, Any]:
 
     try:
         result = await sandbox_run_command(
-            command, work_dir, timeout,
+            command,
+            work_dir,
+            timeout,
             network_level=network_level,  # type: ignore[arg-type]
         )
     except TimeoutError:
@@ -251,7 +258,9 @@ async def tool_run_python(args: dict[str, Any]) -> dict[str, Any]:
 
     try:
         result = await sandbox_run_python(
-            code, work_dir, timeout,
+            code,
+            work_dir,
+            timeout,
             network_level=network_level,  # type: ignore[arg-type]
         )
     except TimeoutError:
@@ -279,16 +288,19 @@ async def tool_install_package(args: dict[str, Any]) -> dict[str, Any]:
 
     # 安全检查：只允许包名，不允许额外参数（防注入）
     import re
-    if not re.match(r'^[a-zA-Z0-9_\-][a-zA-Z0-9_\-.=<>~!,\[\]]*$', package):
+
+    if not re.match(r"^[a-zA-Z0-9_\-][a-zA-Z0-9_\-.=<>~!,\[\]]*$", package):
         return {"success": False, "error": f"无效的包名: {package}"}
 
     command = f"pip install {package}"
-    return await tool_run_command({
-        "command": command,
-        "meeting_id": meeting_id,
-        "network_level": "L2",
-        "timeout": 120,
-    })
+    return await tool_run_command(
+        {
+            "command": command,
+            "meeting_id": meeting_id,
+            "network_level": "L2",
+            "timeout": 120,
+        }
+    )
 
 
 def register_workspace_tools(registry: Any) -> None:
@@ -306,8 +318,7 @@ def register_workspace_tools(registry: Any) -> None:
 
     registry.register(
         "fs.read",
-        "读取工作区中文件的内容。返回文件文本内容（UTF-8编码）。"
-        "用于查看已有代码、配置文件、输出结果等。",
+        "读取工作区中文件的内容。返回文件文本内容（UTF-8编码）。用于查看已有代码、配置文件、输出结果等。",
         tool_read_file,
         {
             "path": "str（必填，文件相对路径，如 'src/main.py'）",
@@ -318,8 +329,7 @@ def register_workspace_tools(registry: Any) -> None:
 
     registry.register(
         "fs.write",
-        "创建或覆盖写入文件。自动创建不存在的父目录。"
-        "用于创建代码文件、配置文件、保存输出结果等。",
+        "创建或覆盖写入文件。自动创建不存在的父目录。用于创建代码文件、配置文件、保存输出结果等。",
         tool_write_file,
         {
             "path": "str（必填，文件相对路径，如 'src/main.py'）",
@@ -357,8 +367,7 @@ def register_workspace_tools(registry: Any) -> None:
 
     registry.register(
         "pip.install",
-        "安装 Python 依赖包（pip install）。在限网沙箱中执行，只允许从 PyPI 安装。"
-        "用于运行代码前安装需要的第三方库。",
+        "安装 Python 依赖包（pip install）。在限网沙箱中执行，只允许从 PyPI 安装。用于运行代码前安装需要的第三方库。",
         tool_install_package,
         {
             "package": "str（必填，包名，如 'requests', 'pandas>=2.0', 'flask==3.0'）",

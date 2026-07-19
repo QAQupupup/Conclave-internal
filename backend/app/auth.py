@@ -8,9 +8,11 @@
 - 向后兼容旧版 dev token（CONCLAVE_API_TOKEN 环境变量）
 - 向后兼容旧密码哈希（260_000 次迭代仍可验证，新密码自动升级为 600_000 次）
 """
+
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -21,7 +23,7 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import text
 
@@ -59,7 +61,7 @@ def _ensure_jwt_secret() -> str:
     secret_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".jwt_secret")
     try:
         if os.path.exists(secret_path):
-            with open(secret_path, "r", encoding="utf-8") as f:
+            with open(secret_path, encoding="utf-8") as f:
                 JWT_SECRET = f.read().strip()
                 if JWT_SECRET:
                     return JWT_SECRET
@@ -81,7 +83,8 @@ def _ensure_jwt_secret() -> str:
 
 # ---- 密码哈希 ----
 
-def hash_password(password: str, salt: Optional[bytes] = None, iterations: int = PBKDF2_ITERATIONS) -> str:
+
+def hash_password(password: str, salt: bytes | None = None, iterations: int = PBKDF2_ITERATIONS) -> str:
     """PBKDF2-HMAC-SHA256 密码哈希，返回格式：pbkdf2_sha256$iterations$salt_b64$hash_b64
 
     [H-04 修复] 默认使用 600,000 次迭代；验证时从存储的哈希中读取实际迭代次数，
@@ -126,6 +129,7 @@ def verify_password(password: str, stored_hash: str) -> tuple[bool, bool]:
 
 # ---- JWT ----
 
+
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
@@ -137,7 +141,7 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data)
 
 
-def create_jwt(payload: dict[str, Any], expires_in: Optional[int] = None) -> str:
+def create_jwt(payload: dict[str, Any], expires_in: int | None = None) -> str:
     """创建 JWT token
 
     [H-05 修复] 自动添加 iss/aud/jti/iat/exp 标准声明：
@@ -165,7 +169,7 @@ def create_jwt(payload: dict[str, Any], expires_in: Optional[int] = None) -> str
     return f"{h_b64}.{p_b64}.{s_b64}"
 
 
-def verify_jwt(token: str) -> Optional[dict[str, Any]]:
+def verify_jwt(token: str) -> dict[str, Any] | None:
     """验证 JWT，返回 payload 或 None
 
     [H-05 修复] 严格验证 iss 和 aud 声明，防止跨环境 token 重用。
@@ -198,7 +202,7 @@ def verify_jwt(token: str) -> Optional[dict[str, Any]]:
             else:
                 logger.warning("JWT aud 声明不匹配: expected=%s, got=%s", JWT_AUDIENCE, aud)
                 return None
-        return claims
+        return claims  # type: ignore[no-any-return]
     except Exception:
         return None
 
@@ -228,9 +232,7 @@ async def _init_users_table() -> None:
                 """
             )
         )
-        await session.execute(
-            text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
-        )
+        await session.execute(text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
         await session.commit()
 
 
@@ -259,7 +261,7 @@ async def _load_users_from_db() -> None:
             }
 
 
-async def _create_user_in_db(username: str, password_hash: str, role: str, display_name: str) -> Optional[dict]:
+async def _create_user_in_db(username: str, password_hash: str, role: str, display_name: str) -> dict | None:
     """在数据库中创建用户"""
     async with async_session_factory() as session:
         try:
@@ -344,7 +346,8 @@ async def init_auth() -> None:
                 "Creating default admin user: username=%s %s",
                 DEFAULT_ADMIN_USERNAME,
                 "(USING DEFAULT PASSWORD 'admin123' - SET CONCLAVE_ADMIN_PASSWORD IN PRODUCTION!)"
-                if using_default_pw else "(custom password from env)",
+                if using_default_pw
+                else "(custom password from env)",
             )
             pw_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
             user = await _create_user_in_db(
@@ -357,7 +360,7 @@ async def init_auth() -> None:
                 _users_cache[DEFAULT_ADMIN_USERNAME] = user
 
 
-async def authenticate_user(username: str, password: str) -> Optional[dict]:
+async def authenticate_user(username: str, password: str) -> dict | None:
     """验证用户名密码，返回用户信息（不含密码哈希）或 None
 
     [H-04 修复] 登录成功后自动将旧迭代次数的密码哈希升级到新标准。
@@ -372,10 +375,8 @@ async def authenticate_user(username: str, password: str) -> Optional[dict]:
     if not valid:
         return None
     # 更新最后登录时间
-    try:
+    with contextlib.suppress(Exception):
         await _update_last_login(username)
-    except Exception:
-        pass
     # 透明升级密码哈希（旧迭代次数 → 新迭代次数）
     if needs_rehash:
         try:
@@ -388,7 +389,7 @@ async def authenticate_user(username: str, password: str) -> Optional[dict]:
     return {k: v for k, v in user.items() if k != "password_hash"}
 
 
-def get_user_by_username(username: str) -> Optional[dict]:
+def get_user_by_username(username: str) -> dict | None:
     with _users_lock:
         user = _users_cache.get(username)
     if not user:
@@ -398,24 +399,29 @@ def get_user_by_username(username: str) -> Optional[dict]:
 
 def require_role(required_role: str):
     """FastAPI 依赖：要求用户具有指定角色（admin 自动拥有所有权限）"""
-    def _dep(user: dict = _get_current_user_dep) -> dict:
+
+    def _dep(user: dict = _get_current_user_dep) -> dict:  # type: ignore[assignment]
         if user.get("role") != "admin" and user.get("role") != required_role:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=403, detail=f"权限不足：需要 {required_role} 角色")
         return user
+
     return _dep
 
 
 def create_access_token(user: dict) -> str:
     """为用户创建 JWT access token"""
-    return create_jwt({
-        "sub": user["username"],
-        "role": user.get("role", "user"),
-        "uid": user.get("id"),
-    })
+    return create_jwt(
+        {
+            "sub": user["username"],
+            "role": user.get("role", "user"),
+            "uid": user.get("id"),
+        }
+    )
 
 
-def decode_token(token: str) -> Optional[dict]:
+def decode_token(token: str) -> dict | None:
     """验证并解码 token，返回 {username, role, uid, jti, ...} 或 None"""
     claims = verify_jwt(token)
     if not claims:
@@ -432,12 +438,14 @@ def decode_token(token: str) -> Optional[dict]:
 def _get_current_user_dep():
     """占位依赖，实际由 middleware 注入 request.state.auth_user。
     这里不做实际工作，仅用于路由签名。"""
-    from fastapi import Request, HTTPException
+    from fastapi import HTTPException, Request
+
     def _inner(request: Request) -> dict:
         user = getattr(request.state, "auth_user", None)
         if not user:
             raise HTTPException(status_code=401, detail="未授权")
-        return user
+        return user  # type: ignore[no-any-return]
+
     return _inner
 
 

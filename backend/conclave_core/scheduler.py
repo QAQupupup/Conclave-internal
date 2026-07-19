@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 
 @dataclass
 class SubTask:
     """子任务节点"""
+
     id: str
     stage: str
     role: str
@@ -23,6 +25,7 @@ class SubTask:
 @dataclass
 class ExecutionPlan:
     """执行计划 = DAG"""
+
     tasks: list[SubTask] = field(default_factory=list)
 
     def topological_layers(self) -> list[list[SubTask]]:
@@ -64,7 +67,7 @@ class Scheduler:
         for layer in plan.topological_layers():
             coros = [self._run_task(t, shared_state, results, depth=0) for t in layer]
             layer_results = await asyncio.gather(*coros, return_exceptions=True)
-            for t, res in zip(layer, layer_results):
+            for t, res in zip(layer, layer_results, strict=False):
                 if isinstance(res, Exception):
                     results[t.id] = {"success": False, "error": str(res)}
                 else:
@@ -94,14 +97,16 @@ class Scheduler:
     def _build_sub_plan(self, parent_id: str, sub_tasks: list[dict[str, Any]]) -> ExecutionPlan:
         tasks = []
         for st in sub_tasks:
-            tasks.append(SubTask(
-                id=f"{parent_id}:{st.get('id', str(uuid.uuid4())[:6])}",
-                stage=st.get("stage", "produce"),
-                role=st.get("role", "engineer"),
-                description=st.get("description", ""),
-                dependencies=[f"{parent_id}:{dep}" for dep in st.get("dependencies", [])],
-                payload=st.get("payload", {}),
-            ))
+            tasks.append(
+                SubTask(
+                    id=f"{parent_id}:{st.get('id', str(uuid.uuid4())[:6])}",
+                    stage=st.get("stage", "produce"),
+                    role=st.get("role", "engineer"),
+                    description=st.get("description", ""),
+                    dependencies=[f"{parent_id}:{dep}" for dep in st.get("dependencies", [])],
+                    payload=st.get("payload", {}),
+                )
+            )
         return ExecutionPlan(tasks=tasks)
 
     @staticmethod

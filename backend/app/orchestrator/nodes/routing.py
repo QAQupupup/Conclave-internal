@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.config import settings
 from app.models import MeetingState, Stage
+
 from ._helpers import _resolve_model_for_call
 
 
@@ -10,14 +11,26 @@ def _resolve_model_for_routing(state: MeetingState) -> str:
     """解析元认知 Agent 使用的模型（轻量调用，不指定角色/阶段覆盖）"""
     return _resolve_model_for_call(state, role="meta_cognition", stage="meta")
 
+
 # 阶段跳转规则（元认知 Agent 的输出约束）
 # 防止无限循环和无效跳转
 _VALID_NEXT_STAGES: dict[Stage, set[Stage]] = {
     Stage.CLARIFY: {Stage.INTRA_TEAM, Stage.PRODUCE},
     Stage.INTRA_TEAM: {Stage.INTRA_TEAM, Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},
-    Stage.CROSS_TEAM: {Stage.INTRA_TEAM, Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},  # +回退INTRA_TEAM
+    Stage.CROSS_TEAM: {
+        Stage.INTRA_TEAM,
+        Stage.CROSS_TEAM,
+        Stage.EVIDENCE_CHECK,
+        Stage.ARBITRATE,
+        Stage.PRODUCE,
+    },  # +回退INTRA_TEAM
     Stage.EVIDENCE_CHECK: {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},  # +回退CROSS_TEAM
-    Stage.ARBITRATE: {Stage.EVIDENCE_CHECK, Stage.CROSS_TEAM, Stage.ARBITRATE, Stage.PRODUCE},  # +回退EVIDENCE_CHECK/CROSS_TEAM
+    Stage.ARBITRATE: {
+        Stage.EVIDENCE_CHECK,
+        Stage.CROSS_TEAM,
+        Stage.ARBITRATE,
+        Stage.PRODUCE,
+    },  # +回退EVIDENCE_CHECK/CROSS_TEAM
     Stage.PRODUCE: set(),  # 终态
 }
 
@@ -37,15 +50,15 @@ def _get_loop_count(state: MeetingState, stage: Stage) -> int:
     """获取某阶段的循环计数"""
     if not hasattr(state, _STAGE_LOOP_KEY):
         setattr(state, _STAGE_LOOP_KEY, {})
-    counts = getattr(state, _STAGE_LOOP_KEY)
-    return counts.get(stage.value, 0)
+    counts: dict[str, int] = getattr(state, _STAGE_LOOP_KEY)
+    return int(counts.get(stage.value, 0))
 
 
 def _inc_loop_count(state: MeetingState, stage: Stage) -> None:
     """递增某阶段的循环计数"""
     if not hasattr(state, _STAGE_LOOP_KEY):
         setattr(state, _STAGE_LOOP_KEY, {})
-    counts = getattr(state, _STAGE_LOOP_KEY)
+    counts: dict[str, int] = getattr(state, _STAGE_LOOP_KEY)
     counts[stage.value] = counts.get(stage.value, 0) + 1
 
 
@@ -71,8 +84,7 @@ def _build_state_summary(state: MeetingState) -> str:
     if state.decision_record:
         parts.append("已有裁决记录")
     # 注入消息
-    unprocessed = [inj for inj in state.injected_messages
-                   if inj.get("signal") == "inject" and not inj.get("rejected")]
+    unprocessed = [inj for inj in state.injected_messages if inj.get("signal") == "inject" and not inj.get("rejected")]
     if unprocessed:
         parts.append(f"未处理用户注入: {len(unprocessed)} 条")
     # 置信度
@@ -105,6 +117,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
     loop_count = _get_loop_count(state, current)
     if loop_count >= max_loops:
         from conclave_core.state import next_stage as _ns
+
         forced_next = _ns(current, state.flow_plan)
         if forced_next and forced_next in valid_next:
             # 推进到管线中的下一个阶段（非PRODUCE），给后续阶段发言机会
@@ -151,13 +164,13 @@ async def decide_next_stage(state: MeetingState) -> Stage:
                 valid_next = forced_no_produce
 
     # 标准辩论：无冲突时跳过 evidence_check（cross_team后直接arbitrate）
-    if state.debate_depth == "standard" and current == Stage.CROSS_TEAM:
-        if not state.conflicts:
-            return Stage.ARBITRATE if Stage.ARBITRATE in valid_next else Stage.PRODUCE
+    if state.debate_depth == "standard" and current == Stage.CROSS_TEAM and not state.conflicts:
+        return Stage.ARBITRATE if Stage.ARBITRATE in valid_next else Stage.PRODUCE
 
     # 调用 LLM 做元认知决策
     try:
-        from app.agents.compute import execute_think, ThinkRequest
+        from app.agents.compute import ThinkRequest, execute_think
+
         summary = _build_state_summary(state)
         valid_stages_str = ", ".join(s.value for s in valid_next)
 
@@ -187,18 +200,21 @@ async def decide_next_stage(state: MeetingState) -> Stage:
             f"只输出一个阶段名称（小写英文），不要任何其他内容。"
         )
 
-        resp = await execute_think(ThinkRequest(
-            agent_role="meta_cognition",
-            stage="meta",
-            prompt=prompt,
-            schema_hint="meta_next_stage",
-            temperature=0,
-            seed=settings.llm_seed,
-            model=_resolve_model_for_routing(state),
-        ))
+        resp = await execute_think(
+            ThinkRequest(
+                agent_role="meta_cognition",
+                stage="meta",
+                prompt=prompt,
+                schema_hint="meta_next_stage",
+                temperature=0,
+                seed=settings.llm_seed,
+                model=_resolve_model_for_routing(state),
+            )
+        )
 
-        next_stage_str = (resp.result.get("next_stage", "") if isinstance(resp.result, dict)
-                          else str(resp.result)).strip().lower()
+        next_stage_str = (
+            (resp.result.get("next_stage", "") if isinstance(resp.result, dict) else str(resp.result)).strip().lower()
+        )
 
         # 验证输出
         for stage in Stage:
@@ -207,6 +223,7 @@ async def decide_next_stage(state: MeetingState) -> Stage:
 
         # 回退：按固定顺序前进
         from conclave_core.state import next_stage as _ns
+
         fallback = _ns(current, state.flow_plan)
         if fallback and fallback in valid_next:
             return fallback
@@ -216,4 +233,5 @@ async def decide_next_stage(state: MeetingState) -> Stage:
 
     # 最终回退
     from conclave_core.state import next_stage as _ns
+
     return _ns(current, state.flow_plan) or Stage.PRODUCE

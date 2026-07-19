@@ -4,6 +4,7 @@
 密钥从 CONCLAVE_SECRET_KEY 环境变量派生；若未设置则首次启动时自动生成
 并存入数据目录（.secret_key 文件），确保重启后密钥一致。
 """
+
 from __future__ import annotations
 
 import base64
@@ -63,7 +64,7 @@ def encrypt_key(plaintext: str) -> str:
     if not plaintext:
         return ""
     f = _get_fernet()
-    return f.encrypt(plaintext.encode("utf-8")).decode("ascii")
+    return f.encrypt(plaintext.encode("utf-8")).decode("ascii")  # type: ignore[no-any-return]
 
 
 def decrypt_key(encrypted: str) -> str:
@@ -72,13 +73,14 @@ def decrypt_key(encrypted: str) -> str:
         return ""
     f = _get_fernet()
     try:
-        return f.decrypt(encrypted.encode("ascii")).decode("utf-8")
+        return f.decrypt(encrypted.encode("ascii")).decode("utf-8")  # type: ignore[no-any-return]
     except Exception as e:
         logger.error("API Key 解密失败: %s", str(e)[:100])
         return ""
 
 
 # ---- CRUD 操作 ----
+
 
 async def save_api_key(
     provider: str,
@@ -107,6 +109,7 @@ async def save_api_key(
             existing.base_url = base_url
             existing.is_default = is_default
             from datetime import datetime, timezone
+
             existing.updated_at = datetime.now(timezone.utc)
         else:
             record = ApiKeyModel(
@@ -135,6 +138,7 @@ async def save_api_key(
     # 同步更新内存中的 PROVIDERS 配置
     try:
         from app.llm_providers import PROVIDERS
+
         if provider in PROVIDERS:
             PROVIDERS[provider].api_key = api_key
             if base_url:
@@ -156,25 +160,25 @@ async def list_api_keys() -> list[dict[str, Any]]:
     from sqlalchemy import select
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name)
-        )
+        result = await session.execute(select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name))
         records = result.scalars().all()
 
     keys = []
     for r in records:
         plain = decrypt_key(r.encrypted_key)
         masked = _mask_key(plain)
-        keys.append({
-            "id": r.id,
-            "provider": r.provider,
-            "name": r.name,
-            "key_masked": masked,
-            "base_url": r.base_url,
-            "is_default": r.is_default,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-        })
+        keys.append(
+            {
+                "id": r.id,
+                "provider": r.provider,
+                "name": r.name,
+                "key_masked": masked,
+                "base_url": r.base_url,
+                "is_default": r.is_default,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+        )
     return keys
 
 
@@ -208,7 +212,7 @@ async def delete_api_key(provider: str, name: str = "default") -> bool:
             )
         )
         await session.commit()
-        return result.rowcount > 0
+        return result.rowcount > 0  # type: ignore[no-any-return]
 
 
 async def load_keys_to_providers() -> int:
@@ -218,13 +222,12 @@ async def load_keys_to_providers() -> int:
         加载的 Key 数量
     """
     from sqlalchemy import select
+
     from app.llm_providers import PROVIDERS
 
     try:
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(ApiKeyModel).where(ApiKeyModel.is_default.is_(True))
-            )
+            result = await session.execute(select(ApiKeyModel).where(ApiKeyModel.is_default.is_(True)))
             defaults = result.scalars().all()
 
         count = 0
@@ -237,7 +240,7 @@ async def load_keys_to_providers() -> int:
                 count += 1
 
         if count > 0:
-            logger.info("从数据库加载了 %d 个 API Key 到 Provider 配置", count)
+            logger.info(f"从数据库加载了 {count} 个 API Key 到 Provider 配置", logger="services.key_store")
         return count
     except Exception as e:
         logger.warning("加载持久化 API Key 失败: %s", str(e)[:200])

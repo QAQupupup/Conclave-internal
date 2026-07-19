@@ -2,10 +2,12 @@
 
 支持多种连接方式：本地 unix socket、TCP、TCP+TLS、SSH 密钥、SSH 密码、Docker Context。
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, JSON
+
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -13,6 +15,7 @@ from app.db.base import Base
 
 class DockerHostModel(Base):
     """Docker 主机注册表"""
+
     __tablename__ = "docker_hosts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -62,11 +65,13 @@ class DockerHostModel(Base):
     # ["mtg-xxx", "mtg-yyy"]
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -74,6 +79,7 @@ class DockerHostModel(Base):
 
 class DockerHostSecretModel(Base):
     """敏感字段分离存储（SSH 密码、TLS key 内容等）"""
+
     __tablename__ = "docker_host_secrets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

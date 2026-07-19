@@ -8,18 +8,17 @@
   - ssh_password: SSH 密码认证
   - docker_context: 使用已配置的 docker context
 """
+
 from __future__ import annotations
 
 import asyncio
-import json
+import contextlib
 import logging
 import os
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -128,16 +127,17 @@ PRESET_CONFIGS = {
 
 # ─── 调度策略 ─────────────────────────────────────────
 class SchedulingStrategy(str, Enum):
-    LEAST_LOADED = "least_loaded"       # 最少运行容器数
-    TAG_MATCH = "tag_match"             # 标签匹配优先
-    MANUAL = "manual"                   # 手动指定
-    ROUND_ROBIN = "round_robin"         # 轮询
-    LOCAL_FIRST = "local_first"         # 本地优先，本地满了再远程
+    LEAST_LOADED = "least_loaded"  # 最少运行容器数
+    TAG_MATCH = "tag_match"  # 标签匹配优先
+    MANUAL = "manual"  # 手动指定
+    ROUND_ROBIN = "round_robin"  # 轮询
+    LOCAL_FIRST = "local_first"  # 本地优先，本地满了再远程
 
 
 @dataclass
 class HostHealthInfo:
     """主机健康信息"""
+
     ok: bool = False
     docker_version: str = ""
     running_containers: int = 0
@@ -151,6 +151,7 @@ class HostHealthInfo:
 @dataclass
 class DeployTarget:
     """部署目标选择结果"""
+
     host_id: int
     host_name: str
     connection_type: str
@@ -222,15 +223,13 @@ async def run_docker_cmd(
     if host_config and host_config.get("connection_type") == "ssh_key":
         key_content = host_config.get("_ssh_key_content", "")
         if key_content:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix="_id_rsa", delete=False
-            ) as f:
+            with tempfile.NamedTemporaryFile(mode="w", suffix="_id_rsa", delete=False) as f:
                 f.write(key_content)
                 tmp_key_path = f.name
             os.chmod(tmp_key_path, 0o600)
             env["DOCKER_SSH_IDENTITY"] = tmp_key_path
 
-    cmd = ["docker"] + args
+    cmd = ["docker", *args]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -239,9 +238,7 @@ async def run_docker_cmd(
             stderr=asyncio.subprocess.PIPE if capture else None,
         )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
             stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
             return proc.returncode or 0, stdout, stderr
@@ -252,10 +249,8 @@ async def run_docker_cmd(
         return -1, "", "docker CLI not found"
     finally:
         if tmp_key_path:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_key_path)
-            except OSError:
-                pass
 
 
 async def check_host_health(host_config: dict[str, Any]) -> HostHealthInfo:
@@ -350,9 +345,9 @@ async def select_deploy_target(
     min_cpu = requirements.get("min_cpu_cores", 0)
     if min_mem or min_cpu:
         capable = [
-            h for h in healthy
-            if (h.memory_gb >= min_mem or h.memory_gb == 0)
-            and (h.cpu_cores >= min_cpu or h.cpu_cores == 0)
+            h
+            for h in healthy
+            if (h.memory_gb >= min_mem or h.memory_gb == 0) and (h.cpu_cores >= min_cpu or h.cpu_cores == 0)
         ]
         if capable:
             healthy = capable
@@ -378,6 +373,7 @@ async def select_deploy_target(
             h_tags = set(h.tags or [])
             match = len(req_tags & h_tags)
             return (-match, h.running_containers)
+
         chosen = min(healthy, key=tag_score)
     else:
         chosen = healthy[0]

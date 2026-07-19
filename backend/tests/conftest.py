@@ -4,6 +4,7 @@
 - 默认使用 stub/mock，不调用真实 LLM
 - 如需真实 LLM，显式使用 test_real_llm_e2e.py 或设置 CONCLAVE_USE_REAL_LLM=1
 """
+
 from __future__ import annotations
 
 import pytest
@@ -26,6 +27,7 @@ def _dispose_db_resources_after_test():
     yield
     try:
         from app.db.engine import dispose_async_engine
+
         # dispose_async_engine 已同步释放 async engine 并置 None；
         # close_db_pool 现已改为 async，且与 dispose_async_engine 做的事完全重复，
         # 此处为同步 fixture，不再调用 close_db_pool 以免创建新 engine 再 dispose。

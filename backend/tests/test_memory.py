@@ -6,8 +6,8 @@ import pytest
 from app.memory.models import FeatureMemory, MemoryLayer, ProfileMemory, RawMemory
 from app.memory.store import memory_store
 
-
 # ---------- fixtures ----------
+
 
 @pytest.fixture(autouse=True)
 async def _clear_memory():
@@ -34,6 +34,7 @@ def _restore_memory(original):
 
 
 # ---------- 数据模型测试 ----------
+
 
 def test_memory_layer_enum():
     """MemoryLayer 枚举值"""
@@ -92,6 +93,7 @@ def test_profile_memory_defaults():
 
 # ---------- record_raw 测试 ----------
 
+
 @pytest.mark.asyncio
 async def test_record_raw_and_query():
     """测试 record_raw + 查询"""
@@ -135,6 +137,7 @@ async def test_record_raw_multiple():
 
 
 # ---------- extract_features 测试 ----------
+
 
 @pytest.mark.asyncio
 async def test_extract_features_stub_rules():
@@ -196,6 +199,7 @@ async def test_extract_features_evidence_low():
 
 # ---------- get_or_create_profile 测试 ----------
 
+
 def test_get_or_create_profile_defaults():
     """测试 get_or_create_profile 默认值"""
     profile = memory_store.get_or_create_profile("engineer")
@@ -217,28 +221,45 @@ def test_get_or_create_profile_idempotent():
 
 # ---------- update_profile 测试 ----------
 
+
 @pytest.mark.asyncio
 async def test_update_profile_merges_features():
     """测试 update_profile 更新画像"""
     features = [
         FeatureMemory(
-            id="f1", agent_role="engineer", feature_type="stance_style",
-            feature_value="conservative", confidence=0.8, sample_count=5,
+            id="f1",
+            agent_role="engineer",
+            feature_type="stance_style",
+            feature_value="conservative",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f2", agent_role="engineer", feature_type="evidence_dependency",
-            feature_value="high", confidence=0.8, sample_count=5,
+            id="f2",
+            agent_role="engineer",
+            feature_type="evidence_dependency",
+            feature_value="high",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f3", agent_role="engineer", feature_type="collaboration",
-            feature_value="bridging", confidence=0.8, sample_count=5,
+            id="f3",
+            agent_role="engineer",
+            feature_type="collaboration",
+            feature_value="bridging",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f4", agent_role="engineer", feature_type="risk_appetite",
-            feature_value="conservative", confidence=0.8, sample_count=5,
+            id="f4",
+            agent_role="engineer",
+            feature_type="risk_appetite",
+            feature_value="conservative",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
     ]
@@ -264,8 +285,12 @@ async def test_update_profile_low_confidence_ignored():
     """低置信度特征不更新画像"""
     features = [
         FeatureMemory(
-            id="f1", agent_role="engineer", feature_type="stance_style",
-            feature_value="aggressive", confidence=0.1, sample_count=1,
+            id="f1",
+            agent_role="engineer",
+            feature_type="stance_style",
+            feature_value="aggressive",
+            confidence=0.1,
+            sample_count=1,
             source_meeting_ids=["m1"],
         ),
     ]
@@ -274,6 +299,7 @@ async def test_update_profile_low_confidence_ignored():
 
 
 # ---------- get_profile_anchor 测试 ----------
+
 
 def test_get_profile_anchor_empty_without_profile():
     """无画像时返回空串"""
@@ -291,23 +317,39 @@ async def test_get_profile_anchor_returns_text_after_update():
     """更新画像后返回注入文本"""
     features = [
         FeatureMemory(
-            id="f1", agent_role="engineer", feature_type="stance_style",
-            feature_value="conservative", confidence=0.8, sample_count=5,
+            id="f1",
+            agent_role="engineer",
+            feature_type="stance_style",
+            feature_value="conservative",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f2", agent_role="engineer", feature_type="evidence_dependency",
-            feature_value="high", confidence=0.8, sample_count=5,
+            id="f2",
+            agent_role="engineer",
+            feature_type="evidence_dependency",
+            feature_value="high",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f3", agent_role="engineer", feature_type="collaboration",
-            feature_value="bridging", confidence=0.8, sample_count=5,
+            id="f3",
+            agent_role="engineer",
+            feature_type="collaboration",
+            feature_value="bridging",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f4", agent_role="engineer", feature_type="risk_appetite",
-            feature_value="conservative", confidence=0.8, sample_count=5,
+            id="f4",
+            agent_role="engineer",
+            feature_type="risk_appetite",
+            feature_value="conservative",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
     ]
@@ -321,6 +363,7 @@ async def test_get_profile_anchor_returns_text_after_update():
 
 # ---------- inject_profile 测试 ----------
 
+
 @pytest.mark.asyncio
 async def test_inject_profile_with_anchor():
     """inject_profile 在有画像时拼到 prompt 前"""
@@ -328,23 +371,39 @@ async def test_inject_profile_with_anchor():
 
     features = [
         FeatureMemory(
-            id="f1", agent_role="engineer", feature_type="stance_style",
-            feature_value="conservative", confidence=0.8, sample_count=5,
+            id="f1",
+            agent_role="engineer",
+            feature_type="stance_style",
+            feature_value="conservative",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f2", agent_role="engineer", feature_type="evidence_dependency",
-            feature_value="high", confidence=0.8, sample_count=5,
+            id="f2",
+            agent_role="engineer",
+            feature_type="evidence_dependency",
+            feature_value="high",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f3", agent_role="engineer", feature_type="collaboration",
-            feature_value="bridging", confidence=0.8, sample_count=5,
+            id="f3",
+            agent_role="engineer",
+            feature_type="collaboration",
+            feature_value="bridging",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
         FeatureMemory(
-            id="f4", agent_role="engineer", feature_type="risk_appetite",
-            feature_value="conservative", confidence=0.8, sample_count=5,
+            id="f4",
+            agent_role="engineer",
+            feature_type="risk_appetite",
+            feature_value="conservative",
+            confidence=0.8,
+            sample_count=5,
             source_meeting_ids=["m1"],
         ),
     ]
@@ -364,6 +423,7 @@ def test_inject_profile_without_anchor():
 
 
 # ---------- trigger_extraction 测试 ----------
+
 
 @pytest.mark.asyncio
 async def test_trigger_extraction_from_state():
@@ -447,6 +507,7 @@ async def test_trigger_extraction_borrowed_role_no_profile():
 def test_trigger_extraction_disabled():
     """memory_enabled=False 时 trigger_extraction 直接返回"""
     import asyncio
+
     from app.config import settings
     from app.memory.profile import trigger_extraction
     from app.models import MeetingState
@@ -511,6 +572,7 @@ async def test_trigger_extraction_mixed_roles():
 def test_trigger_extraction_exception_safe():
     """trigger_extraction 异常时不影响主流程"""
     import asyncio
+
     from app.memory.profile import trigger_extraction
 
     original = _enable_memory()

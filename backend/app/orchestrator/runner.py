@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import threading
 import time
-import os
 from datetime import datetime, timezone
 
 from app.config import settings
@@ -13,9 +14,16 @@ from app.events import bus, make_event
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus, Stage
 from app.observability.log_bus import log_bus
+from app.orchestrator.instant import (
+    FLOW_INSTANT,
+    FLOW_STANDARD,
+    classify_intent_async,
+    is_instant_mode,
+    normalize_mode,
+    run_instant,
+)
 from app.orchestrator.manager import MeetingManager
-from app.orchestrator.nodes import decide_next_stage, _inc_loop_count, _let_borrowed_agents_speak
-from app.orchestrator.instant import classify_intent_async, run_instant, is_instant_mode, normalize_mode, FLOW_INSTANT, FLOW_STANDARD
+from app.orchestrator.nodes import _inc_loop_count, _let_borrowed_agents_speak, decide_next_stage
 from conclave_core.state import STAGE_ORDER, is_terminal, should_pause
 
 logger = get_logger("orchestrator.runner")
@@ -28,6 +36,8 @@ _STATE_TTL_AFTER_DONE = int(os.environ.get("CONCLAVE_STATE_TTL", "1800"))  # 默
 _MAX_CACHED_STATES = int(os.environ.get("CONCLAVE_MAX_CACHED_STATES", "100"))
 # 已完成会议的最后访问时间记录（用于LRU淘汰）
 _state_last_access: dict[str, float] = {}
+# 保存对延迟清理任务的引用，防止被垃圾回收
+_cleanup_tasks: set[asyncio.Task] = set()
 
 
 async def _process_interventions(state: MeetingState) -> MeetingState:
@@ -41,14 +51,14 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
     - intervention_messages 列表被并发修改
     [CON-22 修复] 用户内容在喂给 LLM 前做 prompt 注入检测与隔离包装
     """
-    from app.agents.compute import execute_think, ThinkRequest
-    from datetime import datetime
     import uuid as _uuid
+    from datetime import datetime
+
+    from app.agents.compute import ThinkRequest, execute_think
     from app.prompt_injection import sanitize_user_input, wrap_user_content
 
     unprocessed = [
-        inj for inj in state.injected_messages
-        if inj.get("signal") == "intervene" and not inj.get("processed")
+        inj for inj in state.injected_messages if inj.get("signal") == "intervene" and not inj.get("processed")
     ]
     if not unprocessed:
         return state
@@ -59,8 +69,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
     async with lock:
         # 重新过滤一次：等待锁期间其他协程可能已经处理
         unprocessed = [
-            inj for inj in state.injected_messages
-            if inj.get("signal") == "intervene" and not inj.get("processed")
+            inj for inj in state.injected_messages if inj.get("signal") == "intervene" and not inj.get("processed")
         ]
         if not unprocessed:
             return state
@@ -86,7 +95,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
                 if reply_to:
                     for m in state.intervention_messages:
                         if m.get("id") == reply_to:
-                            reply_context = f"\n回复对象：\"{m.get('content', '')[:200]}\"（来自 {m.get('sender', '')}）"
+                            reply_context = f'\n回复对象："{m.get("content", "")[:200]}"（来自 {m.get("sender", "")}）'
                             break
 
                 stage_summary = state.stage.value
@@ -94,8 +103,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
                 if state.messages:
                     recent = state.messages[-3:]
                     agent_summary = "\n".join(
-                        f"  [{m.get('agent_role', '?')}]: {m.get('content', '')[:150]}"
-                        for m in recent
+                        f"  [{m.get('agent_role', '?')}]: {m.get('content', '')[:150]}" for m in recent
                     )
 
                 prompt = (
@@ -115,13 +123,15 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
                     f"只输出回复内容，不要任何格式化。"
                 )
 
-                resp = await execute_think(ThinkRequest(
-                    agent_role="moderator",
-                    stage="intervention",
-                    prompt=prompt,
-                    temperature=0.3,
-                    seed=settings.llm_seed,
-                ))
+                resp = await execute_think(
+                    ThinkRequest(
+                        agent_role="moderator",
+                        stage="intervention",
+                        prompt=prompt,
+                        temperature=0.3,
+                        seed=settings.llm_seed,
+                    )
+                )
 
                 reply_text = str(resp.result).strip() if resp.result else "收到，我会在后续流程中处理。"
 
@@ -183,9 +193,15 @@ class Runner:
         """从当前阶段跑到底（或被 pause / abort 打断）"""
         # 设置追踪上下文（后续所有日志/事件/LLM 调用自动关联）
         from app.context import (
-            set_meeting_id, reset_meeting_id,
-            get_request_id, set_request_id, reset_request_id, new_request_id,
-            set_runner_session_id, reset_runner_session_id, new_runner_session_id,
+            get_request_id,
+            new_request_id,
+            new_runner_session_id,
+            reset_meeting_id,
+            reset_request_id,
+            reset_runner_session_id,
+            set_meeting_id,
+            set_request_id,
+            set_runner_session_id,
         )
         from app.observability.log_bus import log_bus
 
@@ -219,6 +235,7 @@ class Runner:
         if not state.resolved_models:
             try:
                 from app.llm_providers import resolve_models_for_meeting
+
                 state.resolved_models = resolve_models_for_meeting(
                     role_configs=state.role_configs,
                     meeting_model=state.model_override,
@@ -262,7 +279,9 @@ class Runner:
                 logger.error("即时模式异常: %s", exc, exc_info=True)
                 state.status = MeetingStatus.FAILED
                 state.error_detail = str(exc)[:2000]
-                from datetime import datetime as _dt_fp, timezone as _tz_fp
+                from datetime import datetime as _dt_fp
+                from datetime import timezone as _tz_fp
+
                 state.completed_at = _dt_fp.now(_tz_fp.utc)
             # 持久化最终状态后返回（不进入六阶段管线）
             await self._persist(state)
@@ -305,6 +324,7 @@ class Runner:
                 except Exception as stage_exc:
                     # === 断点续传：阶段失败时不直接标记FAILED，而是记录checkpoint并重试 ===
                     import traceback
+
                     stage_name = current_stage.value
                     retry_count = state.stage_retry_count.get(stage_name, 0)
                     logger.error(
@@ -325,13 +345,15 @@ class Runner:
                     if retry_count < state.max_stage_retries:
                         # 重试当前阶段：不推进stage，记录重试次数，短暂等待后继续循环
                         state.stage_retry_count[stage_name] = retry_count + 1
-                        state.error_detail = f"阶段 {stage_name} 异常(重试{retry_count+1}/{state.max_stage_retries}): {str(stage_exc)[:500]}"
+                        state.error_detail = f"阶段 {stage_name} 异常(重试{retry_count + 1}/{state.max_stage_retries}): {str(stage_exc)[:500]}"
                         # 发布阶段重试事件
-                        await bus.publish(make_event(
-                            "stage.retry",
-                            state.meeting_id,
-                            {"stage": stage_name, "retry_count": retry_count + 1, "error": str(stage_exc)[:200]},
-                        ))
+                        await bus.publish(
+                            make_event(
+                                "stage.retry",
+                                state.meeting_id,
+                                {"stage": stage_name, "retry_count": retry_count + 1, "error": str(stage_exc)[:200]},
+                            )
+                        )
                         await self._persist(state)
                         await asyncio.sleep(2)  # 重试前短暂等待
                         continue  # 重新执行当前阶段
@@ -354,14 +376,18 @@ class Runner:
                         except (ValueError, IndexError):
                             pass
                         state.status = MeetingStatus.FAILED
-                        state.error_detail = f"阶段 {stage_name} 重试{state.max_stage_retries}次后失败: {str(stage_exc)[:1000]}"
+                        state.error_detail = (
+                            f"阶段 {stage_name} 重试{state.max_stage_retries}次后失败: {str(stage_exc)[:1000]}"
+                        )
                         state.completed_at = datetime.now(timezone.utc)
                         await self._persist(state)
-                        await bus.publish(make_event(
-                            "meeting.failed",
-                            state.meeting_id,
-                            {"stage": stage_name, "error": str(stage_exc)[:500], "resumable": True},
-                        ))
+                        await bus.publish(
+                            make_event(
+                                "meeting.failed",
+                                state.meeting_id,
+                                {"stage": stage_name, "error": str(stage_exc)[:500], "resumable": True},
+                            )
+                        )
                         break
 
                 elapsed = time.monotonic() - t0
@@ -376,7 +402,9 @@ class Runner:
                 # 借调 agent 的 stage 标签使用刚完成的 current_stage，确保前端正确归类
                 await _let_borrowed_agents_speak(state, current_stage)
                 conf = state.confidence_flags.get(current_stage.value, "unknown")
-                logger.info("会议 %s 阶段 %s 完成 (%.2fs, confidence=%s)", state.meeting_id, current_stage.value, elapsed, conf)
+                logger.info(
+                    "会议 %s 阶段 %s 完成 (%.2fs, confidence=%s)", state.meeting_id, current_stage.value, elapsed, conf
+                )
 
                 # === 断点续传：记录成功checkpoint ===
                 state.checkpoint = {
@@ -422,54 +450,61 @@ class Runner:
                         },
                     )
                     # 记录迭代历史
-                    state.iteration_history.append({
-                        "iteration": state.iteration_count,
-                        "quality_score": state.quality_score,
-                        "feedback": state.quality_feedback[:500],
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
+                    state.iteration_history.append(
+                        {
+                            "iteration": state.iteration_count,
+                            "quality_score": state.quality_score,
+                            "feedback": state.quality_feedback[:500],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
                     if should_iterate and state.iteration_count < state.max_iterations and state.auto_iterate:
                         # 触发迭代：回退到produce阶段，注入质量反馈
                         state.iteration_count += 1
                         state.stage = Stage.PRODUCE  # 重新执行produce
                         # 将质量反馈注入到state中，produce节点可以读取
-                        state.intervention_messages.append({
-                            "id": f"quality-feedback-{state.iteration_count}",
-                            "sender": "moderator",
-                            "content": (
-                                f"[质量迭代 第{state.iteration_count}轮] 上一轮产出质量评分 {state.quality_score}/100，"
-                                f"未达商用标准。请根据以下反馈改进后重新产出：\n{state.quality_feedback}"
-                            ),
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "type": "quality_iteration",
-                        })
-                        await bus.publish(make_event(
-                            "iteration.started",
-                            state.meeting_id,
+                        state.intervention_messages.append(
                             {
-                                "iteration": state.iteration_count,
-                                "quality_score": state.quality_score,
-                                "feedback": state.quality_feedback[:300],
-                            },
-                        ))
+                                "id": f"quality-feedback-{state.iteration_count}",
+                                "sender": "moderator",
+                                "content": (
+                                    f"[质量迭代 第{state.iteration_count}轮] 上一轮产出质量评分 {state.quality_score}/100，"
+                                    f"未达商用标准。请根据以下反馈改进后重新产出：\n{state.quality_feedback}"
+                                ),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "type": "quality_iteration",
+                            }
+                        )
+                        await bus.publish(
+                            make_event(
+                                "iteration.started",
+                                state.meeting_id,
+                                {
+                                    "iteration": state.iteration_count,
+                                    "quality_score": state.quality_score,
+                                    "feedback": state.quality_feedback[:300],
+                                },
+                            )
+                        )
                         _lb2 = get_logger("orchestrator.runner")
                         _lb2.info(
                             f"会议 {state.meeting_id} 触发自我迭代 第{state.iteration_count}轮",
-                            logger="orchestrator.runner",
                         )
                         await self._persist(state)
                         continue  # 重新执行produce阶段
                     elif should_iterate and not state.auto_iterate:
                         # 用户未开启auto_iterate，标记为需要人工确认
-                        await bus.publish(make_event(
-                            "quality.needs_review",
-                            state.meeting_id,
-                            {
-                                "quality_score": state.quality_score,
-                                "feedback": state.quality_feedback,
-                                "can_iterate": state.iteration_count < state.max_iterations,
-                            },
-                        ))
+                        await bus.publish(
+                            make_event(
+                                "quality.needs_review",
+                                state.meeting_id,
+                                {
+                                    "quality_score": state.quality_score,
+                                    "feedback": state.quality_feedback,
+                                    "can_iterate": state.iteration_count < state.max_iterations,
+                                },
+                            )
+                        )
 
                 # 终止判断
                 if is_terminal(state):
@@ -506,7 +541,8 @@ class Runner:
                                 f"{old_stage.value} → {next_stage.value}",
                                 logger="orchestrator.runner",
                                 extra={
-                                    "from": old_stage.value, "to": next_stage.value,
+                                    "from": old_stage.value,
+                                    "to": next_stage.value,
                                     "regression_count": state._regression_count,
                                 },
                             )
@@ -536,6 +572,7 @@ class Runner:
                     # 无需 runner 重复设置。如果节点未设置（防御性），兜底推进到 PRODUCE。
                     if state.stage == current_stage:
                         from conclave_core.state import next_stage as _ns
+
                         nxt = _ns(current_stage, state.flow_plan)
                         state.stage = nxt or Stage.PRODUCE
 
@@ -569,7 +606,9 @@ class Runner:
             )
             state.status = MeetingStatus.FAILED
             state.error_detail = str(exc)[:2000]
-            from datetime import datetime as _dt, timezone as _tz
+            from datetime import datetime as _dt
+            from datetime import timezone as _tz
+
             state.completed_at = _dt.now(_tz.utc)
             await self._persist(state)
 
@@ -616,7 +655,7 @@ class Runner:
         review = artifact.get("review", {})
         deployment = artifact.get("deployment", {})
         test_results = artifact.get("test_results", {})
-        execution = artifact.get("execution", {})
+        artifact.get("execution", {})
 
         score = 0
         feedback_parts = []
@@ -660,16 +699,16 @@ class Runner:
         # === 3. 架构完整性（25分）===
         arch_score = 0
         expected_layers = {
-            "app/main.py": 4,       # 入口文件
-            "app/config.py": 3,      # 配置
-            "app/db/engine.py": 3,   # 数据库引擎
-            "app/db/base.py": 2,     # ORM基类
-            "app/routers/": 4,       # 路由层
-            "app/schemas/": 3,       # DTO层
-            "app/services/": 2,      # 服务层（medium+需要）
-            "app/dao/": 2,           # DAO层（medium+需要）
-            "app/db/models/": 2,     # ORM模型
-            "app/domain/": 1,        # 领域层
+            "app/main.py": 4,  # 入口文件
+            "app/config.py": 3,  # 配置
+            "app/db/engine.py": 3,  # 数据库引擎
+            "app/db/base.py": 2,  # ORM基类
+            "app/routers/": 4,  # 路由层
+            "app/schemas/": 3,  # DTO层
+            "app/services/": 2,  # 服务层（medium+需要）
+            "app/dao/": 2,  # DAO层（medium+需要）
+            "app/db/models/": 2,  # ORM模型
+            "app/domain/": 1,  # 领域层
             "app/middleware.py": 1,  # 中间件
         }
         all_files = set(project_tree.keys()) | set(root_files.keys())
@@ -680,7 +719,9 @@ class Runner:
                 if has_files:
                     arch_score += weight
             else:
-                if path in all_files or any(f.endswith(path.split("/")[-1]) and path.rsplit("/", 1)[0] in f for f in all_files):
+                if path in all_files or any(
+                    f.endswith(path.split("/")[-1]) and path.rsplit("/", 1)[0] in f for f in all_files
+                ):
                     arch_score += weight
 
         # micro/small可以简化
@@ -698,10 +739,10 @@ class Runner:
         scale_score = 0
         # 各复杂度期望的代码量范围
         expected_scale = {
-            "micro":  {"min_files": 1, "max_files": 10, "min_lines": 100, "max_lines": 500},
-            "small":  {"min_files": 5, "max_files": 20, "min_lines": 300, "max_lines": 2000},
+            "micro": {"min_files": 1, "max_files": 10, "min_lines": 100, "max_lines": 500},
+            "small": {"min_files": 5, "max_files": 20, "min_lines": 300, "max_lines": 2000},
             "medium": {"min_files": 15, "max_files": 50, "min_lines": 1000, "max_lines": 8000},
-            "large":  {"min_files": 30, "max_files": 200, "min_lines": 3000, "max_lines": 30000},
+            "large": {"min_files": 30, "max_files": 200, "min_lines": 3000, "max_lines": 30000},
         }
         exp = expected_scale.get(complexity, expected_scale["medium"])
 
@@ -732,23 +773,20 @@ class Runner:
         # === 5. 功能真实性检测（15分）- 检测demo/stub ===
         real_score = 15
         # 检查代码中是否有hardcoded mock数据模式
-        all_code = "\n".join(
-            str(v) for k, v in project_tree.items()
-            if k.endswith(".py") and isinstance(v, str)
-        )
+        all_code = "\n".join(str(v) for k, v in project_tree.items() if k.endswith(".py") and isinstance(v, str))
         demo_patterns = [
             ("TODO", "包含TODO标记"),
             ("return []", "返回空列表作为mock数据"),
             ("return {}", "返回空字典作为mock数据"),
             ("pass  # TODO", "空pass实现"),
-            ("return {\"message\": \"not implemented\"}", "未实现占位"),
+            ('return {"message": "not implemented"}', "未实现占位"),
             ("raise NotImplementedError", "未实现异常"),
             ("hardcoded", "明确标注hardcoded"),
             ("示例", "包含中文'示例'标记"),
             ("stub", "stub代码"),
         ]
         demo_hits = 0
-        for pattern, desc in demo_patterns:
+        for pattern, _desc in demo_patterns:
             if pattern in all_code:
                 demo_hits += 1
                 real_score -= 3
@@ -758,7 +796,10 @@ class Runner:
             feedback_parts.append(f"代码中存在{demo_hits}处可能的demo占位符")
 
         # 检查是否有真实的数据库操作
-        has_real_db = any(kw in all_code for kw in ["INSERT", "SELECT", "UPDATE", "DELETE", "session.execute", "commit(", "create_all"])
+        has_real_db = any(
+            kw in all_code
+            for kw in ["INSERT", "SELECT", "UPDATE", "DELETE", "session.execute", "commit(", "create_all"]
+        )
         if has_real_db:
             real_score += 0  # 已包含在基础分中
         else:
@@ -869,7 +910,8 @@ class Runner:
         db_legacy 已迁移到 SQLAlchemy async，直接 await 即可，
         不再需要 asyncio.to_thread 线程隔离。
         """
-        from app.db_legacy import save_meeting, save_meeting_aux, save_message
+        from app.db_legacy import save_meeting_aux
+
         aux = state.extract_aux()
         try:
             await save_meeting(
@@ -902,7 +944,7 @@ def _evict_if_needed() -> None:
         if len(_states) <= _MAX_CACHED_STATES:
             return
         # 找出可淘汰的会议（非RUNNING/PAUSED状态）
-        now = time.monotonic()
+        time.monotonic()
         evictable = []
         for mid, st in _states.items():
             if st.status not in (MeetingStatus.RUNNING, MeetingStatus.PAUSED):
@@ -937,6 +979,7 @@ def set_state(state: MeetingState) -> None:
 
 def _schedule_cleanup(meeting_id: str, delay: int) -> None:
     """延迟清理已完成会议的内存资源（在事件循环中调度）"""
+
     async def _do_cleanup():
         try:
             await asyncio.sleep(delay)
@@ -949,11 +992,15 @@ def _schedule_cleanup(meeting_id: str, delay: int) -> None:
             logger.info("TTL到期清理会议资源: %s", meeting_id)
         except Exception as e:
             logger.warning("延迟清理会议 %s 失败: %s", meeting_id, e)
-    loop = asyncio.get_event_loop()
+
     try:
-        loop.create_task(_do_cleanup())
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        pass  # 无事件循环时跳过（测试/脚本场景）
+        loop = asyncio.get_event_loop()
+    with contextlib.suppress(RuntimeError):
+        task = loop.create_task(_do_cleanup())
+        _cleanup_tasks.add(task)
+        task.add_done_callback(_cleanup_tasks.discard)
 
 
 def clear_state(meeting_id: str) -> bool:
@@ -996,6 +1043,7 @@ def cleanup_meeting_resources(meeting_id: str) -> None:
     # 3. 清理事件总线历史
     try:
         from app.events import bus
+
         bus.clear(meeting_id)
     except Exception:
         pass
@@ -1003,6 +1051,7 @@ def cleanup_meeting_resources(meeting_id: str) -> None:
     # 4. 清理 RAG 向量缓存
     try:
         from app.rag.store import clear_store
+
         clear_store(meeting_id)
     except Exception:
         pass
@@ -1013,20 +1062,28 @@ def cleanup_meeting_resources(meeting_id: str) -> None:
     # 6. 清理会议级模型配置覆盖
     try:
         from app.llm_providers import clear_meeting_config
+
         clear_meeting_config(meeting_id)
     except Exception:
         pass
 
     # 7. 释放浏览器上下文
     try:
-        from app.tools.browser_tool import browser_pool
-        browser_pool.release_meeting(meeting_id)
+        from app.tools.browser_tool import get_browser_pool
+
+        pool = get_browser_pool()
+        with contextlib.suppress(RuntimeError):
+            loop = asyncio.get_running_loop()
+            _task = loop.create_task(pool.release_context(meeting_id))
+            _cleanup_tasks.add(_task)
+            _task.add_done_callback(_cleanup_tasks.discard)
     except Exception:
         pass
 
     # 8. 清理 trace 注册表（避免内存泄漏）
     try:
         from app.agents.trace import _trace_registry
+
         _trace_registry.pop(meeting_id, None)
     except Exception:
         pass
@@ -1053,6 +1110,7 @@ async def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] |
         return existing
     # 尝试从 PostgreSQL 恢复
     from app.db_legacy import get_meeting, get_meeting_aux
+
     record = await get_meeting(meeting_id)
     if record is not None:
         aux = await get_meeting_aux(meeting_id)
@@ -1065,7 +1123,9 @@ async def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] |
             if aux:
                 state.inject_aux(aux)
             set_state(state)
-            logger.info("会议 %s 从 PostgreSQL 恢复运行态（aux=%d keys, flow_plan=%s）", meeting_id, len(aux), state.flow_plan)
+            logger.info(
+                "会议 %s 从 PostgreSQL 恢复运行态（aux=%d keys, flow_plan=%s）", meeting_id, len(aux), state.flow_plan
+            )
             return state
         except Exception as e:
             logger.warning("会议 %s 从 PostgreSQL 恢复失败: %s，创建新状态", meeting_id, e)
@@ -1079,7 +1139,7 @@ async def recover_crashed_meetings() -> list[str]:
     重启后把它们标记为 paused，用户可以手动 resume 继续。
     返回被恢复的会议 ID 列表。
     """
-    from app.db_legacy import recover_running_meetings, save_meeting, save_meeting_aux, get_meeting_aux
+    from app.db_legacy import get_meeting_aux, recover_running_meetings, save_meeting_aux
     from app.models import MeetingStatus
     from app.observability.log_bus import log_bus
 
@@ -1090,6 +1150,7 @@ async def recover_crashed_meetings() -> list[str]:
         payload = record.get("payload", {})
         if isinstance(payload, str):
             import json
+
             payload = json.loads(payload)
         try:
             state = MeetingState(**payload)

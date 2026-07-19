@@ -50,7 +50,7 @@ async def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
         for claim in claims:
             role = ""
             if isinstance(claim, dict):
-                role = claim.get("agent_role", claim.get("role", ""))
+                role = str(claim.get("agent_role", claim.get("role", "")))
             if not role:
                 continue
             role_claims.setdefault(role, []).append(claim)
@@ -83,11 +83,7 @@ async def evaluate_agents(state: Any) -> dict[str, dict[str, Any]]:
                             break
 
             adoption_rate = adopted_count / total if total > 0 else 0.0
-            evidence_accuracy = (
-                evidence_validated / evidence_backed
-                if evidence_backed > 0
-                else 0.0
-            )
+            evidence_accuracy = evidence_validated / evidence_backed if evidence_backed > 0 else 0.0
             overall_score = 0.6 * adoption_rate + 0.4 * evidence_accuracy
 
             evaluations[role] = {
@@ -127,10 +123,12 @@ async def _persist_scores_to_memory(state: Any, evaluations: dict[str, dict]) ->
     """
     try:
         from app.config import settings
+
         if not settings.memory_enabled:
             return
 
         from app.memory.store import memory_store
+
         meeting_id = getattr(state, "meeting_id", "")
 
         for role, scores in evaluations.items():

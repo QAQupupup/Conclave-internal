@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.compute import execute_think, build_arbitrate_prompt
+from app.agents.compute import build_arbitrate_prompt, execute_think
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
-
 from app.orchestrator.stage_runners import run_arbitrate
-from ._helpers import _run_with_consistency, _resolve_model_for_call
+
+from ._helpers import _resolve_model_for_call, _run_with_consistency
 
 
 async def arbitrate_node(state: MeetingState) -> MeetingState:

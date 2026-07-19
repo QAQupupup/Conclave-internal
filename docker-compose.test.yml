@@ -75,7 +75,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: conclave-test-backend
-    entrypoint: ["pytest", "-q", "--tb=short"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "pip install --no-cache-dir pytest pytest-asyncio pytest-timeout >/dev/null 2>&1; pytest -q --tb=short --timeout=30 --timeout-method=thread"
     environment:
       DATABASE_URL: postgresql+asyncpg://conclave:conclave_dev@postgres-test:5432/conclave_test
       REDIS_URL: redis://redis-test:6379/0
@@ -89,9 +91,11 @@ services:
       CONCLAVE_DISABLE_KEY_LOADER: "1"
       CONCLAVE_DISABLE_METRICS: "1"
       CONCLAVE_API_TOKEN: "test-token-for-ci"
+      CONCLAVE_WEB_SEARCH_MODE: "stub"
       CONCLAVE_RATE_LIMIT_PER_MIN: "100000"
       CONCLAVE_RATE_LIMIT_FAIL_PER_MIN: "100000"
       CONCLAVE_LOG_LEVEL: "WARNING"
+      PLAYWRIGHT_BROWSERS_PATH: "/root/.cache/ms-playwright"
     depends_on:
       postgres-test:
         condition: service_healthy

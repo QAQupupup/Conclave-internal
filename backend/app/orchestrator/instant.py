@@ -11,18 +11,20 @@
 - plan: 规划模式（未来扩展，当前映射到 standard）
 - simple: 简单任务（未来扩展，当前映射到 instant）
 """
+
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus
-from app.config import settings
-from conclave_core.state import Stage
 from app.orchestrator.system_prompt import (
     build_classification_prompt,
     parse_classification_result,
 )
+from conclave_core.state import Stage
 
 logger = get_logger("orchestrator.instant")
 
@@ -74,7 +76,7 @@ async def classify_intent_async(
     Returns:
         'instant'、'standard'、'plan' 或 'simple'
     """
-    from app.agents.compute import get_compute, ThinkRequest
+    from app.agents.compute import ThinkRequest, get_compute
 
     # 构建系统提示词 + 用户提示词（明确分离）
     system_prompt, user_prompt = build_classification_prompt(
@@ -94,13 +96,15 @@ async def classify_intent_async(
 
     try:
         compute = get_compute()
-        resp = await compute.think(ThinkRequest(
-            agent_role="moderator",
-            stage="classify_intent",
-            prompt=full_prompt,
-            temperature=0.0,
-            seed=settings.llm_seed,
-        ))
+        resp = await compute.think(
+            ThinkRequest(
+                agent_role="moderator",
+                stage="classify_intent",
+                prompt=full_prompt,
+                temperature=0.0,
+                seed=settings.llm_seed,
+            )
+        )
 
         if resp.success and resp.result:
             result_text = ""
@@ -116,7 +120,9 @@ async def classify_intent_async(
             reason = parsed.get("reason", "")
             logger.info(
                 "意图分类: mode=%s, reason=%s, query=%s",
-                mode, reason, query[:60],
+                mode,
+                reason,
+                query[:60],
             )
             return mode
 
@@ -139,15 +145,16 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
     Returns:
         更新后的 MeetingState（status=DONE 或 FAILED）
     """
-    from app.agents.compute import get_compute, ThinkRequest
+    import time
+
+    from app.agents.compute import ThinkRequest, get_compute
     from app.events import bus, make_event
     from app.observability.log_bus import log_bus
-    import time
 
     t0 = time.monotonic()
 
     # 检测用户输入语言，决定回答语言
-    has_chinese = any('\u4e00' <= c <= '\u9fff' for c in query)
+    has_chinese = any("\u4e00" <= c <= "\u9fff" for c in query)
 
     prompt = (
         f"请直接回答以下问题或完成以下请求。\n\n"
@@ -163,13 +170,15 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
 
     try:
         compute = get_compute()
-        resp = await compute.think(ThinkRequest(
-            agent_role="moderator",
-            stage="instant",
-            prompt=prompt,
-            temperature=0.3,
-            seed=settings.llm_seed,
-        ))
+        resp = await compute.think(
+            ThinkRequest(
+                agent_role="moderator",
+                stage="instant",
+                prompt=prompt,
+                temperature=0.3,
+                seed=settings.llm_seed,
+            )
+        )
 
         elapsed = time.monotonic() - t0
 
@@ -236,7 +245,8 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
             )
             logger.info(
                 "即时模式完成: meeting=%s, elapsed=%.2fs",
-                state.meeting_id, elapsed,
+                state.meeting_id,
+                elapsed,
             )
         else:
             # LLM 调用失败
@@ -246,7 +256,7 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
             state.error_detail = f"即时模式 LLM 调用失败: {resp.error}"
             state.completed_at = datetime.now(timezone.utc)
             # 发布失败事件通知前端
-            try:
+            with contextlib.suppress(Exception):
                 await bus.publish(
                     make_event(
                         "meeting.failed",
@@ -254,11 +264,10 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
                         {"meeting_id": state.meeting_id, "error": state.error_detail},
                     )
                 )
-            except Exception:
-                pass
             logger.warning(
                 "即时模式 LLM 调用失败: meeting=%s, error=%s",
-                state.meeting_id, resp.error,
+                state.meeting_id,
+                resp.error,
             )
             log_bus.warning(
                 f"即时模式 LLM 失败: {resp.error}",
@@ -273,7 +282,7 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
         state.error_detail = f"即时模式执行异常: {str(e)[:2000]}"
         state.completed_at = datetime.now(timezone.utc)
         # 发布失败事件通知前端
-        try:
+        with contextlib.suppress(Exception):
             await bus.publish(
                 make_event(
                     "meeting.failed",
@@ -281,11 +290,11 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
                     {"meeting_id": state.meeting_id, "error": state.error_detail},
                 )
             )
-        except Exception:
-            pass
         logger.error(
             "即时模式执行异常: meeting=%s, error=%s",
-            state.meeting_id, e, exc_info=True,
+            state.meeting_id,
+            e,
+            exc_info=True,
         )
         log_bus.error(
             f"即时模式异常: {e}",

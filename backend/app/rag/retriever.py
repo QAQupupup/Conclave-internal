@@ -41,10 +41,12 @@ def retrieve(
         # 邻居链上下文：附带前 N 个 chunk 的文本
         if expand_neighbors > 0:
             neighbor_ctx = store.get_neighbor_context(
-                chunk, prev_count=expand_neighbors, next_count=0,
+                chunk,
+                prev_count=expand_neighbors,
+                next_count=0,
             )
             if len(neighbor_ctx) > len(chunk.text):
-                d["neighbor_context"] = neighbor_ctx[:summary_max * 3]
+                d["neighbor_context"] = neighbor_ctx[: summary_max * 3]
         out.append(d)
     return out
 
@@ -82,7 +84,9 @@ async def retrieve_for_conflict(
             d["expandable"] = len(chunk.text) > 200
             # 邻居链上下文
             neighbor_ctx = store.get_neighbor_context(
-                chunk, prev_count=1, next_count=0,
+                chunk,
+                prev_count=1,
+                next_count=0,
             )
             if len(neighbor_ctx) > len(chunk.text):
                 d["neighbor_context"] = neighbor_ctx[:600]
@@ -102,9 +106,7 @@ async def retrieve_for_conflict(
     return _rerank_with_keywords(conflict_summary, base, top_k)
 
 
-def _rerank_with_siliconflow(
-    query: str, candidates: list[dict[str, Any]], top_k: int
-) -> list[dict[str, Any]]:
+def _rerank_with_siliconflow(query: str, candidates: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
     """硅基流动 bge-reranker-v2-m3 真实重排"""
     try:
         resp = httpx.post(
@@ -134,9 +136,7 @@ def _rerank_with_siliconflow(
         return _rerank_with_keywords(query, candidates, top_k)
 
 
-def _rerank_with_keywords(
-    query: str, candidates: list[dict[str, Any]], top_k: int
-) -> list[dict[str, Any]]:
+def _rerank_with_keywords(query: str, candidates: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
     """关键词加成重排（stub 兜底）"""
     keywords = set(_tokenize(query))
     for item in candidates:

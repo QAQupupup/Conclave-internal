@@ -1,17 +1,18 @@
 """
 认证路由：登录、获取当前用户信息
 """
+
 from __future__ import annotations
 
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.auth import authenticate_user, create_access_token, get_user_by_username, JWT_EXPIRE_SECONDS
-from app.schemas.auth import LoginRequest, LoginResponse, MeResponse
-from app.middleware import record_auth_failure, reset_auth_failures, client_ip
-from app.context import set_user_id, set_username, set_user_role
+from app.auth import JWT_EXPIRE_SECONDS, authenticate_user, create_access_token, get_user_by_username
+from app.context import set_user_id, set_user_role, set_username
+from app.middleware import client_ip, record_auth_failure, reset_auth_failures
 from app.observability.audit import audit
+from app.schemas.auth import LoginRequest, LoginResponse, MeResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -28,16 +29,20 @@ async def login(req: LoginRequest, request: Request):
         record_auth_failure(client_ip_str)
         logger.warning("Login failed for username=%s from %s", req.username, client_ip_str)
         # 审计：登录失败
-        audit("auth.login_failed", "failure", {
-            "username_attempt": req.username,
-            "reason": "invalid_credentials",
-        }, ip=client_ip_str)
+        audit(
+            "auth.login_failed",
+            "failure",
+            {
+                "username_attempt": req.username,
+                "reason": "invalid_credentials",
+            },
+            ip=client_ip_str,
+        )
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     token = create_access_token(user)
     reset_auth_failures(client_ip_str)
-    logger.info("User logged in: username=%s role=%s from %s",
-                user["username"], user.get("role"), client_ip_str)
+    logger.info("User logged in: username=%s role=%s from %s", user["username"], user.get("role"), client_ip_str)
 
     # 设置用户上下文（用于后续请求的日志追踪）
     set_user_id(str(user.get("id", "")))
@@ -45,10 +50,17 @@ async def login(req: LoginRequest, request: Request):
     set_user_role(user.get("role", "user"))
 
     # 审计：登录成功
-    audit("auth.login", "success", {
-        "role": user.get("role", "user"),
-        "display_name": user.get("display_name", user["username"]),
-    }, ip=client_ip_str, username=user["username"], user_id=str(user.get("id", "")))
+    audit(
+        "auth.login",
+        "success",
+        {
+            "role": user.get("role", "user"),
+            "display_name": user.get("display_name", user["username"]),
+        },
+        ip=client_ip_str,
+        username=user["username"],
+        user_id=str(user.get("id", "")),
+    )
 
     return LoginResponse(
         access_token=token,

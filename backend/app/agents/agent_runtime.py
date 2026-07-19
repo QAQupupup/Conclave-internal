@@ -6,7 +6,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-
 from app.agents.compute import ThinkRequest, get_compute
 from app.agents.task_baseline import RequiredArtifact, TaskBaseline
 
@@ -14,6 +13,7 @@ from app.agents.task_baseline import RequiredArtifact, TaskBaseline
 @dataclass
 class AgentConfig:
     """Agent 运行时配置"""
+
     role: str
     name: str
     instructions: str
@@ -27,6 +27,7 @@ class AgentConfig:
 @dataclass
 class AgentContext:
     """单次 Agent 执行上下文"""
+
     meeting_id: str
     topic: str
     stage: str
@@ -42,6 +43,7 @@ class AgentContext:
 @dataclass
 class AgentResult:
     """Agent 执行结果"""
+
     success: bool
     role: str
     stage: str
@@ -120,9 +122,10 @@ class AgentRuntime:
         if ctx.parent_constraints:
             parts.append("## 父级约束\n" + "\n".join(f"- {c}" for c in ctx.parent_constraints))
         if ctx.locked_conclusions:
-            parts.append("## 已锁定结论\n" + "\n".join(
-                f"- [{c.get('stage')}] {c.get('summary', '')}" for c in ctx.locked_conclusions
-            ))
+            parts.append(
+                "## 已锁定结论\n"
+                + "\n".join(f"- [{c.get('stage')}] {c.get('summary', '')}" for c in ctx.locked_conclusions)
+            )
         if ctx.working_memory:
             parts.append("## 相关上下文\n")
             for k, v in ctx.working_memory.items():
@@ -145,10 +148,12 @@ def build_agent_from_baseline(
 ) -> AgentRuntime:
     """从 TaskBaseline 的团队角色定义构建 AgentRuntime"""
     role_key = role.get("role", "unknown")
-    return AgentRuntime(AgentConfig(
-        role=role_key,
-        name=role.get("name", role_key),
-        instructions=role.get("instructions", f"你是 {role_key}，立场：{role.get('stance', '')}"),
-        output_schema=stage,
-        temperature=float(role.get("temperature", 0.3)),
-    ))
+    return AgentRuntime(
+        AgentConfig(
+            role=role_key,
+            name=role.get("name", role_key),
+            instructions=role.get("instructions", f"你是 {role_key}，立场：{role.get('stance', '')}"),
+            output_schema=stage,
+            temperature=float(role.get("temperature", 0.3)),
+        )
+    )

@@ -83,3 +83,11 @@ docker-compose.override.yml
 backend/.trash/
 backend/data/
 .secret_key
+
+# ===== Temp files / exports =====
+export_*.py
+resume*.html
+*简历*.html
+*_简史.html
+Qwen*/
+docs/audits/

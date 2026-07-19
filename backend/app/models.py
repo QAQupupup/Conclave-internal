@@ -3,47 +3,48 @@
 保留此文件是为了向后兼容 `from app.models import xxx` 的调用。
 新代码应直接使用 `from app.domain import xxx`。
 """
+
 from __future__ import annotations
 
-from app.domain.enums import Role, ClaimType, ConflictType, Stage, MeetingStatus
-from app.domain.message import (
-    Message,
-    Claim,
-    Conflict,
-    Evidence,
-    EvidenceAssessment,
-    Decision,
-    DecisionRecord,
-    EvidenceSet,
-)
+from app.domain.agent_role import AgentRole, AgentRoleListResponse
+from app.domain.enums import ClaimType, ConflictType, MeetingStatus, Role, Stage
 from app.domain.meeting import (
     PRD,
     Artifact,
-    Meeting,
     BorrowRequest,
+    Meeting,
     MeetingState,
 )
-from app.domain.agent_role import AgentRole, AgentRoleListResponse
+from app.domain.message import (
+    Claim,
+    Conflict,
+    Decision,
+    DecisionRecord,
+    Evidence,
+    EvidenceAssessment,
+    EvidenceSet,
+    Message,
+)
 
 __all__ = [
-    "Role",
-    "ClaimType",
-    "ConflictType",
-    "Stage",
-    "MeetingStatus",
-    "Message",
-    "Claim",
-    "Conflict",
-    "Evidence",
-    "EvidenceAssessment",
-    "Decision",
-    "DecisionRecord",
-    "EvidenceSet",
     "PRD",
-    "Artifact",
-    "Meeting",
-    "BorrowRequest",
-    "MeetingState",
     "AgentRole",
     "AgentRoleListResponse",
+    "Artifact",
+    "BorrowRequest",
+    "Claim",
+    "ClaimType",
+    "Conflict",
+    "ConflictType",
+    "Decision",
+    "DecisionRecord",
+    "Evidence",
+    "EvidenceAssessment",
+    "EvidenceSet",
+    "Meeting",
+    "MeetingState",
+    "MeetingStatus",
+    "Message",
+    "Role",
+    "Stage",
 ]

@@ -15,7 +15,7 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-from app.tools.search_engine import SearchResult, SearchEngineError
+from app.tools.search_engine import SearchEngineError, SearchResult
 
 logger = logging.getLogger("app.tools.engines.ddg")
 
@@ -71,6 +71,7 @@ class DuckDuckGoEngine:
         """检查 Playwright 是否可用"""
         try:
             import playwright  # noqa: F401
+
             return True
         except ImportError:
             return False
@@ -89,8 +90,8 @@ class DuckDuckGoEngine:
             raise SearchEngineError("Playwright 未安装")
 
         try:
+            from app.tools.domain_registry import SPAM_DOMAINS, rank_by_tier
             from app.tools.playwright_search import get_playwright_search
-            from app.tools.domain_registry import rank_by_tier, SPAM_DOMAINS
 
             pw_search = get_playwright_search()
             await pw_search._ensure_browser()
@@ -143,13 +144,15 @@ class DuckDuckGoEngine:
                         continue
 
                     seen_urls.add(url)
-                    results.append(SearchResult(
-                        url=url,
-                        title=item.get("title", ""),
-                        snippet=item.get("snippet", ""),
-                        rank=item.get("rank", 0),
-                        engine=self.name,
-                    ))
+                    results.append(
+                        SearchResult(
+                            url=url,
+                            title=item.get("title", ""),
+                            snippet=item.get("snippet", ""),
+                            rank=item.get("rank", 0),
+                            engine=self.name,
+                        )
+                    )
 
                 # 按 tier 重排
                 url_to_idx = {r.url: i for i, r in enumerate(results)}
@@ -179,6 +182,7 @@ class DuckDuckGoEngine:
             return False
         try:
             from app.tools.playwright_search import get_playwright_search
+
             pw_search = get_playwright_search()
             await pw_search._ensure_browser()
             return pw_search._browser is not None

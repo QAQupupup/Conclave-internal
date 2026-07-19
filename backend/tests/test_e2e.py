@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import time
-
 
 logger = logging.getLogger("app.tests.e2e")
 
@@ -19,6 +19,7 @@ def test_e2e_full_meeting_with_logging(client, caplog):
     """
     # setup_logging 设置了模块级 WARNING，需要覆盖为 INFO 才能捕获 runner 日志
     import logging as _logging
+
     _logging.getLogger("app").setLevel(_logging.INFO)
     _logging.getLogger("app.orchestrator").setLevel(_logging.INFO)
     _logging.getLogger("app.orchestrator.runner").setLevel(_logging.INFO)
@@ -53,8 +54,8 @@ def test_e2e_full_meeting_with_logging(client, caplog):
     logger.info("文档已上传: %d chunks", doc_chunks)
 
     # 3. 运行会议（六阶段）
-    from app.orchestrator import runner as runner_mod
     from app.models import MeetingStatus
+    from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)
@@ -82,12 +83,13 @@ def test_e2e_full_meeting_with_logging(client, caplog):
 
     # 8. 验证事件历史
     from app.events import bus
-    events = bus.history(meeting_id)
+
+    events = bus.get_events(meeting_id)
     assert len(events) > 0, "会议应产生事件"
     # 验证事件序列号单调递增（全局 seq 可能被 system.meetings.changed 等通配事件占用）
     seqs = [e.seq for e in events]
     assert seqs[0] == 0, f"首个事件 seq 应为 0，实际为 {seqs[0]}"
-    for prev, cur in zip(seqs, seqs[1:]):
+    for prev, cur in itertools.pairwise(seqs):
         assert cur > prev, f"事件 seq 应单调递增，出现 {prev} -> {cur}"
     # 验证事件 trace_id 不为空（全链路追踪）
     for ev in events:
@@ -95,6 +97,7 @@ def test_e2e_full_meeting_with_logging(client, caplog):
 
     # 6. 验证 trace 统计
     from app.events import bus
+
     trace = state.llm_trace
     trace_summary = trace.summary()
     logger.info("Trace 统计: %s", json.dumps(trace_summary, ensure_ascii=False, default=str))
@@ -107,9 +110,13 @@ def test_e2e_full_meeting_with_logging(client, caplog):
     resp = client.get(f"/meetings/{meeting_id}/stats")
     assert resp.status_code == 200
     stats = resp.json()
-    logger.info("Stats: msg=%d, claims=%d, conflicts=%d, evidence=%d",
-                stats["message_count"], stats["claim_count"],
-                stats["conflict_count"], stats["evidence_count"])
+    logger.info(
+        "Stats: msg=%d, claims=%d, conflicts=%d, evidence=%d",
+        stats["message_count"],
+        stats["claim_count"],
+        stats["conflict_count"],
+        stats["evidence_count"],
+    )
 
     assert stats["meeting_id"] == meeting_id
     assert stats["stage"] == "produce"
@@ -163,8 +170,13 @@ def test_e2e_full_meeting_with_logging(client, caplog):
     assert prd.get("title") or prd.get("goal"), "PRD 应有标题或目标"
     assert openapi, "应产出 OpenAPI"
 
-    logger.info("端到端测试全部通过！events=%d, messages=%d, claims=%d, conflicts=%d",
-                len(events), stats["message_count"], stats["claim_count"], stats["conflict_count"])
+    logger.info(
+        "端到端测试全部通过！events=%d, messages=%d, claims=%d, conflicts=%d",
+        len(events),
+        stats["message_count"],
+        stats["claim_count"],
+        stats["conflict_count"],
+    )
 
 
 def test_e2e_confidence_flags_all_stages(client):
@@ -172,8 +184,8 @@ def test_e2e_confidence_flags_all_stages(client):
     resp = client.post("/meetings", json={"topic": "置信度端到端测试"})
     meeting_id = resp.json()["meeting_id"]
 
-    from app.orchestrator import runner as runner_mod
     from app.models import MeetingStatus
+    from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)
@@ -192,8 +204,8 @@ def test_e2e_drift_log_complete(client):
     resp = client.post("/meetings", json={"topic": "漂移日志端到端测试"})
     meeting_id = resp.json()["meeting_id"]
 
-    from app.orchestrator import runner as runner_mod
     from app.models import MeetingStatus
+    from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)

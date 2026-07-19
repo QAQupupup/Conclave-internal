@@ -154,7 +154,7 @@ export default function Models() {
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [demoMode]);
 
   const activeProvider = providers.find((p) => p.id === currentProvider) || providers[0];

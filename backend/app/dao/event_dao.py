@@ -3,6 +3,7 @@
 提供事件保存、增量/全量回放加载以及最新 seq 查询。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
 """
+
 from __future__ import annotations
 
 import json
@@ -41,7 +42,7 @@ async def save_event(
         await session.commit()
         if seq is None:
             seq = 1
-        return seq - 1
+        return seq - 1  # type: ignore[no-any-return]
 
 
 async def load_events(meeting_id: str, from_seq: int = 0, limit: int = 0) -> list[dict[str, Any]]:
@@ -73,14 +74,16 @@ async def load_events(meeting_id: str, from_seq: int = 0, limit: int = 0) -> lis
         rows = result.mappings().all()
         out = []
         for row in rows:
-            out.append({
-                "seq": row["seq"] - 1,
-                "meeting_id": row["meeting_id"],
-                "type": row["type"],
-                "payload": json.loads(row["payload"]),
-                "ts": row["ts"],
-                "trace_id": row["trace_id"],
-            })
+            out.append(
+                {
+                    "seq": row["seq"] - 1,
+                    "meeting_id": row["meeting_id"],
+                    "type": row["type"],
+                    "payload": json.loads(row["payload"]),
+                    "ts": row["ts"],
+                    "trace_id": row["trace_id"],
+                }
+            )
         return out
 
 

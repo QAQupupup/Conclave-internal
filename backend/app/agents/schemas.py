@@ -3,10 +3,9 @@
 # 用于 RealLLM.complete() 的解析层校验（三明治模式）。
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ---------- 通用配置 ----------
 # 校验时忽略 LLM 多输出的字段；缺字段由各自默认值兜底，保证解析层稳定。
@@ -16,6 +15,7 @@ _SCHEMA_CONFIG = ConfigDict(extra="ignore")
 # ---------- 1. clarify ----------
 class TeamMember(BaseModel):
     """团队组成单项"""
+
     model_config = _SCHEMA_CONFIG
     role: str
     stance: str = ""
@@ -26,6 +26,7 @@ class ClarifyResult(BaseModel):
 
     flow_plan 字段实现议题路由：LLM 根据议题复杂度裁剪后续阶段。
     """
+
     model_config = _SCHEMA_CONFIG
     clarified_topic: str
     key_questions: list[str] = Field(default_factory=list)
@@ -44,10 +45,11 @@ class ClaimItem(BaseModel):
     工程师会带 risk_level；架构师不带（保持 Optional）。
     type 取值：fact | assumption | constraint。
     """
+
     model_config = _SCHEMA_CONFIG
     claim: str
     evidence_ref: str = ""
-    risk_level: Optional[str] = None
+    risk_level: str | None = None
     type: str = "assumption"
 
 
@@ -57,6 +59,7 @@ class ClaimListResult(BaseModel):
     claims 为必填字段（非空校验）：LLM 漏输出 claims 时会触发 ValidationError，
     进入重试→降级 StubLLM 路径，保证 claims 不再静默丢失。
     """
+
     model_config = _SCHEMA_CONFIG
     claims: list[ClaimItem]
 
@@ -68,6 +71,7 @@ class ConflictItem(BaseModel):
     type 取值：factual | preference | scope。
     nodes.py 会把 type 改名 conflict_type，这里保持与 StubLLM 对齐。
     """
+
     model_config = _SCHEMA_CONFIG
     id: str
     type: str = "preference"
@@ -78,6 +82,7 @@ class ConflictItem(BaseModel):
 
 class ConflictListResult(BaseModel):
     """CrossTeam 阶段输出：冲突列表"""
+
     model_config = _SCHEMA_CONFIG
     conflicts: list[ConflictItem] = Field(default_factory=list)
 
@@ -89,16 +94,18 @@ class EvidenceAssessmentItem(BaseModel):
     supports: a | b | neutral | irrelevant
     strength: strong（文档/网络证据）| weak（通用知识）| none（无证据占位）
     """
+
     model_config = _SCHEMA_CONFIG
     evidence_id: str
     quote: str = ""
     source: str = ""
     supports: str = "neutral"  # a | b | neutral | irrelevant
-    strength: str = "strong"    # strong | weak | none
+    strength: str = "strong"  # strong | weak | none
 
 
 class EvidenceCheckResult(BaseModel):
     """EvidenceCheck 阶段输出：单冲突的证据对照集合"""
+
     model_config = _SCHEMA_CONFIG
     conflict_id: str
     evidence_assessments: list[EvidenceAssessmentItem] = Field(default_factory=list)
@@ -107,6 +114,7 @@ class EvidenceCheckResult(BaseModel):
 # ---------- 5. arbitrate ----------
 class DecisionItem(BaseModel):
     """单条裁决"""
+
     model_config = _SCHEMA_CONFIG
     conflict_id: str
     verdict: str = "compromise"  # a | b | compromise
@@ -115,6 +123,7 @@ class DecisionItem(BaseModel):
 
 class ArbitrateResult(BaseModel):
     """Arbitrate 阶段输出：裁决记录集合"""
+
     model_config = _SCHEMA_CONFIG
     decisions: list[DecisionItem] = Field(default_factory=list)
     adopted_claims: list[str] = Field(default_factory=list)
@@ -123,6 +132,7 @@ class ArbitrateResult(BaseModel):
 # ---------- 6. produce ----------
 class PRDResult(BaseModel):
     """产品需求文档"""
+
     model_config = _SCHEMA_CONFIG
     title: str
     goal: str = ""
@@ -138,6 +148,7 @@ class CodeAnalysisArtifact(BaseModel):
 
     关键字段 code 为必填，LLM 漏输出时校验失败触发重试。
     """
+
     model_config = _SCHEMA_CONFIG
     title: str = ""
     description: str = ""
@@ -150,11 +161,12 @@ class TestedSystemArtifact(BaseModel):
 
     关键字段 main_code / test_code 为必填。
     """
+
     model_config = _SCHEMA_CONFIG
     title: str = ""
     description: str = ""
     main_code: str  # 必填：实现代码
-    test_code: str   # 必填：测试代码
+    test_code: str  # 必填：测试代码
     run_command: str = "python -m pytest test_generated.py -v"
 
 
@@ -171,6 +183,7 @@ class DeployableServiceArtifact(BaseModel):
     - "medium": 中型服务（20-50个文件），完整分层+React前端+PostgreSQL+测试+Alembic迁移
     - "large": 大型服务（50+文件），微服务架构+多模块+完整测试+CI/CD+监控
     """
+
     model_config = _SCHEMA_CONFIG
 
     # === 基础元数据 ===
@@ -258,18 +271,20 @@ class ProduceResult(BaseModel):
     - deployable_service: prd + openapi + deployable_service
     扩展字段使用具体 Pydantic 模型，关键字段缺失时触发校验失败→重试。
     """
+
     model_config = _SCHEMA_CONFIG
     prd: PRDResult
     openapi: str = ""
     # 可选产出字段（根据 deliverable_type 动态填充）
-    code_analysis: Optional[CodeAnalysisArtifact] = None
-    tested_system: Optional[TestedSystemArtifact] = None
-    deployable_service: Optional[DeployableServiceArtifact] = None
+    code_analysis: CodeAnalysisArtifact | None = None
+    tested_system: TestedSystemArtifact | None = None
+    deployable_service: DeployableServiceArtifact | None = None
 
 
 # ---------- 6b. produce 子类型：非 PRD 产出 ----------
 class DesignDocArtifact(BaseModel):
     """design_doc 产出：架构设计文档"""
+
     model_config = _SCHEMA_CONFIG
     title: str = ""
     overview: str = ""
@@ -284,12 +299,14 @@ class DesignDocArtifact(BaseModel):
 
 class DesignDocResult(BaseModel):
     """Produce 阶段输出：架构设计文档"""
+
     model_config = _SCHEMA_CONFIG
     design_doc: DesignDocArtifact
 
 
 class ComprehensiveArtifact(BaseModel):
     """comprehensive 产出：综合设计文档"""
+
     model_config = _SCHEMA_CONFIG
     title: str = ""
     requirements: dict[str, Any] = Field(default_factory=dict)
@@ -300,12 +317,14 @@ class ComprehensiveArtifact(BaseModel):
 
 class ComprehensiveResult(BaseModel):
     """Produce 阶段输出：综合设计文档"""
+
     model_config = _SCHEMA_CONFIG
     comprehensive: ComprehensiveArtifact
 
 
 class ResearchReportArtifact(BaseModel):
     """research_report 产出：调研报告"""
+
     model_config = _SCHEMA_CONFIG
     title: str = ""
     summary: str = ""
@@ -317,12 +336,14 @@ class ResearchReportArtifact(BaseModel):
 
 class ResearchReportResult(BaseModel):
     """Produce 阶段输出：调研报告"""
+
     model_config = _SCHEMA_CONFIG
     research_report: ResearchReportArtifact
 
 
 class BusinessReportArtifact(BaseModel):
     """business_report 产出：商业报告"""
+
     model_config = _SCHEMA_CONFIG
     title: str = ""
     executive_summary: str = ""
@@ -335,6 +356,7 @@ class BusinessReportArtifact(BaseModel):
 
 class BusinessReportResult(BaseModel):
     """Produce 阶段输出：商业报告"""
+
     model_config = _SCHEMA_CONFIG
     business_report: BusinessReportArtifact
 
@@ -342,6 +364,7 @@ class BusinessReportResult(BaseModel):
 # ---------- 分阶段生成子阶段 schemas ----------
 class PhasedModuleDef(BaseModel):
     """架构规划中的模块定义"""
+
     model_config = _SCHEMA_CONFIG
     name: str
     resource: str = ""
@@ -353,6 +376,7 @@ class PhasedModuleDef(BaseModel):
 
 class PhasedPlanResult(BaseModel):
     """Phase 1: 架构规划输出"""
+
     model_config = _SCHEMA_CONFIG
     title: str
     description: str = ""
@@ -369,14 +393,16 @@ class PhasedPlanResult(BaseModel):
 
 class PhasedFilesResult(BaseModel):
     """Phase 3-6: 通用文件输出"""
+
     model_config = _SCHEMA_CONFIG
     files: dict[str, str] = Field(default_factory=dict)
 
 
 class PhasedSpecsResult(BaseModel):
     """Phase 2: OpenAPI+PRD输出"""
+
     model_config = _SCHEMA_CONFIG
-    prd: Optional[PRDResult] = None
+    prd: PRDResult | None = None
     openapi: str = ""
 
 
