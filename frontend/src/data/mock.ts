@@ -300,6 +300,7 @@ export const HEALTH_CHECKS: HealthCheck[] = [
   { name: 'Redis', desc: '会话缓存 / 限流 / 任务队列', status: 'ok', latency: '1ms', detail: '内存占用 128MB / 512MB' },
   { name: 'Qdrant', desc: '向量数据库（RAG文档检索）', status: 'ok', latency: '5ms', detail: '3个collection · 12,847条向量' },
   { name: 'Docker Engine', desc: '沙箱容器运行时（通过 Socket Proxy）', status: 'ok', latency: '12ms', detail: '4个容器运行中' },
+  { name: 'Docker Hosts', desc: '远程Docker主机集群（2台在线/共2台）', status: 'ok', latency: '18ms', detail: '本机local + 1台SSH worker' },
   { name: 'LLM 熔断器', desc: 'SiliconFlow API 连接保护', status: 'closed', latency: '—', detail: '正常状态，无熔断' },
   { name: 'Web搜索服务', desc: 'Playwright + noVNC 远程浏览器', status: 'ok', latency: '—', detail: '空闲，最近请求 14:22' },
 ];
@@ -376,7 +377,9 @@ export const TOPOLOGY_NODES: TopologyNode[] = [
   { id: 'sandbox-l1', x: 540, y: 220, w: 120, h: 40, label: 'Sandbox L1', sub: '--network none' },
   { id: 'sandbox-l2', x: 540, y: 300, w: 120, h: 40, label: 'Sandbox L2', sub: 'DNS过滤' },
   { id: 'dns', x: 380, y: 300, w: 120, h: 40, label: 'DNS Proxy', sub: 'dnsmasq' },
-  { id: 'llm', x: 300, y: 370, w: 120, h: 40, label: 'SiliconFlow', sub: 'api.siliconflow.cn' },
+  { id: 'remote-host', x: 720, y: 130, w: 140, h: 40, label: 'Remote Worker', sub: 'ssh://worker-01' },
+  { id: 'remote-sandbox', x: 720, y: 220, w: 140, h: 40, label: 'Remote Sandbox', sub: 'SSH调度' },
+  { id: 'llm', x: 300, y: 380, w: 120, h: 40, label: 'SiliconFlow', sub: 'api.siliconflow.cn' },
 ];
 
 interface TopologyLink {
@@ -394,6 +397,8 @@ export const TOPOLOGY_LINKS: TopologyLink[] = [
   { from: 'socket-proxy', to: 'sandbox-l1', type: 'dashed' },
   { from: 'socket-proxy', to: 'sandbox-l2', type: 'dashed' },
   { from: 'sandbox-l2', to: 'dns', type: 'active' },
+  { from: 'backend', to: 'remote-host', type: 'active' },
+  { from: 'remote-host', to: 'remote-sandbox', type: 'dashed' },
   { from: 'backend', to: 'llm', type: 'active' },
 ];
 
@@ -423,9 +428,11 @@ export const CONNECTIONS: Connection[] = [
   { from: 'Backend', to: 'Redis', port: 'TCP :6379', status: 'ok' },
   { from: 'Backend', to: 'Qdrant', port: 'HTTP :6333', status: 'ok' },
   { from: 'Backend', to: 'Docker Proxy', port: 'TCP :2375', status: 'ok' },
+  { from: 'Backend', to: 'Remote Worker', port: 'SSH :22', status: 'ok' },
   { from: 'Backend', to: 'SiliconFlow', port: 'HTTPS :443', status: 'ok' },
   { from: 'Docker Proxy', to: 'Sandbox L1', port: 'containerd', status: 'ok' },
   { from: 'Sandbox L2', to: 'DNS Proxy', port: 'UDP :53', status: 'ok' },
+  { from: 'Remote Worker', to: 'Remote Sandbox', port: 'containerd', status: 'ok' },
 ];
 
 /* ═══ Command palette (cmd+k) ═══ */
@@ -437,6 +444,7 @@ export type CmdkAction =
   | 'models'
   | 'monitor'
   | 'topology'
+  | 'devops'
   | 'settings'
   | 'toggleTheme'
   | 'toggleLog';
@@ -455,6 +463,7 @@ export const CMDK_ITEMS: CmdkItem[] = [
   { icon: 'M7 7h10v10H7z', label: '模型中心', action: 'models', shortcut: '' },
   { icon: 'M3 12h4l2-6 4 12 2-6h6', label: '监控面板', action: 'monitor', shortcut: '' },
   { icon: 'M5 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0M15 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0M10 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0M7 6h10M6.5 7.5L10.5 16M17.5 7.5L13.5 16', label: '组件联通', action: 'topology', shortcut: '' },
+  { icon: 'M2 3h20v8H2zM2 13h20v8H2zM6 7h0M6 17h0M10 7h8M10 17h4', label: '运维面板', action: 'devops', shortcut: '' },
   { icon: 'M12 3v2M12 19v2M3 12h2M19 12h2', label: '切换深色模式', action: 'toggleTheme', shortcut: '⌘D' },
   { icon: 'M5 5h14v14H5z', label: '打开日志面板', action: 'toggleLog', shortcut: '⌘L' },
   { icon: 'M4 12l16-8-6 16-3-7z', label: '新建会议', action: 'landing', shortcut: '⌘N' },

@@ -31,6 +31,9 @@ const HEALTH_LABELS: Record<string, { name: string; desc: string }> = {
   postgresql: { name: 'PostgreSQL', desc: '主数据库' },
   qdrant: { name: 'Qdrant', desc: '向量数据库' },
   docker: { name: 'Docker', desc: '沙箱运行时' },
+  docker_hosts: { name: 'Docker Hosts', desc: '远程主机集群' },
+  redis: { name: 'Redis', desc: '缓存与队列' },
+  llm_circuit_breaker: { name: 'LLM 熔断器', desc: 'API连接保护' },
 };
 
 function statusDotClass(status: string): string {

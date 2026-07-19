@@ -23,6 +23,8 @@
 
 ### 数据科学与代码执行
 - **Docker沙箱隔离**：Sibling Containers架构，代码执行在独立容器中，安全隔离
+- **多主机分布式调度**：支持注册多台远程Docker主机（SSH密钥/密码/TCP+TLS/Unix Socket），内置5种调度策略（least_loaded/local_first/tag_match/manual/round_robin）
+- **运维面板**：可视化管理Docker主机集群，实时查看CPU/内存/磁盘/容器状态，一键健康检查与资源清理
 - **Python数据科学环境**：预装Pandas、NumPy、Matplotlib等库
 - **自动代码修复**：代码执行失败时自动分析错误并修复（最多3轮）
 - **Web搜索能力**：Agent可通过BrowserTool主动搜索资料支撑论点
@@ -124,12 +126,12 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Frontend (React)                         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────────┐  │
-│  │ 聊天面板  │ │ 日志面板  │ │ 拓扑图   │ │ 浮动面板(议题/证据)│  │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────────┬──────────┘  │
-│       │            │            │                 │             │
-│       └────────────┴────────────┴─────────────────┘             │
-│                         │ WebSocket                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐ │
+│  │ 聊天面板  │ │ 日志面板  │ │ 拓扑图   │ │ 运维面板  │ │ 监控  │ │
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └──┬────┘ │
+│       │            │            │             │          │      │
+│       └────────────┴────────────┴─────────────┴──────────┘      │
+│                         │ WebSocket / REST API                  │
 └─────────────────────────┼───────────────────────────────────────┘
                           │
 ┌─────────────────────────┼───────────────────────────────────────┐
@@ -141,10 +143,11 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 │  └──────────────────────┬──────────────────────┘                │
 │                         │                                       │
 │  ┌──────────────────────┴──────────────────────┐                │
-│  │          Runner (编排器)                     │                │
+│  │          Runner (编排器) + 调度引擎          │                │
 │  │  clarify → intra_team → cross_team →        │                │
 │  │  evidence_check → arbitrate → produce       │                │
 │  │  + 动态路由 + 崩溃恢复 + 资源清理            │                │
+│  │  + DockerHost调度(5种策略)                  │                │
 │  └───┬───────┬───────┬───────┬───────┬─────────┘                │
 │      │       │       │       │       │                          │
 │  ┌───▼──┐ ┌──▼──┐ ┌──▼──┐ ┌──▼──┐ ┌──▼───┐                     │
@@ -152,10 +155,13 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 │  │(LLM) │ │     │ │box  │ │     │ │      │                     │
 │  └───┬──┘ └─────┘ └──┬──┘ └─────┘ └──────┘                     │
 │      │               │ Docker API                               │
-│      │               ▼                                          │
-│      │     ┌─────────────────┐                                 │
-│      │     │  Docker Daemon  │  ← 沙箱容器/服务容器              │
-│      │     └─────────────────┘                                 │
+│      │         ┌─────┴──────┐ SSH/TCP                           │
+│      │         │            │ ─────────────────────┐            │
+│      │         ▼            ▼                      ▼            │
+│      │  ┌──────────┐ ┌──────────────┐     ┌──────────────┐     │
+│      │  │ 本地Docker │ │ Remote Host  │ ... │ Remote Host  │     │
+│      │  │ (Socket)  │ │ (SSH Worker) │     │ (TCP+TLS)    │     │
+│      │  └──────────┘ └──────────────┘     └──────────────┘     │
 │      ▼                                                          │
 │  ┌──────────────────────────────────────────┐                  │
 │  │ PostgreSQL  Redis  Qdrant                │                  │
@@ -219,7 +225,8 @@ Conclave/
 │   │   ├── models.py                  # Pydantic模型 + 枚举定义
 │   │   ├── events.py                  # 事件总线（内存+SQLite，1000条上限）
 │   │   ├── context.py                 # 异步上下文变量(request/meeting/agent)
-│   │   ├── sandbox.py                 # Docker沙箱管理（代码执行+服务部署）
+│   │   ├── sandbox.py                 # Docker沙箱管理（代码执行+服务部署+远程主机调度）
+│   │   ├── docker_hosts.py            # Docker主机管理（注册/健康检查/调度策略）
 │   │   ├── orchestrator/              # 编排核心
 │   │   │   ├── runner.py              # 主循环 + 崩溃恢复 + 资源清理
 │   │   │   ├── state.py               # 阶段流转 + 控制信号
@@ -252,6 +259,7 @@ Conclave/
 │   │   │   └── trace.py               # LLM调用追踪
 │   │   ├── routers/                   # API路由
 │   │   │   ├── meetings.py            # 会议CRUD + 后台执行
+│   │   │   ├── docker_hosts.py        # Docker主机管理API
 │   │   │   ├── ws.py                  # WebSocket端点
 │   │   │   ├── documents.py           # 文档上传
 │   │   │   └── ...
@@ -306,6 +314,7 @@ Conclave/
 │   │   │   ├── EvidencePanel.tsx      # 证据面板
 │   │   │   ├── ModelsView.tsx         # 模型中心
 │   │   │   ├── FloatingBadges.tsx     # 右侧浮动徽标
+│   │   │   ├── DevOpsPanel.tsx        # 运维面板（Docker主机管理）
 │   │   │   └── ...
 │   │   ├── store/                     # 状态管理
 │   │   │   ├── MeetingContext.tsx     # 会议Context（key={meetingId}防内存泄漏）
@@ -386,6 +395,13 @@ Conclave/
 | POST | `/api/meetings/{id}/documents` | 上传参考文档 |
 | DELETE | `/api/meetings/{id}?mode=soft/hard` | 删除会议（清理所有关联资源） |
 | WS | `/ws/meetings/{id}` | WebSocket实时事件流 |
+| GET | `/api/v1/docker-hosts` | 获取Docker主机列表 |
+| POST | `/api/v1/docker-hosts` | 添加Docker主机 |
+| PUT | `/api/v1/docker-hosts/{id}` | 更新Docker主机配置 |
+| DELETE | `/api/v1/docker-hosts/{id}` | 删除Docker主机 |
+| POST | `/api/v1/docker-hosts/{id}/check` | 手动触发健康检查 |
+| POST | `/api/v1/docker-hosts/{id}/prune` | 清理无用容器/镜像/卷 |
+| GET | `/api/v1/docker-hosts/presets` | 获取连接预设和调度策略 |
 
 WebSocket事件类型：`snapshot`、`agent.spoke`、`stage.changed`、`evidence.attached`、`artifact.generated`、`produce.progress`、`log.entry`、`meeting.error`、`control.ack`等。
 
@@ -424,6 +440,8 @@ npm run dev
 - 多Agent六阶段会议管线 ✅
 - 独立人格角色 + 动态借调 ✅
 - Docker沙箱代码执行 ✅
+- 多主机分布式Docker调度 ✅
+- 运维面板（Docker主机集群管理） ✅
 - 数据科学分析（Pandas/NumPy/Matplotlib）✅
 - 可部署服务自动生成和部署 ✅
 - RAG文档检索 ✅

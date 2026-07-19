@@ -11,6 +11,7 @@ const NAV_ROUTES: Record<string, string> = {
   models: '/models',
   monitor: '/monitor',
   topology: '/topology',
+  devops: '/devops',
   settings: '/settings',
 };
 
