@@ -1,0 +1,28 @@
+# Cursor Rules — Conclave
+
+请先阅读并遵守项目根目录的 `AGENTS.md`（AI 助手指南，含提交前 checklist、高频踩坑清单、工程纪律），以及 `PROJECT_CONVENTIONS.md`（唯一权威工程规范）。
+
+## 关键速记
+
+- 技术栈：Python 3.12 + FastAPI + asyncio + SQLAlchemy async（后端）；React 18 + TS + Vite + Ant Design（前端）；PostgreSQL + Redis + Qdrant；Docker Compose 部署。
+- 提交前必须跑：后端 `ruff check` + `mypy`；前端 `eslint` + `tsc --noEmit` + `npm run build`；集成测试 `docker compose -f docker-compose.test.yml up --build --exit-code-from backend-test`。
+- Commit 必须 Conventional Commits：`feat/fix/refactor/docs/test/chore/perf/style/ci(scope): 中文描述`。
+- 禁止本地直接跑服务/测试，必须走 Docker Compose。
+- 所有依赖走国内镜像源（pip 清华、npm npmmirror、apt 清华、Docker 华为 SWR）。
+- 模块级禁止直接 `asyncio.Lock()/Semaphore()`，用 `app/lazy_asyncio.py` 的 `LazyLock/LazySemaphore`。
+- 单例 getter 必须事件循环感知（loop 变化时重建）。
+- Docker Playwright 依赖必须装在最终运行阶段（libglib2.0-0、libasound2、libnss3 等）。
+- 事件 publish 后 history 必须按 seq 排序。
+- 测试 mock 用 `**_kwargs` 兼容签名变化。
+- UI 风格：扁平/留白/靛蓝 #335c8e，禁止渐变/3D/重阴影/!important/z-index:9999。
+- 扩展字段优先 JSONB metadata，不随便加核心表列。
+- 一次提交只做一件事，PR < 400 行，禁止 vibe coding。
+
+## 文档索引
+
+- `AGENTS.md` — AI 助手指南（本项目 AI 第一入口，**必读**）
+- `PROJECT_CONVENTIONS.md` — 唯一权威工程规范
+- `docs/design/design-principles.md` — 11 条设计原则
+- `docs/design/adr/` — 架构决策记录
+- `docs/RETROSPECTIVE_CONVENTIONS.md` — 修复报告归档规范
+- `backend/app/skills/ui_design_system.yaml` — UI 设计系统
