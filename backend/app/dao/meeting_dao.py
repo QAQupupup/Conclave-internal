@@ -4,6 +4,8 @@
 batch_delete_meetings 内部调用本文件内的 soft_delete_meeting / hard_delete_meeting，
 无需跨文件 import。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
+
+多租户：所有查询自动附加 tenant_id 过滤；写入时自动填充当前租户 ID。
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from typing import Any
 from sqlalchemy import bindparam, text
 
 from app.db.engine import async_session_factory
+from app.tenants import current_tenant_id, tenant_filter_clause
 
 
 async def save_meeting(
@@ -26,62 +29,51 @@ async def save_meeting(
     payload: dict[str, Any],
     owner_username: str | None = None,
 ) -> None:
-    """upsert 会议记录，payload 存 JSON"""
+    """upsert 会议记录，payload 存 JSON。自动填充当前 tenant_id。"""
+    tid = current_tenant_id()  # None 表示系统租户
+
+    cols = ["id", "topic", "status", "stage", "created_at", "payload"]
+    vals = [":meeting_id", ":topic", ":status", ":stage", ":created_at", ":payload"]
+    params: dict[str, Any] = {
+        "meeting_id": meeting_id,
+        "topic": topic,
+        "status": status,
+        "stage": stage,
+        "created_at": created_at.isoformat(),
+        "payload": json.dumps(payload, ensure_ascii=False, default=str),
+    }
+    if owner_username is not None:
+        cols.insert(2, "owner_username")
+        vals.insert(2, ":owner_username")
+        params["owner_username"] = owner_username
+    if tid is not None:
+        cols.append("tenant_id")
+        vals.append(":tenant_id")
+        params["tenant_id"] = tid
+
+    col_list = ", ".join(cols)
+    val_list = ", ".join(vals)
+    sql = (
+        f"INSERT INTO meetings ({col_list})\n"
+        f"VALUES ({val_list})\n"
+        "ON CONFLICT(id) DO UPDATE SET\n"
+        "    topic=excluded.topic,\n"
+        "    status=excluded.status,\n"
+        "    stage=excluded.stage,\n"
+        "    payload=excluded.payload"
+    )
     async with async_session_factory() as session:
-        if owner_username is not None:
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO meetings (id, topic, owner_username, status, stage, created_at, payload)
-                    VALUES (:meeting_id, :topic, :owner_username, :status, :stage, :created_at, :payload)
-                    ON CONFLICT(id) DO UPDATE SET
-                        topic=excluded.topic,
-                        status=excluded.status,
-                        stage=excluded.stage,
-                        payload=excluded.payload
-                    """
-                ),
-                {
-                    "meeting_id": meeting_id,
-                    "topic": topic,
-                    "owner_username": owner_username,
-                    "status": status,
-                    "stage": stage,
-                    "created_at": created_at.isoformat(),
-                    "payload": json.dumps(payload, ensure_ascii=False, default=str),
-                },
-            )
-        else:
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO meetings (id, topic, status, stage, created_at, payload)
-                    VALUES (:meeting_id, :topic, :status, :stage, :created_at, :payload)
-                    ON CONFLICT(id) DO UPDATE SET
-                        topic=excluded.topic,
-                        status=excluded.status,
-                        stage=excluded.stage,
-                        payload=excluded.payload
-                    """
-                ),
-                {
-                    "meeting_id": meeting_id,
-                    "topic": topic,
-                    "status": status,
-                    "stage": stage,
-                    "created_at": created_at.isoformat(),
-                    "payload": json.dumps(payload, ensure_ascii=False, default=str),
-                },
-            )
+        await session.execute(text(sql), params)
         await session.commit()
 
 
 async def get_meeting(meeting_id: str) -> dict[str, Any] | None:
-    """取单条会议记录"""
+    """取单条会议记录（自动租户过滤）"""
+    tcond, tparams = tenant_filter_clause()
     async with async_session_factory() as session:
         result = await session.execute(
-            text("SELECT * FROM meetings WHERE id = :meeting_id"),
-            {"meeting_id": meeting_id},
+            text(f"SELECT * FROM meetings WHERE id = :meeting_id AND {tcond}"),
+            {"meeting_id": meeting_id, **tparams},
         )
         row = result.mappings().first()
         if row is None:
@@ -92,13 +84,18 @@ async def get_meeting(meeting_id: str) -> dict[str, Any] | None:
 
 
 async def list_meetings(include_deleted: bool = False) -> list[dict[str, Any]]:
-    """列出全部会议。默认排除软删除（status='deleted'）的记录。"""
+    """列出全部会议。默认排除软删除（status='deleted'）的记录。自动租户过滤。"""
+    tcond, tparams = tenant_filter_clause()
     async with async_session_factory() as session:
         if include_deleted:
-            result = await session.execute(text("SELECT * FROM meetings ORDER BY created_at DESC"))
+            result = await session.execute(
+                text(f"SELECT * FROM meetings WHERE {tcond} ORDER BY created_at DESC"),
+                tparams,
+            )
         else:
             result = await session.execute(
-                text("SELECT * FROM meetings WHERE status != 'deleted' ORDER BY created_at DESC")
+                text(f"SELECT * FROM meetings WHERE status != 'deleted' AND {tcond} ORDER BY created_at DESC"),
+                tparams,
             )
         rows = result.mappings().all()
         out = []
@@ -122,9 +119,10 @@ async def query_meetings(
     - items：当前页的会议列表（含 tags 字段）
     - total：满足条件的总记录数（用于分页计算）
     """
+    tcond, tparams = tenant_filter_clause("m.tenant_id")
     async with async_session_factory() as session:
-        conditions: list[str] = []
-        params: dict[str, Any] = {}
+        conditions: list[str] = [tcond]
+        params: dict[str, Any] = {**tparams}
 
         if not include_deleted:
             conditions.append("m.status != 'deleted'")
@@ -143,7 +141,7 @@ async def query_meetings(
             params["tags"] = tags
             params["tag_count"] = len(tags)
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where_clause = f"WHERE {' AND '.join(conditions)}"
 
         # 总数
         count_sql = f"SELECT COUNT(*) as cnt FROM meetings m {where_clause}"
@@ -171,7 +169,7 @@ async def query_meetings(
         for row in rows:
             d = dict(row)
             d["payload"] = json.loads(d["payload"])
-            # 查询该会议的标签
+            # 查询该会议的标签（meeting_id 已受外层租户过滤保护）
             tag_result = await session.execute(
                 text("SELECT tag FROM meeting_tags WHERE meeting_id = :meeting_id ORDER BY tag"),
                 {"meeting_id": d["id"]},
@@ -191,14 +189,15 @@ async def get_meetings_by_ids(meeting_ids: list[str]) -> list[dict[str, Any]]:
     """
     if not meeting_ids:
         return []
+    tcond, tparams = tenant_filter_clause()
     async with async_session_factory() as session:
         stmt = text(
             "SELECT id, topic, status, stage, created_at, payload "
-            "FROM meetings WHERE id IN :meeting_ids "
+            f"FROM meetings WHERE id IN :meeting_ids AND {tcond} "
             "AND status NOT IN ('deleted', 'running') "
             "ORDER BY created_at DESC"
         ).bindparams(bindparam("meeting_ids", expanding=True))
-        result = await session.execute(stmt, {"meeting_ids": meeting_ids})
+        result = await session.execute(stmt, {"meeting_ids": meeting_ids, **tparams})
         rows = result.mappings().all()
         out = []
         for row in rows:
@@ -250,21 +249,27 @@ def _extract_artifact_summary(artifact: dict[str, Any] | None) -> str:
 
 
 async def recover_running_meetings() -> list[dict[str, Any]]:
-    """查找状态为 running 的会议（用于崩溃恢复）"""
+    """查找状态为 running 的会议（用于崩溃恢复）。
+    调用方应使用 create_system_tenant_ctx() 包裹以跨租户恢复。"""
+    tcond, tparams = tenant_filter_clause()
     async with async_session_factory() as session:
-        result = await session.execute(text("SELECT * FROM meetings WHERE status = 'running'"))
+        result = await session.execute(
+            text(f"SELECT * FROM meetings WHERE status = 'running' AND {tcond}"),
+            tparams,
+        )
         rows = result.mappings().all()
         return [dict(row) for row in rows]
 
 
 async def soft_delete_meeting(meeting_id: str) -> bool:
     """软删除会议：将 status 标记为 'deleted'，保留全部数据用于回归。
-    返回是否找到了记录并更新。"""
+    返回是否找到了记录并更新。自动租户过滤。"""
+    tcond, tparams = tenant_filter_clause()
     async with async_session_factory() as session:
         # 先读取当前 payload
         result = await session.execute(
-            text("SELECT payload FROM meetings WHERE id = :meeting_id"),
-            {"meeting_id": meeting_id},
+            text(f"SELECT payload FROM meetings WHERE id = :meeting_id AND {tcond}"),
+            {"meeting_id": meeting_id, **tparams},
         )
         row = result.mappings().first()
         if row is None:
@@ -272,10 +277,11 @@ async def soft_delete_meeting(meeting_id: str) -> bool:
         payload = json.loads(row["payload"])
         payload["_deleted_at"] = datetime.now().isoformat()
         await session.execute(
-            text("UPDATE meetings SET status = 'deleted', payload = :payload WHERE id = :meeting_id"),
+            text(f"UPDATE meetings SET status = 'deleted', payload = :payload WHERE id = :meeting_id AND {tcond}"),
             {
                 "payload": json.dumps(payload, ensure_ascii=False, default=str),
                 "meeting_id": meeting_id,
+                **tparams,
             },
         )
         await session.commit()
@@ -284,17 +290,18 @@ async def soft_delete_meeting(meeting_id: str) -> bool:
 
 async def hard_delete_meeting(meeting_id: str) -> bool:
     """硬删除会议：永久删除 meetings、messages、events 表中该会议的全部记录。
-    不可恢复，用于彻底清理。返回是否删除了主记录。"""
+    不可恢复，用于彻底清理。返回是否删除了主记录。自动租户过滤。"""
+    tcond, tparams = tenant_filter_clause()
     async with async_session_factory() as session:
-        # 先检查主记录是否存在
+        # 先检查主记录是否存在（带租户过滤）
         result = await session.execute(
-            text("SELECT id FROM meetings WHERE id = :meeting_id"),
-            {"meeting_id": meeting_id},
+            text(f"SELECT id FROM meetings WHERE id = :meeting_id AND {tcond}"),
+            {"meeting_id": meeting_id, **tparams},
         )
         row = result.mappings().first()
         if row is None:
             return False
-        # 按依赖顺序删除：先 meeting_tags、messages（有外键），再 events，最后 meetings
+        # 子表通过 meeting_id 关联，天然受限于当前会议（已通过租户校验）
         await session.execute(
             text("DELETE FROM meeting_tags WHERE meeting_id = :meeting_id"),
             {"meeting_id": meeting_id},
@@ -308,8 +315,8 @@ async def hard_delete_meeting(meeting_id: str) -> bool:
             {"meeting_id": meeting_id},
         )
         await session.execute(
-            text("DELETE FROM meetings WHERE id = :meeting_id"),
-            {"meeting_id": meeting_id},
+            text(f"DELETE FROM meetings WHERE id = :meeting_id AND {tcond}"),
+            {"meeting_id": meeting_id, **tparams},
         )
         await session.commit()
         return True
@@ -317,11 +324,12 @@ async def hard_delete_meeting(meeting_id: str) -> bool:
 
 async def restore_meeting(meeting_id: str) -> bool:
     """恢复软删除的会议：将 status 从 'deleted' 恢复为 'aborted'。
-    返回是否找到了记录并恢复。"""
+    返回是否找到了记录并恢复。自动租户过滤。"""
+    tcond, tparams = tenant_filter_clause()
     async with async_session_factory() as session:
         result = await session.execute(
-            text("SELECT payload FROM meetings WHERE id = :meeting_id AND status = 'deleted'"),
-            {"meeting_id": meeting_id},
+            text(f"SELECT payload FROM meetings WHERE id = :meeting_id AND status = 'deleted' AND {tcond}"),
+            {"meeting_id": meeting_id, **tparams},
         )
         row = result.mappings().first()
         if row is None:
@@ -329,10 +337,11 @@ async def restore_meeting(meeting_id: str) -> bool:
         payload = json.loads(row["payload"])
         payload.pop("_deleted_at", None)
         await session.execute(
-            text("UPDATE meetings SET status = 'aborted', payload = :payload WHERE id = :meeting_id"),
+            text(f"UPDATE meetings SET status = 'aborted', payload = :payload WHERE id = :meeting_id AND {tcond}"),
             {
                 "payload": json.dumps(payload, ensure_ascii=False, default=str),
                 "meeting_id": meeting_id,
+                **tparams,
             },
         )
         await session.commit()

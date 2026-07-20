@@ -1142,46 +1142,48 @@ async def recover_crashed_meetings() -> list[str]:
     from app.db_legacy import get_meeting_aux, recover_running_meetings, save_meeting_aux
     from app.models import MeetingStatus
     from app.observability.log_bus import log_bus
+    from app.tenants import create_system_tenant_ctx
 
-    crashed = await recover_running_meetings()
-    recovered_ids = []
-    for record in crashed:
-        meeting_id = record["id"]
-        payload = record.get("payload", {})
-        if isinstance(payload, str):
-            import json
+    with create_system_tenant_ctx():
+        crashed = await recover_running_meetings()
+        recovered_ids = []
+        for record in crashed:
+            meeting_id = record["id"]
+            payload = record.get("payload", {})
+            if isinstance(payload, str):
+                import json
 
-            payload = json.loads(payload)
-        try:
-            state = MeetingState(**payload)
-            # 标准化 flow_plan（旧会议可能使用旧值）
-            state.flow_plan = normalize_mode(state.flow_plan)
-            # 从 meeting_aux 表恢复大字段（向后兼容）
-            aux = await get_meeting_aux(meeting_id)
-            if aux:
-                state.inject_aux(aux)
-            state.status = MeetingStatus.PAUSED
-            state.paused_snapshot = state.snapshot()
-            set_state(state)
-            # 持久化时分离 aux 大字段（先保存主记录，再保存 aux，满足外键约束）
-            persist_aux = state.extract_aux()
-            await save_meeting(
-                state.meeting_id,
-                state.topic,
-                state.status.value,
-                state.stage.value,
-                state.created_at,
-                state.snapshot(),
-            )
-            await save_meeting_aux(meeting_id, persist_aux)
-            recovered_ids.append(meeting_id)
-            log_bus.warning(
-                f"崩溃恢复：会议 {meeting_id} 从 running 标记为 paused",
-                logger="orchestrator.runner",
-            )
-        except Exception as e:
-            log_bus.error(
-                f"崩溃恢复失败：会议 {meeting_id} 恢复异常: {e}",
-                logger="orchestrator.runner",
-            )
+                payload = json.loads(payload)
+            try:
+                state = MeetingState(**payload)
+                # 标准化 flow_plan（旧会议可能使用旧值）
+                state.flow_plan = normalize_mode(state.flow_plan)
+                # 从 meeting_aux 表恢复大字段（向后兼容）
+                aux = await get_meeting_aux(meeting_id)
+                if aux:
+                    state.inject_aux(aux)
+                state.status = MeetingStatus.PAUSED
+                state.paused_snapshot = state.snapshot()
+                set_state(state)
+                # 持久化时分离 aux 大字段（先保存主记录，再保存 aux，满足外键约束）
+                persist_aux = state.extract_aux()
+                await save_meeting(
+                    state.meeting_id,
+                    state.topic,
+                    state.status.value,
+                    state.stage.value,
+                    state.created_at,
+                    state.snapshot(),
+                )
+                await save_meeting_aux(meeting_id, persist_aux)
+                recovered_ids.append(meeting_id)
+                log_bus.warning(
+                    f"崩溃恢复：会议 {meeting_id} 从 running 标记为 paused",
+                    logger="orchestrator.runner",
+                )
+            except Exception as e:
+                log_bus.error(
+                    f"崩溃恢复失败：会议 {meeting_id} 恢复异常: {e}",
+                    logger="orchestrator.runner",
+                )
     return recovered_ids

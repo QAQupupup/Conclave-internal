@@ -97,7 +97,9 @@ def _reset_event_bus():
         try:
             conn.autocommit = True
             cur = conn.cursor()
-            cur.execute("TRUNCATE TABLE events RESTART IDENTITY CASCADE")
+            # 使用 DELETE + 重置序列代替 TRUNCATE CASCADE，避免外键锁级联导致超时
+            cur.execute("DELETE FROM events")
+            cur.execute("ALTER SEQUENCE events_seq_seq RESTART WITH 1")
             cur.close()
         finally:
             conn.close()

@@ -3,6 +3,8 @@
 将 llm_trace、evidence_set 等大字段从 payload 中分离单独存储，
 并提供 payload 精简工具函数。
 原迁移自 app/db_legacy.py，逻辑未做任何修改。
+
+多租户：写入时自动填充 tenant_id；读取通过 meeting_id 间接隔离。
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from typing import Any
 from sqlalchemy import text
 
 from app.db.engine import async_session_factory
+from app.tenants import current_tenant_id
 
 # 需要从 payload 中分离的 aux 字段名列表
 _AUX_KEYS = ("llm_trace", "evidence_set", "conclusion_chain", "borrowed_agents")
@@ -33,25 +36,46 @@ async def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
     if not aux:
         return
     now = datetime.now().isoformat()
+    tid = current_tenant_id()
     async with async_session_factory() as session:
         for key, value in aux.items():
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at)
-                    VALUES (:meeting_id, :key, :value_json, :updated_at)
-                    ON CONFLICT(meeting_id, key) DO UPDATE SET
-                        value_json=excluded.value_json,
-                        updated_at=excluded.updated_at
-                    """
-                ),
-                {
-                    "meeting_id": meeting_id,
-                    "key": key,
-                    "value_json": json.dumps(value, ensure_ascii=False, default=str),
-                    "updated_at": now,
-                },
-            )
+            if tid is not None:
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at, tenant_id)
+                        VALUES (:meeting_id, :key, :value_json, :updated_at, :tenant_id)
+                        ON CONFLICT(meeting_id, key) DO UPDATE SET
+                            value_json=excluded.value_json,
+                            updated_at=excluded.updated_at
+                        """
+                    ),
+                    {
+                        "meeting_id": meeting_id,
+                        "key": key,
+                        "value_json": json.dumps(value, ensure_ascii=False, default=str),
+                        "updated_at": now,
+                        "tenant_id": tid,
+                    },
+                )
+            else:
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at)
+                        VALUES (:meeting_id, :key, :value_json, :updated_at)
+                        ON CONFLICT(meeting_id, key) DO UPDATE SET
+                            value_json=excluded.value_json,
+                            updated_at=excluded.updated_at
+                        """
+                    ),
+                    {
+                        "meeting_id": meeting_id,
+                        "key": key,
+                        "value_json": json.dumps(value, ensure_ascii=False, default=str),
+                        "updated_at": now,
+                    },
+                )
         await session.commit()
 
 
