@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 # ---- 配置 ----
 JWT_SECRET = os.environ.get("CONCLAVE_JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_JWT_EXPIRE", "86400"))  # 默认24小时
+JWT_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_JWT_EXPIRE", "86400"))  # 默认24小时（access token）
+REFRESH_TOKEN_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_REFRESH_TOKEN_EXPIRE", str(7 * 86400)))  # 默认7天
 
 # [H-04 修复] PBKDF2 迭代次数：OWASP 2023+ 推荐 SHA-256 最低 600,000 次
 PBKDF2_ITERATIONS = 600_000
@@ -417,7 +418,20 @@ def create_access_token(user: dict) -> str:
             "sub": user["username"],
             "role": user.get("role", "user"),
             "uid": user.get("id"),
+            "type": "access",
         }
+    )
+
+
+def create_refresh_token(user: dict) -> str:
+    """为用户创建 JWT refresh token（仅用于刷新 access token，不用于 API 访问）"""
+    return create_jwt(
+        {
+            "sub": user.get("id") or user["username"],
+            "username": user["username"],
+            "type": "refresh",
+        },
+        expires_in=REFRESH_TOKEN_EXPIRE_SECONDS,
     )
 
 

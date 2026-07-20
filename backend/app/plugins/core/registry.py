@@ -135,14 +135,12 @@ class PluginRegistry:
         """返回当前已注册插件总数。"""
         return len(self._entries)
 
-    # ---- 便捷加载入口 ----
+    def sync_discover(self, dirs: list[Any]) -> int:
+        """同步扫描插件目录并注册内置插件（不触发 on_startup）。
 
-    async def discover_plugins(self, dirs: list[Any]) -> int:
-        """扫描插件目录并注册发现的插件。
-
-        Phase 0: 仅遍历目录检查是否存在 ``plugin.py``，不执行实际 import
-        （Phase 1a 再实现动态加载逻辑）。当前 builtin 目录为空，返回 0。
-        返回发现并注册的插件数量。
+        用于 create_app() 阶段，此时需要同步注册中间件/路由。
+        异步 on_startup（DB 连接等）在 startup() 中执行。
+        Phase 0: 仅遍历目录，无实际插件，返回 0。
         """
         count = 0
         for d in dirs:
@@ -152,28 +150,44 @@ class PluginRegistry:
             for sub in p.iterdir():
                 if not sub.is_dir() or sub.name.startswith("_"):
                     continue
-                # Phase 0: 仅记录，不实际 import；Phase 1a 实现动态加载
-                # plugin_file = sub / "plugin.py"
-                # if plugin_file.exists(): ...
-                logger.debug("发现插件目录（Phase 0 未加载）: %s", sub.name)
+                # Phase 1a 起：import 插件模块并注册 PluginBase 实例
+                # Phase 0 仅记录日志
+                logger.debug("发现插件目录（未加载）: %s", sub.name)
         logger.info("插件扫描完成，共注册 %d 个插件", count)
         return count
 
-    async def initialize_all(self, app: Any | None = None) -> None:
-        """用默认 PluginContext 初始化所有已注册插件（resolve_and_load 的便捷封装）。"""
+    def bootstrap(self, app: Any) -> None:
+        """同步注册中间件、路由、异常处理器（在 create_app() 中调用）。"""
         self._app = app
+        # 先做拓扑排序确定插件顺序
+        self._order = self._topo_sort()
+        logger.info("插件 bootstrap 顺序: %s", " → ".join(self._order))
+        self.register_exception_handlers(app)
+        self.register_all_middlewares(app)
+        self.register_all_routers(app)
+
+    # ---- 便捷加载入口 ----
+
+    async def discover_plugins(self, dirs: list[Any]) -> int:
+        """异步扫描插件目录并注册发现的插件。
+
+        Phase 0: 仅遍历目录检查是否存在 ``plugin.py``，不执行实际 import
+        （Phase 1a 再实现动态加载逻辑）。当前 builtin 目录为空，返回 0。
+        返回发现并注册的插件数量。
+        """
+        return self.sync_discover(dirs)
+
+    async def initialize_all(self, app: Any | None = None) -> None:
+        """异步初始化：调用所有插件 on_startup（DB 初始化、建表等）。"""
+        if app is not None:
+            self._app = app
         ctx = PluginContext(
-            app=app,
+            app=app if app is not None else self._app,
             registry=self,
             event_bus=self.event_bus,
         )
         self._ctx = ctx
         await self.resolve_and_load(ctx)
-        if app is not None:
-            # 注册中间件、路由、异常处理器
-            self.register_exception_handlers(app)
-            self.register_all_middlewares(app)
-            self.register_all_routers(app)
 
     # ---- 热开关（内存版，Redis 版 P1b 扩展）----
 
@@ -321,7 +335,8 @@ class PluginRegistry:
     def register_all_routers(self, app: FastAPI) -> None:
         for name in self._order:
             entry = self._entries[name]
-            if entry.state != PluginState.READY:
+            # bootstrap 阶段：DISCOVERED / BOOTSTRAPPED / READY 都允许注册路由；仅跳过 DISABLED / FAILED
+            if entry.state in (PluginState.DISABLED, PluginState.FAILED):
                 continue
             plugin = entry.plugin
             if isinstance(plugin, RouterMixin):
@@ -334,7 +349,7 @@ class PluginRegistry:
     def register_all_middlewares(self, app: FastAPI) -> None:
         for name in self._order:
             entry = self._entries[name]
-            if entry.state != PluginState.READY:
+            if entry.state in (PluginState.DISABLED, PluginState.FAILED):
                 continue
             plugin = entry.plugin
             if isinstance(plugin, MiddlewareMixin):

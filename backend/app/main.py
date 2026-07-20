@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.auth import init_auth as init_jwt_auth
+from app.auth import init_auth as init_jwt_auth  # noqa: F401  # 保留供外部引用，实际初始化由 auth 插件完成
 from app.db.base import Base
 from app.db.engine import async_session_factory
 from app.db.redis import close_redis, init_redis
@@ -24,7 +24,6 @@ from app.net_auth import init_auth_table
 from app.plugins import PluginRegistry, set_global_registry
 from app.routers import agent_roles as agent_roles_router
 from app.routers import audit_logs as audit_router
-from app.routers import auth as auth_router
 from app.routers import captcha as captcha_router
 from app.routers import docker_hosts as docker_hosts_router
 from app.routers import documents as documents_router
@@ -80,8 +79,7 @@ async def lifespan(app: FastAPI):
     # PostgreSQL 兼容层（db_legacy，逐步迁移到 async Repository）
     await init_db()
     await init_auth_table()
-    # JWT 用户认证系统（建表 + 默认管理员）
-    await init_jwt_auth()
+    # 注意：JWT 用户认证系统（init_auth）由 auth CORE 插件 on_startup 处理，此处不再直接调用
 
     from app.config import settings
 
@@ -97,8 +95,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("db_mode=%s", settings.db_mode)
 
-    # 插件系统：发现并初始化内置插件（Phase 0 无实际插件，不影响行为）
-    # 插件目录：app/plugins/builtin/ ；外部插件目录通过 CONCLAVE_PLUGINS_EXTRA_DIR 指定
+    # 插件系统：触发所有已注册插件的 on_startup（bootstrap 已在 create_app 同步完成）
+    # 插件目录扫描（外部/额外插件）：通过 CONCLAVE_PLUGINS_EXTRA_DIR 指定
     try:
         import importlib.resources as _pkg_res
 
@@ -112,12 +110,13 @@ async def lifespan(app: FastAPI):
     if _extra_dir_raw:
         _plugin_dirs.append(Path(_extra_dir_raw))
     try:
-        _loaded = await app.state.plugin_registry.discover_plugins(_plugin_dirs)
+        # 同步扫描额外目录（Phase 1a 仅扫描，Phase 1b 起动态加载外部插件）
+        app.state.plugin_registry.sync_discover(_plugin_dirs)
         await app.state.plugin_registry.initialize_all(app)
-        if _loaded:
-            logger.info("插件系统：已加载 %d 个内置插件", _loaded)
-        else:
-            logger.info("插件系统：未发现可加载插件（Phase 0 空壳，正常）")
+        logger.info(
+            "插件系统初始化完成，共 %d 个插件已就绪",
+            app.state.plugin_registry.loaded_count(),
+        )
     except Exception as e:
         logger.warning("插件系统初始化失败（非致命，继续启动）: %s", e)
 
@@ -216,10 +215,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # 插件系统：创建全局注册中心（Phase 0 无插件，discover 阶段为空操作）
+    # 插件系统：创建全局注册中心，注册内置 CORE 插件
     _registry = PluginRegistry()
     app.state.plugin_registry = _registry
     set_global_registry(_registry)
+
+    # 注册内置插件（Phase 1a：auth 插件接管认证）
+    from app.plugins.builtin.auth import AuthPlugin
+    _registry.register(AuthPlugin())
 
     # CORS：生产环境必须通过 CONCLAVE_CORS_ORIGINS 限制；开发环境默认允许常见本地端口
     _cors_origins_raw = os.environ.get("CONCLAVE_CORS_ORIGINS", "")
@@ -261,14 +264,11 @@ def create_app() -> FastAPI:
                 )
         return await call_next(request)
 
-    # API 认证中间件
-    from app.middleware import setup_auth_middleware
-
-    setup_auth_middleware(app)
-    # 请求追踪中间件
+    # 请求追踪中间件（auth 中间件由插件 bootstrap 注册）
     setup_trace_middleware(app)
-    # 挂载路由
-    app.include_router(auth_router.router)
+    # 插件 bootstrap：同步注册中间件/路由/异常处理器
+    _registry.bootstrap(app)
+    # 挂载业务路由（auth 路由由插件注册）
     app.include_router(agent_roles_router.router)
     app.include_router(captcha_router.router)
     app.include_router(meetings_router.router)
