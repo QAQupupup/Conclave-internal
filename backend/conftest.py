@@ -2,6 +2,50 @@
 # 必须在导入 app 之前设置环境变量
 import os
 
+# ---------- pytest-xdist 多进程支持：每个 worker 使用独立数据库 ----------
+# PYTEST_XDIST_WORKER 在 xdist 下为 "gw0"/"gw1"/...，非 xdist 下未设置
+_XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
+
+
+def _apply_xdist_isolation() -> None:
+    """xdist 并行模式下，为每个 worker 配置独立的 PG 数据库、Redis DB 和 Qdrant collection。
+
+    必须在 _ensure_test_database() 和 app 导入之前调用。
+    在 Docker 环境中 DATABASE_URL/REDIS_URL 已由 compose 注入，需要直接覆盖。
+    """
+    if not _XDIST_WORKER or _XDIST_WORKER == "master":
+        return
+
+    gw_num = int(_XDIST_WORKER.replace("gw", ""))
+
+    # 1. PostgreSQL：修改 DATABASE_URL 中的数据库名，添加 worker 后缀
+    db_url = os.environ.get("DATABASE_URL", "")
+    if db_url:
+        # 将路径部分的数据库名替换为带后缀的版本
+        # postgresql+asyncpg://user:pass@host:port/dbname -> .../dbname_gw0
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(db_url)
+        old_db = parsed.path.lstrip("/")
+        if old_db and not old_db.endswith(f"_{_XDIST_WORKER}"):
+            new_db = f"{old_db}_{_XDIST_WORKER}"
+            new_parsed = parsed._replace(path=f"/{new_db}")
+            os.environ["DATABASE_URL"] = urlunparse(new_parsed)
+
+    # 2. Redis：使用不同 DB 索引（0-15）
+    redis_url = os.environ.get("REDIS_URL", "")
+    if redis_url:
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(redis_url)
+        new_parsed = parsed._replace(path=f"/{gw_num % 16}")
+        os.environ["REDIS_URL"] = urlunparse(new_parsed)
+
+    # 3. Qdrant：使用不同 collection 名
+    os.environ["CONCLAVE_QDRANT_COLLECTION"] = f"conclave_chunks_{_XDIST_WORKER}"
+
+
+_apply_xdist_isolation()
+
+
 # CONCLAVE_TEST_REAL_LLM=1 时加载 .env 使用真实 LLM；默认走 StubLLM
 # 用法：CONCLAVE_TEST_REAL_LLM=1 python -m pytest -m real_llm
 if os.environ.get("CONCLAVE_TEST_REAL_LLM") != "1":
@@ -10,15 +54,19 @@ if os.environ.get("CONCLAVE_TEST_REAL_LLM") != "1":
     os.environ.setdefault("CONCLAVE_RERANK_API_KEY", "")
 # 真实 LLM 模式下不设置空值，让 config.py 的 _load_dotenv() 从 .env 加载真实 key
 
-# 测试使用 PostgreSQL；Docker 内由 compose 注入 DATABASE_URL，本地开发默认连 5433
+# 测试使用 PostgreSQL；Docker 内由 compose 注入 DATABASE_URL（已由 _apply_xdist_isolation 处理），
+# 本地开发默认连 5433
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://conclave:conclave_dev@localhost:5433/conclave_test",
 )
+os.environ.setdefault("REDIS_URL", "redis://localhost:6380/0")
+os.environ.setdefault("CONCLAVE_QDRANT_COLLECTION", "conclave_chunks")
 
 
 def _ensure_test_database() -> None:
-    """在导入 app 前确保测试数据库存在（连到默认 postgres 库创建）。"""
+    """在导入 app 前确保测试数据库存在（连到默认 postgres 库创建）。
+    xdist 模式下为每个 worker 创建独立数据库。"""
     import psycopg2
     from psycopg2.sql import Identifier, SQL
     from urllib.parse import urlparse
@@ -35,6 +83,12 @@ def _ensure_test_database() -> None:
         conn = psycopg2.connect(admin_url)
         conn.autocommit = True
         cur = conn.cursor()
+        # 终止其他连接到该数据库的会话（避免残留连接阻塞 CREATE DATABASE）
+        cur.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = %s AND pid <> pg_backend_pid()",
+            (dbname,),
+        )
         cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
         if not cur.fetchone():
             cur.execute(SQL("CREATE DATABASE {}").format(Identifier(dbname)))
@@ -115,6 +169,37 @@ def _reset_event_bus():
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_llm: 需要真实 LLM API key 的集成测试")
+    config.addinivalue_line("markers", "serial: 不能并行执行的测试（依赖全局状态）")
+
+
+# ---------- Session 级：确保数据库表已初始化 ----------
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_db_initialized():
+    """每个 worker 进程启动时确保数据库表已创建。
+    不使用 client fixture 的测试（如直接调用 Runner.run()）也需要表存在。"""
+    import asyncio as _asyncio
+    import contextlib as _contextlib
+    from app.db.engine import _ensure_engine, dispose_async_engine
+    from app.dao.db_init import init_db as _init_db
+
+    async def _do_init():
+        await _ensure_engine()
+        await _init_db()
+
+    loop = _asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_do_init())
+    except Exception:
+        # 可能已被 lifespan 初始化过，忽略错误
+        pass
+    finally:
+        # dispose 引擎（同步函数），关闭临时循环；后续 _ensure_engine 会自动重建
+        with _contextlib.suppress(Exception):
+            dispose_async_engine()
+        loop.close()
+    yield
 
 
 # ---------- 公共 fixture：TestClient ----------
@@ -142,8 +227,10 @@ def _reset_state():
     - store_mod._stores：RAG 向量库
     - memory_store：三层记忆
     - 异步/同步数据库连接池
+
+    xdist 并行模式下，每个 worker 是独立进程，模块级状态天然隔离；
+    此 fixture 负责同一 worker 内测试间的状态清理。
     """
-    import asyncio
     import contextlib
     from app.db.engine import dispose_async_engine
     runner_mod._states.clear()

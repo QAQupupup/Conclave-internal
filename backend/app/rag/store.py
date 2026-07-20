@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from typing import Protocol
 
 import httpx
@@ -273,7 +274,7 @@ class QdrantVectorStore(InMemoryVectorStore):
     def __init__(self, url: str, embedding: Embedding | None = None) -> None:
         super().__init__(embedding)
         self._url = url.rstrip("/")
-        self._collection = "conclave_chunks"
+        self._collection = os.environ.get("CONCLAVE_QDRANT_COLLECTION", "conclave_chunks")
         self._client = None
 
     def _get_client(self):
