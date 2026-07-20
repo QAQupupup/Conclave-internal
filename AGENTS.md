@@ -240,6 +240,18 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 2. 所有业务表外键统一用 `ON DELETE SET NULL`，避免级联删除导致意外数据丢失。
 3. 后台任务/启动恢复等跨租户操作必须用 `create_system_tenant_ctx()` 包裹，否则 tenant_filter 会 fail-closed 返回 FALSE。
 
+### 4.11 pytest-xdist 多进程测试隔离
+
+**症状**：pytest-xdist 并行跑测试时出现 `relation "xxx" does not exist`、数据交叉污染、Redis key 冲突。
+
+**根因**：多个 worker 进程共享同一个 PG 数据库/Redis DB/Qdrant collection，并发 DDL/DML 产生竞态。
+
+**规则**：
+1. conftest.py 已内置 `_apply_xdist_isolation()`：每个 worker 自动使用独立 PG 库（`conclave_test_gwN`）、Redis DB（`N%16`）、Qdrant collection（`conclave_chunks_gwN`）。
+2. 不使用 `client` fixture 的测试（直接调 Runner/DAO）必须确保 session 级 `_ensure_db_initialized` fixture 已建表。
+3. 模块级单例（bus、engine、agent 缓存）在 xdist 下天然隔离（每个 worker 独立进程），但同一 worker 内测试仍需 `_reset_state` 清理。
+4. 并行数由 `-n auto` 自动检测 CPU 核心数；如需固定数量用 `-n 2`/`-n 4`。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -343,4 +355,4 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ---
 
-> 本文件最后更新：2026-07-20（Phase 1b 多租户数据模型完成：tenants 表、User-Tenant 关联、核心业务表 tenant_id 列、JWT claims 集成、ContextVar、DAO 层自动过滤、默认租户迁移；Phase 0 插件框架 + Phase 1a Auth CORE 插件已完成）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-20（pytest-xdist 多进程并行测试支持，测试加速 2.3x；Phase 1b 多租户数据模型完成；Phase 0 插件框架 + Phase 1a Auth CORE 插件已完成）。若发现新的高频坑，追加到第 4 节并更新日期。
