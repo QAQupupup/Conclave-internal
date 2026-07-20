@@ -221,3 +221,77 @@ async def create_default_tenant_for_existing_users() -> TenantInfo | None:
         logger.info("已将 %d 个现有用户关联到默认租户(id=%d)", cnt, default_tenant.id)
 
     return default_tenant
+
+
+# 需要加 tenant_id 列的核心业务表（除 users 外，users 在 ensure_tenants_table 中已处理）
+# meetings 是核心表；messages/events/meeting_tags/meeting_aux 通过 meeting_id 级联，
+# 但为了防御纵深和查询性能，也冗余 tenant_id 列。
+_BUSINESS_TABLES = [
+    "meetings",
+    "messages",
+    "events",
+    "meeting_tags",
+    "meeting_aux",
+    "user_preferences",
+]
+
+
+async def ensure_business_tables_tenant_id() -> None:
+    """为所有核心业务表添加 tenant_id 列（如不存在）。
+
+    幂等：可重复调用。添加列后回填默认租户 ID（对于 tenant_id IS NULL 的历史数据）。
+    """
+    default_tenant = await get_default_tenant()
+    default_tid = default_tenant.id if default_tenant else None
+
+    async with async_session_factory() as session:
+        for table in _BUSINESS_TABLES:
+            # 添加列（如果不存在）
+            await session.execute(text(
+                f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = '{table}' AND column_name = 'tenant_id'
+                    ) THEN
+                        ALTER TABLE {table} ADD COLUMN tenant_id INTEGER;
+                    END IF;
+                END $$;
+                """
+            ))
+
+        await session.commit()
+
+        # 回填默认租户 ID（必须在列存在之后）
+        if default_tid is not None:
+            for table in _BUSINESS_TABLES:
+                await session.execute(text(
+                    f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL"
+                ), {"tid": default_tid})
+            await session.commit()
+            logger.info("已为核心业务表回填默认租户 id=%d", default_tid)
+
+        # 添加索引和外键（回填完成后再加外键，避免 NULL 约束问题）
+        for table in _BUSINESS_TABLES:
+            await session.execute(text(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_tenant_id ON {table}(tenant_id)"
+            ))
+            # meetings 表的外键
+            await session.execute(text(
+                f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.table_constraints
+                        WHERE constraint_name = 'fk_{table}_tenant' AND table_name = '{table}'
+                    ) THEN
+                        ALTER TABLE {table} ADD CONSTRAINT fk_{table}_tenant
+                        FOREIGN KEY (tenant_id) REFERENCES {TENANTS_TABLE}(id) ON DELETE SET NULL;
+                    END IF;
+                END $$;
+                """
+            ))
+        await session.commit()
+
+    logger.info("核心业务表 tenant_id 列迁移完成")

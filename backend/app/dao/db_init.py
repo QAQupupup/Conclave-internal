@@ -29,7 +29,8 @@ async def init_db() -> None:
             stage TEXT NOT NULL,
             created_at TEXT NOT NULL,
             payload TEXT NOT NULL,
-            schema_version INTEGER NOT NULL DEFAULT 1
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            tenant_id INTEGER
         )
         """,
         """
@@ -42,6 +43,7 @@ async def init_db() -> None:
             claim_refs TEXT NOT NULL,
             evidence_refs TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            tenant_id INTEGER,
             FOREIGN KEY (meeting_id) REFERENCES meetings(id)
         )
         """,
@@ -53,7 +55,8 @@ async def init_db() -> None:
             type TEXT NOT NULL,
             payload TEXT NOT NULL,
             ts TEXT NOT NULL,
-            trace_id TEXT
+            trace_id TEXT,
+            tenant_id INTEGER
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_events_meeting ON events(meeting_id)",
@@ -64,6 +67,7 @@ async def init_db() -> None:
             key TEXT NOT NULL,
             value TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            tenant_id INTEGER,
             PRIMARY KEY (user_id, key)
         )
         """,
@@ -73,6 +77,7 @@ async def init_db() -> None:
             meeting_id TEXT NOT NULL,
             tag TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            tenant_id INTEGER,
             UNIQUE(meeting_id, tag),
             FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
         )
@@ -104,6 +109,7 @@ async def init_db() -> None:
             key TEXT NOT NULL,
             value_json TEXT NOT NULL DEFAULT '{}',
             updated_at TEXT NOT NULL,
+            tenant_id INTEGER,
             PRIMARY KEY (meeting_id, key),
             FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
         )
@@ -112,9 +118,22 @@ async def init_db() -> None:
         # 兼容旧数据库：为已有表添加缺失列
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS owner_username TEXT NOT NULL DEFAULT 'system'",
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        "ALTER TABLE messages ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        "ALTER TABLE meeting_tags ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        "ALTER TABLE meeting_aux ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        # 索引（必须在列存在之后创建）
         "CREATE INDEX IF NOT EXISTS idx_meetings_owner ON meetings(owner_username)",
         "CREATE INDEX IF NOT EXISTS idx_meetings_status ON meetings(status)",
         "CREATE INDEX IF NOT EXISTS idx_meetings_created ON meetings(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_meetings_tenant_id ON meetings(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_tenant_id ON messages(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_events_tenant_id ON events(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_preferences_tenant_id ON user_preferences(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_tags_tenant_id ON meeting_tags(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_meeting_aux_tenant_id ON meeting_aux(tenant_id)",
     ]
     async with async_session_factory() as session:
         for stmt in ddl_statements:
