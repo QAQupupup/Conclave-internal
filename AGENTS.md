@@ -229,6 +229,17 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 改端口必须三处一致：代码、Dockerfile、compose yml。
 
+### 4.10 多租户外键与 TRUNCATE CASCADE 锁超时
+
+**症状**：测试 fixture 中 `TRUNCATE TABLE events RESTART IDENTITY CASCADE` 超时挂死。
+
+**根因**：新增多租户外键（`fk_*_tenant → tenants(id)`）后，TRUNCATE CASCADE 需要获取所有相关表的 ACCESS EXCLUSIVE 锁，与异步引擎残留连接产生锁等待。
+
+**规则**：
+1. 测试 fixture 清理数据用 `DELETE FROM table` + `ALTER SEQUENCE ... RESTART WITH 1` 代替 `TRUNCATE CASCADE`。
+2. 所有业务表外键统一用 `ON DELETE SET NULL`，避免级联删除导致意外数据丢失。
+3. 后台任务/启动恢复等跨租户操作必须用 `create_system_tenant_ctx()` 包裹，否则 tenant_filter 会 fail-closed 返回 FALSE。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -332,4 +343,4 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ---
 
-> 本文件最后更新：2026-07-20（新增 §0.5 AI 助手执行纪律：Docker Compose 优先、命令无需请示；Phase 0 插件框架 + Phase 1a Auth CORE 插件已完成）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-20（Phase 1b 多租户数据模型完成：tenants 表、User-Tenant 关联、核心业务表 tenant_id 列、JWT claims 集成、ContextVar、DAO 层自动过滤、默认租户迁移；Phase 0 插件框架 + Phase 1a Auth CORE 插件已完成）。若发现新的高频坑，追加到第 4 节并更新日期。
