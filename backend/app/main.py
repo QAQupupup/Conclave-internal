@@ -21,6 +21,7 @@ from app.db_legacy import init_db
 from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware
 from app.net_auth import init_auth_table
+from app.plugins import PluginRegistry, set_global_registry
 from app.routers import agent_roles as agent_roles_router
 from app.routers import audit_logs as audit_router
 from app.routers import auth as auth_router
@@ -96,6 +97,30 @@ async def lifespan(app: FastAPI):
 
     logger.info("db_mode=%s", settings.db_mode)
 
+    # 插件系统：发现并初始化内置插件（Phase 0 无实际插件，不影响行为）
+    # 插件目录：app/plugins/builtin/ ；外部插件目录通过 CONCLAVE_PLUGINS_EXTRA_DIR 指定
+    try:
+        import importlib.resources as _pkg_res
+
+        from app.plugins import builtin as _builtin_ns
+
+        _builtin_dir = Path(_pkg_res.files(_builtin_ns)._paths[0])  # type: ignore[attr-defined]
+    except Exception:
+        _builtin_dir = Path(__file__).parent / "plugins" / "builtin"
+    _extra_dir_raw = os.environ.get("CONCLAVE_PLUGINS_EXTRA_DIR", "").strip()
+    _plugin_dirs: list[Path] = [_builtin_dir]
+    if _extra_dir_raw:
+        _plugin_dirs.append(Path(_extra_dir_raw))
+    try:
+        _loaded = await app.state.plugin_registry.discover_plugins(_plugin_dirs)
+        await app.state.plugin_registry.initialize_all(app)
+        if _loaded:
+            logger.info("插件系统：已加载 %d 个内置插件", _loaded)
+        else:
+            logger.info("插件系统：未发现可加载插件（Phase 0 空壳，正常）")
+    except Exception as e:
+        logger.warning("插件系统初始化失败（非致命，继续启动）: %s", e)
+
     # 启动时扫描工作区孤立目录
     _cleanup_orphaned_workspaces()
 
@@ -140,6 +165,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # 关闭插件系统（逆序 shutdown，在基础设施关闭之前）
+    try:
+        await app.state.plugin_registry.shutdown_all()
+    except Exception as e:
+        logger.warning("插件系统关闭异常（非致命）: %s", e)
     # 停止速率限制清理
     stop_rate_limit_cleanup()
     # 停止后台指标采集
@@ -185,6 +215,12 @@ def create_app() -> FastAPI:
         version="0.3.0",
         lifespan=lifespan,
     )
+
+    # 插件系统：创建全局注册中心（Phase 0 无插件，discover 阶段为空操作）
+    _registry = PluginRegistry()
+    app.state.plugin_registry = _registry
+    set_global_registry(_registry)
+
     # CORS：生产环境必须通过 CONCLAVE_CORS_ORIGINS 限制；开发环境默认允许常见本地端口
     _cors_origins_raw = os.environ.get("CONCLAVE_CORS_ORIGINS", "")
     if _cors_origins_raw.strip():
@@ -307,6 +343,13 @@ def create_app() -> FastAPI:
             checks["llm_circuit"] = cb.state
         except Exception:
             checks["llm_circuit"] = "unknown"
+
+        # 插件系统状态
+        try:
+            _pr = app.state.plugin_registry
+            checks["plugins"] = f"{_pr.loaded_count()} loaded"
+        except Exception:
+            checks["plugins"] = "unknown"
 
         _healthy_vals = {"ok", "closed", "half_open", "disabled"}
         all_ok = all(v in _healthy_vals for v in checks.values())

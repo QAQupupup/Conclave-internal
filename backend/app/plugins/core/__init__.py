@@ -1,0 +1,81 @@
+"""插件系统核心模块：类型、Hook 协议、注册中心、事件总线、异常。"""
+from __future__ import annotations
+
+from app.plugins.core.context import plugin_scope
+from app.plugins.core.event_bus import PluginEvent, PluginEventBus
+from app.plugins.core.exceptions import (
+    AccessDenied,
+    ConclaveException,
+    PluginDependencyError,
+    PluginLoadError,
+    PluginRejected,
+    QuotaExceeded,
+    SetupRequired,
+)
+from app.plugins.core.hooks import (
+    LifecycleMixin,
+    LLMErrorInfo,
+    LLMErrorMixin,
+    LLMObserverMixin,
+    LLMPreCallMixin,
+    LLMRequest,
+    LLMResponse,
+    LLMUsage,
+    MeetingAccessMixin,
+    MeetingCreatedMixin,
+    MeetingCreatingMixin,
+    MiddlewareMixin,
+    RouterMixin,
+)
+from app.plugins.core.registry import PluginRegistry, get_registry, set_global_registry
+from app.plugins.core.types import (
+    Fallback,
+    LLMFallback,
+    LLMOverride,
+    Next,
+    Override,
+    PluginBase,
+    PluginContext,
+    PluginHealth,
+    PluginState,
+    PluginTier,
+)
+
+__all__ = [
+    "AccessDenied",
+    "ConclaveException",
+    "Fallback",
+    "LLMErrorInfo",
+    "LLMErrorMixin",
+    "LLMFallback",
+    "LLMObserverMixin",
+    "LLMOverride",
+    "LLMPreCallMixin",
+    "LLMRequest",
+    "LLMResponse",
+    "LLMUsage",
+    "LifecycleMixin",
+    "MeetingAccessMixin",
+    "MeetingCreatedMixin",
+    "MeetingCreatingMixin",
+    "MiddlewareMixin",
+    "Next",
+    "Override",
+    "PluginBase",
+    "PluginContext",
+    "PluginDependencyError",
+    "PluginEvent",
+    "PluginEventBus",
+    "PluginHealth",
+    "PluginLoadError",
+    "PluginRegistry",
+    "PluginRejected",
+    "PluginState",
+    "PluginTier",
+    "QuotaExceeded",
+    "RouterMixin",
+    "SetupRequired",
+    "get_registry",
+    "plugin_scope",
+    "set_global_registry",
+]

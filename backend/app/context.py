@@ -27,6 +27,9 @@ _user_id: contextvars.ContextVar[str] = contextvars.ContextVar("user_id", defaul
 _username: contextvars.ContextVar[str] = contextvars.ContextVar("username", default="-")
 _user_role: contextvars.ContextVar[str] = contextvars.ContextVar("user_role", default="")
 
+# plugin_name：当前钩子调用所属的插件（插件系统在钩子调度时设置）
+_plugin_name: contextvars.ContextVar[str] = contextvars.ContextVar("plugin_name", default="-")
+
 
 def new_request_id() -> str:
     """生成新的 request_id（短格式 UUID）"""
@@ -122,6 +125,18 @@ def set_user_role(role: str) -> contextvars.Token[str]:
     return _user_role.set(role)
 
 
+def get_plugin_name() -> str:
+    return _plugin_name.get()
+
+
+def set_plugin_name(name: str) -> contextvars.Token[str]:
+    return _plugin_name.set(name)
+
+
+def reset_plugin_name(token: contextvars.Token[str]) -> None:
+    _plugin_name.reset(token)
+
+
 def get_trace_context() -> dict[str, str]:
     """获取当前追踪上下文快照（用于日志注入）"""
     return {
@@ -132,4 +147,5 @@ def get_trace_context() -> dict[str, str]:
         "user_id": _user_id.get(),
         "username": _username.get(),
         "user_role": _user_role.get(),
+        "plugin_name": _plugin_name.get(),
     }

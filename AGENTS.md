@@ -17,6 +17,46 @@
 
 ---
 
+## 0.5 AI 助手执行纪律（强制）
+
+> 本节是对 PROJECT_CONVENTIONS.md §1.1（Docker Compose 优先）的 AI 助手执行细则。
+> **违反这些规则等同于违反工程规范。**
+
+### 0.5.1 命令执行无需请示
+
+用户已明确授权：执行命令前**无需**弹出"是否允许执行"的确认，可以直接运行。
+例外：涉及 `git push`、`git reset --hard`、`docker system prune -a`、`rm -rf` 系统级删除等不可逆操作，仍需简要说明影响后再执行。
+
+### 0.5.2 所有 lint/typecheck/test 必须在 Docker 容器内执行
+
+**禁止**在 Windows/macOS/Linux 宿主机直接运行以下命令：
+- `pytest` / `python -m pytest`
+- `ruff check` / `ruff format`（作为最终验证）
+- `mypy`
+- `npm run build` / `npx tsc` / `npx eslint`（作为最终验证）
+- `python main.py` / `uvicorn` / `npm run dev`（启动服务）
+
+**正确做法**：
+- 后端 lint/typecheck：`docker compose -f docker-compose.test.yml run --rm backend-test sh -c "ruff check app ... && mypy ..."`
+- 后端测试：`docker compose -f docker-compose.test.yml up --build --exit-code-from backend-test`
+- 前端构建/测试：通过对应 docker compose 服务或容器内命令执行
+- 启动开发环境：`docker compose up -d --build`
+
+**允许在宿主机执行的命令**（仅限快速反馈，**不能替代容器内验证**）：
+- `python -m py_compile <file>` 纯语法检查
+- `git status` / `git diff` / `git log` / `git add`
+- `ls` / `dir` / `Get-ChildItem` / `cat` / `type` 文件查看
+- `docker compose config` 配置校验
+- `pip install` 到虚拟环境仅供辅助脚本使用，**不能**用来跑项目测试
+
+### 0.5.3 提交卫生
+
+- 提交前必须在 Docker 容器内跑过 ruff/mypy/pytest 三个检查全部通过
+- 禁止把临时文件（`__pycache__`、`.pyc`、`.pytest_cache`、本地虚拟环境、个人笔记）提交到仓库
+- 提交信息必须遵循 Conventional Commits，scope 使用 `backend`/`frontend`/`docker`/`plugins` 等
+
+---
+
 ## 1. 技术栈速查
 
 | 层 | 技术 | 关键约束 |
@@ -292,4 +332,4 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ---
 
-> 本文件最后更新：2026-07-20。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-20（新增 §0.5 AI 助手执行纪律：Docker Compose 优先、命令无需请示）。若发现新的高频坑，追加到第 4 节并更新日期。
