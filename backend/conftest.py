@@ -177,23 +177,59 @@ def pytest_configure(config):
 
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_db_initialized():
-    """每个 worker 进程启动时确保数据库表已创建。
+    """每个 worker 进程启动时确保数据库表已创建且数据干净。
     不使用 client fixture 的测试（如直接调用 Runner.run()）也需要表存在。"""
     import asyncio as _asyncio
     import contextlib as _contextlib
     from app.db.engine import _ensure_engine, dispose_async_engine
     from app.dao.db_init import init_db as _init_db
+    from sqlalchemy import text as _text
 
     async def _do_init():
-        await _ensure_engine()
+        # _ensure_engine 是同步函数，直接调用（它处理循环检测与重建）
+        _ensure_engine()
         await _init_db()
+        # 确保 users 表存在（与 app/auth.py 中 _init_users_table 保持一致）
+        from app.db.engine import async_session_factory
+        from app.auth import hash_password as _hash_pw
+        async with async_session_factory() as session:
+            await session.execute(_text("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(64) UNIQUE NOT NULL,
+                    password_hash VARCHAR(256) NOT NULL,
+                    role VARCHAR(32) NOT NULL DEFAULT 'user',
+                    display_name VARCHAR(128),
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    tenant_id INTEGER,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    last_login_at TIMESTAMP
+                )
+            """))
+            await session.execute(_text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
+            # 查询所有用户表（排除 alembic_version），然后 TRUNCATE CASCADE
+            result = await session.execute(_text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                "AND tablename NOT IN ('alembic_version')"
+            ))
+            tables = [row[0] for row in result.fetchall()]
+            if tables:
+                await session.execute(_text(
+                    f"TRUNCATE TABLE {', '.join(tables)} RESTART IDENTITY CASCADE"
+                ))
+            # 插入测试管理员用户（id=1，与测试模式 middleware 中 set_user_id("1") 对应）
+            # lifespan 启动时 create_default_tenant_for_existing_users 会自动将其关联到默认租户
+            await session.execute(_text(
+                "INSERT INTO users(id, username, password_hash, role, display_name, is_active) "
+                "VALUES(1, 'admin', :pw, 'admin', 'Administrator', TRUE)"
+            ), {"pw": _hash_pw("Admin123!@#")})
+            # 重置 sequences 以确保 id 从 2 开始（避免后续插入冲突）
+            await session.execute(_text("ALTER SEQUENCE users_id_seq RESTART WITH 2"))
+            await session.commit()
 
     loop = _asyncio.new_event_loop()
     try:
         loop.run_until_complete(_do_init())
-    except Exception:
-        # 可能已被 lifespan 初始化过，忽略错误
-        pass
     finally:
         # dispose 引擎（同步函数），关闭临时循环；后续 _ensure_engine 会自动重建
         with _contextlib.suppress(Exception):

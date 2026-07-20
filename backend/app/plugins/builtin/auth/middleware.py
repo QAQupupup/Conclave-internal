@@ -98,11 +98,11 @@ def setup_auth_middleware(app, plugin=None) -> None:
         method = request.method
         ip = _client_ip(request)
 
-        # 测试模式：跳过认证与限流，注入测试 admin 用户（与旧 middleware 行为一致）
+        # 测试模式：跳过认证与限流，注入默认管理员（与 init_auth 创建的 admin 用户一致）
         if os.environ.get("APP_ENV") == "test" and os.environ.get("CONCLAVE_TEST_DISABLE_AUTH") == "1":
-            request.state.auth_user = {"username": "test", "role": "admin", "uid": None}
-            set_user_id("test")
-            set_username("test")
+            request.state.auth_user = {"username": "admin", "role": "admin", "uid": 1}
+            set_user_id("1")
+            set_username("admin")
             set_user_role("admin")
             set_tenant_id(None)
             from app.tenants.context import set_system_tenant as _set_sys

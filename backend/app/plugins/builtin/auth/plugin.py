@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from app.plugins.builtin.auth import middleware as auth_mw
 from app.plugins.builtin.auth import router as auth_router_mod
 from app.plugins.builtin.auth import setup as setup_mod
+from app.plugins.builtin.auth import tenants_router as tenants_router_mod
 from app.plugins.core.hooks import LifecycleMixin, MiddlewareMixin, RouterMixin
 from app.plugins.core.types import PluginContext, PluginHealth, PluginTier
 
@@ -98,6 +99,7 @@ class AuthPlugin(LifecycleMixin, RouterMixin, MiddlewareMixin):
     def register_routers(self, app: FastAPI) -> None:
         app.include_router(auth_router_mod.router)
         app.include_router(setup_mod.router)
+        app.include_router(tenants_router_mod.router)
 
     def register_middlewares(self, app: FastAPI) -> None:
         auth_mw.setup_auth_middleware(app, self)

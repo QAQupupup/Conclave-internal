@@ -7,7 +7,7 @@ from typing import Any
 
 @dataclass
 class TenantInfo:
-    """租户信息（内存缓存用）。"""
+    """租户信息（API 返回/内存缓存用）。"""
 
     id: int
     name: str
@@ -16,6 +16,7 @@ class TenantInfo:
     owner_id: int | None = None
     settings: dict[str, Any] = field(default_factory=dict)
     created_at: str | None = None
+    role: str | None = None  # 当前用户在该租户的角色（list_user_tenants 时填充）
 
 
 @dataclass
@@ -27,3 +28,15 @@ class TenantCreate:
     plan: str = "free"
     owner_id: int | None = None
     settings: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TenantMember:
+    """租户成员信息。"""
+
+    user_id: int
+    username: str
+    display_name: str
+    email: str | None = None
+    role: str = "member"  # owner / admin / member
+    joined_at: str | None = None
