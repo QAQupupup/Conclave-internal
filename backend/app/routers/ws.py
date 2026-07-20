@@ -90,7 +90,7 @@ def _check_meeting_access(user: dict, meeting_id: str) -> tuple[bool, str]:
         # 会议不存在，允许创建者连接
         return True, "create"
     # 检查 owner
-    owner = getattr(state, "owner", None) or (state.snapshot().get("owner") if hasattr(state, "snapshot") else None)
+    owner = getattr(state, "owner_username", None) or (state.snapshot().get("owner_username") if hasattr(state, "snapshot") else None)
     if owner and owner == username:
         return True, "owner"
     # 检查参与者列表
@@ -234,13 +234,14 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
 
     # 审计：WS 连接建立
     try:
-        from app.context import set_meeting_id, set_user_id, set_user_role, set_username
+        from app.context import set_meeting_id, set_user_id, set_user_role, set_username, set_tenant_id
         from app.observability.audit import audit
 
         set_user_id(str(user.get("uid") or ""))
         set_username(user.get("username", ""))
         set_user_role(user.get("role", ""))
         set_meeting_id(meeting_id)
+        set_tenant_id(user.get("tenant_id"))
         audit(
             "system.ws_connected",
             "success",

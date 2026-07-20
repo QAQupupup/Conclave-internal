@@ -215,7 +215,7 @@ _users_cache: dict[str, dict[str, Any]] = {}  # username -> user dict
 
 
 async def _init_users_table() -> None:
-    """创建 users 表（如不存在）"""
+    """创建 users 表（如不存在），并为旧库补加缺失列。"""
     async with async_session_factory() as session:
         await session.execute(
             text(
@@ -235,6 +235,10 @@ async def _init_users_table() -> None:
             )
         )
         await session.execute(text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
+        # 兼容旧库：补加缺失列
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(128)"))
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER"))
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP"))
         # tenant_id 外键在 ensure_tenants_table() 中通过 ALTER TABLE 添加（避免建表顺序依赖）
         await session.commit()
 
@@ -318,9 +322,46 @@ async def _update_password_hash(username: str, new_hash: str) -> None:
             {"hash": new_hash, "username": username},
         )
         await session.commit()
+
+
+async def update_display_name(username: str, display_name: str) -> dict | None:
+    """更新用户显示名，返回更新后的用户 dict。"""
+    display_name = display_name.strip()
+    if not display_name or len(display_name) > 128:
+        return None
+    async with async_session_factory() as session:
+        await session.execute(
+            text("UPDATE users SET display_name = :dn WHERE username = :username"),
+            {"dn": display_name, "username": username},
+        )
+        await session.commit()
+    # 更新缓存
+    with _users_lock:
+        if username in _users_cache:
+            _users_cache[username]["display_name"] = display_name
+    return get_user_by_username(username)
+
+
+async def change_password(username: str, old_password: str, new_password: str) -> bool:
+    """修改密码：验证旧密码后更新。成功返回 True。"""
+    user = await authenticate_user(username, old_password)
+    if not user:
+        return False
+    if len(new_password) < 6 or len(new_password) > 128:
+        return False
+    from bcrypt import hashpw, gensalt
+    new_hash = hashpw(new_password.encode("utf-8"), gensalt()).decode("utf-8")
+    async with async_session_factory() as session:
+        await session.execute(
+            text("UPDATE users SET password_hash = :hash WHERE username = :username"),
+            {"hash": new_hash, "username": username},
+        )
+        await session.commit()
+    # 更新缓存
     with _users_lock:
         if username in _users_cache:
             _users_cache[username]["password_hash"] = new_hash
+    return True
 
 
 async def _update_last_login(username: str) -> None:
@@ -443,7 +484,7 @@ def create_refresh_token(user: dict) -> str:
 
 
 def decode_token(token: str) -> dict | None:
-    """验证并解码 token，返回 {username, role, uid, jti, ...} 或 None"""
+    """验证并解码 token，返回 {username, role, uid, jti, tenant_id, ...} 或 None"""
     claims = verify_jwt(token)
     if not claims:
         return None
@@ -452,6 +493,7 @@ def decode_token(token: str) -> dict | None:
         "role": claims.get("role", "user"),
         "uid": claims.get("uid"),
         "jti": claims.get("jti"),
+        "tenant_id": claims.get("tenant_id"),
     }
 
 

@@ -334,6 +334,9 @@ AI在后续修复任务中，应：
 | 删除模式粘滞 | 危险操作（永久删除）的状态保持导致误删 | 危险操作每次确认都重置为安全默认 |
 | 状态切换不重置 | 切换会议/页面时局部状态残留（如Tab停留在工作区） | ID变化时重置相关state |
 | 文件上传无删除 | 选择文件后无法撤销/重选 | 使用标准Upload组件，支持onRemove |
+| SA FK 引用 raw SQL 表 | ORM 模型 ForeignKey 引用非 metadata 注册表导致 create_all 崩溃 | 插件/raw SQL 表不在 SA 模型中声明 FK，统一用 ALTER TABLE 添加 |
+| 加列不加过滤 | 多 tenant_id 列已迁移但 DAO/路由层忘记使用 | 遵循多租户隔离 Checklist（AGENTS.md §4.13），7 项逐项确认 |
+| 误建 ORM 模型污染 metadata | 为 raw SQL 模块额外建 ORM 模型导致 DDL 冲突 | 确认模块已用 raw SQL 管理 DDL 后不再建 SA 模型，统一一种方式 |
 
 ---
 

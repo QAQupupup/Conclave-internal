@@ -13,6 +13,7 @@ from app.db.models import DocumentModel
 from app.orchestrator.runner import get_state
 from app.rag.chunker import chunk_markdown
 from app.rag.store import get_store
+from app.tenants import current_tenant_id
 
 router = APIRouter(prefix="/meetings", tags=["documents"])
 
@@ -81,10 +82,12 @@ async def upload_document(meeting_id: str, file: UploadFile = File(...)) -> dict
     # 持久化文档元数据到数据库
     doc_db_id = uuid.uuid4().hex
     content_hash = hashlib.sha256(raw).hexdigest()
+    tid = current_tenant_id()
     try:
         async with async_session_factory() as session:
             doc_record = DocumentModel(
                 id=doc_db_id,
+                tenant_id=tid,
                 meeting_id=meeting_id,
                 filename=doc_id + ext,
                 original_name=filename,
@@ -113,16 +116,28 @@ async def upload_document(meeting_id: str, file: UploadFile = File(...)) -> dict
 
 @router.get("/{meeting_id}/documents")
 async def list_documents(meeting_id: str) -> dict[str, Any]:
-    """列出会议已上传的文档"""
-    from sqlalchemy import select
+    """列出会议已上传的文档（按租户过滤）"""
+    from sqlalchemy import and_, select
 
+    tid = current_tenant_id()
     try:
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(DocumentModel)
-                .where(DocumentModel.meeting_id == meeting_id)
-                .order_by(DocumentModel.created_at.desc())
-            )
+            if tid is not None:
+                q = select(DocumentModel).where(
+                    and_(
+                        DocumentModel.meeting_id == meeting_id,
+                        DocumentModel.tenant_id == tid,
+                    )
+                )
+            else:
+                q = select(DocumentModel).where(
+                    and_(
+                        DocumentModel.meeting_id == meeting_id,
+                        DocumentModel.tenant_id.is_(None),
+                    )
+                )
+            q = q.order_by(DocumentModel.created_at.desc())
+            result = await session.execute(q)
             docs = result.scalars().all()
         return {
             "meeting_id": meeting_id,

@@ -129,7 +129,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
             return await call_next(request)  # type: ignore[no-any-return]
 
         # 延迟 import 避免循环引用
-        from app.auth import decode_token
+        from app.auth import verify_jwt
         from app.middleware import _DEV_TOKEN, _RATE_BLOCK_SECONDS, _check_rate_limit
 
         # 速率限制
@@ -191,7 +191,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
                     headers={"WWW-Authenticate": "Bearer"},
                 )
 
-            claims = decode_token(token)
+            claims = verify_jwt(token)
             if not claims:
                 _check_rate_limit(ip, is_failed_attempt=True)
                 audit("auth.invalid_token", "failure", {"path": path}, ip=ip)
@@ -219,7 +219,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
             set_tenant_id(tenant_id if isinstance(tenant_id, int) else (int(tenant_id) if tenant_id else None))
             from app.tenants.context import set_system_tenant as _set_sys3
             _set_sys3(False)
-            # auth_user 格式与旧 middleware 兼容
+            # auth_user 包含完整 claims
             auth_user = dict(claims)
             auth_user["username"] = username
             auth_user["uid"] = uid_str

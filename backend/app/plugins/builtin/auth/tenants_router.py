@@ -259,8 +259,9 @@ async def _do_switch_tenant(
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在")
 
-    user_with_tenant = dict(user)
-    user_with_tenant["tenant_id"] = tenant_id
+    # 同步更新内存缓存中的 tenant_id，避免 refresh token 使用旧值
+    _users_cache[username] = {**user, "tenant_id": tenant_id}
+    user_with_tenant = _users_cache[username]
 
     # 签发新 token
     access_token = create_access_token(user_with_tenant)

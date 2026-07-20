@@ -307,13 +307,17 @@ async def select_deploy_target(
     """
     from app.db.engine import async_session_factory
     from app.db.models.docker_host import DockerHostModel
+    from app.tenants import current_tenant_id
+    from sqlalchemy import or_
 
     requirements = requirements or {}
+    tid = current_tenant_id()
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(DockerHostModel).where(DockerHostModel.enabled == True)  # noqa: E712
-        )
+        q = select(DockerHostModel).where(DockerHostModel.enabled == True)  # noqa: E712
+        if tid is not None:
+            q = q.where(or_(DockerHostModel.tenant_id == tid, DockerHostModel.tenant_id.is_(None)))
+        result = await session.execute(q)
         hosts = list(result.scalars().all())
 
     if not hosts:

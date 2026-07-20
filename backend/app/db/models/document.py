@@ -32,6 +32,8 @@ class DocumentModel(Base):
     __tablename__ = "documents"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # tenant_id: 由 tenants service 通过 ALTER TABLE 添加外键约束
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     meeting_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("meetings.id", ondelete="CASCADE"),

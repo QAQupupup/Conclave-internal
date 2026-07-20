@@ -45,6 +45,8 @@ class ApiKeyModel(Base):
     __tablename__ = "api_keys"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # tenant_id: 由 tenants service 通过 ALTER TABLE 添加外键约束
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     provider: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True, comment="LLM厂商: siliconflow/deepseek/openai/openrouter/custom"
     )
@@ -67,6 +69,7 @@ class ApiKeyModel(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("provider", "name", name="uq_api_key_provider_name"),
+        UniqueConstraint("tenant_id", "provider", "name", name="uq_api_key_tenant_provider_name"),
         Index("idx_api_keys_provider", "provider"),
+        Index("idx_api_keys_tenant_id", "tenant_id"),
     )

@@ -13,7 +13,6 @@ from app.db.models.event import EventModel
 from app.db.models.meeting import MeetingAuxModel, MeetingModel, MeetingTagModel
 from app.db.models.memory import FeatureMemoryModel, ProfileMemoryModel, RawMemoryModel
 from app.db.models.message import MessageModel
-from app.db.models.net_auth import NetAuthRequestModel
 from app.db.models.observability import CostRecordModel
 from app.db.models.user import ApiKeyModel, UserPreferenceModel
 
@@ -30,7 +29,6 @@ __all__ = [
     "MeetingModel",
     "MeetingTagModel",
     "MessageModel",
-    "NetAuthRequestModel",
     "ProfileMemoryModel",
     "RawMemoryModel",
     "UserPreferenceModel",

@@ -252,6 +252,32 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 3. 模块级单例（bus、engine、agent 缓存）在 xdist 下天然隔离（每个 worker 独立进程），但同一 worker 内测试仍需 `_reset_state` 清理。
 4. 并行数由 `-n auto` 自动检测 CPU 核心数；如需固定数量用 `-n 2`/`-n 4`。
 
+### 4.12 SQLAlchemy 模型与 raw SQL 表混用时 FK 声明陷阱
+
+**症状**：`Base.metadata.create_all()` 抛出 `sqlalchemy.exc.NoReferencedTableError: Foreign key associated with column 'X.tenant_id' could not find table 'tenants' with which to generate a foreign key`。
+
+**根因**：`tenants` 等插件表由 `ensure_tenants_table()` 通过 raw SQL `CREATE TABLE IF NOT EXISTS` 创建，未注册到 SQLAlchemy `Base.metadata`。在 ORM 模型中声明 `ForeignKey("tenants.id")` 后，`create_all()` 排序表依赖时找不到被引用表，直接崩溃。
+
+**规则**：
+1. 对于 raw SQL 创建的表（如 tenants、由插件管理的表），**不要**在 SA ORM 模型中声明 `ForeignKey(...)`。
+2. 外键约束统一由 raw SQL `ALTER TABLE ... ADD CONSTRAINT ... REFERENCES table(id) ON DELETE SET NULL` 在表创建后添加（参见 `app/tenants/service.py::ensure_business_tables_tenant_id()`）。
+3. SA 模型中仅声明列类型和 `index=True`，注释说明外键由迁移统一添加。
+4. 新增 ORM 模型前先确认对应模块是否已有 raw SQL DDL。如果有，要么统一迁移到 ORM，要么完全不建 ORM 模型，切勿混用导致 metadata 污染。
+
+### 4.13 多租户隔离 Checklist（强制）
+
+为任何资源表添加/修改多租户支持时，必须逐项确认：
+
+1. 表已加入 `app/tenants/service.py::_BUSINESS_TABLES`（自动迁移加列）
+2. INSERT 时填充 `tenant_id = current_tenant_id()`
+3. SELECT 列表加 `WHERE tenant_id = :tid`（系统资源继承场景用 `OR tenant_id IS NULL`）
+4. UPDATE/DELETE 加 WHERE tenant_id 条件，防止跨租户操作
+5. GET by ID 必须校验 tenant_id，不能仅按 ID 查询
+6. 不在 SA 模型中对 raw SQL 表声明 ForeignKey（见 §4.12）
+7. 测试覆盖：创建两个租户 → 各插入数据 → 互相查询不到对方数据
+
+**教训**：Phase 1b 为所有业务表加了 tenant_id 列和 ALTER TABLE 外键，但多个模块（key_store、docker_hosts、net_auth、documents）的 DAO/路由层忘记实际使用该列进行过滤，导致跨租户数据泄露。参见修复报告 `docs/retrospectives/2026-07-21-multitenant-isolation-and-settings-ux.html`。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -355,4 +381,4 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ---
 
-> 本文件最后更新：2026-07-20（pytest-xdist 多进程并行测试支持，测试加速 2.3x；Phase 1b 多租户数据模型完成；Phase 0 插件框架 + Phase 1a Auth CORE 插件已完成）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-21（§4.12 SA FK 与 raw SQL 表混用陷阱、§4.13 多租户隔离 Checklist；Phase 2b 全局资源隔离完成，修复 SA create_all NoReferencedTableError 崩溃）。若发现新的高频坑，追加到第 4 节并更新日期。

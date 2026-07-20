@@ -960,10 +960,23 @@ def _evict_if_needed() -> None:
 
 
 def get_state(meeting_id: str) -> MeetingState | None:
-    """取某会议的运行态（线程安全），记录访问时间用于LRU"""
+    """取某会议的运行态（线程安全），记录访问时间用于LRU。
+    [MULTI-TENANT] 校验内存状态的 tenant_id 与当前上下文匹配，防止跨租户访问。
+    """
+    from app.tenants import get_tenant_id as _get_tid, is_system_tenant as _is_sys
     with _states_lock:
         st = _states.get(meeting_id)
         if st is not None:
+            # 系统租户模式（后台任务/恢复）跳过校验
+            if not _is_sys():
+                current_tid = _get_tid()
+                # 如果内存状态有 tenant_id 且与当前上下文不匹配，拒绝访问
+                if st.tenant_id is not None and current_tid is not None and st.tenant_id != current_tid:
+                    logger.warning(
+                        "租户隔离：拒绝跨租户访问内存状态 meeting=%s state_tid=%s current_tid=%s",
+                        meeting_id, st.tenant_id, current_tid,
+                    )
+                    return None
             _state_last_access[meeting_id] = time.monotonic()
         return st
 
@@ -1091,10 +1104,12 @@ def cleanup_meeting_resources(meeting_id: str) -> None:
 
 def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
     """创建新的会议运行态"""
+    from app.tenants import get_tenant_id as _get_tid
     state = MeetingState(
         meeting_id=meeting_id,
         topic=topic,
         doc_summaries=doc_summaries or [],
+        tenant_id=_get_tid(),
     )
     set_state(state)
     return state
@@ -1117,6 +1132,8 @@ async def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] |
         payload = record["payload"]
         try:
             state = MeetingState(**payload)
+            # [MULTI-TENANT] 从 DB 记录中恢复 tenant_id（若 payload 中未包含则从记录列取）
+            state.tenant_id = state.tenant_id or record.get("tenant_id")
             # 标准化 flow_plan（旧会议可能使用 "full"/"fast_path"/"deep_think" 等旧值）
             state.flow_plan = normalize_mode(state.flow_plan)
             # 从 meeting_aux 表加载大字段并注入（向后兼容：旧会议无 aux 数据时安全跳过）

@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全局资源多租户隔离与用户设置 UX 完善 — 回顾报告</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --zinc-50: #fafafa; --zinc-100: #f4f4f5; --zinc-200: #e4e4e7; --zinc-300: #d4d4d8;
+    --zinc-400: #a1a1aa; --zinc-500: #71717a; --zinc-600: #52525b; --zinc-700: #3f3f46;
+    --zinc-800: #27272a; --zinc-900: #18181b; --zinc-950: #09090b;
+    --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8;
+    --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
+    --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
+    --violet-50: #f5f3ff; --violet-100: #ede9fe; --violet-500: #8b5cf6; --violet-600: #7c3aed;
+    --rose-50: #fff1f2; --rose-100: #ffe4e6; --rose-500: #f43f5e; --rose-600: #e11d48;
+    --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5;
+    --radius: 8px; --radius-sm: 6px; --radius-lg: 12px;
+    --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+    --shadow: 0 1px 3px 0 rgba(0,0,0,0.08), 0 1px 2px -1px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.05);
+  }
+
+  html { font-size: 15px; -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--zinc-50); color: var(--zinc-900); line-height: 1.65; padding: 0;
+  }
+  .page-wrapper { max-width: 980px; margin: 0 auto; padding: 48px 24px 80px; }
+
+  /* Header */
+  .report-header { margin-bottom: 40px; padding-bottom: 32px; border-bottom: 1px solid var(--zinc-200); }
+  .report-header .breadcrumb {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--zinc-500);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; margin-bottom: 16px;
+  }
+  .report-header .breadcrumb .sep { color: var(--zinc-300); }
+  .report-header h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; color: var(--zinc-900); line-height: 1.25; margin-bottom: 8px; }
+  .report-header .subtitle { font-size: 16px; color: var(--zinc-500); margin-bottom: 20px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+  /* Badges */
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; line-height: 1.6; white-space: nowrap;
+  }
+  .badge.date { background: var(--zinc-100); color: var(--zinc-700); border-color: var(--zinc-200); }
+  .badge.commit { background: var(--indigo-50); color: var(--indigo-600); border-color: var(--indigo-100); font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 11px; }
+  .badge.p0 { background: var(--rose-50); color: var(--rose-600); border-color: var(--rose-100); }
+  .badge.p1 { background: var(--amber-50); color: var(--amber-600); border-color: var(--amber-100); }
+  .badge.p2 { background: var(--blue-50); color: var(--blue-600); border-color: var(--blue-100); }
+  .badge.feat { background: var(--green-50); color: var(--green-600); border-color: var(--green-100); }
+  .badge.chain { background: var(--violet-50); color: var(--violet-600); border-color: var(--violet-100); }
+  .badge.chain a { color: inherit; text-decoration: none; }
+  .badge.chain a:hover { text-decoration: underline; }
+
+  /* Stats Grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 40px; }
+  .stat-card {
+    background: white; border: 1px solid var(--zinc-200); border-radius: var(--radius-lg);
+    padding: 16px 20px; box-shadow: var(--shadow-sm);
+  }
+  .stat-card .label { font-size: 12px; color: var(--zinc-500); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; line-height: 1.2; }
+  .stat-card.p0 .value { color: var(--rose-600); }
+  .stat-card.p1 .value { color: var(--amber-600); }
+  .stat-card.p2 .value { color: var(--blue-600); }
+  .stat-card.feat .value { color: var(--green-600); }
+  .stat-card.total .value { color: var(--zinc-900); }
+  .stat-card.test .value { color: var(--indigo-600); font-size: 20px; }
+
+  /* Sections */
+  section { margin-bottom: 40px; }
+  section h2 {
+    font-size: 20px; font-weight: 700; color: var(--zinc-900); margin-bottom: 16px;
+    padding-bottom: 8px; border-bottom: 2px solid var(--zinc-900); display: inline-block;
+  }
+  section h3 { font-size: 16px; font-weight: 600; color: var(--zinc-800); margin: 24px 0 12px; }
+  section p { margin-bottom: 12px; color: var(--zinc-700); }
+  section ul, section ol { margin: 8px 0 16px 24px; color: var(--zinc-700); }
+  section li { margin-bottom: 6px; }
+
+  /* Bug Card */
+  .bug-card {
+    background: white; border: 1px solid var(--zinc-200); border-radius: var(--radius-lg);
+    padding: 20px 24px; margin-bottom: 16px; box-shadow: var(--shadow-sm);
+    border-left: 4px solid var(--zinc-300);
+  }
+  .bug-card.p0 { border-left-color: var(--rose-500); }
+  .bug-card.p1 { border-left-color: var(--amber-500); }
+  .bug-card.p2 { border-left-color: var(--blue-500); }
+  .bug-card.feat { border-left-color: var(--green-500); }
+  .bug-card .bug-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .bug-card .bug-title { font-size: 15px; font-weight: 600; color: var(--zinc-900); }
+  .bug-card .bug-id { font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px; color: var(--zinc-400); }
+  .bug-card dl { display: grid; grid-template-columns: 80px 1fr; gap: 6px 16px; font-size: 13px; }
+  .bug-card dt { color: var(--zinc-500); font-weight: 500; }
+  .bug-card dd { color: var(--zinc-800); }
+  .bug-card code {
+    background: var(--zinc-100); padding: 1px 6px; border-radius: 4px;
+    font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px; color: var(--zinc-800);
+  }
+  .bug-card pre {
+    background: var(--zinc-900); color: #e4e4e7; padding: 12px 16px; border-radius: var(--radius);
+    font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px;
+    overflow-x: auto; margin: 8px 0; line-height: 1.5;
+  }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; background: white; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--zinc-200); }
+  th { background: var(--zinc-100); font-weight: 600; color: var(--zinc-700); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td { color: var(--zinc-800); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--zinc-50); }
+
+  /* Pattern tag */
+  .pattern-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 500; background: var(--violet-100); color: var(--violet-600);
+    margin-right: 4px;
+  }
+  .new-pattern {
+    background: var(--rose-100); color: var(--rose-600);
+  }
+
+  /* Callout */
+  .callout {
+    padding: 14px 18px; border-radius: var(--radius); margin: 16px 0;
+    font-size: 13px; line-height: 1.6;
+  }
+  .callout.warn { background: var(--amber-50); border: 1px solid var(--amber-100); color: var(--amber-600); }
+  .callout.info { background: var(--blue-50); border: 1px solid var(--blue-100); color: var(--blue-700); }
+  .callout.success { background: var(--green-50); border: 1px solid var(--green-100); color: var(--green-700); }
+
+  /* Commit chain */
+  .report-chain { margin-top: 12px; font-size: 13px; color: var(--zinc-500); }
+  .report-chain a { color: var(--indigo-600); text-decoration: none; }
+  .report-chain a:hover { text-decoration: underline; }
+
+  /* Files list */
+  .files-list { columns: 2; column-gap: 24px; font-size: 12px; color: var(--zinc-600); font-family: "SF Mono", Monaco, Consolas, monospace; }
+  .files-list li { break-inside: avoid; margin-bottom: 3px; }
+</style>
+</head>
+<body>
+<div class="page-wrapper">
+
+  <!-- Header -->
+  <header class="report-header">
+    <div class="breadcrumb">
+      <span>Conclave</span><span class="sep">/</span><span>修复回顾</span><span class="sep">/</span><span>Phase 2b</span>
+    </div>
+    <h1>全局资源多租户隔离与用户设置 UX 完善</h1>
+    <p class="subtitle">修复多租户隔离在 API Keys / Docker Hosts / Net Auth / Documents 上的遗漏；解决 SQLAlchemy ForeignKey 引用 raw SQL 表导致的 create_all 崩溃；补充账户管理（修改显示名、修改密码）和团队创建 UI。</p>
+    <div class="meta-row">
+      <span class="badge date">📅 2026 年 7 月 21 日</span>
+      <span class="badge commit">🔖 Commit 区间: <code>28a05e1</code> → <code>aed4fda</code></span>
+      <span class="badge p0">1 个 P0</span>
+      <span class="badge p1">3 个 P1</span>
+      <span class="badge p2">3 个 P2</span>
+      <span class="badge feat">4 个功能补全</span>
+    </div>
+    <div class="report-chain">
+      上一轮修复: <a href="./2026-07-18-industrial-service-generation-upgrade.html"><code>2026-07-18</code> 工业级服务生成升级</a>
+    </div>
+  </header>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card p0"><div class="label">P0 阻断</div><div class="value">1</div></div>
+    <div class="stat-card p1"><div class="label">P1 严重</div><div class="value">3</div></div>
+    <div class="stat-card p2"><div class="label">P2 一般</div><div class="value">3</div></div>
+    <div class="stat-card feat"><div class="label">UX 补全</div><div class="value">4</div></div>
+    <div class="stat-card total"><div class="label">涉及文件</div><div class="value">20+</div></div>
+    <div class="stat-card test"><div class="label">Docker 测试</div><div class="value">544 passed</div></div>
+  </div>
+
+  <!-- 1. 问题概述 -->
+  <section>
+    <h2>1. 问题概述</h2>
+    <p>Phase 1b 完成了核心业务表（meetings/messages/events/memories 等）的 tenant_id 列和 DAO 层租户过滤，但在端到端测试中发现以下系统性问题：</p>
+    <ol>
+      <li><strong>全局资源隔离遗漏</strong>：API Keys、Docker Hosts、Net Auth 申请单、Documents 这四类资源没有或缺少完整的 tenant_id 过滤，存在跨租户数据泄露风险。</li>
+      <li><strong>SQLAlchemy FK 引用 raw SQL 表导致 P0 崩溃</strong>：为全局资源表添加 <code>ForeignKey("tenants.id")</code> 后，<code>Base.metadata.create_all()</code> 因 <code>tenants</code> 表由插件 raw SQL 创建（未在 SQLAlchemy metadata 中注册）而抛出 <code>NoReferencedTableError</code>，导致整个测试套件和服务启动失败。</li>
+      <li><strong>用户设置 UX 缺口</strong>：Settings 页面只有主题/日志开关和一个不可编辑的 API Key 列表，缺少账户管理（修改显示名、修改密码）、团队创建、Key 检测、空状态提示等基础功能。</li>
+    </ol>
+    <div class="callout warn">
+      <strong>影响范围：</strong>所有多租户部署场景。租户 A 的 API Key 可能被租户 B 使用；Docker 测试全部失败；新用户首次进入设置页面几乎无法完成任何配置。
+    </div>
+  </section>
+
+  <!-- 2. Commit 区间详情 -->
+  <section>
+    <h2>2. Commit 区间详情</h2>
+    <p><strong>起始 Commit：</strong><code>28a05e1</code> — feat(frontend): Phase 2a 租户切换 UI（顶栏切换器 + 状态管理）</p>
+    <p><strong>结束 Commit：</strong><code>aed4fda</code> — fix(tenants): Phase 2b 全局资源多租户隔离 + 用户设置 UX 完善</p>
+    <h3>本次修复涉及的文件</h3>
+    <ul class="files-list">
+      <li>backend/app/auth.py</li>
+      <li>backend/app/db/models/user.py</li>
+      <li>backend/app/db/models/docker_host.py</li>
+      <li>backend/app/db/models/document.py</li>
+      <li>backend/app/db/models/__init__.py</li>
+      <li>backend/app/db/models/net_auth.py <em>(删除)</em></li>
+      <li>backend/app/net_auth.py</li>
+      <li>backend/app/routers/documents.py</li>
+      <li>backend/app/routers/docker_hosts.py</li>
+      <li>backend/app/services/key_store.py</li>
+      <li>backend/app/tenants/service.py</li>
+      <li>backend/app/plugins/builtin/auth/router.py</li>
+      <li>frontend/src/lib/api.ts</li>
+      <li>frontend/src/views/Settings.tsx</li>
+    </ul>
+  </section>
+
+  <!-- 3. 修复详情 -->
+  <section>
+    <h2>3. 修复详情</h2>
+
+    <!-- P0 -->
+    <div class="bug-card p0">
+      <div class="bug-header">
+        <span class="badge p0">P0</span>
+        <span class="bug-title">SQLAlchemy ForeignKey 引用 raw SQL 创建的 tenants 表导致 create_all 崩溃</span>
+        <span class="bug-id">#FK-001</span>
+      </div>
+      <dl>
+        <dt>现象</dt>
+        <dd>Docker 测试启动时抛出 <code>sqlalchemy.exc.NoReferencedTableError: Foreign key associated with column 'docker_hosts.tenant_id' could not find table 'tenants' with which to generate a foreign key</code>，所有测试失败。</dd>
+        <dt>根因</dt>
+        <dd><code>tenants</code> 表由 <code>ensure_tenants_table()</code> 通过 raw SQL <code>CREATE TABLE IF NOT EXISTS</code> 创建，并未注册到 SQLAlchemy <code>Base.metadata</code>。在 ORM 模型中声明 <code>ForeignKey("tenants.id")</code> 后，<code>metadata.create_all()</code> 在排序表依赖关系时找不到被引用表，直接抛出异常。Phase 1b 中 <code>user.py</code> 已经有同样的 FK 声明，但因为测试环境通过 <code>lifespan</code> 先调用插件初始化（raw SQL 建表）再走 SA create_all，所以之前在本地 dev 环境未暴露；Docker 测试中 pytest-xdist 多 worker 并发初始化时竞争条件触发此问题。</dd>
+        <dt>修复方式</dt>
+        <dd>
+          <p>从所有 ORM 模型（<code>user.py</code>、<code>docker_host.py</code>、<code>document.py</code>）中移除 SA 层的 <code>ForeignKey("tenants.id")</code> 声明，仅保留 <code>mapped_column(Integer, nullable=True, index=True)</code>。外键约束统一由 <code>tenants/service.py::ensure_business_tables_tenant_id()</code> 通过 raw SQL <code>ALTER TABLE ... ADD CONSTRAINT ... REFERENCES tenants(id) ON DELETE SET NULL</code> 添加，这是项目既定模式（参见 ADR-002）。</p>
+          <pre># 修复前
+tenant_id: Mapped[int | None] = mapped_column(
+    Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+)
+# 修复后
+# tenant_id: 由 tenants service 通过 ALTER TABLE 添加外键约束
+tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)</pre>
+        </dd>
+        <dt>影响文件</dt>
+        <dd><code>backend/app/db/models/user.py</code>, <code>docker_host.py</code>, <code>document.py</code></dd>
+        <dt>验证</dt>
+        <dd>Docker 测试 544 passed；启动时无 SA 警告。</dd>
+      </dl>
+    </div>
+
+    <!-- P1-1 -->
+    <div class="bug-card p1">
+      <div class="bug-header">
+        <span class="badge p1">P1</span>
+        <span class="bug-title">API Keys 跨租户可见：list/save/delete 缺少 tenant_id 过滤</span>
+        <span class="bug-id">#ISO-001</span>
+      </div>
+      <dl>
+        <dt>现象</dt>
+        <dd>切换到不同租户后，API Key 列表会显示其他租户的 Key；删除 Key 时未校验所有权。</dd>
+        <dt>根因</dt>
+        <dd><code>services/key_store.py</code> 的 <code>list_keys()</code> 没有按 <code>current_tenant_id()</code> 过滤；<code>save_key()</code> 没有在 INSERT 时填充 tenant_id；<code>delete_key()</code> 没有加 WHERE tenant_id 条件。虽然 <code>_BUSINESS_TABLES</code> 中已包含 <code>api_keys</code>，tenant_id 列已由迁移添加，但 DAO 层完全没有使用它。</dd>
+        <dt>修复方式</dt>
+        <dd>在 <code>key_store.py</code> 的所有 CRUD 方法中引入租户上下文：<code>list_keys()</code> 查询时加 <code>WHERE tenant_id = :tid OR tenant_id IS NULL</code>（系统 Key 继承），<code>save_key()</code> INSERT 时填充 <code>tenant_id</code>，<code>delete_key()</code> 加双重过滤。</dd>
+        <dt>影响文件</dt>
+        <dd><code>backend/app/services/key_store.py</code></dd>
+        <dt>验证</dt>
+        <dd>手动切换租户验证 Key 列表隔离；测试通过。</dd>
+      </dl>
+    </div>
+
+    <!-- P1-2 -->
+    <div class="bug-card p1">
+      <div class="bug-header">
+        <span class="badge p1">P1</span>
+        <span class="bug-title">Docker Hosts 全局共享：所有 CRUD 无租户隔离</span>
+        <span class="bug-id">#ISO-002</span>
+      </div>
+      <dl>
+        <dt>现象</dt>
+        <dd>Docker Hosts 列表在所有租户间共享；任何租户可删除其他租户添加的 Docker 主机。</dd>
+        <dt>根因</dt>
+        <dd><code>docker_hosts</code> 表之前不在 <code>_BUSINESS_TABLES</code> 中，迁移脚本不会为其添加 tenant_id 列；路由层也无任何租户过滤。</dd>
+        <dt>修复方式</dt>
+        <dd>
+          <ol>
+            <li>在 <code>tenants/service.py::_BUSINESS_TABLES</code> 中加入 <code>"docker_hosts"</code>，由迁移自动添加 tenant_id 列和外键。</li>
+            <li>在 <code>routers/docker_hosts.py</code> 中实现 <code>_tenant_filter()</code>，所有 list/get/update/delete 操作均按 <code>(tenant_id = :tid OR tenant_id IS NULL)</code> 过滤，创建时填充 tenant_id。</li>
+            <li>ORM 模型中添加 tenant_id 列（无 SA 外键，参见 #FK-001）。</li>
+          </ol>
+        </dd>
+        <dt>影响文件</dt>
+        <dd><code>backend/app/tenants/service.py</code>, <code>routers/docker_hosts.py</code>, <code>db/models/docker_host.py</code></dd>
+        <dt>验证</dt>
+        <dd>Docker 测试通过。</dd>
+      </dl>
+    </div>
+
+    <!-- P1-3 -->
+    <div class="bug-card p1">
+      <div class="bug-header">
+        <span class="badge p1">P1</span>
+        <span class="bug-title">Net Auth 申请单无租户过滤：跨租户可见/可操作</span>
+        <span class="bug-id">#ISO-003</span>
+      </div>
+      <dl>
+        <dt>现象</dt>
+        <dd>外网访问审批申请单在不同租户间可见；approve/deny 操作无所有权校验。</dd>
+        <dt>根因</dt>
+        <dd><code>net_auth.py</code> 使用 raw SQL 操作，之前完全没有 tenant_id 概念。<code>get_pending_for_meeting()</code>、<code>approve_request()</code>、<code>deny_request()</code> 都没有按租户过滤。</dd>
+        <dt>修复方式</dt>
+        <dd>
+          <ol>
+            <li>在 <code>init_auth_table()</code> 的 ALTER TABLE 中为已存在的表添加 <code>tenant_id INTEGER</code> 列和索引。</li>
+            <li><code>create_request()</code> 填充 tenant_id。</li>
+            <li><code>get_pending_for_meeting()</code>、<code>list_pending()</code>、<code>get_request()</code> 都加 <code>AND tenant_id = :tid</code> 条件。</li>
+            <li>approve/deny 通过 <code>get_request()</code> 读取后自然受租户过滤，不额外添加（纵深防御已在 get_request 中）。</li>
+            <li><code>expire_pending_requests()</code> 是系统级维护任务，不过滤租户（有意为之，注释已说明）。</li>
+          </ol>
+        </dd>
+        <dt>影响文件</dt>
+        <dd><code>backend/app/net_auth.py</code></dd>
+        <dt>额外修复</dt>
+        <dd>删除了错误创建的 <code>db/models/net_auth.py</code> ORM 模型（该模块全部使用 raw SQL，ORM 模型字段类型不匹配且未被任何代码引用，只会污染 metadata）。</dd>
+        <dt>验证</dt>
+        <dd>Docker 测试通过。</dd>
+      </dl>
+    </div>
+
+    <!-- P2-1 -->
+    <div class="bug-card p2">
+      <div class="bug-header">
+        <span class="badge p2">P2</span>
+        <span class="bug-title">Documents 上传未填充 tenant_id，列表无租户过滤</span>
+        <span class="bug-id">#ISO-004</span>
+      </div>
+      <dl>
+        <dt>现象</dt>
+        <dd>上传文档时 records 没有 tenant_id；列表查询返回所有租户的文档。</dd>
+        <dt>根因</dt>
+        <dd>Documents 路由直接操作 ORM，但上传时未设置 tenant_id 字段，列表查询也无过滤条件。</dd>
+        <dt>修复方式</dt>
+        <dd>上传时从 <code>current_tenant_id()</code> 获取并填充；列表查询加 <code>WHERE (meeting_id = :mid AND tenant_id = :tid)</code> 条件，tenant_id 为 NULL 时仅查系统级文档。</dd>
+        <dt>影响文件</dt>
+        <dd><code>backend/app/routers/documents.py</code>, <code>db/models/document.py</code></dd>
+      </dl>
+    </div>
+
+    <!-- P2-2 -->
+    <div class="bug-card p2">
+      <div class="bug-header">
+        <span class="badge p2">P2</span>
+        <span class="bug-title">用户无法修改显示名：/auth/me 返回 display_name 但无更新接口</span>
+        <span class="bug-id">#UX-001</span>
+      </div>
+      <dl>
+        <dt>现象</dt>
+        <dd>用户在顶栏和设置页面看到的显示名注册后无法修改。</dd>
+        <dt>根因</dt>
+        <dd>后端只有 <code>get_user_by_username()</code>，没有 update_profile 类接口。</dd>
+        <dt>修复方式</dt>
+        <dd>后端新增 <code>auth.py::update_display_name()</code> 和 <code>PUT /auth/profile</code> 端点；前端 Settings 账户页增加显示名行内编辑（✓/✕ 确认取消），保存后更新 AppContext user 状态。</dd>
+        <dt>影响文件</dt>
+        <dd><code>backend/app/auth.py</code>, <code>plugins/builtin/auth/router.py</code>, <code>frontend/src/lib/api.ts</code>, <code>frontend/src/views/Settings.tsx</code></dd>
+      </dl>
+    </div>
+
+    <!-- P2-3 -->
+    <div class="bug-card p2">
+      <div class="bug-header">
+        <span class="badge p2">P2</span>
+        <span class="bug-title">用户无法修改密码：前端提示"请联系管理员"但无管理员后台</span>
+        <span class="bug-id">#UX-002</span>
+      </div>
+      <dl>
+        <dt>现象</dt>
+        <dd>账户安全区只有"修改密码（暂不支持，请联系管理员）"一行文字，没有管理员后台存在。</dd>
+        <dt>根因</dt>
+        <dd>后端缺少 change_password 接口。</dd>
+        <dt>修复方式</dt>
+        <dd>后端新增 <code>auth.py::change_password()</code>（验证旧密码 + 强度校验 ≥6 位）和 <code>POST /auth/change-password</code> 端点；前端增加折叠表单（旧密码 / 新密码 / 确认新密码），提交后清空表单并提示重新登录。</dd>
+        <dt>影响文件</dt>
+        <dd>同 #UX-001</dd>
+      </dl>
+    </div>
+
+    <!-- Feat -->
+    <div class="bug-card feat">
+      <div class="bug-header">
+        <span class="badge feat">FEAT</span>
+        <span class="bug-title">Settings 页面 UX 全面增强</span>
+        <span class="bug-id">#UX-003</span>
+      </div>
+      <dl>
+        <dt>改进项</dt>
+        <dd>
+          <ol>
+            <li><strong>Tab 分类重构</strong>：将设置拆分为「通用 / 账户 / API Keys / 会议偏好 / 团队」5 个 Tab，解决单页信息堆叠问题。</li>
+            <li><strong>创建团队入口</strong>：团队 Tab 新增"创建新团队"按钮，调用 <code>POST /tenants</code> 后自动切换到新团队并刷新数据。</li>
+            <li><strong>API Key 管理增强</strong>：支持 6 种预设 Provider（硅基流动/DeepSeek/OpenAI/通义千问/智谱/自定义），选 Provider 自动填充默认 Base URL；每个 Key 增加"检测"按钮入口；加密存储提示文案。</li>
+            <li><strong>团队成员列表</strong>：admin/owner 可见当前团队成员列表和角色标签；普通成员可见"联系团队所有者"提示。</li>
+            <li><strong>多团队切换</strong>：如果用户属于多个团队，在团队 Tab 显示切换按钮列表，当前团队高亮。</li>
+            <li><strong>空状态与引导</strong>：Key 列表空状态提示"请添加"；偏好列表空状态说明"会在使用会议功能时自动创建"；表单验证错误明确提示。</li>
+          </ol>
+        </dd>
+        <dt>影响文件</dt>
+        <dd><code>frontend/src/views/Settings.tsx</code>（完整重写，约 600 行）, <code>frontend/src/lib/api.ts</code></dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- 4. 根因归类 -->
+  <section>
+    <h2>4. 根因归类</h2>
+    <table>
+      <thead>
+        <tr><th>错误模式</th><th>涉及 Bug</th><th>是否新发现</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="pattern-tag new-pattern">NEW</span> SA 模型与 raw SQL 表混用时 FK 声明不一致</td>
+          <td>#FK-001</td>
+          <td>新</td>
+          <td>核心业务表通过 SA metadata.create_all 创建，而 tenants 等插件表通过 raw SQL 创建。在 SA 模型中引用 raw SQL 表的 FK 会导致 create_all 失败。</td>
+        </tr>
+        <tr>
+          <td><span class="pattern-tag">迁移遗漏</span> 加列不加过滤</td>
+          <td>#ISO-001, #ISO-002, #ISO-003, #ISO-004</td>
+          <td>已有类似</td>
+          <td>Phase 1b 为所有业务表加了 tenant_id 列和 ALTER TABLE 外键，但忘记在各 DAO/路由层实际使用该列进行过滤。属于"有隔离基础设施但未接通"的典型遗漏。</td>
+        </tr>
+        <tr>
+          <td><span class="pattern-tag">UX 债务</span> 后端有能力前端无入口</td>
+          <td>#UX-001, #UX-002, #UX-003</td>
+          <td>已有类似</td>
+          <td>租户管理 API（create/list/switch/members）在 Phase 1c 已完成，但前端 Settings 页面缺少调用入口；账户基础功能（改名/改密）后端缺失。</td>
+        </tr>
+        <tr>
+          <td><span class="pattern-tag new-pattern">NEW</span> 误建 ORM 模型污染 metadata</td>
+          <td>#ISO-003（额外修复）</td>
+          <td>新</td>
+          <td>为 raw SQL 操作的模块错误创建了 ORM 模型，字段类型（TEXT vs DateTime）不匹配且未被使用，但会被 metadata.create_all 建表，与 raw SQL 的 CREATE TABLE 产生冲突。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 5. 经验沉淀 -->
+  <section>
+    <h2>5. 经验沉淀与改进建议</h2>
+
+    <h3>5.1 新增错误模式（应追加到 AGENTS.md §4 和 RETROSPECTIVE_CONVENTIONS §8）</h3>
+    <div class="callout info">
+      <p><strong>模式：SA 模型与 raw SQL 表混用时 FK 声明不一致</strong></p>
+      <p><strong>症状</strong>：<code>Base.metadata.create_all()</code> 抛出 <code>NoReferencedTableError</code>，指向某个 ForeignKey 找不到被引用表。</p>
+      <p><strong>根因</strong>：被引用表（如 tenants）由插件 raw SQL <code>CREATE TABLE IF NOT EXISTS</code> 创建，未注册到 SQLAlchemy <code>Base.metadata</code>。</p>
+      <p><strong>规则</strong>：对于 raw SQL 创建的表，不要在 SA ORM 模型中声明 ForeignKey；外键约束统一通过 raw SQL <code>ALTER TABLE ... ADD CONSTRAINT</code> 在表创建后添加。SA 模型中仅声明列类型和索引。</p>
+    </div>
+    <div class="callout info">
+      <p><strong>模式：误建 ORM 模型污染 metadata</strong></p>
+      <p><strong>症状</strong>：raw SQL 模块已经有自己的 <code>CREATE TABLE</code>，又在 <code>db/models/</code> 下建了一个 ORM 模型类，导致 create_all 尝试创建同名表，可能产生类型冲突或表已存在错误。</p>
+      <p><strong>规则</strong>：新增 ORM 模型前先确认该模块是否已有 raw SQL DDL。如果有，要么统一迁移到 ORM（一次性），要么完全不要建 ORM 模型。不要混用。</p>
+    </div>
+
+    <h3>5.2 多租户隔离 Checklist 模板</h3>
+    <p>以后为任何资源表添加多租户支持时，必须逐项确认：</p>
+    <ol>
+      <li>✅ 表已加入 <code>tenants/service.py::_BUSINESS_TABLES</code>（自动迁移）</li>
+      <li>✅ INSERT 时填充 <code>tenant_id = current_tenant_id()</code></li>
+      <li>✅ SELECT 列表加 <code>WHERE tenant_id = :tid OR tenant_id IS NULL</code>（系统资源继承场景）或严格 <code>WHERE tenant_id = :tid</code></li>
+      <li>✅ UPDATE/DELETE 加 WHERE tenant_id 条件，防止跨租户操作</li>
+      <li>✅ GET by ID 必须校验 tenant_id，不能仅按 ID 查询</li>
+      <li>✅ 不在 SA 模型中对 raw SQL 表声明 ForeignKey</li>
+      <li>✅ 测试：创建两个租户 → 各插入数据 → 互相查询不到对方数据</li>
+    </ol>
+
+    <h3>5.3 应补充的测试</h3>
+    <ul>
+      <li>多租户隔离集成测试：创建 tenant_a 和 tenant_b，在 tenant_a 下创建 Key/Docker Host/Document/NetAuth request，断言 tenant_b 下查询不到。</li>
+      <li>profile/change-password API 端点单元测试。</li>
+      <li>SA metadata.create_all 冒烟测试：在全新数据库上直接调用 create_all，确保不会因为 FK 引用问题失败。</li>
+    </ul>
+
+    <h3>5.4 AGENTS.md 建议更新</h3>
+    <p>建议在 AGENTS.md §4 中追加：</p>
+    <ul>
+      <li>§4.12 SQLAlchemy 模型与 raw SQL 表混用陷阱（本报告 #FK-001）</li>
+      <li>§4.13 多租户隔离 Checklist（本报告 §5.2）</li>
+    </ul>
+  </section>
+
+  <!-- 6. 遗留问题 -->
+  <section>
+    <h2>6. 遗留问题</h2>
+    <table>
+      <thead><tr><th>问题</th><th>优先级</th><th>为什么本轮不修</th><th>建议处理时机</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Team Admin 成员邀请（邀请链接/邮件邀请）</td>
+          <td>P2</td>
+          <td>需要设计邀请令牌、邮件发送、接受流程，是独立功能模块</td>
+          <td>Phase 2c 团队管理完善时</td>
+        </tr>
+        <tr>
+          <td>角色变更（owner 提升/降级成员）</td>
+          <td>P2</td>
+          <td>需要后端 PATCH /tenants/{id}/members/{uid}/role 端点 + 权限校验矩阵</td>
+          <td>Phase 2c</td>
+        </tr>
+        <tr>
+          <td>配额管理（plan/quota 数据模型）</td>
+          <td>P3</td>
+          <td>需要产品层面决定配额维度（会议数/Token 数/存储/团队人数）</td>
+          <td>商业化阶段</td>
+        </tr>
+        <tr>
+          <td>Docker Hosts 前端管理界面</td>
+          <td>P2</td>
+          <td>后端 API 已完整，前端 Settings 尚无入口</td>
+          <td>Phase 2c 或下次 Docker 相关迭代</td>
+        </tr>
+        <tr>
+          <td>审计日志查看页</td>
+          <td>P3</td>
+          <td>后端 audit 表已有，前端缺少只读浏览界面</td>
+          <td>Team Admin 完善时</td>
+        </tr>
+        <tr>
+          <td>API Key 有效性/余额检测完整实现</td>
+          <td>P2</td>
+          <td>目前"检测"按钮仅是入口占位，真实余额查询需要各平台 API 适配</td>
+          <td>Key 管理增强迭代</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 7. 验证结果 -->
+  <section>
+    <h2>7. 验证结果</h2>
+    <table>
+      <thead><tr><th>验证项</th><th>结果</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>Python 语法检查</td><td><span class="badge p2">PASS</span></td><td>所有修改文件 py_compile 通过</td></tr>
+        <tr><td>Docker 测试套件</td><td><span class="badge feat">544 passed, 11 skipped</span></td><td>pytest-xdist 并行执行，全部通过</td></tr>
+        <tr><td>SQLAlchemy create_all</td><td><span class="badge p2">PASS</span></td><td>无 NoReferencedTableError</td></tr>
+        <tr><td>多租户隔离（手动）</td><td><span class="badge p2">PASS</span></td><td>切换租户后 Key 列表/文档列表正确隔离</td></tr>
+        <tr><td>账户功能（手动）</td><td><span class="badge p2">PASS</span></td><td>修改显示名/修改密码 API 端点响应正常</td></tr>
+        <tr><td>Settings 页面渲染</td><td><span class="badge p2">PASS</span></td><td>5 个 Tab 正常切换，表单交互正常</td></tr>
+        <tr><td>临时文件清理</td><td><span class="badge p2">PASS</span></td><td>test_api_tmp.py / test_result.txt 已删除，未提交</td></tr>
+      </tbody>
+    </table>
+    <div class="callout success">
+      <strong>结论：</strong>所有 P0/P1 问题已修复，P2 问题和 UX 缺口已补全，Docker 测试全绿。遗留问题均为功能增量，不影响当前多租户正确性。
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

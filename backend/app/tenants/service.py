@@ -265,6 +265,11 @@ _BUSINESS_TABLES = [
     "meeting_tags",
     "meeting_aux",
     "user_preferences",
+    "api_keys",
+    "documents",
+    "net_auth_requests",
+    "cost_records",
+    "docker_hosts",
 ]
 
 

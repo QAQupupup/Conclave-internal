@@ -106,7 +106,8 @@ export async function apiLogin(username: string, password: string) {
 }
 export async function apiMe(): Promise<ConclaveUser | null> {
   try {
-    return await api<ConclaveUser>('/auth/me', { silent: true });
+    const data = await api<{ user: ConclaveUser }>('/auth/me', { silent: true });
+    return data?.user || null;
   } catch {
     return null;
   }
@@ -237,12 +238,27 @@ export async function apiGetModels(silent = false) {
   return apiQueryModels({}, silent);
 }
 export async function apiGetKeys(silent = false) {
-  return api('/meetings/llm/keys', { silent });
+  return api<{ keys: LlmKey[] }>('/meetings/llm/keys', { silent });
 }
-export async function apiSaveKey(provider: string, name: string, key: string) {
+export interface LlmKey {
+  id: number;
+  provider: string;
+  name: string;
+  key_masked: string;
+  base_url: string;
+  is_default: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+export async function apiSaveKey(provider: string, name: string, key: string, base_url = '', is_default = true) {
   return api('/meetings/llm/keys', {
     method: 'POST',
-    body: JSON.stringify({ provider, name, key }),
+    body: JSON.stringify({ provider, name, key, base_url, is_default }),
+  });
+}
+export async function apiDeleteKey(provider: string, name: string) {
+  return api(`/meetings/llm/keys/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
   });
 }
 
@@ -349,28 +365,52 @@ export interface TenantMember {
 }
 
 export async function apiListTenants(): Promise<TenantInfo[]> {
-  const data = await api<{ tenants: TenantInfo[]; current_tenant_id?: number | null }>('/tenants');
+  const data = await api<{ tenants: TenantInfo[]; current_tenant_id?: number | null }>('/api/tenants');
   return Array.isArray(data) ? data : (data?.tenants || []);
 }
 export async function apiCreateTenant(name: string, plan = 'free'): Promise<TenantInfo> {
-  return api<TenantInfo>('/tenants', {
+  return api<TenantInfo>('/api/tenants', {
     method: 'POST',
     body: JSON.stringify({ name, plan }),
   });
 }
 export async function apiGetTenant(tenantId: number): Promise<TenantInfo> {
-  return api<TenantInfo>(`/tenants/${tenantId}`);
+  return api<TenantInfo>(`/api/tenants/${tenantId}`);
 }
 export async function apiTenantMembers(tenantId: number): Promise<{ members: TenantMember[] }> {
-  return api<{ members: TenantMember[] }>(`/tenants/${tenantId}/members`);
+  return api<{ members: TenantMember[] }>(`/api/tenants/${tenantId}/members`);
 }
 export async function apiSwitchTenant(tenantId: number): Promise<{ access_token: string; user: ConclaveUser }> {
-  const data = await api<{ access_token: string; user: ConclaveUser }>('/tenants/switch', {
+  const data = await api<{ access_token: string; user: ConclaveUser }>('/api/tenants/switch', {
     method: 'POST',
     body: JSON.stringify({ tenant_id: tenantId }),
   });
   // 切换成功后更新 token 和用户信息（会通知订阅者）
   commitLogin(data.access_token, data.user);
   return data;
+}
+
+// ── 个人资料 / 密码 ──
+
+export async function apiUpdateProfile(displayName: string): Promise<{ success: boolean; display_name: string }> {
+  return api('/auth/profile', {
+    method: 'PUT',
+    body: JSON.stringify({ display_name: displayName }),
+  });
+}
+
+export async function apiChangePassword(oldPassword: string, newPassword: string): Promise<{ success: boolean }> {
+  return api('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  });
+}
+
+// ── LLM 余额查询 ──
+
+export async function apiQueryBalanceForKey(provider: string, apiKey: string, baseUrl?: string): Promise<{ balance?: number; error?: string; unit?: string }> {
+  const params = new URLSearchParams({ provider, api_key: apiKey });
+  if (baseUrl) params.set('base_url', baseUrl);
+  return api(`/meetings/llm/balance?${params.toString()}`);
 }
 

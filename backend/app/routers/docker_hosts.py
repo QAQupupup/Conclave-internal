@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.db.engine import async_session_factory
 from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
@@ -24,9 +24,40 @@ from app.docker_hosts import (
     run_docker_cmd,
     select_deploy_target,
 )
+from app.tenants import current_tenant_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/docker-hosts", tags=["docker-hosts"])
+
+
+def _tenant_filter():
+    """返回租户过滤条件：当前租户的主机 + 系统主机(tenant_id IS NULL)"""
+    tid = current_tenant_id()
+    if tid is None:
+        return DockerHostModel.tenant_id.is_(None)
+    return or_(DockerHostModel.tenant_id == tid, DockerHostModel.tenant_id.is_(None))
+
+
+def _tenant_filter_for_update():
+    """返回租户更新过滤条件：只能修改自己租户的主机"""
+    tid = current_tenant_id()
+    if tid is None:
+        return DockerHostModel.tenant_id.is_(None)
+    return DockerHostModel.tenant_id == tid
+
+
+async def _get_host_with_access(session, host_id: int, for_write: bool = False) -> DockerHostModel:
+    """获取主机并校验租户访问权限。for_write=True 时仅允许访问自己租户的主机。"""
+    from sqlalchemy import and_
+    if for_write:
+        cond = and_(DockerHostModel.id == host_id, _tenant_filter_for_update())
+    else:
+        cond = and_(DockerHostModel.id == host_id, _tenant_filter())
+    result = await session.execute(select(DockerHostModel).where(cond))
+    host = result.scalar_one_or_none()
+    if not host:
+        raise HTTPException(404, "主机不存在或无权访问")
+    return host
 
 
 # ─── Pydantic Schemas ────────────────────────────────
@@ -154,9 +185,11 @@ def _model_to_config_dict(m: DockerHostModel, secret: DockerHostSecretModel | No
 # ─── CRUD Endpoints ──────────────────────────────────
 @router.get("")
 async def list_hosts() -> dict[str, Any]:
-    """列出所有 Docker 主机。"""
+    """列出当前租户可见的 Docker 主机（含系统主机）。"""
     async with async_session_factory() as session:
-        result = await session.execute(select(DockerHostModel).order_by(DockerHostModel.id))
+        result = await session.execute(
+            select(DockerHostModel).where(_tenant_filter()).order_by(DockerHostModel.id)
+        )
         hosts = list(result.scalars().all())
     return {
         "hosts": [_model_to_response(h) for h in hosts],
@@ -166,19 +199,28 @@ async def list_hosts() -> dict[str, Any]:
 
 @router.post("")
 async def create_host(body: DockerHostCreate) -> dict[str, Any]:
-    """创建 Docker 主机。"""
+    """创建 Docker 主机（归属于当前租户）。"""
+    tid = current_tenant_id()
     async with async_session_factory() as session:
-        # 检查名称唯一
-        existing = await session.execute(select(DockerHostModel).where(DockerHostModel.name == body.name))
+        # 检查名称唯一（在当前租户范围内）
+        existing = await session.execute(
+            select(DockerHostModel).where(
+                DockerHostModel.name == body.name,
+                _tenant_filter_for_update() if tid is not None else DockerHostModel.tenant_id.is_(None),
+            )
+        )
         if existing.scalar_one_or_none():
             raise HTTPException(400, f"主机名 '{body.name}' 已存在")
 
-        # 如果设为默认，清除其他默认
+        # 如果设为默认，清除同租户其他默认
         if body.is_default:
             all_hosts = (
                 (
                     await session.execute(
-                        select(DockerHostModel).where(DockerHostModel.is_default == True)  # noqa: E712
+                        select(DockerHostModel).where(
+                            DockerHostModel.is_default == True,  # noqa: E712
+                            _tenant_filter_for_update() if tid is not None else DockerHostModel.tenant_id.is_(None),
+                        )
                     )
                 )
                 .scalars()
@@ -188,6 +230,7 @@ async def create_host(body: DockerHostCreate) -> dict[str, Any]:
                 h.is_default = False
 
         host = DockerHostModel(
+            tenant_id=tid,
             name=body.name,
             description=body.description,
             connection_type=body.connection_type,
@@ -229,9 +272,7 @@ async def create_host(body: DockerHostCreate) -> dict[str, Any]:
 async def get_host(host_id: int) -> dict[str, Any]:
     """获取单个主机详情。"""
     async with async_session_factory() as session:
-        host = await session.get(DockerHostModel, host_id)
-        if not host:
-            raise HTTPException(404, "主机不存在")
+        host = await _get_host_with_access(session, host_id)
     return _model_to_response(host)
 
 
@@ -239,9 +280,7 @@ async def get_host(host_id: int) -> dict[str, Any]:
 async def update_host(host_id: int, body: DockerHostUpdate) -> dict[str, Any]:
     """更新 Docker 主机。"""
     async with async_session_factory() as session:
-        host = await session.get(DockerHostModel, host_id)
-        if not host:
-            raise HTTPException(404, "主机不存在")
+        host = await _get_host_with_access(session, host_id, for_write=True)
 
         update_data = body.model_dump(exclude_unset=True)
         secret_fields = {"ssh_password", "ssh_key_content"}
@@ -251,6 +290,7 @@ async def update_host(host_id: int, body: DockerHostUpdate) -> dict[str, Any]:
         for k, v in base_updates.items():
             setattr(host, k, v)
 
+        tid = current_tenant_id()
         if base_updates.get("is_default"):
             others = (
                 (
@@ -258,6 +298,7 @@ async def update_host(host_id: int, body: DockerHostUpdate) -> dict[str, Any]:
                         select(DockerHostModel).where(
                             DockerHostModel.id != host_id,
                             DockerHostModel.is_default == True,  # noqa: E712
+                            _tenant_filter_for_update() if tid is not None else DockerHostModel.tenant_id.is_(None),
                         )
                     )
                 )
@@ -288,9 +329,7 @@ async def update_host(host_id: int, body: DockerHostUpdate) -> dict[str, Any]:
 async def delete_host(host_id: int) -> dict[str, Any]:
     """删除 Docker 主机。"""
     async with async_session_factory() as session:
-        host = await session.get(DockerHostModel, host_id)
-        if not host:
-            raise HTTPException(404, "主机不存在")
+        host = await _get_host_with_access(session, host_id, for_write=True)
         # 删除关联 secret
         secret = (
             await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id))
@@ -307,9 +346,7 @@ async def delete_host(host_id: int) -> dict[str, Any]:
 async def health_check_host(host_id: int) -> dict[str, Any]:
     """对指定主机执行健康检查。"""
     async with async_session_factory() as session:
-        host = await session.get(DockerHostModel, host_id)
-        if not host:
-            raise HTTPException(404, "主机不存在")
+        host = await _get_host_with_access(session, host_id)
         secret = (
             await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id))
         ).scalar_one_or_none()
@@ -351,10 +388,13 @@ async def health_check_host(host_id: int) -> dict[str, Any]:
 
 @router.post("/health-check-all")
 async def health_check_all() -> dict[str, Any]:
-    """对所有启用的主机执行批量健康检查。"""
+    """对当前租户可见的所有启用主机执行批量健康检查。"""
     async with async_session_factory() as session:
         result = await session.execute(
-            select(DockerHostModel).where(DockerHostModel.enabled == True)  # noqa: E712
+            select(DockerHostModel).where(
+                DockerHostModel.enabled == True,  # noqa: E712
+                _tenant_filter(),
+            )
         )
         hosts = list(result.scalars().all())
         secrets = {}
@@ -545,9 +585,7 @@ async def get_setup_script() -> dict[str, Any]:
 async def list_containers(host_id: int) -> dict[str, Any]:
     """列出指定主机上运行的容器（包括 Conclave 部署的服务）。"""
     async with async_session_factory() as session:
-        host = await session.get(DockerHostModel, host_id)
-        if not host:
-            raise HTTPException(404, "主机不存在")
+        host = await _get_host_with_access(session, host_id)
         secret = (
             await session.execute(select(DockerHostSecretModel).where(DockerHostSecretModel.host_id == host_id))
         ).scalar_one_or_none()

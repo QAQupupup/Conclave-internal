@@ -33,6 +33,18 @@ export default function Login() {
     return () => clearTimeout(t);
   }, []);
 
+  // 已登录用户访问 /login → 直接跳转首页
+  useEffect(() => {
+    if (user && !loginSuccess) {
+      const redirect = params.get('redirect');
+      const safeRedirect =
+        redirect && redirect.startsWith('/') && !redirect.startsWith('//')
+          ? redirect
+          : '/';
+      navigate(safeRedirect, { replace: true });
+    }
+  }, [user, loginSuccess, params, navigate]);
+
   // user 从 null 变为非 null（登录成功）→ 立即跳转
   // 此时守卫能拿到新 user 状态，不会再次重定向回登录页
   useEffect(() => {
@@ -42,7 +54,7 @@ export default function Login() {
       const safeRedirect =
         redirect && redirect.startsWith('/') && !redirect.startsWith('//')
           ? redirect
-          : '';
+          : '/';
       navigate(safeRedirect, { replace: true });
       setLoginSuccess(false);
     }

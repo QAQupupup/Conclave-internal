@@ -164,6 +164,8 @@ class MeetingState(BaseModel):
     # [SECURITY-FIX] 会议所有权：创建会议时记录创建者，用于访问控制
     owner_username: str | None = None
     owner_uid: str | None = None
+    # [MULTI-TENANT] 租户隔离：会议所属租户 ID，用于内存状态访问校验
+    tenant_id: int | None = None
     # 参与者列表（通过 WS 加入的用户）
     participants: list[str] = Field(default_factory=list)
     # === 断点续传 & 自我迭代支持 ===

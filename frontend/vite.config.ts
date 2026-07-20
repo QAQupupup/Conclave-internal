@@ -57,6 +57,8 @@ export default defineConfig({
       '/config': 'http://localhost:8000',
       '/documents': 'http://localhost:8000',
       '/net-auth': 'http://localhost:8000',
+      '/docker-hosts': 'http://localhost:8000',
+      '/regression': 'http://localhost:8000',
     },
   },
   test: {
