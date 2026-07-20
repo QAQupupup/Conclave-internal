@@ -347,9 +347,10 @@ def create_app() -> FastAPI:
         # 插件系统状态
         try:
             _pr = app.state.plugin_registry
-            checks["plugins"] = f"{_pr.loaded_count()} loaded"
+            _ = _pr.loaded_count()
+            checks["plugins"] = "ok"
         except Exception:
-            checks["plugins"] = "unknown"
+            checks["plugins"] = "error: unavailable"
 
         _healthy_vals = {"ok", "closed", "half_open", "disabled"}
         all_ok = all(v in _healthy_vals for v in checks.values())
