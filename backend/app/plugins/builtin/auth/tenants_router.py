@@ -86,6 +86,10 @@ class TenantMemberListResponse(BaseModel):
     members: list[TenantMemberResponse]
 
 
+class TenantSwitchRequest(BaseModel):
+    tenant_id: int = Field(..., description="目标租户 ID")
+
+
 class TenantSwitchResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -93,6 +97,7 @@ class TenantSwitchResponse(BaseModel):
     expires_in: int
     csrf_token: str
     tenant: TenantInfoResponse
+    user: dict  # 完整用户信息（含 tenants 列表），与 /auth/login 返回格式一致
 
 
 # ---- Helper ----
@@ -208,10 +213,28 @@ async def switch_tenant(
     request: Request,
     response: Response,
 ) -> TenantSwitchResponse:
-    """切换到指定租户：重新签发包含新 tenant_id 的 JWT。
+    """切换到指定租户（路径参数版）：重新签发包含新 tenant_id 的 JWT。"""
+    return await _do_switch_tenant(tenant_id, request, response)
 
-    切换后后续请求自动使用新租户上下文。需要是该租户成员。
-    """
+
+@router.post("/switch", response_model=TenantSwitchResponse)
+async def switch_tenant_by_body(
+    body: TenantSwitchRequest,
+    request: Request,
+    response: Response,
+) -> TenantSwitchResponse:
+    """切换到指定租户（Body 版）：重新签发包含新 tenant_id 的 JWT。"""
+    return await _do_switch_tenant(body.tenant_id, request, response)
+
+
+async def _do_switch_tenant(
+    tenant_id: int,
+    request: Request,
+    response: Response,
+) -> TenantSwitchResponse:
+    """切换租户的核心逻辑：验证权限 → 更新 DB → 重发 JWT + Cookie。"""
+    from app.tenants import set_tenant_id as _set_tid, get_tenant_id as _get_tid
+
     user_id, username = _require_auth()
 
     # 先检查租户是否存在
@@ -224,11 +247,13 @@ async def switch_tenant(
     if not is_system_tenant() and not await user_has_tenant_access(user_id, tenant_id):
         raise HTTPException(status_code=403, detail="无权访问该租户")
 
-    # 更新用户当前活跃租户（持久化到数据库）
+    # 更新用户当前活跃租户（持久化到 DB）
     await add_user_to_tenant(user_id, tenant_id)
 
+    # 更新 ContextVar
+    _set_tid(tenant_id)
+
     # 构建 user dict 用于签发 token（需要 tenant_id）
-    # 从缓存加载用户信息
     from app.auth import _users_cache
     user = _users_cache.get(username)
     if not user:
@@ -242,8 +267,24 @@ async def switch_tenant(
     refresh_token = create_refresh_token(user_with_tenant)
     csrf_token = generate_csrf_token()
 
-    # 更新 Cookie（保持登录状态但切换租户上下文）
+    # 更新 Cookie
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)
+
+    # 构造返回的 tenants 列表
+    tenants = await list_user_tenants(user_id)
+    tenant_list = [
+        {"id": t.id, "name": t.name, "slug": t.slug, "role": (ROLE_OWNER if t.owner_id == user_id else ROLE_MEMBER), "plan": t.plan}
+        for t in tenants
+    ]
+    user_info = {
+        "id": user_id,
+        "username": username,
+        "role": user.get("role", "user"),
+        "display_name": user.get("display_name", username),
+        "tenant_id": tenant_id,
+        "tenant": {"id": tenant.id, "name": tenant.name, "slug": tenant.slug, "plan": tenant.plan},
+        "tenants": tenant_list,
+    }
 
     logger.info("用户 %s 切换到租户 %s(id=%d)", username, tenant.name, tenant.id)
 
@@ -253,4 +294,5 @@ async def switch_tenant(
         expires_in=JWT_EXPIRE_SECONDS,
         csrf_token=csrf_token,
         tenant=_tenant_to_response(tenant, user_id),
+        user=user_info,
     )

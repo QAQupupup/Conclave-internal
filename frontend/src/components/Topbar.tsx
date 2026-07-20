@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppContext';
+import TenantSwitcher from './TenantSwitcher';
 
 export default function Topbar() {
   const { theme, toggleTheme, toggleLog, openCmdk, user, logout, demoMode, exitDemo } = useApp();
@@ -44,6 +45,7 @@ export default function Topbar() {
         )}
       </div>
       <div className="topbar-right">
+        <TenantSwitcher />
         <div className="topbar-search" onClick={openCmdk} style={{ cursor: 'pointer' }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"><circle cx="10.5" cy="10.5" r="6.5" /><line x1="15.5" y1="15.5" x2="21" y2="21" /></svg>
           <input type="text" placeholder="搜索或输入命令…" readOnly />

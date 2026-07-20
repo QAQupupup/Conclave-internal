@@ -3,7 +3,8 @@ import {
   type ReactNode,
 } from 'react';
 import { subscribeAuth, getAuthUser, commitLogout, getToken, type ConclaveUser } from '../lib/auth';
-import { onUnauthorized, apiMe, apiListMeetings, apiCreateMeeting, apiRunMeeting, apiGetMeeting, apiControlMeeting, apiIntervene } from '../lib/api';
+import { onUnauthorized, apiMe, apiListMeetings, apiCreateMeeting, apiRunMeeting, apiGetMeeting, apiControlMeeting, apiIntervene, apiSwitchTenant, apiListTenants, apiCreateTenant } from '../lib/api';
+import type { TenantInfo } from '../lib/api';
 import { MeetingWsClient, connectSystemWs, STAGE_KEYS } from '../lib/ws';
 import { STAGES, MEETINGS as MOCK_MEETINGS } from '../data/mock';
 import { type ToastKind } from '../components/Toast';
@@ -126,6 +127,13 @@ interface AppApi {
   _setToastFn: (fn: (msg: string, kind?: ToastKind, duration?: number) => void) => void;
   statusText: (s: string) => string;
   stageName: (s: string) => string;
+  /** 租户 */
+  tenants: TenantInfo[];
+  tenantsLoading: boolean;
+  refreshTenants: () => Promise<void>;
+  switchTenant: (tenantId: number) => Promise<boolean>;
+  createTenant: (name: string, plan?: string) => Promise<TenantInfo | null>;
+  currentTenant: TenantInfo | null;
 }
 
 const Ctx = createContext<AppApi | null>(null);
@@ -153,6 +161,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [meetingsLoading, setMeetingsLoading] = useState(false);
   const [meetingsError, setMeetingsError] = useState<string | null>(null);
   const [meeting, setMeeting] = useState<MeetingState>(INITIAL_MEETING);
+  const [tenants, setTenants] = useState<TenantInfo[]>([]);
+  const [tenantsLoading, setTenantsLoading] = useState(false);
 
   // 确认对话框状态（Promise-based，替换原生 confirm）
   const [confirmState, setConfirmState] = useState<ConfirmOptions | null>(null);
@@ -581,6 +591,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /* ── elapsed 不再在 context 中每秒更新，由 Meeting 视图基于 startedAt 本地计算 ── */
 
+  /* ── 租户 ── */
+  const currentTenant = useMemo<TenantInfo | null>(() => {
+    if (!user?.tenant_id || !Array.isArray(user.tenants)) return null;
+    return (user.tenants as TenantInfo[]).find((t) => t.id === user.tenant_id) || user.tenant as TenantInfo || null;
+  }, [user]);
+
+  const refreshTenants = useCallback(async () => {
+    if (demoMode || !user) { setTenants([]); return; }
+    setTenantsLoading(true);
+    try {
+      const list = await apiListTenants();
+      setTenants(Array.isArray(list) ? list : []);
+    } catch (e: any) {
+      appendLog('加载租户列表失败: ' + e.message, 'error', 'tenant');
+    } finally {
+      setTenantsLoading(false);
+    }
+  }, [appendLog, demoMode, user]);
+
+  const switchTenant = useCallback(async (tenantId: number): Promise<boolean> => {
+    try {
+      appendLog(`正在切换到租户 #${tenantId}...`, 'info', 'tenant');
+      await apiSwitchTenant(tenantId);
+      // apiSwitchTenant 内部已调用 commitLogin 更新 user，订阅者会自动刷新
+      // 断开当前 WS，刷新会议列表
+      if (wsRef.current) { wsRef.current.disconnect(); wsRef.current = null; }
+      setMeeting({ ...INITIAL_MEETING });
+      setMeetings([]);
+      toast('已切换租户', 'success');
+      appendLog('租户切换成功，正在刷新数据...', 'info', 'tenant');
+      // 延迟刷新，等待 token 更新
+      setTimeout(() => { refreshBoard(); refreshTenants(); }, 300);
+      return true;
+    } catch (e: any) {
+      appendLog('切换租户失败: ' + e.message, 'error', 'tenant');
+      toast('切换租户失败: ' + e.message, 'error');
+      return false;
+    }
+  }, [appendLog, refreshBoard, refreshTenants, toast]);
+
+  const createTenant = useCallback(async (name: string, plan = 'free'): Promise<TenantInfo | null> => {
+    try {
+      const t = await apiCreateTenant(name, plan);
+      toast(`组织「${t.name}」已创建`, 'success');
+      appendLog(`创建组织成功: ${t.name} (#${t.id})`, 'info', 'tenant');
+      await refreshTenants();
+      return t;
+    } catch (e: any) {
+      toast('创建组织失败: ' + e.message, 'error');
+      appendLog('创建组织失败: ' + e.message, 'error', 'tenant');
+      return null;
+    }
+  }, [appendLog, refreshTenants, toast]);
+
+  // 登录后自动加载租户列表
+  useEffect(() => {
+    if (user && !demoMode) refreshTenants();
+    else setTenants([]);
+  }, [user?.id, demoMode, refreshTenants]);
+
   const api: AppApi = useMemo(() => ({
     theme, toggleTheme, user, setUser, authChecked, authExpired, clearAuthExpired, logout,
     demoMode, enterDemo, exitDemo,
@@ -594,6 +664,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     requestConfirm, confirmState, resolveConfirm,
     toast, _toastFn: toastFnRef.current, _setToastFn,
     statusText, stageName,
+    tenants, tenantsLoading, refreshTenants, switchTenant, createTenant, currentTenant,
   }), [
     theme, toggleTheme, user, setUser, authChecked, authExpired, clearAuthExpired, logout,
     demoMode, enterDemo, exitDemo,
@@ -604,6 +675,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     requestConfirm, confirmState, resolveConfirm,
     toast, _setToastFn,
     statusText, stageName,
+    tenants, tenantsLoading, refreshTenants, switchTenant, createTenant, currentTenant,
   ]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

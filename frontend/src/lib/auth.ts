@@ -3,11 +3,22 @@
 export const TOKEN_KEY = 'conclave_token';
 export const USER_KEY = 'conclave_user';
 
+export interface ConclaveTenant {
+  id: number;
+  name: string;
+  slug: string;
+  plan?: string;
+  role?: string;
+}
+
 export interface ConclaveUser {
-  id?: string;
+  id?: string | number;
   username?: string;
   display_name?: string;
   role?: string;
+  tenant_id?: number | null;
+  tenant?: ConclaveTenant | null;
+  tenants?: ConclaveTenant[];
   [k: string]: unknown;
 }
 
@@ -52,6 +63,14 @@ export function commitLogin(token: string, user: ConclaveUser): void {
   setToken(token);
   setStoredUser(user);
   currentUser = user;
+  listeners.forEach((l) => l(currentUser));
+}
+
+/** 更新当前用户信息（如切换租户后），不改变 token */
+export function updateAuthUser(patch: Partial<ConclaveUser>): void {
+  if (!currentUser) return;
+  currentUser = { ...currentUser, ...patch };
+  setStoredUser(currentUser);
   listeners.forEach((l) => l(currentUser));
 }
 

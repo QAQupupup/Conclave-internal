@@ -1,7 +1,7 @@
 /* Conclave API Client — ported from app.html
  * 统一 HTTP 客户端：自动注入 JWT、401 处理、JSON 解析、超时、重试。 */
-import { getToken, clearToken, commitLogin, commitLogout } from './auth';
-import type { ConclaveUser } from './auth';
+import { getToken, clearToken, commitLogin, commitLogout, updateAuthUser } from './auth';
+import type { ConclaveUser, ConclaveTenant } from './auth';
 
 const API_BASE = ''; // 同源
 
@@ -332,3 +332,45 @@ export async function apiSelectDeployTarget(requirements?: any, preferredHostId?
     body: requirements ? JSON.stringify(requirements) : undefined,
   });
 }
+
+/* ═══ Tenant API ═══ */
+export interface TenantInfo extends ConclaveTenant {
+  owner_id?: number;
+  settings?: Record<string, any>;
+  created_at?: string;
+}
+export interface TenantMember {
+  user_id: number;
+  username: string;
+  display_name: string;
+  email?: string;
+  role: string;
+  joined_at?: string;
+}
+
+export async function apiListTenants(): Promise<TenantInfo[]> {
+  const data = await api<{ tenants: TenantInfo[]; current_tenant_id?: number | null }>('/tenants');
+  return Array.isArray(data) ? data : (data?.tenants || []);
+}
+export async function apiCreateTenant(name: string, plan = 'free'): Promise<TenantInfo> {
+  return api<TenantInfo>('/tenants', {
+    method: 'POST',
+    body: JSON.stringify({ name, plan }),
+  });
+}
+export async function apiGetTenant(tenantId: number): Promise<TenantInfo> {
+  return api<TenantInfo>(`/tenants/${tenantId}`);
+}
+export async function apiTenantMembers(tenantId: number): Promise<{ members: TenantMember[] }> {
+  return api<{ members: TenantMember[] }>(`/tenants/${tenantId}/members`);
+}
+export async function apiSwitchTenant(tenantId: number): Promise<{ access_token: string; user: ConclaveUser }> {
+  const data = await api<{ access_token: string; user: ConclaveUser }>('/tenants/switch', {
+    method: 'POST',
+    body: JSON.stringify({ tenant_id: tenantId }),
+  });
+  // 切换成功后更新 token 和用户信息（会通知订阅者）
+  commitLogin(data.access_token, data.user);
+  return data;
+}
+

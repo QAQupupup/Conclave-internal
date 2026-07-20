@@ -30,6 +30,7 @@ from app.context import (
     set_user_role,
     set_username,
 )
+from app.tenants import get_tenant_id
 from app.observability.audit import audit
 from app.plugins.builtin.auth.csrf import (
     CSRF_COOKIE_NAME,
@@ -168,6 +169,28 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Logi
     set_username(username)
     set_user_role(role)
 
+    # 登录时设置租户上下文：使用用户的默认租户（tenant_id 字段）
+    from app.tenants import set_tenant_id as _set_tid
+    login_tenant_id = user.get("tenant_id")
+    if login_tenant_id:
+        _set_tid(int(login_tenant_id))
+    else:
+        _set_tid(None)
+
+    # 查询租户信息用于返回
+    tenant_info: dict | None = None
+    tenant_list: list[dict] = []
+    if login_tenant_id:
+        from app.tenants.service import get_tenant as _get_tenant, list_user_tenants
+        t = await _get_tenant(int(login_tenant_id))
+        if t:
+            tenant_info = {"id": t.id, "name": t.name, "slug": t.slug, "plan": t.plan}
+        tenants = await list_user_tenants(int(user_id))
+        tenant_list = [
+            {"id": tt.id, "name": tt.name, "slug": tt.slug, "role": tt.role, "plan": tt.plan}
+            for tt in tenants
+        ]
+
     # 写 HttpOnly Cookie
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)
 
@@ -190,6 +213,9 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Logi
             "username": username,
             "role": role,
             "display_name": user.get("display_name", username),
+            "tenant_id": login_tenant_id,
+            "tenant": tenant_info,
+            "tenants": tenant_list,
         },
     )
 
@@ -309,6 +335,7 @@ async def me(request: Request) -> MeResponse:
     user_id = get_user_id()
     username = get_username()
     role = get_user_role()
+    tenant_id = get_tenant_id()
 
     if not user_id or not username:
         raise HTTPException(status_code=401, detail="未登录")
@@ -319,11 +346,35 @@ async def me(request: Request) -> MeResponse:
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在")
 
+    # 查询当前租户信息
+    tenant_info: dict | None = None
+    if tenant_id is not None:
+        from app.tenants.service import get_tenant
+        t = await get_tenant(tenant_id)
+        if t:
+            tenant_info = {
+                "id": t.id,
+                "name": t.name,
+                "slug": t.slug,
+                "plan": t.plan,
+            }
+
+    # 查询用户所属租户列表
+    from app.tenants.service import list_user_tenants
+    tenants = await list_user_tenants(int(user_id))
+    tenant_list = [
+        {"id": t.id, "name": t.name, "slug": t.slug, "role": t.role, "plan": t.plan}
+        for t in tenants
+    ]
+
     return MeResponse(
         user={
             "id": user_id,
             "username": username,
             "role": role or user.get("role", "user"),
             "display_name": user.get("display_name", username),
+            "tenant_id": tenant_id,
+            "tenant": tenant_info,
+            "tenants": tenant_list,
         }
     )
