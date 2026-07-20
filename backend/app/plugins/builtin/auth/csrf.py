@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hmac
 import secrets
-from typing import Optional
 
 from fastapi import Request, Response
 
@@ -42,12 +41,12 @@ def clear_csrf_cookie(response: Response) -> None:
     response.delete_cookie(CSRF_COOKIE_NAME, path="/")
 
 
-def extract_csrf_from_cookie(request: Request) -> Optional[str]:
+def extract_csrf_from_cookie(request: Request) -> str | None:
     """从 Cookie 中提取 CSRF token。"""
     return request.cookies.get(CSRF_COOKIE_NAME)
 
 
-def extract_csrf_from_header(request: Request) -> Optional[str]:
+def extract_csrf_from_header(request: Request) -> str | None:
     """从 Header 中提取 CSRF token。"""
     return request.headers.get(CSRF_HEADER_NAME)
 

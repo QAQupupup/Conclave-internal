@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -19,10 +18,9 @@ from fastapi.responses import JSONResponse
 from app.context import set_request_id, set_user_id, set_user_role, set_username
 from app.observability.audit import audit
 from app.plugins.builtin.auth.csrf import (
-    CSRF_COOKIE_NAME,
-    CSRF_HEADER_NAME,
     check_csrf,
 )
+from app.tenants import set_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +78,7 @@ def _should_check_csrf(request: Request, is_cookie_auth: bool) -> bool:
         return False
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return False
-    if _is_public_path(request.url.path):
-        return False
-    return True
+    return not _is_public_path(request.url.path)
 
 
 def setup_auth_middleware(app, plugin=None) -> None:
@@ -90,9 +86,9 @@ def setup_auth_middleware(app, plugin=None) -> None:
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next) -> Response:
+        import hmac
         import os
         import uuid
-        import hmac
 
         # 生成 request_id
         req_id = request.headers.get("x-request-id", str(uuid.uuid4())[:12])
@@ -108,27 +104,33 @@ def setup_auth_middleware(app, plugin=None) -> None:
             set_user_id("test")
             set_username("test")
             set_user_role("admin")
-            return await call_next(request)
+            set_tenant_id(None)
+            from app.tenants.context import set_system_tenant as _set_sys
+            _set_sys(True)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # OPTIONS 预检直接放行
         if method == "OPTIONS":
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # WebSocket 端点单独处理
         if path.startswith("/ws"):
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # 公共路径放行（清除 ContextVar 避免污染）
         if _is_public_path(path):
             set_user_id("")
             set_username("")
             set_user_role("")
+            set_tenant_id(None)
+            from app.tenants.context import set_system_tenant as _set_sys
+            _set_sys(False)
             request.state.auth_user = None
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # 延迟 import 避免循环引用
-        from app.middleware import _DEV_TOKEN, _check_rate_limit, _RATE_BLOCK_SECONDS
         from app.auth import decode_token
+        from app.middleware import _DEV_TOKEN, _RATE_BLOCK_SECONDS, _check_rate_limit
 
         # 速率限制
         ok, reason = _check_rate_limit(ip, is_failed_attempt=False)
@@ -161,22 +163,23 @@ def setup_auth_middleware(app, plugin=None) -> None:
         dev_token_header = request.headers.get("x-dev-token", "")
         dev_token_query = request.query_params.get("dev_token", "")
         dev_token = dev_token_header or dev_token_query
-        if dev_token and not token:
-            if hmac.compare_digest(dev_token.encode("utf-8"), _DEV_TOKEN.encode("utf-8")):
-                using_dev_token = True
-                set_user_id("dev")
-                set_username("dev")
-                set_user_role("admin")
-                request.state.auth_user = {"username": "dev", "role": "admin", "uid": None}
+        if dev_token and not token and hmac.compare_digest(dev_token.encode("utf-8"), _DEV_TOKEN.encode("utf-8")):
+            using_dev_token = True
+            set_user_id("dev")
+            set_username("dev")
+            set_user_role("admin")
+            set_tenant_id(None)
+            from app.tenants.context import set_system_tenant as _set_sys2
+            _set_sys2(True)
+            request.state.auth_user = {"username": "dev", "role": "admin", "uid": None}
 
         # 2. CSRF 检查（Cookie 认证的写操作）
-        if _should_check_csrf(request, is_cookie_auth):
-            if not check_csrf(request):
-                audit("auth.csrf_failed", "failure", {"path": path, "method": method}, ip=ip)
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "CSRF 验证失败，请刷新页面重试"},
-                )
+        if _should_check_csrf(request, is_cookie_auth) and not check_csrf(request):
+            audit("auth.csrf_failed", "failure", {"path": path, "method": method}, ip=ip)
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "CSRF 验证失败，请刷新页面重试"},
+            )
 
         # 3. 验证 token
         if not using_dev_token:
@@ -208,19 +211,23 @@ def setup_auth_middleware(app, plugin=None) -> None:
             username = claims.get("sub", "")
             uid = claims.get("uid")
             role = claims.get("role", "user")
+            tenant_id = claims.get("tenant_id")
             uid_str = str(uid) if uid is not None else username
             set_user_id(uid_str)
             set_username(username)
             set_user_role(role)
-            # auth_user 格式与旧 middleware 兼容：直接使用 claims dict（含 sub/role/uid 等字段）
-            # 但 auth_guard.py 读取的是 username 字段，所以需要显式设置
+            set_tenant_id(tenant_id if isinstance(tenant_id, int) else (int(tenant_id) if tenant_id else None))
+            from app.tenants.context import set_system_tenant as _set_sys3
+            _set_sys3(False)
+            # auth_user 格式与旧 middleware 兼容
             auth_user = dict(claims)
             auth_user["username"] = username
             auth_user["uid"] = uid_str
+            auth_user["tenant_id"] = tenant_id
             request.state.auth_user = auth_user
 
         # 4. 放行
-        response = await call_next(request)
+        response: Response = await call_next(request)  # type: ignore[assignment]
 
         # 5. 安全响应头
         response.headers["X-Content-Type-Options"] = "nosniff"

@@ -15,16 +15,15 @@ import hashlib
 import logging
 import secrets
 import time
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.auth import hash_password
 from app.context import set_user_id, set_user_role, set_username
 from app.db.engine import async_session_factory
 from app.observability.audit import audit
-from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ SETUP_RATE_LIMIT_PER_10MIN = 5
 router = APIRouter(tags=["Setup"])
 
 # 模块级 setup token 状态
-_setup_token_hash: Optional[str] = None
+_setup_token_hash: str | None = None
 _setup_token_expires_at: float = 0
 _setup_token_used: bool = False
 _admin_created: bool = False
@@ -82,27 +81,36 @@ async def _create_admin_user(username: str, password: str, display_name: str = "
     pw_hash = hash_password(password)
     async with async_session_factory() as session:
         try:
+            # 查询默认租户 ID（在插件 on_startup 中已创建）
+            tenant_id_row = (await session.execute(
+                text("SELECT id FROM tenants WHERE slug = 'default'")
+            )).mappings().first()
+            tenant_id = tenant_id_row["id"] if tenant_id_row else None
+
             await session.execute(
                 text(
-                    "INSERT INTO users(username, password_hash, role, display_name) "
-                    "VALUES(:username, :pw, 'admin', :dn)"
+                    "INSERT INTO users(username, password_hash, role, display_name, tenant_id) "
+                    "VALUES(:username, :pw, 'admin', :dn, :tid)"
                 ),
-                {"username": username, "pw": pw_hash, "dn": display_name},
+                {"username": username, "pw": pw_hash, "dn": display_name, "tid": tenant_id},
             )
             await session.commit()
         except Exception as e:
             await session.rollback()
             raise HTTPException(status_code=400, detail=f"创建用户失败: {e}") from e
         result = await session.execute(
-            text("SELECT id, username, role, display_name FROM users WHERE username = :u"),
+            text("SELECT id, username, role, display_name, tenant_id FROM users WHERE username = :u"),
             {"u": username},
         )
         row = result.mappings().first()
+        if not row:
+            raise HTTPException(status_code=500, detail="创建用户后无法查询到记录")
     return {
         "id": row["id"],
         "username": row["username"],
         "role": row["role"],
         "display_name": row["display_name"],
+        "tenant_id": row.get("tenant_id"),
     }
 
 
@@ -126,7 +134,7 @@ class SetupRequest(BaseModel):
     setup_token: str = Field(..., min_length=10)
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=8, max_length=128)
-    display_name: Optional[str] = Field(None, max_length=128)
+    display_name: str | None = Field(None, max_length=128)
 
 
 class SetupResponse(BaseModel):

@@ -227,6 +227,7 @@ async def _init_users_table() -> None:
                     role VARCHAR(32) NOT NULL DEFAULT 'user',
                     display_name VARCHAR(128),
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    tenant_id INTEGER,
                     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                     last_login_at TIMESTAMP
                 )
@@ -234,6 +235,7 @@ async def _init_users_table() -> None:
             )
         )
         await session.execute(text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
+        # tenant_id 外键在 ensure_tenants_table() 中通过 ALTER TABLE 添加（避免建表顺序依赖）
         await session.commit()
 
 
@@ -242,7 +244,7 @@ async def _load_users_from_db() -> None:
     async with async_session_factory() as session:
         result = await session.execute(
             text(
-                "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at FROM users"
+                "SELECT id, username, password_hash, role, display_name, is_active, tenant_id, created_at, last_login_at FROM users"
             )
         )
         rows = result.mappings().all()
@@ -257,25 +259,27 @@ async def _load_users_from_db() -> None:
                 "role": row["role"],
                 "display_name": row.get("display_name") or username,
                 "is_active": bool(row["is_active"]),
+                "tenant_id": row.get("tenant_id"),
                 "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
                 "last_login_at": row["last_login_at"].isoformat() if row.get("last_login_at") else None,
             }
 
 
-async def _create_user_in_db(username: str, password_hash: str, role: str, display_name: str) -> dict | None:
+async def _create_user_in_db(username: str, password_hash: str, role: str, display_name: str, tenant_id: int | None = None) -> dict | None:
     """在数据库中创建用户"""
     async with async_session_factory() as session:
         try:
             await session.execute(
                 text(
-                    "INSERT INTO users(username, password_hash, role, display_name) "
-                    "VALUES(:username, :password_hash, :role, :display_name)"
+                    "INSERT INTO users(username, password_hash, role, display_name, tenant_id) "
+                    "VALUES(:username, :password_hash, :role, :display_name, :tenant_id)"
                 ),
                 {
                     "username": username,
                     "password_hash": password_hash,
                     "role": role,
                     "display_name": display_name,
+                    "tenant_id": tenant_id,
                 },
             )
             await session.commit()
@@ -285,7 +289,7 @@ async def _create_user_in_db(username: str, password_hash: str, role: str, displ
             return None
         result = await session.execute(
             text(
-                "SELECT id, username, password_hash, role, display_name, is_active, created_at, last_login_at "
+                "SELECT id, username, password_hash, role, display_name, is_active, tenant_id, created_at, last_login_at "
                 "FROM users WHERE username = :username"
             ),
             {"username": username},
@@ -300,6 +304,7 @@ async def _create_user_in_db(username: str, password_hash: str, role: str, displ
         "role": row["role"],
         "display_name": row.get("display_name") or username,
         "is_active": bool(row["is_active"]),
+        "tenant_id": row.get("tenant_id"),
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         "last_login_at": row["last_login_at"].isoformat() if row.get("last_login_at") else None,
     }
@@ -418,6 +423,7 @@ def create_access_token(user: dict) -> str:
             "sub": user["username"],
             "role": user.get("role", "user"),
             "uid": user.get("id"),
+            "tenant_id": user.get("tenant_id"),
             "type": "access",
         }
     )
@@ -429,6 +435,7 @@ def create_refresh_token(user: dict) -> str:
         {
             "sub": user.get("id") or user["username"],
             "username": user["username"],
+            "tenant_id": user.get("tenant_id"),
             "type": "refresh",
         },
         expires_in=REFRESH_TOKEN_EXPIRE_SECONDS,

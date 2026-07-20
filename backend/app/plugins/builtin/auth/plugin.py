@@ -9,15 +9,15 @@
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 from fastapi import FastAPI
-
-from app.plugins.core.hooks import LifecycleMixin, MiddlewareMixin, RouterMixin
-from app.plugins.core.types import PluginContext, PluginHealth, PluginTier
 
 from app.plugins.builtin.auth import middleware as auth_mw
 from app.plugins.builtin.auth import router as auth_router_mod
 from app.plugins.builtin.auth import setup as setup_mod
+from app.plugins.core.hooks import LifecycleMixin, MiddlewareMixin, RouterMixin
+from app.plugins.core.types import PluginContext, PluginHealth, PluginTier
 
 logger = logging.getLogger(__name__)
 
@@ -28,31 +28,44 @@ class AuthPlugin(LifecycleMixin, RouterMixin, MiddlewareMixin):
     name = "auth"
     version = "1.0.0"
     tier = PluginTier.CORE
-    dependencies: list[str] = []
+    dependencies: ClassVar[list[str]] = []
     priority = 0  # 最先加载
 
     def __init__(self) -> None:
         self._users_count: int = 0
 
     async def on_startup(self, ctx: PluginContext) -> None:
-        """初始化认证系统：复用 app.auth.init_auth() 建表+默认管理员，然后处理 setup token。"""
-        from app.auth import init_auth as _init_auth, _users_cache
+        """初始化认证系统：建表+默认管理员，然后初始化多租户。"""
+        from app.auth import _load_users_from_db, _users_cache
+        from app.auth import init_auth as _init_auth
+        from app.tenants import (
+            create_default_tenant_for_existing_users,
+            ensure_tenants_table,
+        )
 
-        # 1. 建表 + 加载用户 + JWT secret + 默认管理员创建
+        # 1. 多租户基础：建 tenants 表 + users.tenant_id 列（必须在 init_auth 之前，
+        #    因为 _init_users_table 需要 tenant_id 列存在以创建正确的表结构）
+        await ensure_tenants_table()
+
+        # 2. 建 users 表 + 加载用户 + JWT secret + 默认管理员创建
         await _init_auth()
+
+        # 3. 创建默认租户并将所有无 tenant_id 的用户关联到默认租户
+        await create_default_tenant_for_existing_users()
+
+        # 4. 重新加载用户缓存（确保 tenant_id 字段已填充）
+        await _load_users_from_db()
         self._users_count = len(_users_cache)
 
-        # 2. Setup token 逻辑（仅当无任何用户时生成，正常情况 init_auth 已创建默认管理员）
+        # 5. Setup token 逻辑（仅当无任何用户时生成，正常情况 init_auth 已创建默认管理员）
         from app.plugins.builtin.auth.setup import (
             generate_setup_token,
-            is_setup_needed,
             mark_admin_created,
         )
 
         if self._users_count > 0:
             mark_admin_created()
         else:
-            # 极端情况：init_auth 未能创建默认管理员（如被禁用），生成 setup token
             token = generate_setup_token()
             logger.warning(
                 "=" * 60 + "\n"
@@ -68,8 +81,9 @@ class AuthPlugin(LifecycleMixin, RouterMixin, MiddlewareMixin):
 
     async def health_check(self) -> PluginHealth:
         try:
-            from app.db.engine import async_session_factory
             from sqlalchemy import text
+
+            from app.db.engine import async_session_factory
 
             async with async_session_factory() as s:
                 await s.execute(text("SELECT 1"))

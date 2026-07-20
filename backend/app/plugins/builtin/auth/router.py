@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -47,7 +47,7 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 # Cookie 配置
 COOKIE_SECURE = False  # TODO: 生产环境从 settings 读取（HTTPS 时为 True）
-COOKIE_SAMESITE = "lax"
+COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
 COOKIE_PATH = "/"
 
 
@@ -72,7 +72,7 @@ class MeResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: Optional[str] = None
+    refresh_token: str | None = None
 
 
 class CsrfResponse(BaseModel):
@@ -217,7 +217,7 @@ async def logout(request: Request, response: Response) -> dict:
 async def refresh_token(
     request: Request,
     response: Response,
-    body: Optional[RefreshRequest] = None,
+    body: RefreshRequest | None = None,
 ) -> dict:
     """刷新 access_token：从 Cookie 或 body 读取 refresh_token。"""
     ip = _client_ip(request)
@@ -242,7 +242,7 @@ async def refresh_token(
         raise HTTPException(status_code=401, detail="无效的 token")
 
     # 3. 查询用户（验证用户仍存在且未禁用）
-    from app.auth import _users_cache, _load_users_from_db
+    from app.auth import _load_users_from_db, _users_cache
     if not _users_cache:
         await _load_users_from_db()
     user = None
@@ -256,7 +256,6 @@ async def refresh_token(
         raise HTTPException(status_code=403, detail="账号已被禁用")
 
     username = user["username"]
-    role = user.get("role", "user")
 
     # 4. 签发新 token
     new_access = create_access_token(user)
