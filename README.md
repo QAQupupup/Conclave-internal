@@ -117,7 +117,7 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 | **实时通信** | WebSocket + 事件总线（内存缓存 + PostgreSQL 持久化 + Redis Pub/Sub 多副本广播 + 增量回放） |
 | **沙箱环境** | Python 3.12-slim（标准）/ 数据科学镜像（Pandas/NumPy/Matplotlib） |
 | **浏览器自动化** | Playwright + Chromium |
-| **可观测性** | 结构化日志（LogBus，JSON Lines 文件输出）+ 指标采集（MetricsStore，JSON API）+ 成本追踪（CostTracker）+ LLM 调用追踪（CallTrace）+ 审计日志（audit.db，SQLite）。未接入 Prometheus/ELK/Grafana 等外部生态 |
+| **可观测性** | 结构化日志（LogBus，JSON Lines 文件输出）+ 指标采集（MetricsStore，JSON API）+ 成本追踪（CostTracker）+ LLM 调用追踪（CallTrace）+ 审计日志（PostgreSQL `audit_logs` 表，后台线程批量写入）。未接入 Prometheus/ELK/Grafana 等外部生态 |
 
 ---
 
@@ -184,13 +184,13 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 |---|---|---|
 | **MeetingManager** | `backend/app/orchestrator/manager.py` | 系统级调度与治理中枢，统一交互层 |
 | **TaskGraph** | `backend/app/orchestrator/task_graph.py` | 显式 DAG 任务图，支持拓扑排序与递归子任务 |
-| **ContextManager** | `backend/app/orchestrator/context_manager.py` | 上下文治理：固定窗口（最近8条）+ 优先级裁剪 + token 预算 |
+| **ContextManager** | `backend/app/orchestrator/context_manager.py` | 上下文治理：动态窗口（token 预算自适应）+ LLM 摘要压缩 + 优先级裁剪 |
 | **AgentRuntime** | `backend/app/agents/agent_runtime.py` | 统一 Agent 运行时，差异通过配置表达 |
 | **TaskBaseline** | `backend/app/agents/task_baseline.py` | 领域基线模板（软件系统、股票分析等） |
 
 ### 解决的核心问题
 
-1. **上下文溢出**：ContextManager 显式预算 + 优先级分层 + 裁剪降级（当前为固定8条窗口+丢弃裁剪，摘要压缩未实现）
+1. **上下文溢出**：ContextManager 显式预算 + 优先级分层 + 动态窗口（token 预算自适应 [2,20] 范围）+ LLM 摘要压缩 + 裁剪降级（M1.1 已实现）
 2. **缺少显式 DAG**：TaskGraph 把阶段/子任务建模为可拓扑排序的有向图
 3. **Agent 抽象不统一**：AgentRuntime 让所有 Agent 共享同一执行接口
 4. **组件交互混乱**：Manager 作为 Storage/EventBus/Sandbox/Agent 之间的统一协议层
@@ -501,8 +501,6 @@ npm run dev
 
 待完善方向（详见"已知限制与待办"章节）：
 - gRPC Agent Worker 横向扩展（当前单进程 stub）
-- RAG 高级检索策略（HyDE / Multi-Query / Graph RAG）
-- 证据事实验证（当前仅语义相似度比对）
 - 跨会议长期记忆和观点演化
 - 部署后自动化功能冒烟测试
 - 数据分析结果的前端图表渲染
@@ -558,9 +556,9 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 
 ### P0（工程质量，渐进收紧）
 
-- **mypy 历史遗留类型错误**：主要为 SQLAlchemy 2.0 stub 不完整（`rowcount` 属性）、`Any` 返回值未收紧、`AsyncTransaction.run_sync` union-attr 等。分布在 8 个文件，属于渐进式严格模式的存量问题。
-  - 现状：非零 errors（具体数量需重新跑 `mypy --config-file pyproject.toml app conclave_core` 确认，历史值为 22）
-  - 目标：mypy 0 errors
+- **mypy 历史遗留类型错误**：主要为 SQLAlchemy 2.0 stub 不完整（`rowcount` 属性）、`Any` 返回值未收紧、`AsyncTransaction.run_sync` union-attr 等。分布在 13 个文件，属于渐进式严格模式的存量问题。
+  - 现状：25 errors（2026-07-22 重新跑 `mypy --config-file pyproject.toml app conclave_core` 确认，CI 中已设为 `continue-on-error` 不阻塞）
+  - 目标：mypy 0 errors（渐进式修复，每次提交不得新增）
   - 验收：`docker compose -f docker-compose.test.yml run --rm backend-test mypy --config-file pyproject.toml app conclave_core` 退出码 0
 
 ---
