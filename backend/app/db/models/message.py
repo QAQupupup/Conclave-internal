@@ -7,11 +7,9 @@ MeetingModel，从而避免循环导入。
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    DateTime,
     ForeignKey,
     Index,
     String,
@@ -19,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
+from app.db.base import Base, CreatedAtMixin, TenantScopeMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.db.models.meeting import MeetingModel
@@ -28,10 +26,9 @@ if TYPE_CHECKING:
 # ============================================================
 # messages — 发言记录
 # ============================================================
-class MessageModel(Base):
+class MessageModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     __tablename__ = "messages"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     meeting_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("meetings.id", ondelete="CASCADE"),
@@ -43,11 +40,6 @@ class MessageModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     claim_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     evidence_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
 
     meeting: Mapped[MeetingModel] = relationship(back_populates="messages")
 

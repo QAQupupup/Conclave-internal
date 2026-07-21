@@ -7,11 +7,9 @@ MeetingModel，从而避免循环导入。
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -19,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
+from app.db.base import Base, CreatedAtMixin, TenantScopeMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.db.models.meeting import MeetingModel
@@ -28,12 +26,9 @@ if TYPE_CHECKING:
 # ============================================================
 # documents — 上传文档元数据
 # ============================================================
-class DocumentModel(Base):
+class DocumentModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     __tablename__ = "documents"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    # tenant_id: 由 tenants service 通过 ALTER TABLE 添加外键约束
-    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     meeting_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("meetings.id", ondelete="CASCADE"),
@@ -47,11 +42,6 @@ class DocumentModel(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     content_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, default="", comment="SHA256 of file content for dedup"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
     )
 
     meeting: Mapped[MeetingModel] = relationship()

@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
+from app.db.base import Base, TenantScopeMixin
 
 if TYPE_CHECKING:
     from app.db.models.meeting import MeetingModel
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 # ============================================================
 # events — 事件溯源
 # ============================================================
-class EventModel(Base):
+class EventModel(Base, TenantScopeMixin):
     __tablename__ = "events"
 
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

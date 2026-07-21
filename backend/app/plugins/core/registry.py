@@ -24,6 +24,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.plugins.core.event_bus import PluginEventBus
+from app.core.exceptions import AppException
 from app.plugins.core.exceptions import (
     ConclaveException,
     PluginDependencyError,
@@ -622,13 +623,13 @@ class PluginRegistry:
     # ---- 全局异常处理器注册 ----
 
     def register_exception_handlers(self, app: FastAPI) -> None:
-        """注册 ConclaveException -> HTTP 响应处理器。"""
+        """注册 AppException -> 统一 JSON 响应处理器。"""
 
-        @app.exception_handler(ConclaveException)
-        async def _conclave_handler(request: Request, exc: ConclaveException):  # type: ignore[unused-argument]
+        @app.exception_handler(AppException)
+        async def _app_exception_handler(request: Request, exc: AppException):  # type: ignore[unused-argument]
             return JSONResponse(
                 status_code=exc.status_code,
-                content={"code": exc.code, "message": exc.message, "details": exc.details},
+                content=exc.to_dict(),
             )
 
 

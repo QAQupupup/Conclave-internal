@@ -65,6 +65,87 @@ class BorrowRequest(BaseModel):
 # ---------- 状态机状态对象 ----------
 
 
+class MeetingCoreSection(BaseModel):
+    """会议核心元信息（身份/状态/配置），分组字段。"""
+
+    meeting_id: str
+    topic: str
+    stage: Stage
+    status: MeetingStatus
+    clarified_topic: str | None = None
+    deliverable_type: str = "prd_openapi"
+    flow_plan: str = "standard"
+    debate_depth: str = "standard"
+    dynamic_routing: bool = True
+    model_override: str = ""
+    owner_username: str | None = None
+    owner_uid: str | None = None
+    tenant_id: int | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: datetime | None = None
+    error_detail: str | None = None
+
+
+class MeetingDebateSection(BaseModel):
+    """辩论/讨论阶段相关数据。"""
+
+    team_config: list[dict[str, Any]] = Field(default_factory=list)
+    role_configs: list[dict[str, Any]] = Field(default_factory=list)
+    key_questions: list[str] = Field(default_factory=list)
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    injected_messages: list[dict[str, Any]] = Field(default_factory=list)
+    intervention_messages: list[dict[str, Any]] = Field(default_factory=list)
+    team_conclusions: list[dict[str, Any]] = Field(default_factory=list)
+    claims: list[dict[str, Any]] = Field(default_factory=list)
+    conflicts: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_set: list[dict[str, Any]] = Field(default_factory=list)
+    prefetched_evidence: dict[str, list[dict]] | None = None
+    drift_log: list[dict[str, Any]] = Field(default_factory=list)
+    user_rejections: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+
+
+class MeetingBorrowSection(BaseModel):
+    """Agent 借调相关状态。"""
+
+    borrowed_agents: list[dict[str, Any]] = Field(default_factory=list)
+    auto_borrow_count: int = 0
+    pending_borrow_request: dict[str, Any] | None = None
+    borrow_frozen: bool = False
+    borrow_request_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MeetingIterationSection(BaseModel):
+    """迭代/质量门禁相关状态。"""
+
+    iteration_count: int = 0
+    max_iterations: int = 2
+    quality_score: float | None = None
+    quality_feedback: str | None = None
+    iteration_history: list[dict[str, Any]] = Field(default_factory=list)
+    auto_iterate: bool = False
+    checkpoint: dict[str, Any] | None = None
+    stage_retry_count: dict[str, int] = Field(default_factory=dict)
+    max_stage_retries: int = 2
+
+
+class MeetingObservabilitySection(BaseModel):
+    """可观测性与审计数据。"""
+
+    decision_record: dict[str, Any] | None = None
+    artifact: dict[str, Any] | None = None
+    doc_summaries: list[str] = Field(default_factory=list)
+    reference_meeting_ids: list[str] = Field(default_factory=list)
+    reference_context: str = ""
+    charter: MeetingCharter | None = None
+    conclusion_chain: ConclusionChain = Field(default_factory=ConclusionChain)
+    llm_trace: CallTrace = Field(default_factory=CallTrace)
+    confidence_flags: dict[str, str] = Field(default_factory=dict)
+    agent_evaluations: dict[str, Any] | None = None
+    resolved_models: dict[str, str] = Field(default_factory=dict)
+    paused_snapshot: dict[str, Any] | None = None
+    participants: list[str] = Field(default_factory=list)
+
+
 class MeetingState(BaseModel):
     """状态机运行态（见 §1.4）
 
@@ -275,6 +356,83 @@ class MeetingState(BaseModel):
             if key in data:
                 data[key] = {"_aux": True}
         return data
+
+    @property
+    def sections(self) -> dict[str, BaseModel]:
+        """按职责返回嵌套分组视图（向后兼容：不影响扁平字段访问）。
+
+        返回 dict 而不是嵌套对象，是为了避免 Pydantic 双向同步问题；
+        每次访问返回新对象（视图），用于日志/序列化/前端聚合输出场景。
+        注意：返回的 section 是视图（拷贝），不要在其上修改以期反向写回 state。
+        """
+        return {
+            "core": MeetingCoreSection(
+                meeting_id=self.meeting_id,
+                topic=self.topic,
+                stage=self.stage,
+                status=self.status,
+                clarified_topic=self.clarified_topic,
+                deliverable_type=self.deliverable_type,
+                flow_plan=self.flow_plan,
+                debate_depth=self.debate_depth,
+                dynamic_routing=self.dynamic_routing,
+                model_override=self.model_override,
+                owner_username=self.owner_username,
+                owner_uid=self.owner_uid,
+                tenant_id=self.tenant_id,
+                created_at=self.created_at,
+                completed_at=self.completed_at,
+                error_detail=self.error_detail,
+            ),
+            "debate": MeetingDebateSection(
+                team_config=self.team_config,
+                role_configs=self.role_configs,
+                key_questions=self.key_questions,
+                messages=self.messages,
+                injected_messages=self.injected_messages,
+                intervention_messages=self.intervention_messages,
+                team_conclusions=self.team_conclusions,
+                claims=self.claims,
+                conflicts=self.conflicts,
+                evidence_set=self.evidence_set,
+                prefetched_evidence=self.prefetched_evidence,
+                drift_log=self.drift_log,
+                user_rejections=self.user_rejections,
+            ),
+            "borrow": MeetingBorrowSection(
+                borrowed_agents=self.borrowed_agents,
+                auto_borrow_count=self.auto_borrow_count,
+                pending_borrow_request=self.pending_borrow_request,
+                borrow_frozen=self.borrow_frozen,
+                borrow_request_history=self.borrow_request_history,
+            ),
+            "iteration": MeetingIterationSection(
+                iteration_count=self.iteration_count,
+                max_iterations=self.max_iterations,
+                quality_score=self.quality_score,
+                quality_feedback=self.quality_feedback,
+                iteration_history=self.iteration_history,
+                auto_iterate=self.auto_iterate,
+                checkpoint=self.checkpoint,
+                stage_retry_count=self.stage_retry_count,
+                max_stage_retries=self.max_stage_retries,
+            ),
+            "observability": MeetingObservabilitySection(
+                decision_record=self.decision_record,
+                artifact=self.artifact,
+                doc_summaries=self.doc_summaries,
+                reference_meeting_ids=self.reference_meeting_ids,
+                reference_context=self.reference_context,
+                charter=self.charter,
+                conclusion_chain=self.conclusion_chain,
+                llm_trace=self.llm_trace,
+                confidence_flags=self.confidence_flags,
+                agent_evaluations=self.agent_evaluations,
+                resolved_models=self.resolved_models,
+                paused_snapshot=self.paused_snapshot,
+                participants=self.participants,
+            ),
+        }
 
     def snapshot(self) -> dict[str, Any]:
         """生成快照用于 pause 暂存 / WS 回放"""

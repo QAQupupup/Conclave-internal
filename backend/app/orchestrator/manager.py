@@ -130,11 +130,11 @@ class MeetingManager:
 
         await bus.publish(make_event(event_type, meeting_id, payload))
 
-    def dispatch_material(self, query: str, meeting_id: str) -> list[dict[str, Any]]:
-        """通过 RAG retriever 检索物料"""
+    async def dispatch_material(self, query: str, meeting_id: str) -> list[dict[str, Any]]:
+        """通过 RAG retriever 检索物料（异步）"""
         try:
             from app.rag.retriever import retrieve
 
-            return retrieve(meeting_id, query)
+            return await retrieve(meeting_id, query)
         except Exception:
             return []

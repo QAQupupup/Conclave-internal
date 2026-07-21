@@ -1,16 +1,13 @@
-# 检索 + 重排：查询改写多路召回 + 混合检索 + bge-reranker-v2-m3 重排
+# 检索 + 重排：查询改写多路召回 + 混合检索 + Reranker 重排
 from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
-from app.config import settings
 from app.rag.query_rewriter import rewrite_query
-from app.rag.store import get_store
+from app.rag.store import get_reranker, get_store
 
 
-def retrieve(
+async def retrieve(
     meeting_id: str,
     query: str,
     top_k: int = 5,
@@ -29,7 +26,7 @@ def retrieve(
     if not store.all_chunks():
         return []
     # 召回阶段取更多候选，给 reranker 留空间
-    candidates = store.search(query, top_k=max(top_k * 2, 10))
+    candidates = await store.search(query, top_k=max(top_k * 2, 10))
     out: list[dict[str, Any]] = []
     for chunk, score in candidates:
         d = chunk.to_dict()
@@ -62,7 +59,7 @@ async def retrieve_for_conflict(
     1. 查询改写：LLM 生成 2 个改写查询 + 原始查询（最多 3 路）
     2. 多路召回：每路检索 top_k*2 个候选
     3. 合并去重：按 chunk_id 去重，保留最高分
-    4. Reranker 重排：bge-reranker-v2-m3 或关键词加成
+    4. Reranker 重排：使用 get_reranker()（真实 API 或关键词 fallback）
     5. 邻居链扩展：附带前后 N 个 chunk 上下文
     """
     # 1. 查询改写
@@ -75,7 +72,7 @@ async def retrieve_for_conflict(
 
     seen: dict[str, dict[str, Any]] = {}
     for q in queries:
-        candidates = store.search(q, top_k=max(top_k * 2, 10))
+        candidates = await store.search(q, top_k=max(top_k * 2, 10))
         for chunk, score in candidates:
             d = chunk.to_dict()
             d["score"] = round(score, 4)
@@ -95,59 +92,20 @@ async def retrieve_for_conflict(
                 seen[chunk.chunk_id] = d
 
     base = list(seen.values())
-    base.sort(key=lambda x: x["score"], reverse=True)
-
     if not base:
         return []
 
-    # 3. 重排
-    if settings.use_real_rerank:
-        return _rerank_with_siliconflow(conflict_summary, base, top_k)
-    return _rerank_with_keywords(conflict_summary, base, top_k)
+    # 按初始分数排序（reranker 内部再重排）
+    base.sort(key=lambda x: x["score"], reverse=True)
 
-
-def _rerank_with_siliconflow(query: str, candidates: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
-    """硅基流动 bge-reranker-v2-m3 真实重排"""
-    try:
-        resp = httpx.post(
-            f"{settings.rerank_base_url.rstrip('/')}/rerank",
-            headers={"Authorization": f"Bearer {settings.rerank_api_key}"},
-            json={
-                "model": settings.rerank_model,
-                "query": query,
-                "documents": [c["text"] for c in candidates],
-                "top_n": top_k,
-                "return_documents": False,
-            },
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-        results = resp.json()["results"]
-        # 按 relevance_score 重排
-        reranked: list[dict[str, Any]] = []
-        for r in results:
-            idx = r["index"]
-            item = candidates[idx].copy()
-            item["score"] = round(r["relevance_score"], 4)
-            reranked.append(item)
-        return reranked[:top_k]
-    except Exception:
-        # reranker 失败则降级关键词重排
-        return _rerank_with_keywords(query, candidates, top_k)
-
-
-def _rerank_with_keywords(query: str, candidates: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
-    """关键词加成重排（stub 兜底）"""
-    keywords = set(_tokenize(query))
-    for item in candidates:
-        hits = sum(1 for kw in keywords if kw in item["text"].lower())
-        item["score"] = round(item["score"] + hits * 0.05, 4)
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    return candidates[:top_k]
-
-
-def _tokenize(text: str) -> list[str]:
-    # [CON-26 修复] 用中英分词工具（jieba 中文按词切）替代单字切分
-    from app.rag.tokenize import tokenize
-
-    return tokenize(text)
+    # 3. 使用 Reranker Protocol 统一重排（SiliconFlow 失败自动回退关键词）
+    reranker = get_reranker()
+    documents = [c["text"] for c in base]
+    reranked = await reranker.rerank(conflict_summary, documents, top_n=top_k)
+    results: list[dict[str, Any]] = []
+    for idx, rel_score in reranked:
+        if 0 <= idx < len(base):
+            item = base[idx].copy()
+            item["score"] = round(rel_score, 4)
+            results.append(item)
+    return results

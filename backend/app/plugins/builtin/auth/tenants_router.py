@@ -100,6 +100,25 @@ class TenantSwitchResponse(BaseModel):
     user: dict  # 完整用户信息（含 tenants 列表），与 /auth/login 返回格式一致
 
 
+class TenantSettingsUpdateRequest(BaseModel):
+    """租户级 AI 配置覆盖（仅白名单字段）。"""
+    llm_api_key: str | None = Field(None, max_length=512, description="LLM API Key")
+    llm_base_url: str | None = Field(None, max_length=512, description="LLM Base URL")
+    llm_model: str | None = Field(None, max_length=128, description="LLM 模型名")
+    embed_api_key: str | None = Field(None, max_length=512, description="Embedding API Key")
+    embed_base_url: str | None = Field(None, max_length=512, description="Embedding Base URL")
+    embed_model: str | None = Field(None, max_length=128, description="Embedding 模型名")
+    rerank_api_key: str | None = Field(None, max_length=512, description="Reranker API Key")
+    rerank_base_url: str | None = Field(None, max_length=512, description="Reranker Base URL")
+    rerank_model: str | None = Field(None, max_length=128, description="Reranker 模型名")
+    web_search_api_key: str | None = Field(None, max_length=512, description="Web Search API Key")
+    web_search_mode: str | None = Field(None, max_length=32, description="Web Search 模式 (stub/tavily/playwright)")
+
+
+class TenantSettingsResponse(BaseModel):
+    settings: dict
+
+
 # ---- Helper ----
 
 
@@ -297,3 +316,61 @@ async def _do_switch_tenant(
         tenant=_tenant_to_response(tenant, user_id),
         user=user_info,
     )
+
+
+@router.get("/{tenant_id}/settings", response_model=TenantSettingsResponse)
+async def get_tenant_settings(tenant_id: int, request: Request) -> TenantSettingsResponse:
+    """获取租户级配置覆盖（仅返回白名单字段，脱敏 API Key）。"""
+    user_id, _ = _require_auth()
+
+    tenant = await get_tenant(tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="租户不存在")
+
+    from app.tenants import is_system_tenant
+    if not is_system_tenant() and not await user_has_tenant_access(user_id, tenant_id):
+        raise HTTPException(status_code=403, detail="无权访问该租户")
+
+    from app.tenants.settings_override import OVERRIDABLE_KEYS, _filter_overrides
+    current = tenant.settings or {}
+    filtered = _filter_overrides(current if isinstance(current, dict) else {})
+    # 脱敏：api_key 字段仅显示前后 4 位
+    masked: dict = {}
+    for k, v in filtered.items():
+        if k.endswith("_api_key") and isinstance(v, str) and len(v) > 8:
+            masked[k] = v[:4] + "****" + v[-4:]
+        else:
+            masked[k] = v
+    # 确保返回所有白名单字段（未设置的用 None 占位）
+    for k in OVERRIDABLE_KEYS:
+        masked.setdefault(k, None)
+    return TenantSettingsResponse(settings=masked)
+
+
+@router.patch("/{tenant_id}/settings", response_model=TenantSettingsResponse)
+async def update_tenant_settings_endpoint(
+    tenant_id: int,
+    body: TenantSettingsUpdateRequest,
+    request: Request,
+) -> TenantSettingsResponse:
+    """更新租户级配置覆盖（部分更新，仅 owner 可操作）。"""
+    user_id, _ = _require_auth()
+
+    tenant = await get_tenant(tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="租户不存在")
+
+    from app.tenants import is_system_tenant, is_tenant_owner
+    if not is_system_tenant() and not await is_tenant_owner(user_id, tenant_id):
+        raise HTTPException(status_code=403, detail="仅租户所有者可修改配置")
+
+    patch = body.model_dump(exclude_unset=True, exclude_none=True)
+    try:
+        from app.tenants.settings_override import update_tenant_settings
+        updated = await update_tenant_settings(tenant_id, patch)
+    except Exception as e:
+        logger.exception("更新租户 settings 失败")
+        raise HTTPException(status_code=400, detail=f"更新失败: {e}")
+
+    logger.info("用户 %s 更新租户 %d 的 settings, keys=%s", user_id, tenant_id, list(patch.keys()))
+    return TenantSettingsResponse(settings=updated)

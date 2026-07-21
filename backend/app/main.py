@@ -11,13 +11,16 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.auth import init_auth as init_jwt_auth  # noqa: F401  # 保留供外部引用，实际初始化由 auth 插件完成
+from app.core.exceptions import AppException
 from app.db.base import Base
 from app.db.engine import async_session_factory
 from app.db.redis import close_redis, init_redis
 from app.db_legacy import init_db
+from app.events import start_event_bus, stop_event_bus
 from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware
 from app.net_auth import init_auth_table
@@ -126,6 +129,9 @@ async def lifespan(app: FastAPI):
     # Redis 初始化（不可用时降级，不阻塞启动）
     await init_redis(app)
 
+    # 事件总线 Redis Pub/Sub 桥接启动（Redis 不可用时自动降级为纯内存模式）
+    await start_event_bus()
+
     # 崩溃恢复：把上次未完成的 RUNNING 会议标记为 PAUSED
     from app.orchestrator.runner import recover_crashed_meetings
 
@@ -174,6 +180,8 @@ async def lifespan(app: FastAPI):
     # 停止后台指标采集
     if os.environ.get("CONCLAVE_DISABLE_METRICS") != "1":
         await get_metrics_store().stop()
+    # 停止事件总线 Redis Pub/Sub 桥接（必须在 close_redis 之前）
+    await stop_event_bus()
     # 关闭 Redis
     await close_redis(app)
     # 清理所有沙箱服务容器
@@ -268,6 +276,15 @@ def create_app() -> FastAPI:
     setup_trace_middleware(app)
     # 插件 bootstrap：同步注册中间件/路由/异常处理器
     _registry.bootstrap(app)
+
+    # 全局 AppException 处理器（统一 JSON 错误格式）
+    @app.exception_handler(AppException)
+    async def app_exception_handler(request: Request, exc: AppException):  # type: ignore[unused-argument]
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_dict(),
+        )
+
     # 挂载业务路由（auth 路由由插件注册）
     app.include_router(agent_roles_router.router)
     app.include_router(captcha_router.router)

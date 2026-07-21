@@ -270,6 +270,7 @@ _BUSINESS_TABLES = [
     "net_auth_requests",
     "cost_records",
     "docker_hosts",
+    "docker_host_secrets",
 ]
 
 

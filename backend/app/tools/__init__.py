@@ -159,10 +159,10 @@ class RemoteWebSearch:
 
 
 class TavilyWebSearch:
-    """Tavily API 搜索实现"""
+    """Tavily API 搜索实现。支持租户级 api_key 覆盖。"""
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
+    def __init__(self, api_key: str = ""):
+        self.api_key = api_key  # 全局默认 key，可能为空
         self._client: Any = None
 
     def _get_client(self) -> Any:
@@ -172,15 +172,33 @@ class TavilyWebSearch:
             self._client = httpx.AsyncClient(timeout=20.0)
         return self._client
 
+    def _resolve_api_key(self) -> str:
+        """解析当前生效的 api_key：租户覆盖 > 全局默认"""
+        try:
+            from app.tenants.context import get_tenant_id
+            from app.tenants.settings_override import get_cached_overrides
+            tid = get_tenant_id()
+            if tid is not None:
+                ov = get_cached_overrides(tid)
+                key = ov.get("web_search_api_key") if ov else None
+                if key:
+                    return key
+        except Exception:
+            pass
+        return self.api_key
+
     async def close(self) -> None:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
     async def search(self, query: str, top_k: int = 5, **kwargs: Any) -> list[dict[str, Any]]:
+        api_key = self._resolve_api_key()
+        if not api_key:
+            return []
         try:
             client = self._get_client()
             payload: dict[str, Any] = {
-                "api_key": self.api_key,
+                "api_key": api_key,
                 "query": query,
                 "max_results": top_k,
                 "search_depth": kwargs.get("search_depth", "basic"),
@@ -220,11 +238,14 @@ class TavilyWebSearch:
 
     async def fetch_url(self, url: str, max_chars: int = 5000) -> dict[str, Any]:
         """Tavily的extract API获取URL内容"""
+        api_key = self._resolve_api_key()
+        if not api_key:
+            return {"url": url, "title": "", "content": "", "chunks": [], "error": "no_api_key"}
         try:
             client = self._get_client()
             resp = await client.post(
                 "https://api.tavily.com/extract",
-                json={"api_key": self.api_key, "urls": url},
+                json={"api_key": api_key, "urls": url},
             )
             resp.raise_for_status()
             data = resp.json()
@@ -274,8 +295,8 @@ def get_web_search() -> ToolPort:
     settings_obj = settings
     mode = settings_obj.web_search_mode
 
-    if mode == "tavily" and settings_obj.web_search_api_key:
-        logger.info("Web Search: 使用 Tavily API 模式")
+    if mode == "tavily":
+        logger.info("Web Search: 使用 Tavily API 模式（支持租户级 key 覆盖）")
         _instance = TavilyWebSearch(settings_obj.web_search_api_key)
     elif mode == "playwright":
         try:
@@ -287,10 +308,7 @@ def get_web_search() -> ToolPort:
             logger.warning("Playwright 初始化失败，回退到 stub: %s", e)
             _instance = StubWebSearch()
     else:
-        if mode == "tavily" and not settings_obj.web_search_api_key:
-            logger.warning("Tavily 模式需要 CONCLAVE_WEB_SEARCH_API_KEY，回退到 stub")
-        else:
-            logger.info("Web Search: 使用 stub 模式（返回空结果）")
+        logger.info("Web Search: 使用 stub 模式（返回空结果）")
         _instance = StubWebSearch()
 
     return _instance

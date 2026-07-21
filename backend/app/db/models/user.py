@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import (
     Boolean,
-    DateTime,
     Index,
-    Integer,
     String,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.db.base import (
+    Base,
+    IntegerPrimaryKeyMixin,
+    TenantScopeMixin,
+    TimestampMixin,
+    UpdatedAtMixin,
+)
 
 
 # ============================================================
 # user_preferences — 用户偏好
 # ============================================================
-class UserPreferenceModel(Base):
+class UserPreferenceModel(Base, UpdatedAtMixin, TenantScopeMixin):
     __tablename__ = "user_preferences"
 
     user_id: Mapped[str] = mapped_column(
@@ -31,22 +33,14 @@ class UserPreferenceModel(Base):
     )
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
 
 
 # ============================================================
 # api_keys — BYOK API Key 加密持久化
 # ============================================================
-class ApiKeyModel(Base):
+class ApiKeyModel(Base, IntegerPrimaryKeyMixin, TimestampMixin, TenantScopeMixin):
     __tablename__ = "api_keys"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # tenant_id: 由 tenants service 通过 ALTER TABLE 添加外键约束
-    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     provider: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True, comment="LLM厂商: siliconflow/deepseek/openai/openrouter/custom"
     )
@@ -57,16 +51,6 @@ class ApiKeyModel(Base):
     encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "provider", "name", name="uq_api_key_tenant_provider_name"),

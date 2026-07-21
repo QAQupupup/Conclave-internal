@@ -216,9 +216,18 @@ def setup_auth_middleware(app, plugin=None) -> None:
             set_user_id(uid_str)
             set_username(username)
             set_user_role(role)
-            set_tenant_id(tenant_id if isinstance(tenant_id, int) else (int(tenant_id) if tenant_id else None))
+            _tid = tenant_id if isinstance(tenant_id, int) else (int(tenant_id) if tenant_id else None)
+            set_tenant_id(_tid)
             from app.tenants.context import set_system_tenant as _set_sys3
             _set_sys3(False)
+            # 预热租户配置覆盖缓存（fire-and-forget，不阻塞请求）
+            if _tid is not None:
+                try:
+                    import asyncio as _asyncio
+                    from app.tenants.settings_override import load_tenant_overrides as _load_ov
+                    _asyncio.create_task(_load_ov(_tid))
+                except Exception:
+                    pass
             # auth_user 包含完整 claims
             auth_user = dict(claims)
             auth_user["username"] = username

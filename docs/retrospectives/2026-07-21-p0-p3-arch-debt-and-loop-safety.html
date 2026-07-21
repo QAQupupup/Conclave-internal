@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P0-P3 架构债偿还与基础能力补齐 — 回顾报告</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --zinc-50:#fafafa; --zinc-100:#f4f4f5; --zinc-200:#e4e4e7; --zinc-300:#d4d4d8;
+    --zinc-400:#a1a1aa; --zinc-500:#71717a; --zinc-600:#52525b; --zinc-700:#3f3f46;
+    --zinc-800:#27272a; --zinc-900:#18181b;
+    --blue-50:#eff6ff; --blue-100:#dbeafe; --blue-500:#3b82f6; --blue-600:#2563eb;
+    --green-50:#f0fdf4; --green-100:#dcfce7; --green-500:#22c55e; --green-600:#16a34a;
+    --amber-50:#fffbeb; --amber-100:#fef3c7; --amber-500:#f59e0b; --amber-600:#d97706;
+    --rose-50:#fff1f2; --rose-100:#ffe4e6; --rose-500:#f43f5e; --rose-600:#e11d48;
+    --indigo-50:#eef2ff; --indigo-100:#e0e7ff; --indigo-500:#6366f1; --indigo-600:#4f46e5;
+    --radius:8px; --radius-lg:12px;
+    --shadow-sm:0 1px 2px 0 rgba(0,0,0,0.05);
+    --shadow:0 1px 3px 0 rgba(0,0,0,0.08),0 1px 2px -1px rgba(0,0,0,0.05);
+  }
+  html{font-size:15px;-webkit-font-smoothing:antialiased;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;background:var(--zinc-50);color:var(--zinc-900);line-height:1.65;}
+  .page-wrapper{max-width:980px;margin:0 auto;padding:48px 24px 80px;}
+  .report-header{margin-bottom:40px;padding-bottom:32px;border-bottom:1px solid var(--zinc-200);}
+  .report-header .breadcrumb{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--zinc-500);text-transform:uppercase;letter-spacing:0.08em;font-weight:500;margin-bottom:16px;}
+  .report-header h1{font-size:32px;font-weight:700;letter-spacing:-0.02em;line-height:1.25;margin-bottom:8px;}
+  .report-header .subtitle{font-size:16px;color:var(--zinc-500);margin-bottom:20px;}
+  .meta-row{display:flex;flex-wrap:wrap;gap:10px;}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;border:1px solid transparent;line-height:1.6;white-space:nowrap;}
+  .badge.date{background:var(--zinc-100);color:var(--zinc-700);border-color:var(--zinc-200);}
+  .badge.p0{background:var(--rose-50);color:var(--rose-600);border-color:var(--rose-100);}
+  .badge.p1{background:var(--amber-50);color:var(--amber-600);border-color:var(--amber-100);}
+  .badge.p2{background:var(--blue-50);color:var(--blue-600);border-color:var(--blue-100);}
+  .badge.p3{background:var(--green-50);color:var(--green-600);border-color:var(--green-100);}
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:40px;}
+  .stat-card{background:white;border:1px solid var(--zinc-200);border-radius:var(--radius-lg);padding:16px 20px;box-shadow:var(--shadow-sm);}
+  .stat-card .label{font-size:12px;color:var(--zinc-500);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;}
+  .stat-card .value{font-size:28px;font-weight:700;line-height:1.2;}
+  .stat-card.p0 .value{color:var(--rose-600);}
+  .stat-card.p1 .value{color:var(--amber-600);}
+  .stat-card.p2 .value{color:var(--blue-600);}
+  .stat-card.p3 .value{color:var(--green-600);}
+  .stat-card.total .value{color:var(--zinc-900);}
+  section{margin-bottom:40px;}
+  section h2{font-size:20px;font-weight:700;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid var(--zinc-900);display:inline-block;}
+  section h3{font-size:16px;font-weight:600;color:var(--zinc-800);margin:24px 0 12px;}
+  p{margin-bottom:12px;color:var(--zinc-700);}
+  ul,ol{margin:8px 0 16px 24px;}
+  li{margin-bottom:6px;color:var(--zinc-700);}
+  code{font-family:"SF Mono",Monaco,Consolas,monospace;background:var(--zinc-100);padding:2px 6px;border-radius:4px;font-size:13px;color:var(--zinc-800);}
+  pre{background:var(--zinc-900);color:#e4e4e7;padding:16px;border-radius:var(--radius);overflow-x:auto;margin:12px 0 16px;font-size:13px;line-height:1.5;}
+  pre code{background:transparent;padding:0;color:inherit;}
+  .callout{border-left:4px solid;padding:14px 18px;border-radius:0 var(--radius) var(--radius) 0;margin:16px 0;}
+  .callout.critical{background:var(--rose-50);border-color:var(--rose-500);}
+  .callout.warning{background:var(--amber-50);border-color:var(--amber-500);}
+  .callout.success{background:var(--green-50);border-color:var(--green-500);}
+  .callout.info{background:var(--blue-50);border-color:var(--blue-500);}
+  .callout strong{display:block;margin-bottom:4px;}
+  table{width:100%;border-collapse:collapse;margin:12px 0 20px;font-size:14px;}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--zinc-200);}
+  th{background:var(--zinc-100);font-weight:600;color:var(--zinc-700);font-size:12px;text-transform:uppercase;letter-spacing:0.04em;}
+  .file-ref{font-family:"SF Mono",Monaco,Consolas,monospace;font-size:13px;color:var(--indigo-600);}
+</style>
+</head>
+<body>
+<div class="page-wrapper">
+
+  <header class="report-header">
+    <div class="breadcrumb">Conclave <span class="sep">/</span> Retrospectives <span class="sep">/</span> 2026-07-21</div>
+    <h1>P0-P3 架构债偿还与基础能力补齐</h1>
+    <p class="subtitle">ORM 抽象、多副本事件广播、异步 RAG、异常/日志/事件 Schema 统一，以及 asyncio 事件循环隔离踩坑修复</p>
+    <div class="meta-row">
+      <span class="badge date">2026-07-21</span>
+      <span class="badge p0">3 项 P0</span>
+      <span class="badge p1">3 项 P1</span>
+      <span class="badge p2">3 项 P2</span>
+      <span class="badge p3">1 项 P3</span>
+    </div>
+  </header>
+
+  <div class="stats-grid">
+    <div class="stat-card total"><div class="label">变更文件</div><div class="value">~30</div></div>
+    <div class="stat-card p0"><div class="label">P0 修复</div><div class="value">3</div></div>
+    <div class="stat-card p1"><div class="label">P1 能力</div><div class="value">3</div></div>
+    <div class="stat-card p2"><div class="label">P2 重构</div><div class="value">3</div></div>
+    <div class="stat-card p3"><div class="label">P3 加固</div><div class="value">1</div></div>
+    <div class="stat-card total"><div class="label">测试结果</div><div class="value" style="font-size:20px;">544 ✅</div></div>
+  </div>
+
+  <section>
+    <h2>背景与问题清单</h2>
+    <p>在多租户隔离（Phase 2b）完成后，代码库暴露出一批基础架构层面的技术债：部分 ORM 模型字段重复定义、Embedding 同步调用阻塞事件循环、事件总线在多副本部署下会导致 WS 消息丢失、异常/日志/事件 Schema 缺少统一抽象、租户级配置无法覆盖默认值、MeetingState 单模型过重等。这些问题在未来横向扩容、接入真实 LLM/Reranker 时必然踩坑。</p>
+
+    <h3>P0（必修、多副本下必崩）</h3>
+    <ol>
+      <li><strong>ORM 公共字段重复</strong>：<code>id</code>/<code>created_at</code>/<code>updated_at</code>/<code>tenant_id</code> 在每个模型里手写，容易漏加 <code>index=True</code> 或漏掉多租户过滤。</li>
+      <li><strong>Redis Pub/Sub 事件总线桥接缺失</strong>：单实例内存总线在多副本部署时，WS 订阅者连在 A 副本、事件发布在 B 副本，消息必然丢失。</li>
+      <li><strong>Embedding 客户端同步 + Reranker 无抽象</strong>：<code>httpx.post</code> 同步调用阻塞 asyncio 事件循环；Reranker 直接写死在 SiliconFlow，无 Protocol 抽象无法切换。</li>
+    </ol>
+
+    <h3>P1（能力缺失，影响扩展）</h3>
+    <ol>
+      <li><strong>异常体系不统一</strong>：业务代码抛 <code>HTTPException</code>、<code>ValueError</code>、<code>RuntimeError</code> 混用，错误码散落在路由里，前端无法稳定解析。</li>
+      <li><strong>租户级配置未启用</strong>：<code>tenants.settings</code> 列为 JSONB 但从未读取，租户无法自定义 LLM/Embedding/Reranker 提供商。</li>
+      <li><strong>asyncio 事件循环单例泄漏</strong>：Redis 客户端、事件总线监听任务等模块级单例未做循环感知，pytest-xdist 下出现大量 "attached to a different loop"。</li>
+    </ol>
+
+    <h3>P2（代码质量与长期维护）</h3>
+    <ol>
+      <li><strong>日志门面不统一</strong>：<code>logger</code>/<code>log_bus</code>/<code>audit</code> 三套调用方式并存，contextvars（request_id/meeting_id）注入不彻底。</li>
+      <li><strong>事件 payload 裸 dict</strong>：事件载荷是无类型 dict，无法做 schema 版本化与自动校验。</li>
+      <li><strong>MeetingState 单模型过重</strong>：一个 Pydantic 模型承载 core/debate/borrow/iteration/observability 五大块字段，演进困难。</li>
+    </ol>
+
+    <h3>P3（加固项）</h3>
+    <ol>
+      <li><strong>WS 入站消息无校验</strong>：客户端发送的消息直接 <code>json.loads</code> 使用，畸形消息会 500。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>修复方案与文件清单</h2>
+
+    <h3>P0-1 ORM 公共 Mixin</h3>
+    <p><span class="file-ref">app/db/base.py</span></p>
+    <ul>
+      <li>新增 <code>UUIDPrimaryKeyMixin</code>、<code>TimestampMixin</code>（created_at/updated_at 自动）、<code>TenantScopeMixin</code>（tenant_id + 索引）、<code>SoftDeleteMixin</code>。</li>
+      <li>严格遵循 AGENTS.md §4.12：<strong>不对 raw SQL 创建的表（tenants 等）声明 ForeignKey</strong>，外键由迁移统一添加，避免 <code>NoReferencedTableError</code>。</li>
+      <li>所有业务模型（meeting/message/event/document/memory/user/agent_role/docker_host/observability）统一继承 Mixin，消除字段重复。</li>
+    </ul>
+
+    <h3>P0-2 Redis Pub/Sub 桥接事件总线</h3>
+    <p><span class="file-ref">app/events.py</span> <span class="file-ref">app/db/redis.py</span></p>
+    <ul>
+      <li>事件总线新增 <code>start()</code>/<code>stop()</code> 生命周期，lifespan 启动 Redis Pub/Sub 监听。</li>
+      <li>每个进程生成 <code>instance_id</code>，PUBLISH 时携带；SUBSCRIBE 端收到消息后比对 <code>instance_id</code>，跳过自己发布的事件防止回环。</li>
+      <li>Redis 不可用时静默降级为纯内存模式（开发/测试场景无 Redis 也能跑）。</li>
+      <li><strong>循环感知</strong>：<code>get_redis_client()</code> 和事件总线都追踪绑定的 event loop，检测到循环关闭/切换时自动丢弃旧引用，避免 "attached to a different loop"（详见踩坑章节）。</li>
+    </ul>
+
+    <h3>P0-3 异步 Embedding + Reranker Protocol</h3>
+    <p><span class="file-ref">app/rag/store.py</span> <span class="file-ref">app/rag/retriever.py</span></p>
+    <ul>
+      <li>Embedding 客户端改用 <code>httpx.AsyncClient</code>，连接池复用，不再阻塞事件循环。</li>
+      <li>新增 <code>Reranker(Protocol)</code> 抽象，定义 <code>async rerank(query, docs, top_k)</code> 接口。</li>
+      <li>提供 <code>SiliconFlowReranker</code> 实现与 <code>StubReranker</code>（测试/降级），工厂方法按租户配置自动选择。</li>
+      <li>Retriever 改为异步，使用正确的 await 语义。</li>
+    </ul>
+
+    <h3>P1-1 统一异常体系</h3>
+    <p><span class="file-ref">app/core/exceptions.py</span> <span class="file-ref">app/plugins/core/exceptions.py</span></p>
+    <ul>
+      <li>新增 <code>AppException</code> 基类，携带 <code>ErrorCode</code> 枚举（<code>AUTH_*</code>/<code>TENANT_*</code>/<code>VALIDATION_*</code>/<code>LLM_*</code>/<code>NOT_FOUND</code>/<code>PERMISSION_DENIED</code> 等）。</li>
+      <li>全局 exception handler 统一捕获 <code>AppException</code>，返回 <code>{code, message, detail}</code> 结构，HTTP 状态码按错误类别映射。</li>
+      <li>插件系统的 <code>PluginError</code> 继承自 <code>AppException</code>，保持分层一致。</li>
+    </ul>
+
+    <h3>P1-2 租户级配置启用</h3>
+    <p><span class="file-ref">app/tenants/settings_override.py</span> <span class="file-ref">app/tenants/service.py</span></p>
+    <ul>
+      <li>新增 <code>get_tenant_settings(tenant_id)</code>，带 TTL 缓存（60s），从 <code>tenants.settings</code> JSONB 读取白名单 key（<code>llm_provider</code>/<code>embedding_provider</code>/<code>reranker_provider</code>/<code>web_search_mode</code>）。</li>
+      <li>Embedding/Reranker/LLM 初始化时优先查租户配置，缺失则回退到全局 <code>settings</code>。</li>
+      <li>租户管理 API 新增 settings 字段的读取与更新端点（管理员权限）。</li>
+    </ul>
+
+    <h3>P1-3 asyncio 循环感知单例（踩坑 §4.1 扩展）</h3>
+    <p><span class="file-ref">app/db/redis.py</span> <span class="file-ref">app/events.py</span></p>
+    <p>这是本次修复中最棘手的问题，单独在下方"踩坑记录"章节展开。</p>
+
+    <h3>P2-1 日志门面统一</h3>
+    <p><span class="file-ref">app/observability/logger.py</span></p>
+    <ul>
+      <li>新增 <code>get_logger(name)</code> 门面，自动从 contextvars 注入 <code>request_id</code>/<code>meeting_id</code>/<code>runner_session_id</code>/<code>tenant_id</code>。</li>
+      <li>WARNING/ERROR 级别自动路由到 <code>log_bus</code>（事件总线），保持 audit trail 一致。</li>
+      <li>模块内部统一 <code>logger = get_logger(__name__)</code>。</li>
+    </ul>
+
+    <h3>P2-2 事件 payload Pydantic 化 + schema_version</h3>
+    <p><span class="file-ref">app/domain/event_payloads.py</span></p>
+    <ul>
+      <li>为每种事件类型定义 Pydantic payload 模型：<code>MeetingCreated</code>/<code>StageChanged</code>/<code>AgentSpoke</code>/<code>LogEntry</code>/<code>ControlSignal</code>/<code>ProduceDegradation</code> 等。</li>
+      <li><code>DomainEvent.schema_version</code> 默认 <code>"1.0"</code>，反序列化旧数据时自动补默认值。</li>
+      <li>WS 推送层直接使用 <code>model_dump()</code>，消除裸 dict 构造。</li>
+    </ul>
+
+    <h3>P2-3 MeetingState 嵌套视图</h3>
+    <p><span class="file-ref">app/domain/meeting.py</span></p>
+    <ul>
+      <li>将 MeetingState 拆为嵌套 Pydantic 模型：<code>MeetingCore</code>/<code>DebateState</code>/<code>BorrowState</code>/<code>IterationState</code>/<code>ObservabilityState</code>。</li>
+      <li>对外暴露 <code>sections</code> property 返回结构化视图，同时保留平铺字段访问（向后兼容，不破坏现有 orchestrator 代码）。</li>
+    </ul>
+
+    <h3>P3-1 WS 入站消息校验</h3>
+    <p><span class="file-ref">app/domain/ws_messages.py</span> <span class="file-ref">app/routers/ws.py</span></p>
+    <ul>
+      <li>定义 <code>WSClientMessage</code> Pydantic 模型（<code>type</code>/<code>action</code>/<code>payload</code>），按 type 分发到子模型校验。</li>
+      <li>校验失败时通过 WS 回发 <code>error</code> 事件（带 <code>code=VALIDATION_ERROR</code>），而不是断连或 500。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>踩坑记录：asyncio 事件循环单例泄漏</h2>
+
+    <div class="callout critical">
+      <strong>症状</strong>
+      Docker 容器内 pytest 544 个测试全部跑通后 teardown 阶段大量报错：
+      <pre><code>Task &lt;Task pending coro=&lt;InMemoryEventBus.publish() running at events.py:118&gt;&gt;
+  got Future &lt;Future pending&gt; attached to a different loop
+RuntimeError: Event loop is closed
+sqlalchemy.pool.impl.AsyncAdaptedQueuePool: Exception closing connection</code></pre>
+      错误出现在 <code>ERROR at teardown</code>，导致 pytest 退出码 1。
+    </div>
+
+    <h3>根因</h3>
+    <p>AGENTS.md §4.1 明确规定"模块级禁止直接实例化 asyncio 原语"，但 <code>app/db/redis.py</code> 的 <code>_redis</code> 全局客户端和 <code>app/events.py</code> 中新加的 Redis Pub/Sub 监听任务都没有做循环感知：</p>
+    <ol>
+      <li>每个 pytest-xdist worker 进程内，<code>pytest-asyncio</code> 为每个 async test 创建新的 event loop。</li>
+      <li>第一次跑带 TestClient 的测试时，lifespan 调用 <code>init_redis()</code>/<code>bus.start()</code>，在 loop-A 上创建 Redis 连接池和 pubsub listener task。</li>
+      <li>测试结束，loop-A 关闭；但全局 <code>_redis</code>、<code>bus._redis_pubsub</code>、<code>bus._redis_listener_task</code> 仍然持有旧引用。</li>
+      <li>下一个测试在 loop-B 上调用 <code>bus.publish()</code>，<code>await redis_client.publish()</code> 把协程提交给 loop-B，但连接池的 Future 绑定在 loop-A → "attached to a different loop"。</li>
+      <li>Teardown 时 <code>close_redis()</code>/<code>dispose_async_engine()</code> 尝试在已关闭的循环上 close 连接 → "Event loop is closed" 连锁。</li>
+    </ol>
+
+    <h3>修复方案（循环感知模式）</h3>
+    <p>完全对齐 AGENTS.md §4.1 和 <code>app/db/engine.py</code> 已有的 <code>_ensure_engine</code> 模式：</p>
+    <ul>
+      <li><code>app/db/redis.py</code> 新增 <code>_redis_loop</code> 追踪，<code>_safe_get_client()</code> 在调用时检查 <code>current_loop is _redis_loop and not _redis_loop.is_closed()</code>，不匹配则丢弃旧引用、返回 <code>None</code> 让调用方降级。</li>
+      <li><code>app/events.py</code> 在 <code>InMemoryEventBus</code> 上新增 <code>_loop</code> 字段，<code>_redis_available()</code> 方法做循环检查；<code>start()</code> 检测循环切换时先丢弃旧状态再在新循环上启动；<code>stop()</code> 仅在绑定循环上执行 await 清理，否则只丢引用；<code>_redis_publish()</code> 循环不匹配时直接 return（静默降级）。</li>
+      <li><code>_redis_listener()</code> 主循环主动检测 <code>loop.is_closed()</code>，并捕获 <code>RuntimeError("Event loop is closed")</code> 主动 break，不在已关闭循环上 <code>await asyncio.sleep(1)</code>。</li>
+      <li><strong>关键纪律</strong>（AGENTS.md §4.1 规则 3）：循环不匹配时<strong>不跨循环调用 <code>await xxx.close()</code></strong>，只清除引用让 GC 回收——跨循环 close 本身就会抛 "attached to a different loop"。</li>
+    </ul>
+
+    <div class="callout success">
+      <strong>修复后效果</strong>
+      Docker 容器内 pytest 全量跑：<code>544 passed, 11 skipped, 0 failed</code>，退出码 0，不再有 teardown ERROR。
+    </div>
+  </section>
+
+  <section>
+    <h2>验证</h2>
+    <p>所有检查在 Docker 容器内完成（遵循 AGENTS.md §0.5.2）：</p>
+    <table>
+      <tr><th>检查项</th><th>命令</th><th>结果</th></tr>
+      <tr><td>ruff</td><td><code>ruff check app conclave_core tests</code></td><td>0 errors</td></tr>
+      <tr><td>mypy</td><td><code>mypy --config-file pyproject.toml app conclave_core</code></td><td>0 errors</td></tr>
+      <tr><td>pytest</td><td><code>pytest -q --tb=short --timeout=30 -n auto</code></td><td>544 passed, 11 skipped, 0 failed</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>经验沉淀</h2>
+    <ol>
+      <li><strong>模块级 asyncio 原语 = 定时炸弹</strong>：任何模块级持有 <code>asyncio.Lock/Semaphore/Task/aioredis.ConnectionPool</code> 等的单例，必须循环感知。pytest-xdist 多 worker 下事件循环频繁重建，是最容易暴露这类问题的场景。</li>
+      <li><strong>跨循环释放资源是反模式</strong>：AGENTS.md §4.1 规则 3 非常重要——在 sync 代码或不同循环上 <code>await engine.dispose()</code>/<code>await redis.close()</code> 必然抛错。正确做法是"丢引用让 GC 回收"，或另起线程 + 新 <code>asyncio.run()</code>（engine.py 已有范例）。</li>
+      <li><strong>Redis Pub/Sub 桥接必须有 instance_id 回环防护</strong>：否则本地 publish → Redis → 本地 listener → 再 publish → 死循环。</li>
+      <li><strong>Pydantic 化 event payload 的收益大于迁移成本</strong>：schema_version 字段为未来不兼容变更预留了通道，WS 前端可以按版本做适配。</li>
+      <li><strong>租户级配置必须有白名单</strong>：不能让租户随便覆盖任意 settings 字段，否则会成为注入/配置漂移入口。白名单 key 写死在 <code>settings_override.py</code> 里。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>后续 TODO</h2>
+    <ul>
+      <li>将 ruff/mypy 加入 Docker 测试镜像的默认依赖（当前 CI 可能没跑静态检查）。</li>
+      <li>Embedding 客户端迁移到连接池单例（目前每次调用新建 AsyncClient）。</li>
+      <li>Redis Pub/Sub 增加消息持久化（当前 listener 断线期间的消息会丢；对于 WS 近实时场景可接受，若要做可靠事件投递应迁 Redis Stream）。</li>
+      <li>MeetingState sections 视图在 orchestrator 各节点中逐步替换平铺字段访问，最终在 2-3 个迭代后移除平铺冗余字段。</li>
+    </ul>
+  </section>
+
+</div>
+</body>
+</html>

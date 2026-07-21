@@ -545,7 +545,7 @@ class RealLLM:
     def _resolve_config(self) -> tuple[str, str, str]:
         """解析当前调用应使用的 (base_url, api_key, model)
 
-        优先级：会议级覆盖 > 全局默认（环境变量）
+        优先级：会议级覆盖 > 租户级覆盖 > 全局默认（环境变量）
         """
         try:
             from app.context import get_meeting_id
@@ -556,6 +556,20 @@ class RealLLM:
                 base_url, api_key, model, _pid = get_meeting_llm_config(mid)
                 if base_url and api_key and model:
                     return base_url, api_key, model
+        except Exception:
+            pass
+        # 租户级覆盖
+        try:
+            from app.tenants.context import get_tenant_id
+            from app.tenants.settings_override import resolve_llm_config
+
+            tid = get_tenant_id()
+            if tid is not None:
+                t_base, t_key, t_model = resolve_llm_config(
+                    tid, self.base_url, self.api_key, self.model
+                )
+                if t_base and t_key and t_model:
+                    return t_base, t_key, t_model
         except Exception:
             pass
         return self.base_url, self.api_key, self.model

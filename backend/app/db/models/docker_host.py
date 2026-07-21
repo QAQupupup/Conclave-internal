@@ -5,23 +5,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.db.base import Base, IntegerPrimaryKeyMixin, TenantScopeMixin, TimestampMixin
 
 
-class DockerHostModel(Base):
+class DockerHostModel(Base, IntegerPrimaryKeyMixin, TimestampMixin, TenantScopeMixin):
     """Docker 主机注册表"""
 
     __tablename__ = "docker_hosts"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # tenant_id: 由 tenants service 通过 ALTER TABLE 添加外键约束，不在 SA 层声明 FK
-    # 避免 Base.metadata.create_all 时因 tenants 表未在 metadata 中注册而失败
-    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
@@ -67,29 +63,16 @@ class DockerHostModel(Base):
     deployed_meetings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # ["mtg-xxx", "mtg-yyy"]
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_docker_host_tenant_name"),
     )
 
 
-class DockerHostSecretModel(Base):
+class DockerHostSecretModel(Base, IntegerPrimaryKeyMixin, TenantScopeMixin):
     """敏感字段分离存储（SSH 密码、TLS key 内容等）"""
 
     __tablename__ = "docker_host_secrets"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     host_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     ssh_password: Mapped[str] = mapped_column(Text, nullable=False, default="")
     ssh_key_content: Mapped[str] = mapped_column(Text, nullable=False, default="")

@@ -14,16 +14,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.db.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin, UpdatedAtMixin
 
 
 # ============================================================
 # raw_memories — Agent 原始发言记忆（三层记忆子系统）
 # ============================================================
-class RawMemoryModel(Base):
+class RawMemoryModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     __tablename__ = "raw_memories"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     agent_role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     meeting_id: Mapped[str] = mapped_column(String(36), nullable=False)
     stage: Mapped[str] = mapped_column(String(20), nullable=False, default="")
@@ -31,11 +30,6 @@ class RawMemoryModel(Base):
     evidence_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     adopted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     corrected_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
 
     __table_args__ = (
         Index("idx_raw_memories_agent", "agent_role"),
@@ -46,10 +40,9 @@ class RawMemoryModel(Base):
 # ============================================================
 # feature_memories — Agent 行为特征记忆
 # ============================================================
-class FeatureMemoryModel(Base):
+class FeatureMemoryModel(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "feature_memories"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     agent_role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     feature_type: Mapped[str] = mapped_column(String(30), nullable=False, default="")
     feature_value: Mapped[str] = mapped_column(String(50), nullable=False, default="")
@@ -68,7 +61,7 @@ class FeatureMemoryModel(Base):
 # ============================================================
 # profile_memories — Agent 稳定画像
 # ============================================================
-class ProfileMemoryModel(Base):
+class ProfileMemoryModel(Base, UpdatedAtMixin):
     __tablename__ = "profile_memories"
 
     agent_role: Mapped[str] = mapped_column(String(50), primary_key=True)
@@ -89,9 +82,4 @@ class ProfileMemoryModel(Base):
         default="collaborative",
     )
     escalation_threshold: Mapped[float] = mapped_column(nullable=False, default=0.6)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

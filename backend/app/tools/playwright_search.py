@@ -109,15 +109,19 @@ class PlaywrightWebSearch:
 
         try:
             from app.config import settings
+            from app.tenants.context import get_tenant_id
+            from app.tenants.settings_override import resolve_llm_config as _res_llm
 
-            if not settings.llm_api_key or not settings.llm_base_url:
+            _tid = get_tenant_id()
+            _base, _key, _mdl = _res_llm(_tid, settings.llm_base_url, settings.llm_api_key, settings.llm_model)
+            if not _key or not _base:
                 self._translator_available = False
                 return query
 
             # 上下文安全检查：超过 2000 字符的查询需要分块翻译
             MAX_CHUNK_CHARS = 2000
             if len(query) <= MAX_CHUNK_CHARS:
-                return await self._translate_single(query, settings)
+                return await self._translate_single(query, _base, _key)
 
             # 分句翻译 + 合并
             logger.info("查询过长 (%d chars)，启动分块翻译...", len(query))
@@ -126,7 +130,7 @@ class PlaywrightWebSearch:
 
             # 并行翻译所有 chunk
             translations = await asyncio.gather(
-                *[self._translate_single(c, settings) for c in chunks],
+                *[self._translate_single(c, _base, _key) for c in chunks],
                 return_exceptions=True,
             )
 
@@ -151,7 +155,7 @@ class PlaywrightWebSearch:
 
         return query
 
-    async def _translate_single(self, text: str, settings: Any) -> str:
+    async def _translate_single(self, text: str, base_url: str, api_key: str) -> str:
         """翻译单个文本块（调用 Hunyuan-MT-7B API）。"""
         import httpx
 
@@ -164,9 +168,9 @@ class PlaywrightWebSearch:
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
-                f"{settings.llm_base_url}/chat/completions",
+                f"{base_url.rstrip('/')}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.llm_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={

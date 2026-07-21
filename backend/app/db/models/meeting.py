@@ -7,11 +7,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -21,7 +19,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
+from app.db.base import (
+    Base,
+    CreatedAtMixin,
+    IntegerPrimaryKeyMixin,
+    TenantScopeMixin,
+    UUIDPrimaryKeyMixin,
+    UpdatedAtMixin,
+)
 
 if TYPE_CHECKING:
     from app.db.models.event import EventModel
@@ -31,10 +36,9 @@ if TYPE_CHECKING:
 # ============================================================
 # meetings — 会议主表
 # ============================================================
-class MeetingModel(Base):
+class MeetingModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     __tablename__ = "meetings"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     topic: Mapped[str] = mapped_column(String(500), nullable=False)
     owner_username: Mapped[str] = mapped_column(String(100), nullable=False, default="system", index=True)
     status: Mapped[str] = mapped_column(
@@ -45,11 +49,6 @@ class MeetingModel(Base):
         nullable=False,
         default="clarify",
         comment="clarify|intra_team|cross_team|evidence_check|arbitrate|produce",
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
     )
     # 完整 MeetingState JSON 快照
     payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
@@ -79,21 +78,15 @@ class MeetingModel(Base):
 # ============================================================
 # meeting_tags — 会议标签
 # ============================================================
-class MeetingTagModel(Base):
+class MeetingTagModel(Base, IntegerPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     __tablename__ = "meeting_tags"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meeting_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("meetings.id", ondelete="CASCADE"),
         nullable=False,
     )
     tag: Mapped[str] = mapped_column(String(100), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
 
     meeting: Mapped[MeetingModel] = relationship(back_populates="tags")
 
@@ -110,7 +103,7 @@ class MeetingTagModel(Base):
 # 将 MeetingState 中的大字段（llm_trace, evidence_set, conclusion_chain,
 # borrowed_agents）从主 payload JSON 中分离，减少热路径序列化开销。
 # 采用 (meeting_id, key) 组合主键，支持灵活扩展。
-class MeetingAuxModel(Base):
+class MeetingAuxModel(Base, UpdatedAtMixin, TenantScopeMixin):
     __tablename__ = "meeting_aux"
 
     meeting_id: Mapped[str] = mapped_column(
@@ -128,11 +121,6 @@ class MeetingAuxModel(Base):
         nullable=False,
         default="{}",
         comment="JSON-serialized aux field value",
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
     )
 
     __table_args__ = (Index("idx_meeting_aux_meeting", "meeting_id"),)

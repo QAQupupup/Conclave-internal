@@ -81,31 +81,33 @@ def test_chunker_splits_by_heading():
         assert c.source.startswith("research:")
 
 
-def test_stub_embedding_deterministic():
+@pytest.mark.asyncio
+async def test_stub_embedding_deterministic():
     """桩嵌入：相同文本得到相同向量"""
     emb = StubEmbedding(dim=32)
-    a = emb.embed("hello world")
-    b = emb.embed("hello world")
+    a = await emb.embed("hello world")
+    b = await emb.embed("hello world")
     assert a == b
     # 不同文本相似度不为 1
-    c = emb.embed("totally different")
+    c = await emb.embed("totally different")
     assert cosine_similarity(a, c) < 1.0
 
 
-def test_vector_store_search():
+@pytest.mark.asyncio
+async def test_vector_store_search():
     """向量库：检索 top_k"""
     md = "# 架构\n系统应支持异步任务处理以解耦耗时操作"
     chunks = chunk_markdown(md, "doc")
     store = InMemoryVectorStore()
-    store.add_chunks(chunks)
-    results = store.search("异步任务", top_k=1)
+    await store.add_chunks(chunks)
+    results = await store.search("异步任务", top_k=1)
     assert len(results) == 1
     chunk, score = results[0]
     assert chunk.section == "架构"
     # StubEmbedding 是确定性伪向量，相似度可正可负，只要能返回浮点排序即可
     assert isinstance(score, float)
     # top_k 截断正确
-    results2 = store.search("架构", top_k=5)
+    results2 = await store.search("架构", top_k=5)
     assert len(results2) >= 1
 
 

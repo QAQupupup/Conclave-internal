@@ -140,11 +140,14 @@ def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str
         else:
             override_model = model_override
 
-    # 首先加入当前主配置
+    # 首先加入当前主配置（优先级：会议 > 租户 > 全局）
     try:
         from app.context import get_meeting_id
+        from app.tenants.context import get_tenant_id
+        from app.tenants.settings_override import get_cached_overrides as _get_ov
 
         mid = get_meeting_id()
+        _used_tenant_override = False
         if mid and mid != "-":
             base_url, api_key, model, pid = get_meeting_llm_config(mid)
             # 如果有 model_override，覆盖模型（和 provider）
@@ -159,6 +162,20 @@ def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str
             if base_url and api_key:
                 chain.append((base_url, api_key, model, pid))
                 seen_urls.add(base_url.rstrip("/"))
+
+        # 会议级未命中时，尝试租户级覆盖
+        if not chain:
+            _tid = get_tenant_id()
+            if _tid is not None:
+                _ov = _get_ov(_tid)
+                _t_base = _ov.get("llm_base_url")
+                _t_key = _ov.get("llm_api_key")
+                _t_model = _ov.get("llm_model")
+                if _t_base and _t_key:
+                    model = override_model or _t_model or settings.llm_model
+                    chain.append((_t_base, _t_key, model, "tenant"))
+                    seen_urls.add(_t_base.rstrip("/"))
+                    _used_tenant_override = True
     except Exception:
         pass
 

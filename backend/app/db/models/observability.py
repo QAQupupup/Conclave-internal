@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import (
-    DateTime,
     Index,
     Integer,
     String,
@@ -13,16 +10,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.db.base import Base, CreatedAtMixin, IntegerPrimaryKeyMixin, TenantScopeMixin
 
 
 # ============================================================
 # cost_records — LLM/工具调用成本记录
 # ============================================================
-class CostRecordModel(Base):
+class CostRecordModel(Base, IntegerPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     __tablename__ = "cost_records"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meeting_id: Mapped[str] = mapped_column(
         String(36),
         nullable=True,
@@ -40,11 +36,6 @@ class CostRecordModel(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ok")
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
 
     __table_args__ = (
         Index("idx_cost_meeting", "meeting_id"),
