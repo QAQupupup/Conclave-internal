@@ -589,3 +589,6 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 4. P0/P1 Bug 修复必须归档修复报告到 `docs/retrospectives/`
 5. 新增功能必须配套测试；Bug 修复先加复现用例再修复
 6. 单次 PR 控制在 400 行以内（不含 lock 文件/生成代码）
+7. **文档变更必须 grep 核验**：修改 README/ADR/待办时，每一条事实性声明（文件路径、API 路径、配置默认值、类名/函数名）必须用 grep/Glob 核验与代码一致（见 AGENTS.md §4.16）。commit message 中列出核验方式。
+8. **回应评审必须逐条核验**：收到代码审查/外部评审的问题清单时，逐条 grep 核验问题是否真实存在，给出"已验证存在/不存在/部分准确"判定，禁止"声明式修复"（见 AGENTS.md §4.17）。
+9. **待办项必须有可验证的验收标准**："改进 X"不是合格待办，"实现 Y 策略，新增 test_y.py 验证"才是。
