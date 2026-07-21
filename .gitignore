@@ -87,3 +87,4 @@ backend/data/
 # ===== Temp files =====
 Qwen*/
 docs/audits/
+.tmp/

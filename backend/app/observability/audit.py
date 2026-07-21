@@ -6,20 +6,25 @@
 3. 行为分析（用户操作路径、功能使用频率）
 4. 合规审计（完整的操作链路可追溯）
 
-审计事件持久化到 SQLite 数据库（独立表，audit.db），同时通过 log_bus 输出到日志。
-注意：审计日志仍用 SQLite（独立于主业务 PostgreSQL），待后续统一迁移到 PostgreSQL。
+审计事件持久化到 PostgreSQL（audit_logs 表，ORM 模型见 app/db/models/observability.py）。
+原 SQLite 实现（audit.db）已废弃，M1.7 迁移到 PostgreSQL。
+
+设计说明：
+- log() 保持同步接口（调用点分布在中间件/路由/事件总线，改成 async 波及面太大）
+- 内部通过独立后台线程 + 专用事件循环执行 async PG 写入
+- 写入失败不影响主流程（审计系统故障不应阻塞业务）
+- 保留内存缓冲，后台线程批量 flush
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
-import os
-import sqlite3
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from app.context import get_meeting_id, get_request_id, get_user_id, get_user_role, get_username
@@ -70,59 +75,113 @@ AUDIT_CATEGORIES = {
     "system.llm_circuit_tripped": "系统",
 }
 
+# 后台 flush 间隔（秒）
+_FLUSH_INTERVAL = 2.0
+# 内存缓冲上限（超过则同步丢弃最旧记录，防止 OOM）
+_BUFFER_MAX = 5000
+# 单批 flush 最大条数
+_BATCH_SIZE = 200
+# audit_logs 表保留最大记录数
+_MAX_RECORDS = 100000
+
 
 class AuditLogger:
-    """审计日志记录器
+    """审计日志记录器（PostgreSQL 后端）
 
-    事件写入 SQLite（自动建表），保留最近 N 条记录，支持按时间/用户/类别/会议查询。
-    写操作使用线程锁保证并发安全，使用 WAL 模式提高写入性能。
+    事件写入内存缓冲，后台线程批量 flush 到 PostgreSQL audit_logs 表。
+    写操作线程安全（使用 deque + lock），不影响主流程。
     """
 
-    def __init__(self, db_path: str | None = None, max_records: int = 100000) -> None:
-        self._db_path = db_path or os.environ.get(
-            "CONCLAVE_AUDIT_DB",
-            str(Path(os.environ.get("CONCLAVE_DB_PATH", "/app/data/conclave.db")).parent / "audit.db"),
-        )
+    def __init__(self, max_records: int = _MAX_RECORDS) -> None:
         self._max_records = max_records
-        self._lock = threading.Lock()
-        self._conn: sqlite3.Connection | None = None
-        self._init_db()
+        self._buffer: deque[dict[str, Any]] = deque(maxlen=_BUFFER_MAX)
+        self._buffer_lock = threading.Lock()
+        self._flush_event = threading.Event()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._started = False
+        # 查询用的同步缓存（stats 等同步方法用，避免起额外循环）
+        self._last_stats: dict[str, Any] = {}
 
-    def _init_db(self) -> None:
+    def start(self) -> None:
+        """启动后台 flush 线程。幂等。"""
+        if self._started:
+            return
+        self._started = True
+        self._thread = threading.Thread(
+            target=self._flush_loop,
+            name="audit-flush",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """停止后台线程并 flush 剩余缓冲。"""
+        if not self._started:
+            return
+        self._stop_event.set()
+        self._flush_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+        self._started = False
+        self._thread = None
+        self._loop = None
+
+    def _flush_loop(self) -> None:
+        """后台线程：专用事件循环批量 flush 到 PG。"""
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
         try:
-            db_dir = os.path.dirname(self._db_path)
-            if db_dir:
-                os.makedirs(db_dir, exist_ok=True)
-            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS audit_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    user_id TEXT DEFAULT '-',
-                    username TEXT DEFAULT '-',
-                    user_role TEXT DEFAULT '',
-                    meeting_id TEXT DEFAULT '-',
-                    request_id TEXT DEFAULT '-',
-                    ip TEXT DEFAULT '',
-                    status TEXT DEFAULT 'success',
-                    details TEXT DEFAULT '{}',
-                    duration_ms INTEGER DEFAULT 0
-                )
-            """)
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(timestamp)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_meeting ON audit_log(meeting_id)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_log(category)")
-            self._conn.commit()
+            while not self._stop_event.is_set():
+                self._flush_event.wait(_FLUSH_INTERVAL)
+                self._flush_event.clear()
+                self._loop.run_until_complete(self._flush_batch())
+            # 停止前 flush 剩余
+            self._loop.run_until_complete(self._flush_batch())
         except Exception as e:
-            # 审计系统故障不应影响主流程
-            print(f"[AuditLogger] 初始化失败: {e}", flush=True)
-            self._conn = None
+            print(f"[AuditLogger] 后台线程异常: {e}", flush=True)
+        finally:
+            self._loop.close()
+
+    async def _flush_batch(self) -> None:
+        """从缓冲取一批记录写入 PG。"""
+        batch: list[dict[str, Any]] = []
+        with self._buffer_lock:
+            while len(batch) < _BATCH_SIZE and self._buffer:
+                batch.append(self._buffer.popleft())
+        if not batch:
+            return
+        try:
+            await self._write_to_pg(batch)
+        except Exception as e:
+            print(f"[AuditLogger] flush 失败: {e}", flush=True)
+            # 失败的记录丢弃（不回填缓冲，避免无限重试）
+
+    async def _write_to_pg(self, batch: list[dict[str, Any]]) -> None:
+        """批量写入 PostgreSQL audit_logs 表。"""
+        from app.db.engine import async_session_factory
+        from app.db.models.observability import AuditLogModel
+
+        async with async_session_factory() as session:
+            try:
+                session.add_all([AuditLogModel(**record) for record in batch])
+                await session.commit()
+                # 定期清理旧记录（简易实现：每次 flush 后检查）
+                # 用 raw SQL 避免加载 ORM
+                from sqlalchemy import text
+
+                await session.execute(
+                    text(
+                        "DELETE FROM audit_logs WHERE id IN "
+                        "(SELECT id FROM audit_logs ORDER BY id DESC LIMIT -1 OFFSET :max)"
+                    ),
+                    {"max": self._max_records},
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     def log(
         self,
@@ -136,10 +195,7 @@ class AuditLogger:
         user_role: str | None = None,
         meeting_id: str | None = None,
     ) -> None:
-        """记录一条审计事件"""
-        if not self._conn:
-            return
-
+        """记录一条审计事件（同步接口，写入内存缓冲）。"""
         category = AUDIT_CATEGORIES.get(action, "其他")
         now = datetime.now(timezone.utc).isoformat()
 
@@ -151,28 +207,27 @@ class AuditLogger:
 
         details_json = json.dumps(details or {}, ensure_ascii=False, default=str)
 
-        try:
-            with self._lock:
-                self._conn.execute(
-                    """INSERT INTO audit_log
-                    (timestamp, category, action, user_id, username, user_role, meeting_id,
-                     request_id, ip, status, details, duration_ms)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (now, category, action, uid, uname, urole, mid, rid, ip, status, details_json, duration_ms),
-                )
-                self._conn.commit()
+        record = {
+            "timestamp": now,
+            "category": category,
+            "action": action,
+            "user_id": uid,
+            "username": uname,
+            "user_role": urole,
+            "meeting_id": mid,
+            "request_id": rid,
+            "ip": ip,
+            "status": status,
+            "details": details_json,
+            "duration_ms": duration_ms,
+        }
 
-                # 定期清理旧记录（超过 max_records 时删除最旧的）
-                # 使用子查询避免全表扫描
-                self._conn.execute(
-                    "DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log ORDER BY id DESC LIMIT -1 OFFSET ?)",
-                    (self._max_records,),
-                )
-                self._conn.commit()
-        except Exception as e:
-            print(f"[AuditLogger] 写入失败: {e}", flush=True)
+        with self._buffer_lock:
+            self._buffer.append(record)
+        # 触发后台 flush（非阻塞）
+        self._flush_event.set()
 
-    def query(
+    async def query(
         self,
         limit: int = 100,
         offset: int = 0,
@@ -184,85 +239,100 @@ class AuditLogger:
         since: str | None = None,
         until: str | None = None,
     ) -> list[dict[str, Any]]:
-        """查询审计日志"""
-        if not self._conn:
-            return []
+        """查询审计日志（异步，从 PG 读取）。"""
+        from sqlalchemy import select
 
-        conditions = []
-        params: list[Any] = []
-        if action:
-            conditions.append("action = ?")
-            params.append(action)
-        if username:
-            conditions.append("username = ?")
-            params.append(username)
-        if meeting_id:
-            conditions.append("meeting_id = ?")
-            params.append(meeting_id)
-        if category:
-            conditions.append("category = ?")
-            params.append(category)
-        if status:
-            conditions.append("status = ?")
-            params.append(status)
-        if since:
-            conditions.append("timestamp >= ?")
-            params.append(since)
-        if until:
-            conditions.append("timestamp <= ?")
-            params.append(until)
+        from app.db.engine import async_session_factory
+        from app.db.models.observability import AuditLogModel
 
-        where = "WHERE " + " AND ".join(conditions) if conditions else ""
-        sql = f"SELECT * FROM audit_log {where} ORDER BY id DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        async with async_session_factory() as session:
+            stmt = select(AuditLogModel).order_by(AuditLogModel.id.desc())
+            if action:
+                stmt = stmt.where(AuditLogModel.action == action)
+            if username:
+                stmt = stmt.where(AuditLogModel.username == username)
+            if meeting_id:
+                stmt = stmt.where(AuditLogModel.meeting_id == meeting_id)
+            if category:
+                stmt = stmt.where(AuditLogModel.category == category)
+            if status:
+                stmt = stmt.where(AuditLogModel.status == status)
+            if since:
+                stmt = stmt.where(AuditLogModel.timestamp >= since)
+            if until:
+                stmt = stmt.where(AuditLogModel.timestamp <= until)
+            stmt = stmt.limit(limit).offset(offset)
+            result = await session.execute(stmt)
+            rows: list[dict[str, Any]] = []
+            for row in result.scalars():
+                record = {
+                    "id": row.id,
+                    "timestamp": row.timestamp,
+                    "category": row.category,
+                    "action": row.action,
+                    "user_id": row.user_id,
+                    "username": row.username,
+                    "user_role": row.user_role,
+                    "meeting_id": row.meeting_id,
+                    "request_id": row.request_id,
+                    "ip": row.ip,
+                    "status": row.status,
+                    "duration_ms": row.duration_ms,
+                }
+                try:
+                    record["details"] = json.loads(row.details or "{}")
+                except Exception:
+                    record["details"] = {}
+                rows.append(record)
+            return rows
 
-        try:
-            with self._lock:
-                cursor = self._conn.execute(sql, params)
-                columns = [desc[0] for desc in cursor.description]
-                rows = []
-                for row in cursor.fetchall():
-                    record = dict(zip(columns, row, strict=False))
-                    try:
-                        record["details"] = json.loads(record.get("details", "{}"))
-                    except Exception:
-                        record["details"] = {}
-                    rows.append(record)
-                return rows
-        except Exception as e:
-            print(f"[AuditLogger] 查询失败: {e}", flush=True)
-            return []
+    async def stats(self, since_minutes: int = 60) -> dict[str, Any]:
+        """获取审计统计信息（异步，从 PG 聚合）。"""
+        from datetime import timedelta
 
-    def stats(self, since_minutes: int = 60) -> dict[str, Any]:
-        """获取审计统计信息（用于监控面板）"""
-        if not self._conn:
-            return {}
-        datetime.now(timezone.utc).isoformat()
-        # 简单统计
-        try:
-            with self._lock:
-                total = self._conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
-                errors = self._conn.execute("SELECT COUNT(*) FROM audit_log WHERE status = 'error'").fetchone()[0]
-                by_action = self._conn.execute(
-                    "SELECT action, COUNT(*) as cnt FROM audit_log GROUP BY action ORDER BY cnt DESC LIMIT 20"
-                ).fetchall()
-                by_user = self._conn.execute(
-                    "SELECT username, COUNT(*) as cnt FROM audit_log WHERE username != '-' GROUP BY username ORDER BY cnt DESC LIMIT 10"
-                ).fetchall()
+        from sqlalchemy import func, select
+
+        from app.db.engine import async_session_factory
+        from app.db.models.observability import AuditLogModel
+
+        since_ts = (datetime.now(timezone.utc) - timedelta(minutes=since_minutes)).isoformat()
+        async with async_session_factory() as session:
+            total = (
+                await session.execute(
+                    select(func.count()).select_from(AuditLogModel)
+                )
+            ).scalar() or 0
+            errors = (
+                await session.execute(
+                    select(func.count()).select_from(AuditLogModel).where(
+                        AuditLogModel.status == "error"
+                    )
+                )
+            ).scalar() or 0
+            by_action_result = await session.execute(
+                select(AuditLogModel.action, func.count().label("cnt"))
+                .where(AuditLogModel.timestamp >= since_ts)
+                .group_by(AuditLogModel.action)
+                .order_by(func.count().desc())
+                .limit(20)
+            )
+            by_user_result = await session.execute(
+                select(AuditLogModel.username, func.count().label("cnt"))
+                .where(AuditLogModel.username != "-")
+                .group_by(AuditLogModel.username)
+                .order_by(func.count().desc())
+                .limit(10)
+            )
             return {
                 "total_records": total,
                 "error_count": errors,
-                "top_actions": [{"action": a, "count": c} for a, c in by_action],
-                "top_users": [{"username": u, "count": c} for u, c in by_user],
+                "top_actions": [{"action": a, "count": c} for a, c in by_action_result],
+                "top_users": [{"username": u, "count": c} for u, c in by_user_result],
             }
-        except Exception:
-            return {}
 
     def close(self) -> None:
-        if self._conn:
-            with contextlib.suppress(Exception):
-                self._conn.close()
-            self._conn = None
+        """停止后台线程。"""
+        self.stop()
 
 
 # 进程级单例
@@ -276,6 +346,7 @@ def get_audit_logger() -> AuditLogger:
         with _init_lock:
             if _audit_logger is None:
                 _audit_logger = AuditLogger()
+                _audit_logger.start()
     return _audit_logger
 
 
