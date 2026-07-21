@@ -1,4 +1,4 @@
-﻿# ===== Web Search Service — 独立 Docker 镜像（多阶段构建）=====
+# ===== Web Search Service — 独立 Docker 镜像（多阶段构建）=====
 #
 # 分层策略（从底到顶，变更频率递增）：
 #   1. system-deps : apt 源配置 + Playwright 浏览器系统依赖
@@ -62,14 +62,14 @@ RUN pip install --no-cache-dir playwright && \
     playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# ---------- 阶段 3: builder（Python 依赖，requirements.txt 变更时重建） ----------
+# ---------- 阶段 3: builder（Python 依赖，requirements.lock 变更时重建） ----------
 FROM playwright AS builder
 
 WORKDIR /build
 
-# 安装项目依赖（复用 backend requirements.txt）
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# 安装项目依赖（复用 backend requirements.lock）
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # 安装 Web Search Service 额外依赖
 COPY web_search_service/requirements.txt /tmp/ws-requirements.txt

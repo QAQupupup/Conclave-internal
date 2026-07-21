@@ -1,4 +1,4 @@
-﻿# ===== Conclave 核心扩展编译与一致性验证 Dockerfile =====
+# ===== Conclave 核心扩展编译与一致性验证 Dockerfile =====
 # 用途：验证 conclave_core 经过 Cython 编译后，全量测试是否仍能通过。
 # 后续可作为 CI 阶段或发布脚本的前置校验。
 #
@@ -33,8 +33,8 @@ RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
 WORKDIR /app
 
 # 先装依赖（利用缓存层）
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # 安装 Cython 与构建工具
 RUN pip install --no-cache-dir Cython setuptools wheel

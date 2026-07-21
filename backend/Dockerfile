@@ -66,13 +66,13 @@ RUN pip install --no-cache-dir playwright && \
     playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# ---------- 阶段 3: builder（Python 依赖，requirements.txt 变更时重建） ----------
+# ---------- 阶段 3: builder（Python 依赖，requirements.lock 变更时重建） ----------
 FROM playwright AS builder
 
 WORKDIR /build
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # ---------- 阶段 4: work（最终运行镜像，代码变更时只重建这层） ----------
 FROM system-deps AS work
@@ -89,8 +89,8 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 复制源码（最常变，放最后）
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && \
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock && \
     pip check
 
 COPY . .
