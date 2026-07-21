@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -17,19 +16,10 @@ from pydantic import BaseModel, Field
 from app.auth import create_access_token, create_refresh_token
 from app.context import get_user_id, get_username
 from app.plugins.builtin.auth.csrf import (
-    CSRF_COOKIE_NAME,
     generate_csrf_token,
 )
-from app.plugins.builtin.auth.middleware import (
-    COOKIE_ACCESS_TOKEN,
-    COOKIE_REFRESH_TOKEN,
-)
 from app.plugins.builtin.auth.router import (
-    COOKIE_PATH,
-    COOKIE_SAMESITE,
-    COOKIE_SECURE,
     JWT_EXPIRE_SECONDS,
-    REFRESH_TOKEN_EXPIRE_SECONDS,
     _set_auth_cookies,
 )
 from app.tenants import (
@@ -130,8 +120,8 @@ def _require_auth() -> tuple[int, str]:
         raise HTTPException(status_code=401, detail="未登录")
     try:
         return int(uid_str), uname
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=401, detail="无效的用户标识")
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=401, detail="无效的用户标识") from exc
 
 
 def _tenant_to_response(t, current_user_id: int) -> TenantInfoResponse:
@@ -186,10 +176,10 @@ async def create_new_tenant(
         ))
     except ValueError as e:
         # slug 重复
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except Exception as e:
         logger.exception("创建租户失败")
-        raise HTTPException(status_code=500, detail="创建租户失败")
+        raise HTTPException(status_code=500, detail="创建租户失败") from e
 
     logger.info("用户 %s 创建租户 %s(id=%d)", username, tenant.name, tenant.id)
     return _tenant_to_response(tenant, user_id)
@@ -252,7 +242,7 @@ async def _do_switch_tenant(
     response: Response,
 ) -> TenantSwitchResponse:
     """切换租户的核心逻辑：验证权限 → 更新 DB → 重发 JWT + Cookie。"""
-    from app.tenants import set_tenant_id as _set_tid, get_tenant_id as _get_tid
+    from app.tenants import set_tenant_id as _set_tid
 
     user_id, username = _require_auth()
 
@@ -360,7 +350,7 @@ async def update_tenant_settings_endpoint(
     if not tenant:
         raise HTTPException(status_code=404, detail="租户不存在")
 
-    from app.tenants import is_system_tenant, is_tenant_owner
+    from app.tenants import is_system_tenant
     if not is_system_tenant() and not await is_tenant_owner(user_id, tenant_id):
         raise HTTPException(status_code=403, detail="仅租户所有者可修改配置")
 
@@ -370,7 +360,7 @@ async def update_tenant_settings_endpoint(
         updated = await update_tenant_settings(tenant_id, patch)
     except Exception as e:
         logger.exception("更新租户 settings 失败")
-        raise HTTPException(status_code=400, detail=f"更新失败: {e}")
+        raise HTTPException(status_code=400, detail=f"更新失败: {e}") from e
 
     logger.info("用户 %s 更新租户 %d 的 settings, keys=%s", user_id, tenant_id, list(patch.keys()))
     return TenantSettingsResponse(settings=updated)

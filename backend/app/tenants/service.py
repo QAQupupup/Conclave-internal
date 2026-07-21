@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 from sqlalchemy import text
 
@@ -110,6 +109,7 @@ async def ensure_tenants_table() -> None:
 async def create_tenant(data: TenantCreate) -> TenantInfo:
     """创建一个新租户。"""
     import json as _json
+
     from sqlalchemy.exc import IntegrityError as _IntegrityError
     async with async_session_factory() as session:
         try:
@@ -382,8 +382,8 @@ async def list_tenant_members(tenant_id: int) -> list[TenantMember]:
         # 查询 tenant_id 指向该租户的用户（当前活跃成员）
         result = await session.execute(
             text(
-                f"SELECT id, username, display_name, tenant_id, created_at "
-                f"FROM users WHERE tenant_id = :tid ORDER BY created_at ASC"
+                "SELECT id, username, display_name, tenant_id, created_at "
+                "FROM users WHERE tenant_id = :tid ORDER BY created_at ASC"
             ),
             {"tid": tenant_id},
         )

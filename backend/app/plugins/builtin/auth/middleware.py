@@ -224,8 +224,10 @@ def setup_auth_middleware(app, plugin=None) -> None:
             if _tid is not None:
                 try:
                     import asyncio as _asyncio
+
                     from app.tenants.settings_override import load_tenant_overrides as _load_ov
-                    _asyncio.create_task(_load_ov(_tid))
+                    _warmup_task = _asyncio.create_task(_load_ov(_tid))
+                    _warmup_task.add_done_callback(lambda _t: None)  # 防止 GC 回收
                 except Exception:
                     pass
             # auth_user 包含完整 claims

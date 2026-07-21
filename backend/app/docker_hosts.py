@@ -305,10 +305,11 @@ async def select_deploy_target(
       - min_cpu_cores: int    最小CPU
       - region: str           优先区域
     """
+    from sqlalchemy import or_
+
     from app.db.engine import async_session_factory
     from app.db.models.docker_host import DockerHostModel
     from app.tenants import current_tenant_id
-    from sqlalchemy import or_
 
     requirements = requirements or {}
     tid = current_tenant_id()

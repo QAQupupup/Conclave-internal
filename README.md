@@ -109,12 +109,12 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 | 层 | 技术选型 |
 |---|---|
 | **后端** | Python 3.12 + FastAPI + asyncio |
-| **前端** | React 19 + TypeScript + Vite + Ant Design |
+| **前端** | React 18 + TypeScript + Vite + Ant Design |
 | **数据库** | PostgreSQL（主存储）+ Redis（缓存/会话） |
 | **向量检索** | Qdrant（推荐）/ 内存向量库（开发模式） |
 | **嵌入模型** | bge-m3（多语言）+ bge-reranker-v2-m3（重排序） |
 | **容器化** | Docker + Docker Compose（Sibling Containers沙箱架构） |
-| **实时通信** | WebSocket + 事件总线（内存+SQLite持久化+增量回放） |
+| **实时通信** | WebSocket + 事件总线（内存缓存 + PostgreSQL 持久化 + Redis Pub/Sub 多副本广播 + 增量回放） |
 | **沙箱环境** | Python 3.12-slim（标准）/ 数据科学镜像（Pandas/NumPy/Matplotlib） |
 | **浏览器自动化** | Playwright + Chromium |
 | **可观测性** | 结构化日志（LogBus）+ 指标采集（MetricsStore）+ 成本追踪（CostTracker） |
@@ -139,7 +139,8 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 │                         │                                       │
 │  ┌──────────────────────┴──────────────────────┐                │
 │  │          EventBus (事件总线)                 │                │
-│  │  内存缓存(1000条上限) + SQLite持久化         │                │
+│  │  内存缓存(1000条上限) + PostgreSQL持久化     │                │
+│  │  + Redis Pub/Sub 多副本广播                  │                │
 │  └──────────────────────┬──────────────────────┘                │
 │                         │                                       │
 │  ┌──────────────────────┴──────────────────────┐                │
@@ -223,7 +224,7 @@ Conclave/
 │   │   ├── main.py                    # FastAPI入口 + lifespan管理
 │   │   ├── config.py                  # 环境变量配置
 │   │   ├── models.py                  # Pydantic模型 + 枚举定义
-│   │   ├── events.py                  # 事件总线（内存+SQLite，1000条上限）
+│   │   ├── events.py                  # 事件总线（内存缓存 + PostgreSQL 持久化 + Redis Pub/Sub）
 │   │   ├── context.py                 # 异步上下文变量(request/meeting/agent)
 │   │   ├── sandbox.py                 # Docker沙箱管理（代码执行+服务部署+远程主机调度）
 │   │   ├── docker_hosts.py            # Docker主机管理（注册/健康检查/调度策略）
@@ -243,14 +244,12 @@ Conclave/
 │   │   │   │   ├── borrow.py          # 动态借调
 │   │   │   │   └── _helpers.py        # 节点辅助函数
 │   │   │   ├── conclusion_chain.py    # 结论锁定链（防漂移）
-│   │   │   ├── consistency.py         # 一致性自检
 │   │   │   ├── react_loop.py          # ReAct工具调用循环
 │   │   │   ├── refine_loop.py         # 代码自修复循环
 │   │   │   ├── stage_planners.py      # V3 阶段规划器
 │   │   │   ├── stage_reducers.py      # V3 阶段结果归约器
 │   │   │   ├── stage_common.py        # 阶段公共辅助函数
-│   │   │   ├── task_graph.py          # DAG 任务图
-│   │   │   └── fast_path.py           # 快速路径分流
+│   │   │   └── task_graph.py          # DAG 任务图
 │   │   ├── agents/                    # Agent计算层
 │   │   │   ├── compute.py             # LLM调用 + 多模型路由
 │   │   │   ├── agent_runtime.py       # V3：统一 Agent 运行时

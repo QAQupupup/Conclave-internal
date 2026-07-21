@@ -17,7 +17,7 @@ from app.config import settings
 from app.db.engine import async_session_factory
 from app.db.models import ApiKeyModel
 from app.observability.log_bus import log_bus
-from app.tenants import current_tenant_id, tenant_filter_clause, is_system_tenant
+from app.tenants import current_tenant_id
 
 logger = log_bus
 
@@ -187,7 +187,7 @@ async def list_api_keys() -> list[dict[str, Any]]:
     """列出当前租户的 API Key（返回的 key 字段为脱敏形式，仅显示前4位+后4位）。
     同时返回系统级 key（tenant_id IS NULL）作为基础。
     """
-    from sqlalchemy import and_, or_, select
+    from sqlalchemy import or_, select
 
     tid = current_tenant_id()
     async with async_session_factory() as session:
@@ -262,10 +262,7 @@ async def delete_api_key(provider: str, name: str = "default") -> bool:
             ApiKeyModel.provider == provider,
             ApiKeyModel.name == name,
         )
-        if tid is not None:
-            q = q.where(ApiKeyModel.tenant_id == tid)
-        else:
-            q = q.where(ApiKeyModel.tenant_id.is_(None))
+        q = q.where(ApiKeyModel.tenant_id == tid) if tid is not None else q.where(ApiKeyModel.tenant_id.is_(None))
         result = await session.execute(q)
         await session.commit()
         return result.rowcount > 0  # type: ignore[no-any-return]
@@ -285,7 +282,7 @@ async def load_keys_to_providers() -> int:
     from app.tenants import create_system_tenant_ctx
 
     try:
-        async with create_system_tenant_ctx():
+        with create_system_tenant_ctx():
             async with async_session_factory() as session:
                 result = await session.execute(
                     select(ApiKeyModel).where(

@@ -647,8 +647,5 @@ def get_reranker() -> Reranker:
     """获取重排序器（进程级单例）：配置了 API key 用真实 Reranker，否则用关键词 fallback。"""
     global _reranker
     if _reranker is None:
-        if settings.rerank_api_key:
-            _reranker = SiliconFlowReranker()
-        else:
-            _reranker = KeywordReranker()
+        _reranker = SiliconFlowReranker() if settings.rerank_api_key else KeywordReranker()
     return _reranker

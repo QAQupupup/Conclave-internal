@@ -23,10 +23,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app.plugins.core.event_bus import PluginEventBus
 from app.core.exceptions import AppException
+from app.plugins.core.event_bus import PluginEventBus
 from app.plugins.core.exceptions import (
-    ConclaveException,
     PluginDependencyError,
 )
 from app.plugins.core.hooks.lifecycle import (

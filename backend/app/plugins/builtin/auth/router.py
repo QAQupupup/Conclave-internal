@@ -30,7 +30,6 @@ from app.context import (
     set_user_role,
     set_username,
 )
-from app.tenants import get_tenant_id
 from app.observability.audit import audit
 from app.plugins.builtin.auth.csrf import (
     CSRF_COOKIE_NAME,
@@ -41,6 +40,7 @@ from app.plugins.builtin.auth.middleware import (
     COOKIE_REFRESH_TOKEN,
     _client_ip,
 )
+from app.tenants import get_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -190,12 +190,13 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Logi
     tenant_info: dict | None = None
     tenant_list: list[dict] = []
     if login_tenant_id:
-        from app.tenants.service import get_tenant as _get_tenant, list_user_tenants
+        from app.tenants.service import get_tenant as _get_tenant
+        from app.tenants.service import list_user_tenants
         t = await _get_tenant(int(login_tenant_id))
         if t:
             tenant_info = {"id": t.id, "name": t.name, "slug": t.slug, "plan": t.plan}
         tenants = await list_user_tenants(int(user_id))
-        from app.plugins.builtin.auth.tenants_router import ROLE_OWNER, ROLE_MEMBER
+        from app.plugins.builtin.auth.tenants_router import ROLE_MEMBER, ROLE_OWNER
         tenant_list = [
             {"id": tt.id, "name": tt.name, "slug": tt.slug, "role": ROLE_OWNER if tt.owner_id == int(user_id) else ROLE_MEMBER, "plan": tt.plan}
             for tt in tenants
@@ -372,7 +373,8 @@ async def me(request: Request) -> MeResponse:
     # 查询用户所属租户列表
     from app.tenants.service import list_user_tenants
     tenants = await list_user_tenants(int(user_id))
-    from app.plugins.builtin.auth.tenants_router import ROLE_OWNER as _RO, ROLE_MEMBER as _RM
+    from app.plugins.builtin.auth.tenants_router import ROLE_MEMBER as _RM
+    from app.plugins.builtin.auth.tenants_router import ROLE_OWNER as _RO
     tenant_list = [
         {"id": t.id, "name": t.name, "slug": t.slug, "role": _RO if t.owner_id == int(user_id) else _RM, "plan": t.plan}
         for t in tenants

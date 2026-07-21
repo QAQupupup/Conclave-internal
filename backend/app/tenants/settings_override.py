@@ -15,8 +15,6 @@ import logging
 import time
 from typing import Any
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -55,7 +53,7 @@ def _get_lock() -> asyncio.Lock:
     global _cache_lock
     if _cache_lock is None:
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # 为当前 loop 新建锁；跨 loop 时自动重建
             _cache_lock = asyncio.Lock()
         except RuntimeError:
@@ -143,8 +141,9 @@ async def load_tenant_overrides(tenant_id: int | None) -> dict[str, Any]:
 
 async def _fetch_from_db(tenant_id: int) -> dict[str, Any]:
     """从 DB 读取 tenants.settings。使用独立 session 以避免循环依赖。"""
-    from app.db.engine import async_session_factory
     from sqlalchemy import text
+
+    from app.db.engine import async_session_factory
 
     async with async_session_factory() as session:
         result = await session.execute(
@@ -159,7 +158,8 @@ async def _fetch_from_db(tenant_id: int) -> dict[str, Any]:
             import json
 
             try:
-                return json.loads(val)
+                parsed: dict[str, Any] = json.loads(val)
+                return parsed
             except Exception:
                 return {}
         return val or {}
@@ -247,34 +247,34 @@ async def update_tenant_settings(tenant_id: int, patch: dict[str, Any]) -> dict[
 
     import json as _json
 
-    from app.db.engine import async_session_factory
     from sqlalchemy import text
 
-    # 读 -> merge -> 写，保证不覆盖其他系统字段（如 quota 等）
-    async with async_session_factory() as session:
-        async with session.begin():
-            result = await session.execute(
-                text("SELECT settings FROM tenants WHERE id = :tid FOR UPDATE"),
-                {"tid": tenant_id},
-            )
-            row = result.fetchone()
-            if row is None:
-                from app.core.exceptions import NotFoundError
+    from app.db.engine import async_session_factory
 
-                raise NotFoundError(f"租户 {tenant_id} 不存在")
-            current = row[0] or {}
-            if isinstance(current, str):
-                try:
-                    current = _json.loads(current)
-                except Exception:
-                    current = {}
-            if not isinstance(current, dict):
+    # 读 -> merge -> 写，保证不覆盖其他系统字段（如 quota 等）
+    async with async_session_factory() as session, session.begin():
+        result = await session.execute(
+            text("SELECT settings FROM tenants WHERE id = :tid FOR UPDATE"),
+            {"tid": tenant_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            from app.core.exceptions import NotFoundError
+
+            raise NotFoundError(f"租户 {tenant_id} 不存在")
+        current = row[0] or {}
+        if isinstance(current, str):
+            try:
+                current = _json.loads(current)
+            except Exception:
                 current = {}
-            current.update(filtered)
-            await session.execute(
-                text("UPDATE tenants SET settings = CAST(:s AS JSONB) WHERE id = :tid"),
-                {"tid": tenant_id, "s": _json.dumps(current, ensure_ascii=False)},
-            )
+        if not isinstance(current, dict):
+            current = {}
+        current.update(filtered)
+        await session.execute(
+            text("UPDATE tenants SET settings = CAST(:s AS JSONB) WHERE id = :tid"),
+            {"tid": tenant_id, "s": _json.dumps(current, ensure_ascii=False)},
+        )
 
     invalidate_cache(tenant_id)
     # 主动预热缓存

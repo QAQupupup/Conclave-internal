@@ -527,26 +527,26 @@ class Runner:
 
                     # [REGRESSION] 回退检测与上限保护
                     _MAX_TOTAL_REGRESSIONS = 5
-                    if not hasattr(state, "_regression_count"):
-                        state._regression_count = 0
+                    _regression_count = int(getattr(state, "_regression_count", 0))
 
                     if next_stage != old_stage and next_stage != Stage.PRODUCE:
                         from_idx = STAGE_ORDER.index(old_stage) if old_stage in STAGE_ORDER else -1
                         to_idx = STAGE_ORDER.index(next_stage) if next_stage in STAGE_ORDER else -1
                         if to_idx < from_idx and from_idx >= 0 and to_idx >= 0:
                             # 回退转移
-                            state._regression_count += 1
+                            _regression_count += 1
+                            state._regression_count = _regression_count  # type: ignore[attr-defined]
                             log_bus.info(
-                                f"阶段回退 ({state._regression_count}/{_MAX_TOTAL_REGRESSIONS}): "
+                                f"阶段回退 ({_regression_count}/{_MAX_TOTAL_REGRESSIONS}): "
                                 f"{old_stage.value} → {next_stage.value}",
                                 logger="orchestrator.runner",
                                 extra={
                                     "from": old_stage.value,
                                     "to": next_stage.value,
-                                    "regression_count": state._regression_count,
+                                    "regression_count": _regression_count,
                                 },
                             )
-                            if state._regression_count >= _MAX_TOTAL_REGRESSIONS:
+                            if _regression_count >= _MAX_TOTAL_REGRESSIONS:
                                 # 回退上限：强制前进到 produce
                                 log_bus.warning(
                                     f"回退次数达上限 ({_MAX_TOTAL_REGRESSIONS})，强制推进到 produce",
@@ -963,7 +963,8 @@ def get_state(meeting_id: str) -> MeetingState | None:
     """取某会议的运行态（线程安全），记录访问时间用于LRU。
     [MULTI-TENANT] 校验内存状态的 tenant_id 与当前上下文匹配，防止跨租户访问。
     """
-    from app.tenants import get_tenant_id as _get_tid, is_system_tenant as _is_sys
+    from app.tenants import get_tenant_id as _get_tid
+    from app.tenants import is_system_tenant as _is_sys
     with _states_lock:
         st = _states.get(meeting_id)
         if st is not None:
