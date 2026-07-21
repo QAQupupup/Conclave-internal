@@ -44,16 +44,20 @@ async def _collect_evidence(meeting_id: str, conflict: dict) -> list[dict]:
 
     统一检索流程：cross_team 预检索和 evidence_check 实时检索共用此函数（DRY）。
     """
+    from app.orchestrator.prompt_safety import sanitize_rag_chunks, sanitize_untrusted_content
+
     summary = conflict.get("summary", str(conflict))
     chunks = await retrieve_for_conflict(meeting_id, summary, top_k=5)
+    # M1.4: RAG 检索结果经过指令注入防护
+    chunks = sanitize_rag_chunks(chunks)
     evidence_chunks = [
         {
             "evidence_id": f"ev-{i}",
-            "quote": ck.get("text", "")[:200],
+            "quote": sanitize_untrusted_content(ck.get("text", "")[:200]),
             "source": ck.get("source", "doc:unknown"),
             "char_range": [ck.get("char_start", 0), ck.get("char_end", 0)],
             # 附带邻居上下文（让 LLM 看到证据所在段落的上下文）
-            "context": ck.get("neighbor_context", ""),
+            "context": sanitize_untrusted_content(ck.get("neighbor_context", "")),
         }
         for i, ck in enumerate(chunks)
     ]
@@ -64,7 +68,7 @@ async def _collect_evidence(meeting_id: str, conflict: dict) -> list[dict]:
             evidence_chunks.append(
                 {
                     "evidence_id": f"web-{i}",
-                    "quote": wr.get("quote", "")[:200],
+                    "quote": sanitize_untrusted_content(wr.get("quote", "")[:200]),
                     "source": wr.get("source", "web:unknown"),
                     "char_range": [0, 0],
                 }
