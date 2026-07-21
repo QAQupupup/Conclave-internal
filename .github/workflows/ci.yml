@@ -34,19 +34,13 @@ jobs:
           pip install -r requirements.txt
 
       - name: Lint with ruff
-        run: |
-          pip install "ruff>=0.4"
-          ruff check app conclave_core tests
+        run: ruff check app conclave_core tests
 
       - name: Check formatting with ruff
-        run: |
-          ruff format --check app conclave_core tests
+        run: ruff format --check app conclave_core tests
 
       - name: Type check with mypy
-        continue-on-error: true
-        run: |
-          pip install "mypy>=1.10"
-          mypy app conclave_core
+        run: mypy app conclave_core
 
   frontend-checks:
     runs-on: ubuntu-latest

@@ -77,7 +77,7 @@ services:
     container_name: conclave-test-backend
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "pip install --no-cache-dir pytest pytest-asyncio pytest-timeout pytest-xdist >/dev/null 2>&1; pytest -q --tb=short"
+      - "pip install --no-cache-dir -r requirements.txt >/dev/null 2>&1; pytest -q --tb=short"
     environment:
       DATABASE_URL: postgresql+asyncpg://conclave:conclave_dev@postgres-test:5432/conclave_test
       REDIS_URL: redis://redis-test:6379/0
