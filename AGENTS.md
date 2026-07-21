@@ -278,6 +278,32 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 **教训**：Phase 1b 为所有业务表加了 tenant_id 列和 ALTER TABLE 外键，但多个模块（key_store、docker_hosts、net_auth、documents）的 DAO/路由层忘记实际使用该列进行过滤，导致跨租户数据泄露。参见修复报告 `docs/retrospectives/2026-07-21-multitenant-isolation-and-settings-ux.html`。
 
+### 4.14 函数内 import 与模块级 import 的取舍
+
+**症状**：代码审查发现大量 `from xxx import yyy` 写在函数体内，而非文件头部。
+
+**规则**：
+1. **默认放在模块级**（文件开头）。Python 的 import 是幂等的，模块级 import 不会重复加载。
+2. **仅在以下情况允许函数内 import**：
+   - 存在循环依赖（A import B，B import A）——用函数内 import 打破循环
+   - 重依赖延迟加载（如 `cryptography.fernet`、`playwright`）——仅在首次使用时加载，减少冷启动时间
+   - 可选依赖（如 `grpc`，未安装时降级）——在 try/except 中 import
+3. **重构前必须验证无循环依赖**：用 `grep -r "from app.xxx" backend/app/` 检查目标模块是否反向引用当前模块。无反向引用则安全提到模块级。
+4. **禁止"习惯性函数内 import"**：不要因为"不确定有没有循环依赖"就全部塞到函数里。这会导致 import 重复执行、IDE 跳转失效、代码可读性下降。
+
+**参考**：`app/services/key_store.py` 已完成模块级 import 重构（commit `b21ec1f`），验证无循环依赖。
+
+### 4.15 Alembic env.py 的 context 注入
+
+**症状**：直接运行 `python alembic/env.py` 报错 `ImportError: cannot import name 'context'` 或 `ModuleNotFoundError`。
+
+**根因**：`from alembic import context` 中的 `context` 不是 alembic 包的普通模块，而是 Alembic 框架在运行迁移时通过 `alembic.ini` 配置注入的全局对象（类似 Flask 的 `g`）。独立运行时该对象不存在。
+
+**规则**：
+1. `alembic/env.py` **必须通过 `alembic upgrade head` / `alembic revision` 等 CLI 命令调用**，不能直接 `python alembic/env.py`。
+2. 不要为了"修复"这个 import 错误而把 `context` 改成其他写法，那会破坏 alembic 迁移。
+3. IDE 中显示红色波浪线是正常的（静态分析无法识别 alembic 的运行时注入），可加 `# noqa: I001` 抑制 ruff 误报。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -378,7 +404,8 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 - `Get-Content`、`Select-Object`、`Select-String` 是 PowerShell 等价的 cat/head/grep。
 - 容器内是 Linux，shell 脚本用 bash 语法。
 - `.gitattributes` 已配置行尾：`.sh`/`Dockerfile*` 强制 LF，`.ps1`/`.bat`/`.cmd` 保持 CRLF。
+- **docker compose run 输出捕获陷阱**：PowerShell 下 `docker compose run` 的 stdout 会被 PowerShell 当作 stderr 处理（`NativeCommandError`），导致 `2>&1` 和 `Out-File` 捕获不到容器内 pytest 输出。解决方案：用 `Start-Process -RedirectStandardOutput` + `-RedirectStandardError` 分别重定向，或直接用 `docker run` 替代 `docker compose run`。
 
 ---
 
-> 本文件最后更新：2026-07-21（§4.12 SA FK 与 raw SQL 表混用陷阱、§4.13 多租户隔离 Checklist；Phase 2b 全局资源隔离完成，修复 SA create_all NoReferencedTableError 崩溃）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-21（§4.14 函数内 import 取舍、§4.15 Alembic context 注入、§8 docker compose run 输出捕获陷阱；post-merge lint/docs 修复完成）。若发现新的高频坑，追加到第 4 节并更新日期。
