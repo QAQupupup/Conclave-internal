@@ -184,13 +184,13 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 |---|---|---|
 | **MeetingManager** | `backend/app/orchestrator/manager.py` | 系统级调度与治理中枢，统一交互层 |
 | **TaskGraph** | `backend/app/orchestrator/task_graph.py` | 显式 DAG 任务图，支持拓扑排序与递归子任务 |
-| **ContextManager** | `backend/app/orchestrator/context_manager.py` | 上下文治理：窗口监控、分层选择、摘要压缩 |
+| **ContextManager** | `backend/app/orchestrator/context_manager.py` | 上下文治理：固定窗口（最近8条）+ 优先级裁剪 + token 预算 |
 | **AgentRuntime** | `backend/app/agents/agent_runtime.py` | 统一 Agent 运行时，差异通过配置表达 |
 | **TaskBaseline** | `backend/app/agents/task_baseline.py` | 领域基线模板（软件系统、股票分析等） |
 
 ### 解决的核心问题
 
-1. **上下文溢出**：ContextManager 显式预算 + 优先级分层 + 自动裁剪
+1. **上下文溢出**：ContextManager 显式预算 + 优先级分层 + 裁剪降级（当前为固定8条窗口+丢弃裁剪，摘要压缩未实现）
 2. **缺少显式 DAG**：TaskGraph 把阶段/子任务建模为可拓扑排序的有向图
 3. **Agent 抽象不统一**：AgentRuntime 让所有 Agent 共享同一执行接口
 4. **组件交互混乱**：Manager 作为 Storage/EventBus/Sandbox/Agent 之间的统一协议层
@@ -568,6 +568,7 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 
 ### P2（架构优化）
 
+- **ContextManager 窗口管理粗糙**：当前为固定 8 条窗口 + 优先级丢弃裁剪，未实现摘要压缩（旧消息直接丢弃导致信息丢失）和动态滑动窗口（根据 token 预算计算窗口大小）。计划：1) 超预算时调用 LLM 对旧消息生成摘要保留关键信息；2) 根据 `budget.available_tokens` 动态计算窗口大小替代硬编码 `[-8:]`。
 - **RAG 检索策略单一**：当前只有 Embedding → Reranker 单轮向量检索。缺少 HyDE（假设性文档）、Multi-Query（多查询扩写）、Parent Document 检索、Graph RAG 等高级策略。
 - **证据校验为语义相似度比对**：未做事实验证（Fact-checking），无法区分"文档提到 A"和"文档证明 A 正确"。
 - **提示词为静态模板**：缺少 Few-shot 动态检索机制和指令注入防护（instruction delimiters）。
