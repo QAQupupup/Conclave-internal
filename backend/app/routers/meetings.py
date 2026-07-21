@@ -1209,6 +1209,7 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
         "meeting_id": meeting_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "meeting": state_snapshot,
+        "sections": state.snapshot_sections() if hasattr(state, "snapshot_sections") else None,
         "trace": {
             "summary": trace_summary,
             "calls": trace_calls,

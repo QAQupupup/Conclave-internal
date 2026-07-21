@@ -437,3 +437,21 @@ class MeetingState(BaseModel):
     def snapshot(self) -> dict[str, Any]:
         """生成快照用于 pause 暂存 / WS 回放"""
         return self.model_dump(mode="json")  # type: ignore[no-any-return]
+
+    def snapshot_sections(self) -> dict[str, dict[str, Any]]:
+        """按 section 分组返回快照，用于 WS 增量推送 / 调试输出。
+
+        与 snapshot() 的区别：
+        - snapshot() 返回平铺字段（向后兼容）
+        - snapshot_sections() 返回嵌套分组（前端可按 section 增量订阅）
+
+        返回示例::
+            {
+                "core": {"meeting_id": "...", "stage": "clarify", ...},
+                "debate": {"messages": [...], "claims": [...], ...},
+                "borrow": {"borrowed_agents": [...], ...},
+                "iteration": {"iteration_count": 0, ...},
+                "observability": {"charter": {...}, ...},
+            }
+        """
+        return {name: section.model_dump(mode="json") for name, section in self.sections.items()}
