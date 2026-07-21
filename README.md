@@ -19,14 +19,14 @@
   4. **evidence_check**（证据校验）—— 对照证据验证论点
   5. **arbitrate**（仲裁裁决）—— 主持人裁决争议、采纳论点
   6. **produce**（产出交付）—— 生成最终产出物
-- **五层确定性保障**：参数约束、结论锁定链、一致性自检、全链路追踪、自动降级兜底
+- **五层确定性保障**：参数约束、结论锁定、漂移检查（drift check）、全链路追踪、自动降级兜底
 
 ### 数据科学与代码执行
 - **Docker沙箱隔离**：Sibling Containers架构，代码执行在独立容器中，安全隔离
 - **多主机分布式调度**：支持注册多台远程Docker主机（SSH密钥/密码/TCP+TLS/Unix Socket），内置5种调度策略（least_loaded/local_first/tag_match/manual/round_robin）
 - **运维面板**：可视化管理Docker主机集群，实时查看CPU/内存/磁盘/容器状态，一键健康检查与资源清理
 - **Python数据科学环境**：预装Pandas、NumPy、Matplotlib等库
-- **自动代码修复**：代码执行失败时自动分析错误并修复（最多3轮）
+- **自动代码修复**：代码执行失败时自动分析错误并修复（RefineLoop，默认最多5轮）
 - **Web搜索能力**：Agent可通过BrowserTool主动搜索资料支撑论点
 
 ### 可部署服务交付
@@ -93,9 +93,9 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 ### 使用流程
 
 1. 打开 http://localhost:5173
-2. 点击"创建会议"，输入议题描述
+2. 点击"开始会议"，输入议题描述
 3. 选择产出物类型（PRD/研究报告/商业报告/设计文档/可部署服务/数据分析）
-4. 点击"启动会议"，观察六阶段自动执行
+4. 点击"开始会议"，观察六阶段自动执行
 5. 会议过程中：
    - 点击右侧蓝色箭头打开实时日志面板
    - 点击右侧浮动徽标查看议题、证据、产出物、Token消耗等
@@ -196,20 +196,24 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 4. **组件交互混乱**：Manager 作为 Storage/EventBus/Sandbox/Agent 之间的统一协议层
 5. **领域扩展困难**：TaskBaseline 按领域定义团队角色、必需产物、质量门
 
-### 已完成（本阶段）
+### 已完成
 
 - [x] Runner 统一走 MeetingManager 调度路径，移除 compatibility_mode
 - [x] clarify / intra_team / cross_team / evidence_check / arbitrate 状态写入逻辑下沉到 `stage_runners.py`
 - [x] produce 阶段收尾逻辑（锁定结论、事件发布、漂移检查、终态设置）下沉到 `stage_runners.py`
+- [x] 核心业务全量迁移到 PostgreSQL（meetings/messages/events/documents/users/api_keys/docker_hosts/agent_roles/memory/observability 均为 SQLAlchemy ORM 模型，见 `app/db/models/`）
+- [x] 事件总线持久化从 SQLite 迁移到 PostgreSQL + Redis Pub/Sub 多副本广播
+- [x] 多租户隔离（tenant_id 列 + 上下文 + 配置覆盖 + RBAC）
+- [x] 插件框架（PluginRegistry / HookSpec / PluginBase / AuthPlugin 等，见 `app/plugins/`）
 - [x] 新增基于历史数据的回归测试 `test_regression_historical.py` 与 produce 专项测试 `test_produce_stage.py`
 
 ### 后续工作
 
 - [ ] MaterialHub / ArtifactRepo 统一物料与产物
-- [ ] 核心业务迁移到 PostgreSQL
 - [ ] 服务持久化（deployed_services 表 + recover_services）
 - [ ] 前端生成与挂载流水线固化
 - [ ] produce 阶段复杂产物构建（代码审查、沙箱执行、Docker 部署）完全接入 AgentRuntime 产物回写
+- [ ] gRPC Agent Worker 横向扩展（当前为 LocalAgentCompute 单进程 stub，见 `app/agents/worker.py`）
 
 详细分析见 `.trae/documents/v3-manager-agent-runtime-implementation-plan.md` 与 `.trae/documents/v3-manager-agent-runtime-completion-report.md`。
 
@@ -412,23 +416,38 @@ Conclave/
 
 ## API概览
 
+> 路由无全局 `/api` 前缀，直接挂载在根路径。完整列表见 `http://localhost:8000/docs`。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/meetings` | 创建会议 |
-| GET | `/api/meetings` | 会议列表 |
-| GET | `/api/meetings/{id}` | 会议详情 |
-| POST | `/api/meetings/{id}/run` | 启动会议（后台异步执行） |
-| POST | `/api/meetings/{id}/control` | 控制信号（pause/resume/abort/inject） |
-| POST | `/api/meetings/{id}/documents` | 上传参考文档 |
-| DELETE | `/api/meetings/{id}?mode=soft/hard` | 删除会议（清理所有关联资源） |
+| POST | `/meetings` | 创建会议 |
+| GET | `/meetings` | 会议列表 |
+| GET | `/meetings/{id}` | 会议详情 |
+| POST | `/meetings/{id}/run` | 启动会议（后台异步执行） |
+| POST | `/meetings/{id}/control` | 控制信号（pause/resume/abort/inject） |
+| POST | `/meetings/{id}/intervene` | 人机介入（注入指令） |
+| POST | `/meetings/{id}/documents` | 上传参考文档 |
+| DELETE | `/meetings/{id}?mode=soft/hard` | 删除会议（清理所有关联资源） |
+| GET | `/meetings/{id}/events` | 获取会议事件流 |
+| GET | `/meetings/{id}/trace` | 获取会议追踪记录 |
+| GET | `/meetings/{id}/stats` | 获取会议统计 |
+| GET | `/meetings/{id}/charter` | 获取会议章程 |
+| GET | `/meetings/llm/keys` | API Key 列表 |
+| POST | `/meetings/llm/keys` | 保存 API Key |
 | WS | `/ws/meetings/{id}` | WebSocket实时事件流 |
-| GET | `/api/v1/docker-hosts` | 获取Docker主机列表 |
-| POST | `/api/v1/docker-hosts` | 添加Docker主机 |
-| PUT | `/api/v1/docker-hosts/{id}` | 更新Docker主机配置 |
-| DELETE | `/api/v1/docker-hosts/{id}` | 删除Docker主机 |
-| POST | `/api/v1/docker-hosts/{id}/check` | 手动触发健康检查 |
-| POST | `/api/v1/docker-hosts/{id}/prune` | 清理无用容器/镜像/卷 |
-| GET | `/api/v1/docker-hosts/presets` | 获取连接预设和调度策略 |
+| WS | `/ws/system` | WebSocket系统状态流 |
+| GET | `/docker-hosts` | Docker主机列表 |
+| POST | `/docker-hosts` | 添加Docker主机 |
+| PUT | `/docker-hosts/{id}` | 更新Docker主机配置 |
+| DELETE | `/docker-hosts/{id}` | 删除Docker主机 |
+| POST | `/docker-hosts/{id}/health-check` | 手动触发健康检查 |
+| POST | `/docker-hosts/health-check-all` | 批量健康检查 |
+| GET | `/docker-hosts/presets` | 获取连接预设和调度策略 |
+| GET | `/agent-roles` | Agent角色列表 |
+| POST | `/agent-roles` | 创建/更新Agent角色 |
+| POST | `/agent-roles/generate` | AI生成角色团队 |
+| POST | `/auth/login` | 登录 |
+| GET | `/auth/me` | 当前用户信息 |
 
 WebSocket事件类型：`snapshot`、`agent.spoke`、`stage.changed`、`evidence.attached`、`artifact.generated`、`produce.progress`、`log.entry`、`meeting.error`、`control.ack`等。
 
