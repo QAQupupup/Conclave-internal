@@ -93,6 +93,8 @@ class EvidenceAssessmentItem(BaseModel):
 
     supports: a | b | neutral | irrelevant
     strength: strong（文档/网络证据）| weak（通用知识）| none（无证据占位）
+    fact_check_status: verified（可验证为真）| contradicted（被其他证据反驳）|
+                       unverifiable（无法验证，如通用知识/无源）| disputed（来源可信但解读有争议）
     """
 
     model_config = _SCHEMA_CONFIG
@@ -101,6 +103,8 @@ class EvidenceAssessmentItem(BaseModel):
     source: str = ""
     supports: str = "neutral"  # a | b | neutral | irrelevant
     strength: str = "strong"  # strong | weak | none
+    # M1.2: 事实核查状态，让仲裁阶段能区分"证据确凿"与"证据存疑"
+    fact_check_status: str = "unverifiable"  # verified | contradicted | unverifiable | disputed
 
 
 class EvidenceCheckResult(BaseModel):

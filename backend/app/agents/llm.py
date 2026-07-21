@@ -167,12 +167,16 @@ class StubLLM:
                         "quote": "系统应支持异步任务处理以解耦耗时操作",
                         "source": "doc:架构",
                         "supports": "a",
+                        "strength": "strong",
+                        "fact_check_status": "verified",
                     },
                     {
                         "evidence_id": "ev-1",
                         "quote": "短期 MVP 不应引入额外中间件",
                         "source": "doc:范围",
                         "supports": "b",
+                        "strength": "strong",
+                        "fact_check_status": "verified",
                     },
                 ],
             }
