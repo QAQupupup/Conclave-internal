@@ -1,0 +1,62 @@
+# ===== Web Search Service 集成测试（v2: 服务解耦模式） =====
+#
+# 启动独立的 web-search 服务，然后通过 HTTP 调用测试。
+# 所有测试在单个 asyncio 事件循环中执行，无浏览器生命周期问题。
+#
+# 运行方式：
+#   docker compose -f docker-compose.websearch.yml -f docker-compose.websearch-test.yml build
+#   docker compose -f docker-compose.websearch.yml -f docker-compose.websearch-test.yml run --rm web-search-test
+#
+# 或者直接测试服务（不通过 test runner）：
+#   docker compose -f docker-compose.websearch.yml up web-search -d
+#   curl http://localhost:9100/health
+#   curl -X POST http://localhost:9100/search -H 'Content-Type: application/json' -d '{"query":"Python async tutorial","top_k":3}'
+
+services:
+  web-search-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: conclave-web-search-test
+    entrypoint: ["python", "tests/run_web_search_tests.py"]
+    environment:
+      # 使用远程服务模式（通过 HTTP 调用 web-search 服务）
+      - CONCLAVE_WEB_SEARCH_SERVICE_URL=http://web-search:9100
+      # 翻译模型
+      - CONCLAVE_LLM_API_KEY=${CONCLAVE_LLM_API_KEY:-}
+      - CONCLAVE_LLM_BASE_URL=${CONCLAVE_LLM_BASE_URL:-https://api.siliconflow.cn/v1}
+      # Cookie 持久化
+      - CONCLAVE_DATA_DIR=/app/data
+      # 禁用不需要的组件
+      - CONCLAVE_DISABLE_SANDBOX_WARMUP=1
+      - CONCLAVE_DISABLE_PRICING_LOADER=1
+      - CONCLAVE_DISABLE_KEY_LOADER=1
+      - CONCLAVE_DISABLE_METRICS=1
+      - CONCLAVE_MEMORY_DISABLED=1
+      # 测试模式
+      - CONCLAVE_TEST_MODE=1
+      - CONCLAVE_TEST_DISABLE_AUTH=1
+      - CONCLAVE_LOG_LEVEL=WARNING
+      # 数据库（不需要但必须设置以免报错）
+      - DATABASE_URL=postgresql+asyncpg://conclave:conclave_dev@localhost:5432/conclave
+      - REDIS_URL=redis://localhost:6379/0
+      - CONCLAVE_QDRANT_URL=http://localhost:6333
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    shm_size: "1g"
+    tmpfs:
+      - /tmp:size=100M,mode=1777
+    volumes:
+      - websearch-test-data:/app/data
+    dns:
+      - 8.8.8.8
+      - 223.5.5.5
+    depends_on:
+      web-search:
+        condition: service_healthy
+
+volumes:
+  websearch-test-data:
+    driver: local

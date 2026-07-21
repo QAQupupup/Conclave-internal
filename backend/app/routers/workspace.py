@@ -9,11 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.middleware import is_dangerous_command
 from app.observability.log_bus import log_bus
-from app.sandbox import run_command, run_python, get_status as sandbox_status
+from app.sandbox import get_status as sandbox_status
+from app.sandbox import run_command, run_python
+from app.schemas.workspace import CodeRunRequest, CommandRequest, FileWriteRequest
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
 
@@ -30,8 +32,7 @@ CODE_TIMEOUT = int(os.environ.get("CONCLAVE_CODE_TIMEOUT", "15"))
 # 输出最大字节数（防止超大输出撑爆前端）
 MAX_OUTPUT = int(os.environ.get("CONCLAVE_MAX_OUTPUT", str(512 * 1024)))
 
-# 禁止执行的命令模式（安全检查）
-from app.middleware import is_dangerous_command
+# 禁止执行的命令模式（安全检查）由 app.middleware.is_dangerous_command 提供。
 
 
 def _resolve_path(rel_path: str, meeting_id: str | None = None) -> Path:
@@ -60,7 +61,7 @@ def _resolve_path(rel_path: str, meeting_id: str | None = None) -> Path:
         raise HTTPException(
             status_code=403,
             detail=f"路径越界：{rel_path} 不在工作区内",
-        )
+        ) from None
     return target
 
 
@@ -69,26 +70,6 @@ def _truncate(data: str) -> str:
     if len(data.encode("utf-8")) > MAX_OUTPUT:
         return data[:MAX_OUTPUT] + "\n... [输出已截断]"
     return data
-
-
-# ---- 请求/响应模型 ----
-
-
-class FileWriteRequest(BaseModel):
-    path: str = Field(..., description="工作区内相对路径")
-    content: str = Field(..., description="文件内容")
-
-
-class CodeRunRequest(BaseModel):
-    code: str = Field(..., description="要执行的 Python 代码")
-    language: str = Field(default="python", description="语言（目前支持 python）")
-    network_level: str = Field(default="L1", description="网络分级：L1=无网络(默认) / L2=限网(pip) / L3=全联网")
-
-
-class CommandRequest(BaseModel):
-    command: str = Field(..., description="要执行的命令")
-    cwd: str = Field(default="", description="工作目录（工作区内相对路径）")
-    network_level: str = Field(default="L2", description="网络分级：L1=无网络 / L2=限网(默认,pip) / L3=全联网")
 
 
 # ---- 文件操作 ----
@@ -101,13 +82,26 @@ async def list_files(path: str = "") -> dict[str, Any]:
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"路径不存在: {path}")
     if target.is_file():
-        # 单个文件：返回元信息
+        # 单个文件：返回统一结构，将文件包装在 items 中，避免前端解构出错
+        import os
+
         stat = target.stat()
+        filename = os.path.basename(path)
+        parent_path = os.path.dirname(path).replace("\\", "/")
         return {
-            "path": path,
-            "type": "file",
-            "size": stat.st_size,
-            "modified": stat.st_mtime,
+            "path": parent_path or "/",
+            "type": "directory",
+            "items": [
+                {
+                    "name": filename,
+                    "path": path.replace("\\", "/"),
+                    "type": "file",
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                    "child_count": 0,
+                    "expanded": False,
+                }
+            ],
         }
 
     items = []
@@ -160,7 +154,7 @@ async def read_file(file_path: str) -> dict[str, Any]:
     except UnicodeDecodeError:
         content = target.read_bytes().decode("utf-8", errors="replace")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取失败: {e}")
+        raise HTTPException(status_code=500, detail=f"读取失败: {e}") from e
 
     return {
         "path": file_path,
@@ -179,7 +173,7 @@ async def write_file(req: FileWriteRequest) -> dict[str, Any]:
     try:
         target.write_text(req.content, encoding="utf-8")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"写入失败: {e}")
+        raise HTTPException(status_code=500, detail=f"写入失败: {e}") from e
 
     log_bus.info(
         f"文件写入: {req.path} ({len(req.content)} chars)",
@@ -208,7 +202,7 @@ async def delete_file(file_path: str) -> dict[str, Any]:
             # 只允许删除空目录
             target.rmdir()
     except OSError as e:
-        raise HTTPException(status_code=400, detail=f"删除失败: {e}")
+        raise HTTPException(status_code=400, detail=f"删除失败: {e}") from e
 
     log_bus.info(f"文件删除: {file_path}", logger="routers.workspace")
     return {"path": file_path, "deleted": True}
@@ -235,13 +229,15 @@ async def exec_command(req: CommandRequest) -> dict[str, Any]:
 
     try:
         result = await run_command(
-            req.command, WORKSPACE_ROOT, CMD_TIMEOUT,
+            req.command,
+            WORKSPACE_ROOT,
+            CMD_TIMEOUT,
             network_level=req.network_level,  # type: ignore[arg-type]
         )
     except TimeoutError as e:
-        raise HTTPException(status_code=408, detail=str(e))
+        raise HTTPException(status_code=408, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"执行失败: {e}")
+        raise HTTPException(status_code=500, detail=f"执行失败: {e}") from e
 
     return {
         "command": req.command,
@@ -275,13 +271,15 @@ async def run_code(req: CodeRunRequest) -> dict[str, Any]:
 
     try:
         result = await run_python(
-            req.code, WORKSPACE_ROOT, CODE_TIMEOUT,
+            req.code,
+            WORKSPACE_ROOT,
+            CODE_TIMEOUT,
             network_level=req.network_level,  # type: ignore[arg-type]
         )
     except TimeoutError as e:
-        raise HTTPException(status_code=408, detail=str(e))
+        raise HTTPException(status_code=408, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"执行失败: {e}")
+        raise HTTPException(status_code=500, detail=f"执行失败: {e}") from e
 
     return {
         "language": req.language,

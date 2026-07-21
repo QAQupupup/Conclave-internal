@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,13 +13,12 @@ from app.models import MeetingStatus, Stage
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.nodes import clarify_node
 from app.orchestrator.runner import Runner
-from app.orchestrator.state import apply_signal
 from app.rag.chunker import chunk_markdown
-from app.rag.store import StubEmbedding, cosine_similarity, InMemoryVectorStore
+from app.rag.store import InMemoryVectorStore, StubEmbedding, cosine_similarity
 from app.routers import meetings as meetings_mod
 
-
 # ---------- fixtures ----------
+
 
 @pytest.fixture()
 def client():
@@ -38,6 +36,7 @@ def _reset_state():
     bus._subs.clear()
     bus._history.clear()
     from app.rag import store as store_mod
+
     store_mod._stores.clear()
     yield
     runner_mod._states.clear()
@@ -66,16 +65,10 @@ def _run_to_done(meeting_id: str):
 
 # ---------- 基础工具测试 ----------
 
+
 def test_chunker_splits_by_heading():
     """切块器：按 # / ## 切分"""
-    md = (
-        "# 用户调研\n"
-        "目标用户为中小团队\n"
-        "## 架构\n"
-        "系统应支持异步任务处理\n"
-        "## 范围\n"
-        "MVP 不应引入额外中间件\n"
-    )
+    md = "# 用户调研\n目标用户为中小团队\n## 架构\n系统应支持异步任务处理\n## 范围\nMVP 不应引入额外中间件\n"
     chunks = chunk_markdown(md, "research")
     assert len(chunks) >= 2
     sections = [c.section for c in chunks]
@@ -88,35 +81,38 @@ def test_chunker_splits_by_heading():
         assert c.source.startswith("research:")
 
 
-def test_stub_embedding_deterministic():
+@pytest.mark.asyncio
+async def test_stub_embedding_deterministic():
     """桩嵌入：相同文本得到相同向量"""
     emb = StubEmbedding(dim=32)
-    a = emb.embed("hello world")
-    b = emb.embed("hello world")
+    a = await emb.embed("hello world")
+    b = await emb.embed("hello world")
     assert a == b
     # 不同文本相似度不为 1
-    c = emb.embed("totally different")
+    c = await emb.embed("totally different")
     assert cosine_similarity(a, c) < 1.0
 
 
-def test_vector_store_search():
+@pytest.mark.asyncio
+async def test_vector_store_search():
     """向量库：检索 top_k"""
     md = "# 架构\n系统应支持异步任务处理以解耦耗时操作"
     chunks = chunk_markdown(md, "doc")
     store = InMemoryVectorStore()
-    store.add_chunks(chunks)
-    results = store.search("异步任务", top_k=1)
+    await store.add_chunks(chunks)
+    results = await store.search("异步任务", top_k=1)
     assert len(results) == 1
     chunk, score = results[0]
     assert chunk.section == "架构"
     # StubEmbedding 是确定性伪向量，相似度可正可负，只要能返回浮点排序即可
     assert isinstance(score, float)
     # top_k 截断正确
-    results2 = store.search("架构", top_k=5)
+    results2 = await store.search("架构", top_k=5)
     assert len(results2) >= 1
 
 
 # ---------- 端到端会议流程测试 ----------
+
 
 def test_health(client):
     """健康检查"""
@@ -194,7 +190,7 @@ def test_full_meeting_flow(client):
     assert detail["artifact"]["prd"]["title"]
 
     # 6. 断言事件被广播
-    events = bus.history(meeting_id)
+    events = bus.get_events(meeting_id)
     event_types = set(e.type for e in events)
     assert "meeting.created" in event_types
     assert "stage.changed" in event_types
@@ -290,14 +286,15 @@ def test_list_meetings(client):
 
 # ---------- WebSocket 测试 ----------
 
+
 def test_websocket_snapshot_and_events(client):
-    """WS：连接回放快照 + 推送事件"""
+    """WS：连接回放快照 + replay.done（完整回放跳过历史事件避免与快照重复）"""
     # 先创建并 run 完一场会议
     resp = client.post("/meetings", json={"topic": "WS 测试会议"})
     meeting_id = resp.json()["meeting_id"]
     _run_to_done(meeting_id)
 
-    # 连接 WS：应回放快照 + 历史事件
+    # 连接 WS：应回放快照 + replay.done
     with client.websocket_connect(f"/ws/meetings/{meeting_id}") as ws:
         # 第一条是快照
         msg = json.loads(ws.receive_text())
@@ -305,7 +302,7 @@ def test_websocket_snapshot_and_events(client):
         assert msg["meeting_id"] == meeting_id
         # 快照里有 artifact（已 run 完）
         assert msg["payload"].get("artifact") is not None
-        # 循环接收历史事件，直到 replay.done
+        # 完整回放不再单独推送历史事件，下一条应为 replay.done
         received_types: set[str] = set()
         for _ in range(50):
             raw = ws.receive_text()
@@ -313,21 +310,19 @@ def test_websocket_snapshot_and_events(client):
             received_types.add(msg.get("type", ""))
             if msg.get("type") == "replay.done":
                 break
-        # 至少覆盖到关键事件类型
-        assert "stage.changed" in received_types or "agent.spoke" in received_types
-        assert "artifact.generated" in received_types
         assert "replay.done" in received_types
 
 
 # ---------- 改造一：run 异步化测试 ----------
 
+
 def test_run_async_returns_running(client):
-    """run 端点异步化后立即返回 running，不阻塞等待完成"""
+    """run 端点异步化后立即返回 202 Accepted，不阻塞等待完成"""
     resp = client.post("/meetings", json={"topic": "异步运行测试"})
     meeting_id = resp.json()["meeting_id"]
 
     resp = client.post(f"/meetings/{meeting_id}/run")
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     data = resp.json()
     assert data["meeting_id"] == meeting_id
     assert data["status"] == "running"
@@ -360,11 +355,12 @@ def test_run_done_meeting_returns_done(client):
     _run_to_done(meeting_id)
 
     resp = client.post(f"/meetings/{meeting_id}/run")
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert resp.json()["status"] == "done"
 
 
 # ---------- 改造二：审计端点测试 ----------
+
 
 def test_trace_endpoint(client):
     """GET /meetings/{id}/trace 返回 LLM 调用追踪摘要"""
@@ -439,6 +435,7 @@ def test_charter_not_found(client):
 
 # ---------- 改造三：借调完整流程测试 ----------
 
+
 def test_loan_borrow_full_flow(client):
     """借调完整流程：申请 → 登记 → 防重复 → 上限 → 发言"""
     resp = client.post("/meetings", json={"topic": "借调流程测试"})
@@ -505,11 +502,8 @@ def test_loan_borrow_full_flow(client):
     # 所有借调 agent 都已发言
     assert all(a["spoken"] for a in state.borrowed_agents)
     # 借调发言事件应被广播
-    events = bus.history(meeting_id)
-    borrow_events = [
-        e for e in events
-        if e.type == "agent.spoke" and e.payload.get("borrowed") is True
-    ]
+    events = bus.get_events(meeting_id)
+    borrow_events = [e for e in events if e.type == "agent.spoke" and e.payload.get("borrowed") is True]
     assert len(borrow_events) >= 2
 
 

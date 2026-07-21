@@ -8,10 +8,10 @@
    2) 英文按空格/标点切
    3) jieba 不可用时退化到单字切分
 """
+
 from __future__ import annotations
 
 import re
-from typing import List
 
 # 尝试加载 jieba（可选依赖，缺失时退化）
 try:
@@ -35,7 +35,7 @@ def has_jieba() -> bool:
     return _HAS_JIEBA
 
 
-def tokenize(text: str, *, min_length: int = 1) -> List[str]:
+def tokenize(text: str, *, min_length: int = 1) -> list[str]:
     """中英混合分词
 
     Args:
@@ -78,7 +78,7 @@ def tokenize(text: str, *, min_length: int = 1) -> List[str]:
     return tokens
 
 
-def tokenize_query(text: str) -> List[str]:
+def tokenize_query(text: str) -> list[str]:
     """查询分词：英文字长 >= 2，中文不限长
 
     用于 RAG 召回：长词更可能是关键词。

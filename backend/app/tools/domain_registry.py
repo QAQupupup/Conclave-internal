@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 
 class DomainTier(str, Enum):
     """信源等级"""
+
     S = "S"  # 官方源
     A = "A"  # 权威参考
     B = "B"  # 优质社区
@@ -222,7 +223,6 @@ _TIER_MAP: dict[str, DomainTier] = {
     "prometheus.io": DomainTier.S,
     "www.rfc-editor.org": DomainTier.S,
     "ietf.org": DomainTier.S,
-
     # ---- A tier: 权威参考 ----
     "developer.mozilla.org": DomainTier.A,
     "en.wikipedia.org": DomainTier.A,
@@ -237,8 +237,6 @@ _TIER_MAP: dict[str, DomainTier] = {
     "developer.chrome.com": DomainTier.A,
     "webkit.org": DomainTier.A,
     "developer.apple.com": DomainTier.A,  # 非 Swift 通用文档也是权威
-    "learn.microsoft.com": DomainTier.A,  # 已在上面设为 S，这里不重复
-
     # ---- B tier: 优质社区 ----
     "github.com": DomainTier.B,
     "stackoverflow.com": DomainTier.B,
@@ -262,7 +260,6 @@ _TIER_MAP: dict[str, DomainTier] = {
     "engineering.fb.com": DomainTier.B,
     "engineering.atspotify.com": DomainTier.B,
     "netflixtechblog.com": DomainTier.B,
-
     # ---- D tier: 低质量/注水 ----
     # 仅标注真正的内容农场 / 纯采集站
     # 注意：CSDN/博客园等内容质量参差不齐，不标 D（保持默认 C），
@@ -286,21 +283,21 @@ _TIER_MAP: dict[str, DomainTier] = {
 # 限制在 15 个以内，避免 Bing 查询 URL 过长
 SPAM_DOMAINS: set[str] = {
     # 百度低质量子产品
-    "tieba.baidu.com",       # 贴吧
-    "zhidao.baidu.com",      # 知道
-    "wenku.baidu.com",       # 文库
-    "baijiahao.baidu.com",   # 百家号（大量营销号）
+    "tieba.baidu.com",  # 贴吧
+    "zhidao.baidu.com",  # 知道
+    "wenku.baidu.com",  # 文库
+    "baijiahao.baidu.com",  # 百家号（大量营销号）
     # 采集站/内容农场
-    "jb51.net",              # 脚本之家
+    "jb51.net",  # 脚本之家
     "360doc.com",
     "111cn.net",
     "yisu.com",
     # 其他
-    "wenku.csdn.net",        # CSDN 文库（纯下载页，无内容）
-    "download.csdn.net",     # CSDN 下载（需积分，无正文）
-    "baike.baidu.com",       # 百度百科内容浅
-    "docin.com",             # 豆丁网
-    "book118.com",           # 道客巴巴
+    "wenku.csdn.net",  # CSDN 文库（纯下载页，无内容）
+    "download.csdn.net",  # CSDN 下载（需积分，无正文）
+    "baike.baidu.com",  # 百度百科内容浅
+    "docin.com",  # 豆丁网
+    "book118.com",  # 道客巴巴
 }
 
 
@@ -474,8 +471,7 @@ def rank_by_tier(urls: list[str]) -> list[str]:
     评审修正：Phase 1/2 的"独立性"仅指"不同域名"，非真正引用链追溯。
     代码注释明确标注此限制，避免后续误用。
     """
-    tagged = [(url, _TIER_ORDER[get_domain_tier(urlparse(url).hostname or "")], i)
-              for i, url in enumerate(urls)]
+    tagged = [(url, _TIER_ORDER[get_domain_tier(urlparse(url).hostname or "")], i) for i, url in enumerate(urls)]
     # 稳定排序：先按 tier 权重，再按原始索引
     tagged.sort(key=lambda x: (x[1], x[2]))
     return [url for url, _, _ in tagged]

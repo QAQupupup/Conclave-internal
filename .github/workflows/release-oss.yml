@@ -1,1 +1,94 @@
-﻿name: Release OSSon:  workflow_run:    workflows: ["CI"]    types: [completed]    branches: [main, refactor/v3-manager-agent-runtime]  # 允许手动触发，方便首次验证或紧急同步  workflow_dispatch:concurrency:  group: release-oss  cancel-in-progress: trueenv:  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simplejobs:  publish-oss:    if: ${{ github.event.workflow_run.conclusion == 'success' }}    runs-on: ubuntu-latest    steps:      - name: Checkout dev repo        uses: actions/checkout@v4        with:          # workflow_run 触发时，默认 checkout 的是默认分支（main）。          # 但实际代码在触发 CI 的分支上，因此显式切到该分支。          # workflow_dispatch 手动触发时回退到当前分支。          ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}          fetch-depth: 0      - name: Set up Python        uses: actions/setup-python@v5        with:          python-version: "3.12"      - name: Install Python dependencies        run: |          python -m pip install --upgrade pip --index-url ${{ env.PIP_INDEX_URL }}          pip install "Cython>=3.0" --index-url ${{ env.PIP_INDEX_URL }}      - name: Setup SSH for OSS repo        uses: webfactory/ssh-agent@v0.9.0        with:          ssh-private-key: ${{ secrets.OSS_DEPLOY_KEY }}          log-public-key: false      - name: Configure git        run: |          git config --global user.name "github-actions[bot]"          git config --global user.email "github-actions[bot]@users.noreply.github.com"      # public 仓库当前没有 main 分支，默认分支为 refactor/v3-manager-agent-runtime。      # 不指定 --branch，让 git clone 使用远程默认分支，避免 clone 失败。      - name: Clone OSS repository        env:          OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}        run: |          REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave.git}"          git clone --depth 1 "$REPO" ../Conclave-OSS      - name: Publish to OSS auto-sync branch        env:          OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}        run: |          python scripts/publish_open_source.py \            --dev-repo . \            --oss-repo ../Conclave-OSS \            --version "${{ github.sha }}" \            --branch auto-sync \            --push      - name: Summary        if: always()        env:          OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}        run: |          REPO="${OSS_REPO_URL:-git@github.com:QAQupupup/Conclave.git}"          echo "OSS auto-sync branch updated: $REPO/tree/auto-sync"
+name: Release OSS
+
+on:
+  # 由 ci.yml 在全部检查通过后通过 workflow_call 触发
+  workflow_call:
+  # 允许手动触发，方便首次验证或紧急同步
+  workflow_dispatch:
+
+concurrency:
+  group: release-oss
+  cancel-in-progress: true
+
+env:
+  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+
+jobs:
+  publish-oss:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev repo
+        uses: actions/checkout@v4
+        with:
+          # workflow_call: 使用触发 CI 的 ref；workflow_dispatch: 用选择的分支
+          ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Cython compilation image
+        run: |
+          docker build \
+            -t conclave-cython-build \
+            -f backend/Dockerfile.cython-build \
+            backend/
+
+      - name: Compile conclave_core in Docker container
+        run: |
+          # 清理历史编译产物
+          find backend/conclave_core -name "*.so" -delete 2>/dev/null || true
+          find backend/conclave_core -name "*.pyd" -delete 2>/dev/null || true
+
+          # 在 Docker 容器内编译（Python 3.12 + 国内镜像源）
+          docker run --rm \
+            -v "${{ github.workspace }}/backend:/app" \
+            conclave-cython-build \
+            python conclave_core/setup.py build_ext --inplace
+
+          # 清理中间生成的 .c 文件
+          find backend/conclave_core -name "*.c" -delete 2>/dev/null || true
+
+          # 验证编译产物
+          echo "=== 编译产物 ==="
+          find backend/conclave_core -name "*.so" -o -name "*.pyd" | sort
+
+      - name: Setup SSH for OSS repo
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.OSS_DEPLOY_KEY }}
+          log-public-key: false
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Clone OSS repository
+        env:
+          OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
+        run: |
+          if [ -z "${OSS_REPO_URL}" ]; then
+            echo "ERROR: OSS_REPO_URL secret is not configured"
+            exit 1
+          fi
+          git clone --depth 1 "${OSS_REPO_URL}" ../Conclave-OSS
+
+      - name: Publish to OSS auto-sync branch
+        env:
+          OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
+        run: |
+          python scripts/publish_open_source.py \
+            --dev-repo . \
+            --oss-repo ../Conclave-OSS \
+            --version "${{ github.sha }}" \
+            --branch auto-sync \
+            --skip-core-build \
+            --push
+
+      - name: Summary
+        if: always()
+        env:
+          OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
+        run: |
+          echo "OSS auto-sync branch updated: ${OSS_REPO_URL}/tree/auto-sync"

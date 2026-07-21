@@ -12,10 +12,10 @@
 # - ReactLoop：LLM 自主决定"下一步调用什么工具"，工具执行后 LLM 观察结果再决策
 from __future__ import annotations
 
-import json
 import os
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.agents.compute import (
     AgentCompute,
@@ -104,6 +104,7 @@ class ToolRegistry:
 
 # ---------- tool_history 裁剪（Phase B-4） ----------
 
+
 def prune_tool_history(
     history: list[ToolResult],
     keep_full: int = 2,
@@ -134,15 +135,17 @@ def prune_tool_history(
     for tr in to_collapse:
         # 将 result 折叠为摘要
         summary = _summarize_tool_result(tr, max_quote_tokens * 4)
-        collapsed.append(ToolResult(
-            tool_name=tr.tool_name,
-            arguments=tr.arguments,
-            success=tr.success,
-            result=summary,  # 摘要替代完整结果
-            error=tr.error,
-            latency_ms=tr.latency_ms,
-            iteration=tr.iteration,
-        ))
+        collapsed.append(
+            ToolResult(
+                tool_name=tr.tool_name,
+                arguments=tr.arguments,
+                success=tr.success,
+                result=summary,  # 摘要替代完整结果
+                error=tr.error,
+                latency_ms=tr.latency_ms,
+                iteration=tr.iteration,
+            )
+        )
 
     return collapsed + to_keep
 
@@ -191,6 +194,7 @@ def _summarize_tool_result(tr: ToolResult, max_chars: int = 400) -> dict[str, An
 
 # ---------- 循环检测 ----------
 
+
 def _is_loop_detected(tool_calls: list[ToolCall], history: list[ToolResult]) -> bool:
     """检测循环：连续两次相同工具+相同参数
 
@@ -213,7 +217,7 @@ def _is_loop_detected(tool_calls: list[ToolCall], history: list[ToolResult]) -> 
         return False
 
     # 逐个比较工具名和参数
-    for call, result in zip(tool_calls, last_results):
+    for call, result in zip(tool_calls, last_results, strict=False):
         if call.tool_name != result.tool_name:
             return False
         if call.arguments != result.arguments:
@@ -223,6 +227,7 @@ def _is_loop_detected(tool_calls: list[ToolCall], history: list[ToolResult]) -> 
 
 
 # ---------- ReAct 循环控制器 ----------
+
 
 class ReactLoop:
     """ReAct 循环控制器：think → act → observe → think
@@ -309,7 +314,7 @@ class ReactLoop:
             # 3. 循环检测
             if _is_loop_detected(response.tool_calls, tool_history):
                 log_bus.warning(
-                    f"ReAct 循环检测: 连续两次相同工具调用，终止",
+                    "ReAct 循环检测: 连续两次相同工具调用，终止",
                     logger="orchestrator.react_loop",
                     extra={
                         "iteration": iteration,
@@ -322,12 +327,13 @@ class ReactLoop:
 
             # 4. Act: 执行工具调用
             for call in response.tool_calls:
-                # 注入 meeting_id（浏览器工具需要，LLM 不知道 meeting_id）
+                # 注入 meeting_id（浏览器工具和工作区工具都需要）
                 args = dict(call.arguments)
-                if self._meeting_id and call.tool_name.startswith("browser."):
+                if self._meeting_id:
+                    # 所有工具都可能需要 meeting_id（用于文件隔离、浏览器上下文等）
                     args.setdefault("meeting_id", self._meeting_id)
                 # 记录工具调用成本
-                t0 = time.monotonic()
+                time.monotonic()
                 result = await self._tools.execute(call.tool_name, args)
                 result.iteration = iteration
                 tool_history.append(result)
@@ -335,7 +341,8 @@ class ReactLoop:
                 # 记录到 CostTracker
                 try:
                     from app.observability.cost_tracker import get_cost_tracker
-                    get_cost_tracker().record_tool(
+
+                    await get_cost_tracker().record_tool(
                         node=req.stage,
                         tool_name=call.tool_name,
                         latency_ms=result.latency_ms,
@@ -383,32 +390,70 @@ class ReactLoop:
 
 # ---------- 默认工具注册表工厂 ----------
 
+
 def create_default_tool_registry() -> ToolRegistry:
-    """创建默认工具注册表（web_search + browser 操作）
+    """创建默认工具注册表（web_search + browser 操作 + workspace 文件/命令工具）
 
     在 evidence_check 和 produce 节点中使用。
     """
     registry = ToolRegistry()
 
-    # web_search 工具
+    # ========== 网络搜索工具 ==========
     async def _web_search(args: dict[str, Any]) -> Any:
-        from app.tools.web_search import get_web_search
+        from app.tools import get_web_search
+
         query = args.get("query", "")
         top_k = args.get("top_k", 5)
         tool = get_web_search()
-        return await tool.search(query, top_k)
+        # 传递可选参数：language, time_range, country, session_key
+        kwargs: dict[str, Any] = {}
+        for key in ("language", "time_range", "country"):
+            if args.get(key):
+                kwargs[key] = args[key]
+        # 使用 meeting_id 作为 session_key，保证同一会议内搜索复用 Context
+        meeting_id = args.get("meeting_id", "")
+        if meeting_id:
+            kwargs["session_key"] = str(meeting_id)
+        return await tool.search(query, top_k, **kwargs)
 
     registry.register(
         "web_search",
-        "搜索网络获取证据。返回证据列表，每条包含 quote（引用文本）、url、source_tier（S/A/B/C/D）、signals（信号袋）。",
+        "搜索网络获取证据。返回证据列表，每条包含 quote（引用文本）、url、source_tier（S/A/B/C/D）、signals（信号袋）。"
+        "支持中文搜索（默认）和英文搜索，可按时间过滤结果。",
         _web_search,
-        {"query": "str（搜索查询）", "top_k": "int（最大结果数，默认5）"},
+        {
+            "query": "str（搜索查询）",
+            "top_k": "int（最大结果数，默认5）",
+            "language": "str（可选，搜索语言：zh-CN/en-US，默认zh-CN）",
+            "time_range": "str（可选，时间过滤：day/week/month/year）",
+        },
+    )
+
+    # web_fetch 工具：直接抓取指定 URL 内容
+    async def _web_fetch(args: dict[str, Any]) -> Any:
+        from app.tools import get_web_fetch
+
+        url = args.get("url", "")
+        max_chars = args.get("max_chars", 5000)
+        tool = get_web_fetch()
+        return await tool.fetch_url(url, max_chars)
+
+    registry.register(
+        "web_fetch",
+        "直接抓取指定 URL 的网页内容，无需先搜索。当你已知具体网址（如从搜索结果中获得）时使用此工具获取详细内容。"
+        "返回页面标题、正文内容、分块信息和来源评级。",
+        _web_fetch,
+        {
+            "url": "str（要抓取的完整URL，如 https://example.com/doc）",
+            "max_chars": "int（可选，最大返回字符数，默认5000）",
+        },
     )
 
     # ---------- Browser 操作工具 ----------
 
     async def _browser_goto(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         url = str(args.get("url", ""))
         meeting_id = str(args.get("meeting_id", ""))
@@ -423,6 +468,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_extract(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         max_length = int(args.get("max_length", 5000))
@@ -437,6 +483,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_click(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         selector = str(args.get("selector", ""))
@@ -451,6 +498,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_scroll(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         amount = int(args.get("amount", 500))
@@ -465,6 +513,7 @@ def create_default_tool_registry() -> ToolRegistry:
 
     async def _browser_evaluate(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
+
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         expression = str(args.get("expression", "document.title"))
@@ -476,5 +525,15 @@ def create_default_tool_registry() -> ToolRegistry:
         _browser_evaluate,
         {"meeting_id": "str（会议ID）", "expression": "str（JavaScript表达式）"},
     )
+
+    # ========== 工作区文件/命令工具 ==========
+    try:
+        from app.tools.workspace_tools import register_workspace_tools
+
+        register_workspace_tools(registry)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("orchestrator.react_loop").warning("工作区工具注册失败: %s", str(e)[:200])
 
     return registry

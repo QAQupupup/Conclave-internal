@@ -9,9 +9,9 @@ from app.agents.role_templates import (
 )
 
 
-def test_role_library_has_six_roles():
-    """角色库包含 6 个角色"""
-    assert len(ROLE_LIBRARY) == 6
+def test_role_library_has_seven_roles():
+    """角色库包含 7 个角色"""
+    assert len(ROLE_LIBRARY) == 7
     expected_ids = {
         "moderator",
         "product_architect",
@@ -19,6 +19,7 @@ def test_role_library_has_six_roles():
         "security_expert",
         "data_engineer",
         "ux_designer",
+        "marketing_expert",
     }
     assert set(ROLE_LIBRARY.keys()) == expected_ids
 
@@ -89,22 +90,13 @@ def test_get_borrow_prompt_returns_text():
 
 def test_get_borrow_prompt_backward_compatible():
     """security_expert 的 prompt 与迭代一硬编码内容一致（向后兼容）"""
-    expected = (
-        "你是安全专家。关注认证、授权、数据安全、注入防护。"
-        "决策偏置：先找安全漏洞，重风险。"
-    )
+    expected = "你是安全专家。关注认证、授权、数据安全、注入防护。决策偏置：先找安全漏洞，重风险。"
     assert get_borrow_prompt("security_expert") == expected
 
-    expected_data = (
-        "你是数据工程师。关注数据模型、存储、迁移、一致性。"
-        "决策偏置：重数据完整性。"
-    )
+    expected_data = "你是数据工程师。关注数据模型、存储、迁移、一致性。决策偏置：重数据完整性。"
     assert get_borrow_prompt("data_engineer") == expected_data
 
-    expected_ux = (
-        "你是用户体验设计师。关注交互流程、可用性、错误处理。"
-        "决策偏置：重用户视角。"
-    )
+    expected_ux = "你是用户体验设计师。关注交互流程、可用性、错误处理。决策偏置：重用户视角。"
     assert get_borrow_prompt("ux_designer") == expected_ux
 
 

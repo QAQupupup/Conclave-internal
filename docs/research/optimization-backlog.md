@@ -6,6 +6,8 @@
 >
 > 最后更新：2026-06-28
 
+> **历史注记** (2026-07-14): 本清单编写时 `nodes.py` 为单文件，现已拆分为 `nodes/` 包。行号引用已失效，请按函数名在对应节点文件中定位：P1-13 → `nodes/evidence_check.py` 和 `nodes/cross_team.py`；P1-14 → `nodes/produce.py`；P2-15 → `nodes/_helpers.py`；P2-16 → `nodes/intra_team.py`。
+
 ---
 
 ## 1. 优先级说明

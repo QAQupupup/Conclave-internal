@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "Cython>=3.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -18,19 +18,54 @@ dependencies = [
     "websockets>=12.0",
     "playwright>=1.40",
     "beautifulsoup4>=4.12",
+    "psycopg2-binary>=2.9",
+    "psutil>=5.9",
+    "jieba>=0.42",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "redis[hiredis]>=5.0",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
+include = ["app*", "conclave_core*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = ["scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",   # line too long (由格式化处理)
+    "B008",   # Do not perform function call in argument defaults (FastAPI Depends 需要)
+    "RUF001", # ambiguous-unicode-character-string (中文字符误报)
+    "RUF002", # ambiguous-unicode-character-docstring
+    "RUF003", # ambiguous-unicode-character-comment
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+# 渐进式严格模式：先放宽现有代码，后续逐步收紧
+check_untyped_defs = false
+disallow_untyped_defs = false
+no_implicit_optional = false

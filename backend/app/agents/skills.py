@@ -11,9 +11,9 @@ Skill 是可被 Agent 动态加载的知识/规范/偏好模块。
 
 Skill 文件位置：backend/app/skills/*.yaml
 """
+
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -27,19 +27,22 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 @dataclass
 class Skill:
     """一个 Skill 的结构化表示"""
-    id: str                           # 唯一ID，如 "ui_design_system"
-    name: str                         # 人类可读名称
-    description: str                  # 简介
+
+    id: str  # 唯一ID，如 "ui_design_system"
+    name: str  # 人类可读名称
+    description: str  # 简介
     version: int = 1
-    type: str = "guideline"           # guideline / constraint / style / checklist
-    applies_to: dict[str, Any] = field(default_factory=lambda: {
-        "stages": [],       # 生效阶段：["produce", "intra_team", ...]，空=全部
-        "deliverable_types": [],  # 生效产出类型：["deployable_service", ...]，空=全部
-        "roles": [],        # 生效角色：["engineer", "ux_designer", ...]，空=全部
-        "complexity": [],   # 生效复杂度：["simple", "standard", "full"]，空=全部
-    })
-    priority: int = 50                # 加载优先级（0-100），高优先级先注入
-    prompt: str = ""                  # 注入到 LLM prompt 的内容
+    type: str = "guideline"  # guideline / constraint / style / checklist
+    applies_to: dict[str, Any] = field(
+        default_factory=lambda: {
+            "stages": [],  # 生效阶段：["produce", "intra_team", ...]，空=全部
+            "deliverable_types": [],  # 生效产出类型：["deployable_service", ...]，空=全部
+            "roles": [],  # 生效角色：["engineer", "ux_designer", ...]，空=全部
+            "complexity": [],  # 生效复杂度：["simple", "standard", "full"]，空=全部
+        }
+    )
+    priority: int = 50  # 加载优先级（0-100），高优先级先注入
+    prompt: str = ""  # 注入到 LLM prompt 的内容
     tags: list[str] = field(default_factory=list)
 
     def matches(
@@ -57,9 +60,7 @@ class Skill:
             return False
         if a.get("roles") and role and role not in a["roles"]:
             return False
-        if a.get("complexity") and complexity and complexity not in a["complexity"]:
-            return False
-        return True
+        return not (a.get("complexity") and complexity and complexity not in a["complexity"])
 
 
 @lru_cache(maxsize=4)
@@ -70,23 +71,26 @@ def load_all_skills() -> list[Skill]:
         return skills
     for f in sorted(SKILLS_DIR.glob("*.yaml")):
         try:
-            with open(f, "r", encoding="utf-8") as fh:
+            with open(f, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh) or {}
             if not data.get("id") or not data.get("prompt"):
                 continue
-            skills.append(Skill(
-                id=data["id"],
-                name=data.get("name", data["id"]),
-                description=data.get("description", ""),
-                version=data.get("version", 1),
-                type=data.get("type", "guideline"),
-                applies_to=data.get("applies_to", {}),
-                priority=data.get("priority", 50),
-                prompt=data["prompt"],
-                tags=data.get("tags", []),
-            ))
+            skills.append(
+                Skill(
+                    id=data["id"],
+                    name=data.get("name", data["id"]),
+                    description=data.get("description", ""),
+                    version=data.get("version", 1),
+                    type=data.get("type", "guideline"),
+                    applies_to=data.get("applies_to", {}),
+                    priority=data.get("priority", 50),
+                    prompt=data["prompt"],
+                    tags=data.get("tags", []),
+                )
+            )
         except Exception as e:
             import logging
+
             logging.getLogger("skills").warning(f"加载 Skill 文件失败 {f.name}: {e}")
     # 按优先级排序
     skills.sort(key=lambda s: -s.priority)
@@ -102,7 +106,8 @@ def get_active_skills(
     """获取在给定上下文中激活的所有 Skill，按优先级排序"""
     all_skills = load_all_skills()
     return [
-        s for s in all_skills
+        s
+        for s in all_skills
         if s.matches(stage=stage, deliverable_type=deliverable_type, role=role, complexity=complexity)
     ]
 

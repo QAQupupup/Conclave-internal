@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
+import re as _re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 from app.orchestrator.runner import get_state
+from app.schemas.regression import BaselineRequest
 
 router = APIRouter(prefix="/regression", tags=["regression"])
 
@@ -22,29 +23,11 @@ _REGRESSION_DIR: Path = Path(__file__).resolve().parents[2] / "data" / "regressi
 # 旧版 _load_baseline 用 Path / f"{baseline_id}.json"，若 baseline_id 含 "../"
 # 可逃出 _REGRESSION_DIR 目录读取任意 JSON（如其他用户的数据）。
 # 限定 baseline_id 仅由 [a-zA-Z0-9-_] 构成，与创建时的 uuid4().hex[:8] 前缀一致。
-import re as _re
 _BASELINE_ID_PATTERN = _re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
-# ---------- 请求/响应模型 ----------
-
-class BaselineRequest(BaseModel):
-    """创建基线请求"""
-    meeting_id: str = Field(..., description="会议 ID")
-
-
-class BaselineSummary(BaseModel):
-    """基线摘要（列表项）"""
-    baseline_id: str
-    created_at: str
-    meeting_id: str
-    topic: str
-    stages_completed: int
-    claims_count: int
-    confidence_all_high: bool
-
-
 # ---------- 指标提取 ----------
+
 
 def _extract_metrics(state: Any) -> dict[str, Any]:
     """从会议状态提取完整指标集
@@ -87,9 +70,7 @@ def _extract_metrics(state: Any) -> dict[str, Any]:
         "stages_completed": stages_completed,
         "claims_count": len(state.claims),
         "conflicts_count": len(state.conflicts),
-        "evidence_count": sum(
-            len(es.get("assessments", [])) for es in state.evidence_set
-        ),
+        "evidence_count": sum(len(es.get("assessments", [])) for es in state.evidence_set),
         "adopted_claims_count": len(adopted_claims),
         "api_endpoints_count": len(api_endpoints),
         "openapi_length": len(openapi),
@@ -116,6 +97,7 @@ def _extract_metrics(state: Any) -> dict[str, Any]:
 
 
 # ---------- 存储操作 ----------
+
 
 def _ensure_dir() -> None:
     """确保基线数据目录存在"""
@@ -151,7 +133,7 @@ def _load_baseline(baseline_id: str) -> dict[str, Any] | None:
         raise HTTPException(status_code=400, detail="baseline_id 越界")
     if not filepath.exists():
         return None
-    return json.loads(filepath.read_text(encoding="utf-8"))
+    return json.loads(filepath.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
 def _list_baseline_files() -> list[Path]:
@@ -166,6 +148,7 @@ def _list_baseline_files() -> list[Path]:
 
 
 # ---------- 端点 ----------
+
 
 @router.post("/baseline")
 async def create_baseline(req: BaselineRequest) -> dict[str, Any]:
@@ -200,15 +183,17 @@ async def list_baselines() -> list[dict[str, Any]]:
     for filepath in _list_baseline_files():
         try:
             data = json.loads(filepath.read_text(encoding="utf-8"))
-            baselines.append({
-                "baseline_id": data["baseline_id"],
-                "created_at": data["created_at"],
-                "meeting_id": data["meeting_id"],
-                "topic": data.get("topic", ""),
-                "stages_completed": data.get("metrics", {}).get("stages_completed", 0),
-                "claims_count": data.get("metrics", {}).get("claims_count", 0),
-                "confidence_all_high": data.get("metrics", {}).get("confidence_all_high", False),
-            })
+            baselines.append(
+                {
+                    "baseline_id": data["baseline_id"],
+                    "created_at": data["created_at"],
+                    "meeting_id": data["meeting_id"],
+                    "topic": data.get("topic", ""),
+                    "stages_completed": data.get("metrics", {}).get("stages_completed", 0),
+                    "claims_count": data.get("metrics", {}).get("claims_count", 0),
+                    "confidence_all_high": data.get("metrics", {}).get("confidence_all_high", False),
+                }
+            )
         except (json.JSONDecodeError, KeyError):
             continue
     return baselines

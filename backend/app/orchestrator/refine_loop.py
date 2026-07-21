@@ -7,7 +7,6 @@
 # - 目标锚定：每轮 prompt 带原始任务 + 当前状态
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from app.agents.llm import get_llm
@@ -106,6 +105,7 @@ async def refine_python_code(
         if meeting_id and current_net_level == "L1":
             try:
                 from app.net_auth_manager import detect_network_failure, request_network_access
+
                 net_reason = detect_network_failure(stderr, exit_code, current_code)
                 if net_reason:
                     log_bus.info(

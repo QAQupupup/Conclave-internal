@@ -3,7 +3,8 @@
 > **审计日期**: 2026-07-11  
 > **审计范围**: 会议 mtg-d8f9a6dd704f, mtg-078103a9ddea  
 > **审计维度**: 功能完整性、过程可靠性、审计可追溯性、用户交互、成本效率、阶段流转正确性、Agent 质量  
-> **修复状态**: 全部已修复并编译验证通过
+> **修复状态**: 全部已修复并编译验证通过  
+> **历史注记** (2026-07-14): 本报告编写时 `nodes.py` 为单文件，现已拆分为 `nodes/` 包（`clarify.py`, `intra_team.py`, `cross_team.py`, `evidence_check.py`, `arbitrate.py`, `produce.py`, `borrow.py`, `_helpers.py`）。报告中所有 `nodes.py` 行号引用已失效，各修复点的函数名映射见对应节点文件。
 
 ---
 

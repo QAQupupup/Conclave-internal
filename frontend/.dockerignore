@@ -1,20 +1,6 @@
-# Git
-.git
-.gitignore
-
-# Node
 node_modules
 dist
-
-# Docker
-Dockerfile
-docker-compose.yml
-
-# IDE
-.vscode
-.idea
-.trae
-
-# OS
-Thumbs.db
+.git
+app.legacy.html
+*.log
 .DS_Store

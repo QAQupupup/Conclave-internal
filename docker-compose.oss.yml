@@ -1,0 +1,225 @@
+# ===== Conclave OSS Docker Compose =====
+# 完整部署：前端(nginx) + 后端(FastAPI) + 自动沙箱准备
+#
+# 启动: docker compose up -d
+# 日志: docker compose logs -f backend
+# 停止: docker compose down
+#
+# 项目命名空间：开源版固定为 conclave-oss，避免与开发版(conclave-dev)冲突
+name: conclave-oss
+#
+# 沙箱架构（Sibling Containers）:
+#   后端容器以 root 启动 entrypoint.sh → 自动配置 Docker socket 权限
+#   → 预拉取标准沙箱镜像 + 构建数据科学镜像
+#   → 降级为 uid 1000 运行 uvicorn
+#   → 运行时通过 /var/run/docker.sock 创建临时 sibling 容器执行用户代码
+#   工作区通过 named volume 在后端和沙箱容器间共享
+#
+# 沙箱自动准备：
+#   1. entrypoint.sh 检测 Docker socket 权限，自动将 app 用户加入宿主 docker 组
+#   2. 自动拉取 python:3.12-slim 沙箱基础镜像（使用国内镜像源）
+#   3. 自动构建 conclave-python-datascience 镜像（预装 pandas/numpy/sklearn 等）
+#   4. 后端启动后 sandbox.py 检测 Docker 可用性，沙箱自动就绪
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: conclave-oss-backend
+    ports:
+      - "8001:8000"
+      - "6081:6080"   # noVNC Web 远程操作端口（CAPTCHA 值守模式）
+    # [v4 安全加固] entrypoint 以 root 启动完成特权操作后降权到 uid 1000
+    # 不再在 compose 中写死 user: "1000:1000"，而是由 entrypoint.sh 处理：
+    #   1. root: 配置 docker.sock 权限、预拉取镜像、chown 目录
+    #   2. 降权: su 到 app(1000:1000) 运行 uvicorn
+    # 运行时 cap_drop + security_opt 仍限制进程能力
+    read_only: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE  # 处理 volume 权限
+      - SYS_ADMIN     # Xvfb 有头浏览器需要（值守模式）
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined  # docker CLI + Playwright + Xvfb 需要 fork/exec 权限
+    shm_size: "1g"  # Chromium + Xvfb 需要较大共享内存
+    volumes:
+      # Docker socket：让后端能创建沙箱 sibling 容器
+      # entrypoint.sh 启动时自动配置权限，使 uid 1000 能访问
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 工作区命名卷：后端和沙箱容器共享
+      - conclave-oss-workspace:/workspace
+      # 数据库持久化
+      - conclave-oss-data:/app/data
+      # 挂载数据科学沙箱 Dockerfile（entrypoint 构建镜像需要）
+      - ./backend/docker/sandbox-datascience:/app/docker/sandbox-datascience:ro
+    tmpfs:
+      - /tmp:size=100M,mode=1777
+      - /var/tmp:size=50M,mode=1777
+    env_file:
+      - .env
+    environment:
+      - CONCLAVE_WORKSPACE_DIR=/workspace
+      - CONCLAVE_DB_PATH=/app/data/conclave.db
+      - CONCLAVE_SECRET_KEY=${CONCLAVE_SECRET_KEY:-}
+      - CONCLAVE_SANDBOX_MODE=auto
+      - CONCLAVE_QDRANT_URL=http://qdrant:6333
+      - DATABASE_URL=postgresql+asyncpg://conclave:conclave_dev@postgres:5432/conclave
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - CONCLAVE_API_TOKEN=${CONCLAVE_API_TOKEN:-}
+      - CONCLAVE_LLM_TIMEOUT=${CONCLAVE_LLM_TIMEOUT:-120.0}
+      - CONCLAVE_PRODUCE_TIMEOUT=${CONCLAVE_PRODUCE_TIMEOUT:-1200.0}
+      # [v4] Docker 监控默认启用（entrypoint 会自动配置好权限）
+      # 如果在无 Docker 的环境运行，可设 CONCLAVE_DOCKER_DISABLED=true
+      - CONCLAVE_DOCKER_DISABLED=${CONCLAVE_DOCKER_DISABLED:-false}
+      # [修复] 沙箱配置：工作区卷名
+      - CONCLAVE_WORKSPACE_VOLUME=conclave-oss-workspace
+    dns:
+      - 8.8.8.8
+      - 223.5.5.5
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s  # 首次启动需拉取镜像，给 60s 宽限期
+    networks:
+      - conclave-internal
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: conclave-oss-frontend
+    ports:
+      - "5174:80"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /var/cache/nginx:size=50M
+      - /var/run:size=10M
+      - /tmp:size=20M
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - conclave-internal
+
+  # ============================================================
+  # Qdrant 向量数据库（用于 RAG 文档检索）
+  # ============================================================
+  qdrant:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.qdrant
+    container_name: conclave-oss-qdrant
+    restart: unless-stopped
+    ports:
+      - "6335:6333"
+      - "6336:6334"
+    volumes:
+      - conclave-oss-qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - conclave-internal
+
+  # ============================================================
+  # PostgreSQL 16 + pgvector
+  # ============================================================
+  postgres:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/pgvector/pgvector:pg16
+    container_name: conclave-oss-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: conclave
+      POSTGRES_USER: conclave
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-conclave_dev}
+    volumes:
+      - conclave-oss-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conclave -d conclave || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - conclave-internal
+
+  # ============================================================
+  # Redis（会话缓存 / 限流 / 任务队列）
+  # ============================================================
+  redis:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:7-alpine
+    container_name: conclave-oss-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - conclave-oss-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - conclave-internal
+
+volumes:
+  conclave-oss-workspace:
+    driver: local
+  conclave-oss-data:
+    driver: local
+  conclave-oss-qdrant-data:
+    driver: local
+  conclave-oss-pg-data:
+    driver: local
+  conclave-oss-redis-data:
+    driver: local
+
+networks:
+  conclave-internal:
+    driver: bridge

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
-
 
 # ---------- stats 端点测试 ----------
+
 
 def test_stats_endpoint(client):
     """GET /stats 返回会议运行统计"""
@@ -14,8 +13,8 @@ def test_stats_endpoint(client):
     meeting_id = resp.json()["meeting_id"]
 
     # 运行会议
-    from app.orchestrator import runner as runner_mod
     from app.models import MeetingStatus
+    from app.orchestrator import runner as runner_mod
 
     state = runner_mod.get_state(meeting_id)
     assert state is not None
@@ -23,6 +22,7 @@ def test_stats_endpoint(client):
         state.status = MeetingStatus.RUNNING
         state.paused_snapshot = None
     from app.orchestrator.runner import Runner
+
     state = asyncio.run(Runner().run(state))
     runner_mod.set_state(state)
 
@@ -66,8 +66,8 @@ def test_stats_evidence_source_distribution(client):
     meeting_id = resp.json()["meeting_id"]
 
     # 运行会议
+    from app.models import MeetingStatus
     from app.orchestrator import runner as runner_mod
-    from app.models import MeetingStatus, MeetingState, Stage
     from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)
@@ -87,6 +87,7 @@ def test_stats_evidence_source_distribution(client):
 
 # ---------- MockLLM trace 记录测试 ----------
 
+
 def test_mock_llm_records_trace(client, mock_llm):
     """MockLLM 被调用后 trace 不记录（只有 RealLLM 记录），但流程正常完成"""
     # 不设置任何响应，MockLLM 返回默认 {"result": "mock"}
@@ -97,8 +98,8 @@ def test_mock_llm_records_trace(client, mock_llm):
     meeting_id = resp.json()["meeting_id"]
 
     # 运行会议（MockLLM 返回不匹配的 schema，流程应通过降级完成）
-    from app.orchestrator import runner as runner_mod
     from app.models import MeetingStatus
+    from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)
@@ -113,9 +114,9 @@ def test_mock_llm_records_trace(client, mock_llm):
 
     # MockLLM 至少被调用过
     assert len(mock_llm.call_log) > 0
-    # 第一次调用的 schema_hint 应该是 clarify
-    first_call = mock_llm.call_log[0]
-    assert "clarify" in first_call[1] or first_call[1] == "clarify"
+    # 至少有一次调用的 schema_hint 包含 "clarify"（意图分类后进入 clarify 阶段）
+    schema_hints = [call[1] for call in mock_llm.call_log]
+    assert any("clarify" in hint for hint in schema_hints), f"期望 clarify 出现在调用中，实际: {schema_hints}"
 
 
 def test_stats_endpoint_fields_complete(client):
@@ -123,8 +124,8 @@ def test_stats_endpoint_fields_complete(client):
     resp = client.post("/meetings", json={"topic": "字段完整性测试"})
     meeting_id = resp.json()["meeting_id"]
 
-    from app.orchestrator import runner as runner_mod
     from app.models import MeetingStatus
+    from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)

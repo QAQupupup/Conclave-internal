@@ -14,8 +14,8 @@ from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
 from app.routers import meetings as meetings_mod
 
-
 # ---------- fixtures ----------
+
 
 @pytest.fixture()
 def client():
@@ -55,12 +55,13 @@ def _run_to_done(meeting_id: str):
 
 # ---------- 事件总线单元测试 ----------
 
+
 def test_event_seq_auto_increment():
     """seq 自动递增：发布3个事件，验证 seq 为 0,1,2"""
     meeting_id = "mtg-seq-test"
     for i in range(3):
         asyncio.run(bus.publish(make_event("test.event", meeting_id, {"index": i})))
-    events = bus.history(meeting_id)
+    events = bus.get_events(meeting_id)
     assert len(events) == 3
     assert [e.seq for e in events] == [0, 1, 2]
 
@@ -70,7 +71,7 @@ def test_replay_from_seq():
     meeting_id = "mtg-replay-test"
     for i in range(5):
         asyncio.run(bus.publish(make_event("test.event", meeting_id, {"index": i})))
-    new_events = bus.replay(meeting_id, from_seq=2)
+    new_events = bus.replay_sync(meeting_id, from_seq=2)
     assert len(new_events) == 2
     assert [e.seq for e in new_events] == [3, 4]
 
@@ -78,15 +79,16 @@ def test_replay_from_seq():
 def test_last_seq():
     """last_seq：无事件返回0，有事件返回最后一条的 seq"""
     # 无事件
-    assert bus.last_seq("mtg-empty") == 0
+    assert bus.last_seq_sync("mtg-empty") == 0
     # 有事件
     meeting_id = "mtg-lastseq-test"
     for i in range(3):
         asyncio.run(bus.publish(make_event("test.event", meeting_id, {"index": i})))
-    assert bus.last_seq(meeting_id) == 2
+    assert bus.last_seq_sync(meeting_id) == 2
 
 
 # ---------- GET /meetings/{id}/events 端点测试 ----------
+
 
 def test_events_endpoint(client):
     """GET /events：创建会议 → run → 返回事件列表"""
@@ -143,13 +145,14 @@ def test_events_not_found(client):
 
 # ---------- WebSocket from_seq 增量回放测试 ----------
 
+
 def test_ws_incremental_replay(client):
     """WS 增量回放：带 from_seq 参数，只推增量事件，不推 snapshot"""
     resp = client.post("/meetings", json={"topic": "WS 增量回放测试"})
     meeting_id = resp.json()["meeting_id"]
     _run_to_done(meeting_id)
 
-    last_seq = bus.last_seq(meeting_id)
+    last_seq = bus.last_seq_sync(meeting_id)
     assert last_seq > 2  # 确保有足够事件做增量回放
 
     # 带 from_seq=2 连接，只推 seq > 2 的事件
@@ -179,14 +182,14 @@ def test_ws_incremental_replay(client):
 
 
 def test_ws_full_replay_default(client):
-    """WS 完整回放：不带 from_seq，推 snapshot + 全部事件（验证现有行为不变）"""
+    """WS 完整回放：不带 from_seq，推 snapshot + replay.done（历史事件已聚合在快照中）"""
     resp = client.post("/meetings", json={"topic": "WS 完整回放测试"})
     meeting_id = resp.json()["meeting_id"]
     _run_to_done(meeting_id)
 
-    last_seq = bus.last_seq(meeting_id)
+    last_seq = bus.last_seq_sync(meeting_id)
 
-    # 不带 from_seq 连接（默认 0），应推 snapshot + 全部历史事件
+    # 不带 from_seq 连接（默认 0），应推 snapshot，随后直接 replay.done
     with client.websocket_connect(f"/ws/meetings/{meeting_id}") as ws:
         messages: list[dict] = []
         for _ in range(100):
@@ -200,12 +203,13 @@ def test_ws_full_replay_default(client):
     assert messages[0]["type"] == "snapshot"
     assert messages[0]["meeting_id"] == meeting_id
 
+    # 完整回放跳过历史事件，避免与快照重复
+    types = [m["type"] for m in messages]
+    assert "stage.changed" not in types
+    assert "agent.spoke" not in types
+
     # replay.done 应包含 from_seq=0 和 last_seq
     replay_done = messages[-1]
     assert replay_done["type"] == "replay.done"
     assert replay_done["from_seq"] == 0
     assert replay_done["last_seq"] == last_seq
-
-    # 应包含历史事件
-    types = [m["type"] for m in messages]
-    assert "stage.changed" in types or "agent.spoke" in types

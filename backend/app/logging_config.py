@@ -22,6 +22,7 @@ class TraceContextFilter(logging.Filter):
         record.request_id = ctx["request_id"]
         record.meeting_id = ctx["meeting_id"]
         record.runner_session_id = ctx["runner_session_id"]
+        record.agent_role = ctx.get("agent_role", "")
         return True
 
 
@@ -36,9 +37,9 @@ def setup_logging(level: str | None = None) -> None:
     log_level = level or os.environ.get("CONCLAVE_LOG_LEVEL", "INFO")
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
 
-    # 统一格式：带追踪 ID（含 runner_session_id）
+    # 统一格式：带追踪 ID（含 runner_session_id 和 agent_role）
     formatter = logging.Formatter(
-        fmt="%(asctime)s [%(levelname)s] [%(request_id)s] [%(meeting_id)s] [%(runner_session_id)s] %(name)s: %(message)s",
+        fmt="%(asctime)s [%(levelname)s] [%(request_id)s] [%(meeting_id)s] [%(runner_session_id)s] [%(agent_role)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -51,8 +52,9 @@ def setup_logging(level: str | None = None) -> None:
     root = logging.getLogger()
     root.setLevel(numeric_level)
     # 避免重复 handler（热重载时可能多次调用）
-    if not any(isinstance(h, logging.StreamHandler) and isinstance(h.formatter, logging.Formatter)
-               for h in root.handlers):
+    if not any(
+        isinstance(h, logging.StreamHandler) and isinstance(h.formatter, logging.Formatter) for h in root.handlers
+    ):
         root.addHandler(handler)
     else:
         # 更新已有 handler 的 formatter（确保追踪格式生效）

@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工业级服务生成升级 — 回顾报告</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --zinc-50: #fafafa;
+    --zinc-100: #f4f4f5;
+    --zinc-200: #e4e4e7;
+    --zinc-300: #d4d4d8;
+    --zinc-400: #a1a1aa;
+    --zinc-500: #71717a;
+    --zinc-600: #52525b;
+    --zinc-700: #3f3f46;
+    --zinc-800: #27272a;
+    --zinc-900: #18181b;
+    --zinc-950: #09090b;
+
+    --blue-50: #eff6ff;
+    --blue-100: #dbeafe;
+    --blue-500: #3b82f6;
+    --blue-600: #2563eb;
+    --blue-700: #1d4ed8;
+
+    --green-50: #f0fdf4;
+    --green-100: #dcfce7;
+    --green-500: #22c55e;
+    --green-600: #16a34a;
+    --green-700: #15803d;
+
+    --amber-50: #fffbeb;
+    --amber-100: #fef3c7;
+    --amber-500: #f59e0b;
+    --amber-600: #d97706;
+
+    --violet-50: #f5f3ff;
+    --violet-100: #ede9fe;
+    --violet-500: #8b5cf6;
+    --violet-600: #7c3aed;
+
+    --rose-50: #fff1f2;
+    --rose-100: #ffe4e6;
+    --rose-500: #f43f5e;
+    --rose-600: #e11d48;
+
+    --radius: 8px;
+    --radius-sm: 6px;
+    --radius-lg: 12px;
+    --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+    --shadow: 0 1px 3px 0 rgba(0,0,0,0.08), 0 1px 2px -1px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.05);
+  }
+
+  html { font-size: 15px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--zinc-50);
+    color: var(--zinc-900);
+    line-height: 1.65;
+    padding: 0;
+  }
+
+  /* ===== Layout ===== */
+  .page-wrapper {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* ===== Header ===== */
+  .report-header {
+    margin-bottom: 40px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--zinc-200);
+  }
+  .report-header .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--zinc-500);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    margin-bottom: 16px;
+  }
+  .report-header .breadcrumb .sep { color: var(--zinc-300); }
+  .report-header h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--zinc-900);
+    line-height: 1.25;
+    margin-bottom: 16px;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  /* ===== Badges ===== */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+  .badge .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .badge-default { background: var(--zinc-100); color: var(--zinc-700); border-color: var(--zinc-200); }
+  .badge-blue { background: var(--blue-50); color: var(--blue-700); border-color: var(--blue-100); }
+  .badge-green { background: var(--green-50); color: var(--green-700); border-color: var(--green-100); }
+  .badge-amber { background: var(--amber-50); color: var(--amber-600); border-color: var(--amber-100); }
+  .badge-violet { background: var(--violet-50); color: var(--violet-600); border-color: var(--violet-100); }
+  .badge-rose { background: var(--rose-50); color: var(--rose-600); border-color: var(--rose-100); }
+
+  /* ===== Sections ===== */
+  section { margin-bottom: 32px; }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    letter-spacing: -0.01em;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 18px;
+    background: var(--zinc-900);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ===== Cards ===== */
+  .card {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 20px 24px;
+  }
+  .card + .card { margin-top: 12px; }
+
+  .card p { color: var(--zinc-600); font-size: 14px; line-height: 1.7; }
+  .card p + p { margin-top: 10px; }
+
+  /* ===== Overview KPI grid ===== */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .kpi-item {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
+  }
+  .kpi-label {
+    font-size: 12px;
+    color: var(--zinc-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .kpi-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--zinc-900);
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  .kpi-sub {
+    font-size: 12px;
+    color: var(--zinc-500);
+    margin-top: 4px;
+  }
+
+  /* ===== Lists ===== */
+  .bullet-list { list-style: none; padding: 0; }
+  .bullet-list li {
+    position: relative;
+    padding-left: 22px;
+    font-size: 14px;
+    color: var(--zinc-700);
+    line-height: 1.7;
+  }
+  .bullet-list li + li { margin-top: 6px; }
+  .bullet-list li::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 11px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--zinc-400);
+  }
+
+  /* ===== Code / filepath ===== */
+  code, .filepath {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Courier New", monospace;
+    font-size: 12.5px;
+    background: var(--zinc-100);
+    color: var(--zinc-800);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--zinc-200);
+    word-break: break-all;
+  }
+  .filepath-new {
+    background: var(--green-50);
+    color: var(--green-700);
+    border-color: var(--green-100);
+  }
+
+  /* ===== Pipeline diagram ===== */
+  .pipeline-wrap {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+    overflow-x: auto;
+  }
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: 720px;
+  }
+  .phase-node {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 14px 8px 12px;
+    background: var(--zinc-50);
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius-sm);
+    margin: 0 4px;
+    transition: all 0.2s;
+  }
+  .phase-node:first-child { margin-left: 0; }
+  .phase-node:last-child { margin-right: 0; }
+  .phase-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+  }
+  .phase-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    letter-spacing: 0.02em;
+    margin-bottom: 4px;
+  }
+  .phase-desc {
+    font-size: 11px;
+    color: var(--zinc-500);
+    line-height: 1.4;
+  }
+  .phase-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--zinc-300);
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+  /* Phase colors */
+  .phase-1 .phase-num { background: var(--blue-600); }
+  .phase-1 { border-color: var(--blue-100); background: var(--blue-50); }
+  .phase-2 .phase-num { background: var(--violet-600); }
+  .phase-2 { border-color: var(--violet-100); background: var(--violet-50); }
+  .phase-3 .phase-num { background: var(--green-600); }
+  .phase-3 { border-color: var(--green-100); background: var(--green-50); }
+  .phase-4 .phase-num { background: var(--amber-600); }
+  .phase-4 { border-color: var(--amber-100); background: var(--amber-50); }
+  .phase-5 .phase-num { background: var(--rose-600); }
+  .phase-5 { border-color: var(--rose-100); background: var(--rose-50); }
+  .phase-6 .phase-num { background: #0891b2; } /* cyan */
+  .phase-6 { border-color: #cffafe; background: #ecfeff; }
+  .phase-7 .phase-num { background: var(--zinc-700); }
+  .phase-7 { border-color: var(--zinc-200); background: var(--zinc-100); }
+
+  /* ===== Phase detail list ===== */
+  .phase-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .phase-detail {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .phase-detail .pd-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .phase-detail .pd-body { flex: 1; min-width: 0; }
+  .phase-detail .pd-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 2px;
+  }
+  .phase-detail .pd-desc {
+    font-size: 12.5px;
+    color: var(--zinc-600);
+    line-height: 1.55;
+  }
+
+  /* ===== Table ===== */
+  .table-wrap {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  thead { background: var(--zinc-50); }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--zinc-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--zinc-200);
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--zinc-100);
+    color: var(--zinc-700);
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.change-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .add { color: var(--green-700); font-weight: 600; }
+  .del { color: var(--rose-600); font-weight: 600; }
+  .change-bar {
+    display: inline-block;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--zinc-200);
+    width: 80px;
+    margin-left: 8px;
+    position: relative;
+    vertical-align: middle;
+    overflow: hidden;
+  }
+  .change-bar .add-bar {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--green-500);
+  }
+  tfoot td {
+    background: var(--zinc-50);
+    font-weight: 600;
+    color: var(--zinc-900);
+    border-top: 1px solid var(--zinc-200);
+    font-size: 13px;
+  }
+
+  /* ===== Two column for backend/frontend ===== */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 720px) {
+    .two-col { grid-template-columns: 1fr; }
+    .report-header h1 { font-size: 26px; }
+    .page-wrapper { padding: 28px 16px 60px; }
+  }
+
+  .sub-card {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    box-shadow: var(--shadow-sm);
+  }
+  .sub-card h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sub-card h3 .tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .tag-backend { background: var(--blue-50); color: var(--blue-700); border: 1px solid var(--blue-100); }
+  .tag-frontend { background: var(--violet-50); color: var(--violet-600); border: 1px solid var(--violet-100); }
+
+  /* ===== Results grid ===== */
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .result-item {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    padding: 18px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    gap: 12px;
+  }
+  .result-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--green-50);
+    color: var(--green-700);
+    border: 1px solid var(--green-100);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .result-body .r-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 4px;
+  }
+  .result-body .r-desc {
+    font-size: 12.5px;
+    color: var(--zinc-600);
+    line-height: 1.55;
+  }
+
+  /* ===== Future list ===== */
+  .future-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .future-item {
+    background: #fff;
+    border: 1px dashed var(--zinc-300);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .future-item .fi-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--zinc-100);
+    color: var(--zinc-600);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .future-item .fi-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--zinc-900);
+    margin-bottom: 2px;
+  }
+  .future-item .fi-desc {
+    font-size: 12px;
+    color: var(--zinc-500);
+    line-height: 1.5;
+  }
+
+  /* ===== File list in cards ===== */
+  .file-list { list-style: none; padding: 0; margin-top: 10px; }
+  .file-list li {
+    font-size: 12.5px;
+    padding: 6px 0;
+    border-top: 1px dashed var(--zinc-100);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    color: var(--zinc-700);
+  }
+  .file-list li:first-child { border-top: none; padding-top: 4px; }
+  .file-list .fl-meta {
+    font-size: 11px;
+    color: var(--zinc-400);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ===== Footer ===== */
+  .report-footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--zinc-200);
+    font-size: 12px;
+    color: var(--zinc-400);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- ===== HEADER ===== -->
+  <header class="report-header">
+    <div class="breadcrumb">
+      <span>Retrospectives</span>
+      <span class="sep">/</span>
+      <span>2026 Q3</span>
+      <span class="sep">/</span>
+      <span>Service Generation</span>
+    </div>
+    <h1>工业级服务生成升级 — 回顾报告</h1>
+    <div class="meta-row">
+      <span class="badge badge-default">
+        <span class="dot" style="color: var(--zinc-500);"></span>
+        2026-07-18
+      </span>
+      <span class="badge badge-blue">
+        <span class="dot"></span>
+        Commit Range: 87cf36a → 984046a
+      </span>
+      <span class="badge badge-green">
+        <span class="dot"></span>
+        已完成 · Shipped
+      </span>
+      <span class="badge badge-violet">
+        <span class="dot"></span>
+        Backend + Frontend
+      </span>
+    </div>
+  </header>
+
+  <!-- ===== OVERVIEW ===== -->
+  <section>
+    <h2 class="section-title">概览 Overview</h2>
+    <div class="card">
+      <p>
+        本次升级将服务生成流程从单次大模型调用重构为<strong>7 阶段分阶段生成管线</strong>，
+        彻底解决了大型项目输出截断问题；同时前端引入 shadcn 风格组件体系与 VSCode 风格代码查看器，
+        显著提升了生成服务的可浏览性与专业感。
+      </p>
+      <div class="kpi-grid">
+        <div class="kpi-item">
+          <div class="kpi-label">新增管线阶段</div>
+          <div class="kpi-value">7<span style="font-size:14px;font-weight:500;color:var(--zinc-500);margin-left:4px;">Phases</span></div>
+          <div class="kpi-sub">PLAN → INTEGRATE</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">代码变更</div>
+          <div class="kpi-value">+1737<span style="font-size:14px;font-weight:500;color:var(--rose-500);margin-left:6px;">-37</span></div>
+          <div class="kpi-sub">跨 10 个文件</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">新增核心文件</div>
+          <div class="kpi-value">2<span style="font-size:14px;font-weight:500;color:var(--zinc-500);margin-left:4px;">Files</span></div>
+          <div class="kpi-sub">phased_generation.py · ServiceViewer.tsx</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">兼容性</div>
+          <div class="kpi-value" style="color: var(--green-700);">100%</div>
+          <div class="kpi-sub">失败自动回退至单调用模式</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== PROBLEM STATEMENT ===== -->
+  <section>
+    <h2 class="section-title">问题背景 Problem Statement</h2>
+    <div class="card">
+      <ul class="bullet-list">
+        <li>
+          <strong>输出截断风险</strong>：大型项目（20+ 文件）依赖单次 LLM 调用生成全部代码，
+          受上下文窗口限制，常出现尾部文件缺失、代码不完整等问题。
+        </li>
+        <li>
+          <strong>代码浏览体验差</strong>：通用代码查看器缺乏文件树、标签页与语法高亮，
+          用户难以快速导航并审阅生成的服务结构。
+        </li>
+        <li>
+          <strong>生成过程黑盒</strong>：用户在生成期间无任何进度反馈，无法判断当前阶段、
+          剩余工作量，也无法定位出错环节。
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===== ARCHITECTURE CHANGES ===== -->
+  <section>
+    <h2 class="section-title">架构变更 Architecture Changes</h2>
+
+    <!-- Pipeline diagram -->
+    <div class="pipeline-wrap">
+      <div style="font-size:12px;color:var(--zinc-500);margin-bottom:14px;letter-spacing:0.04em;text-transform:uppercase;font-weight:500;">
+        7-Phase Generation Pipeline
+      </div>
+      <div class="pipeline">
+        <div class="phase-node phase-1">
+          <div class="phase-num">1</div>
+          <div class="phase-name">PLAN</div>
+          <div class="phase-desc">架构规划<br/>复杂度评估</div>
+        </div>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-2">
+          <div class="phase-num">2</div>
+          <div class="phase-name">SPECS</div>
+          <div class="phase-desc">PRD + OpenAPI<br/>Spec-First</div>
+        </div>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-3">
+          <div class="phase-num">3</div>
+          <div class="phase-name">TESTS</div>
+          <div class="phase-desc">测试骨架<br/>TDD 先行</div>
+        </div>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-4">
+          <div class="phase-num">4</div>
+          <div class="phase-name">SCAFFOLD</div>
+          <div class="phase-desc">项目脚手架<br/>config / main</div>
+        </div>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-5">
+          <div class="phase-num">5</div>
+          <div class="phase-name">MODULES</div>
+          <div class="phase-desc">逐模块后端<br/>schema→router</div>
+        </div>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-6">
+          <div class="phase-num">6</div>
+          <div class="phase-name">FRONTEND</div>
+          <div class="phase-desc">逐模块前端<br/>React 页面</div>
+        </div>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node phase-7">
+          <div class="phase-num">7</div>
+          <div class="phase-name">INTEGRATE</div>
+          <div class="phase-desc">路由注册<br/>docker-compose</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="height:12px;"></div>
+
+    <div class="two-col">
+      <div class="sub-card">
+        <h3><span class="tag tag-backend">Backend</span> 后端改造</h3>
+        <ul class="bullet-list">
+          <li>7 阶段管线：每阶段生成 2–5 个文件，避免单次 token 溢出</li>
+          <li>子阶段级别的进度事件（SSE）实时推送</li>
+          <li>分阶段失败自动降级为单调用模式（向后兼容）</li>
+          <li>复杂度评估（micro / small / medium / large）驱动资源分配</li>
+        </ul>
+        <ul class="file-list">
+          <li>
+            <span><code class="filepath filepath-new">phased_generation.py</code></span>
+            <span class="fl-meta">新增 · ~620 行</span>
+          </li>
+          <li>
+            <span><code class="filepath">nodes/produce.py</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">agents/schemas.py</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">report_layout.py</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="sub-card">
+        <h3><span class="tag tag-frontend">Frontend</span> 前端改造</h3>
+        <ul class="bullet-list">
+          <li><strong>ServiceViewer</strong>：VSCode 风格 IDE 面板（文件树 + 标签页 + 语法高亮）</li>
+          <li><strong>PhasedProgress</strong>：7 阶段管线可视化，实时进度指示</li>
+          <li>shadcn 风格 CSS 设计系统（按钮 / 徽章 / 卡片 / 标签 / 进度条等 ~250 行）</li>
+          <li>升级 Block 渲染器：CodeBlock、ApiTableBlock、KpiGridBlock、TestGroupsBlock、FileTreeBlock</li>
+        </ul>
+        <ul class="file-list">
+          <li>
+            <span><code class="filepath filepath-new">ServiceViewer.tsx</code></span>
+            <span class="fl-meta">新增 · ~340 行</span>
+          </li>
+          <li>
+            <span><code class="filepath filepath-new">PhasedProgress.tsx</code></span>
+            <span class="fl-meta">新增 · ~185 行</span>
+          </li>
+          <li>
+            <span><code class="filepath">views/Report.tsx</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">views/Meeting.tsx</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">state/AppContext.tsx</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+          <li>
+            <span><code class="filepath">styles/global.css</code></span>
+            <span class="fl-meta">修改</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== TECHNICAL DETAILS ===== -->
+  <section>
+    <h2 class="section-title">技术细节 Technical Details</h2>
+    <div class="phase-detail-grid">
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--blue-600);">1</div>
+        <div class="pd-body">
+          <div class="pd-title">PLAN · 架构规划</div>
+          <div class="pd-desc">基于需求进行复杂度分级（micro / small / medium / large），输出模块拆分、技术选型与文件清单。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--violet-600);">2</div>
+        <div class="pd-body">
+          <div class="pd-title">SPECS · 规格先行</div>
+          <div class="pd-desc">生成 PRD 与 OpenAPI 规范文档，为后续模块生成提供契约约束。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--green-600);">3</div>
+        <div class="pd-body">
+          <div class="pd-title">TESTS · 测试骨架</div>
+          <div class="pd-desc">TDD 方式先行生成测试用例骨架，锁定模块接口与预期行为。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--amber-600);">4</div>
+        <div class="pd-body">
+          <div class="pd-title">SCAFFOLD · 项目脚手架</div>
+          <div class="pd-desc">生成配置文件、<code style="font-size:11px;">main.py</code>、数据库基类等项目骨架。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--rose-600);">5</div>
+        <div class="pd-body">
+          <div class="pd-title">MODULES · 模块代码</div>
+          <div class="pd-desc">逐模块生成后端代码，按 schemas → models → dao → services → routers 顺序。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:#0891b2;">6</div>
+        <div class="pd-body">
+          <div class="pd-title">FRONTEND · 前端模块</div>
+          <div class="pd-desc">逐模块生成 React 前端页面与组件，与后端契约对齐。</div>
+        </div>
+      </div>
+      <div class="phase-detail">
+        <div class="pd-num" style="background:var(--zinc-700);">7</div>
+        <div class="pd-body">
+          <div class="pd-title">INTEGRATE · 集成装配</div>
+          <div class="pd-desc">注册路由、生成 <code style="font-size:11px;">docker-compose.yml</code>、<code style="font-size:11px;">__init__.py</code> 等集成文件。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== FILE CHANGES TABLE ===== -->
+  <section>
+    <h2 class="section-title">文件变更 Files Changed</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:42%;">文件路径</th>
+            <th>类型</th>
+            <th>层</th>
+            <th style="text-align:right;">+ / −</th>
+            <th style="width:120px;">变更量</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code class="filepath filepath-new">backend/app/orchestrator/phased_generation.py</code></td>
+            <td><span class="badge badge-green" style="padding:1px 8px;font-size:11px;">新增</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+620</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:95%;background:var(--green-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">backend/app/orchestrator/nodes/produce.py</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+120</span> <span class="del">−15</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:20%;"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">backend/app/agents/schemas.py</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+45</span> <span class="del">−5</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:8%;"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">backend/app/report_layout.py</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-blue" style="padding:1px 8px;font-size:11px;">Backend</span></td>
+            <td class="change-cell"><span class="add">+30</span> <span class="del">−2</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:5%;"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath filepath-new">frontend/src/components/ServiceViewer.tsx</code></td>
+            <td><span class="badge badge-green" style="padding:1px 8px;font-size:11px;">新增</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+340</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:52%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath filepath-new">frontend/src/components/PhasedProgress.tsx</code></td>
+            <td><span class="badge badge-green" style="padding:1px 8px;font-size:11px;">新增</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+185</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:28%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/views/Report.tsx</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+140</span> <span class="del">−8</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:22%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/views/Meeting.tsx</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+95</span> <span class="del">−3</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:15%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/state/AppContext.tsx</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+82</span> <span class="del">−4</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:13%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+          <tr>
+            <td><code class="filepath">frontend/src/styles/global.css</code></td>
+            <td><span class="badge badge-default" style="padding:1px 8px;font-size:11px;">修改</span></td>
+            <td><span class="badge badge-violet" style="padding:1px 8px;font-size:11px;">Frontend</span></td>
+            <td class="change-cell"><span class="add">+80</span></td>
+            <td>
+              <span class="change-bar"><span class="add-bar" style="width:12%;background:var(--violet-500);"></span></span>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3">合计（10 个文件）</td>
+            <td class="change-cell"><span class="add">+1737</span> <span class="del">−37</span></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== RESULTS ===== -->
+  <section>
+    <h2 class="section-title">结果与影响 Results &amp; Impact</h2>
+    <div class="results-grid">
+      <div class="result-item">
+        <div class="result-icon">✓</div>
+        <div class="result-body">
+          <div class="r-title">告别输出截断</div>
+          <div class="r-desc">大型项目（20+ 文件）不再因单次 token 上限而截断，生成完整性显著提升。</div>
+        </div>
+      </div>
+      <div class="result-item">
+        <div class="result-icon">◐</div>
+        <div class="result-body">
+          <div class="r-title">实时进度可见</div>
+          <div class="r-desc">通过 SSE 推送子阶段进度，用户可实时观察管线推进状态。</div>
+        </div>
+      </div>
+      <div class="result-item">
+        <div class="result-icon">{ }</div>
+        <div class="result-body">
+          <div class="r-title">IDE 级代码浏览</div>
+          <div class="r-desc">VSCode 风格文件树、标签页、语法高亮，专业审阅体验。</div>
+        </div>
+      </div>
+      <div class="result-item">
+        <div class="result-icon">↩</div>
+        <div class="result-body">
+          <div class="r-title">向后兼容</div>
+          <div class="r-desc">分阶段生成失败时自动降级到单调用模式，零破坏性变更。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== FUTURE ===== -->
+  <section>
+    <h2 class="section-title">后续改进 Future Improvements</h2>
+    <div class="future-list">
+      <div class="future-item">
+        <div class="fi-num">1</div>
+        <div>
+          <div class="fi-title">增量修复模式</div>
+          <div class="fi-desc">Patch Mode：针对错误文件局部修复，而非整轮重新生成，节省时间与 token。</div>
+        </div>
+      </div>
+      <div class="future-item">
+        <div class="fi-num">2</div>
+        <div>
+          <div class="fi-title">完整 Prism.js 语法高亮</div>
+          <div class="fi-desc">扩展更多语言的语法高亮支持（Go、Rust、SQL、YAML、Dockerfile 等）。</div>
+        </div>
+      </div>
+      <div class="future-item">
+        <div class="fi-num">3</div>
+        <div>
+          <div class="fi-title">文件 Diff 查看器</div>
+          <div class="fi-desc">支持多轮迭代之间的代码差异对比，直观呈现变更内容。</div>
+        </div>
+      </div>
+      <div class="future-item">
+        <div class="fi-num">4</div>
+        <div>
+          <div class="fi-title">常见错误自动修复</div>
+          <div class="fi-desc">针对 LLM 常见生成错误（import 缺失、类型错误等）自动检测并修复。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== FOOTER ===== -->
+  <footer class="report-footer">
+    <div>工业级服务生成升级 · 回顾报告</div>
+    <div>87cf36a → 984046a · Generated 2026-07-18</div>
+  </footer>
+
+</div>
+
+</body>
+</html>

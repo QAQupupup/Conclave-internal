@@ -5,27 +5,91 @@
 # 日志: docker compose logs -f backend
 # 停止: docker compose down
 #
-# 沙箱架构（Sibling Containers）:
-#   后端容器以 root 启动 entrypoint.sh → 自动配置 Docker socket 权限
-#   → 预拉取标准沙箱镜像 + 构建数据科学镜像
-#   → 降级为 uid 1000 运行 uvicorn
-#   → 运行时通过 /var/run/docker.sock 创建临时 sibling 容器执行用户代码
+# 项目命名空间：开发版固定为 conclave-dev，避免与开源版(conclave-oss)冲突
+name: conclave-dev
+#
+# 沙箱架构（Sibling Containers + Socket Proxy）:
+#   docker-socket-proxy 代理 Docker API，仅暴露 containers/images 端点
+#   后端通过 DOCKER_HOST=tcp://docker-socket-proxy:2375 连接（不直挂 socket）
+#   运行时通过代理创建临时 sibling 容器执行用户代码
 #   工作区通过 named volume 在后端和沙箱容器间共享
 #
-# 沙箱自动准备：
-#   1. entrypoint.sh 检测 Docker socket 权限，自动将 app 用户加入宿主 docker 组
-#   2. 自动拉取 python:3.12-slim 沙箱基础镜像（使用国内镜像源）
-#   3. 自动构建 conclave-python-datascience 镜像（预装 pandas/numpy/sklearn 等）
-#   4. 后端启动后 sandbox.py 检测 Docker 可用性，沙箱自动就绪
+# 网络隔离:
+#   conclave-sandbox-l2: 自定义网络 + DNS 代理(dnsmasq)，仅解析白名单域名
+#   L1 沙箱: --network none（无网络）
+#   L2 沙箱: --network conclave-sandbox-l2（DNS 过滤）
+#   L3 沙箱: --network bridge（全联网，需用户授权）
 
 services:
+  # ============================================================
+  # Docker Socket Proxy — 限制 Docker API 暴露面
+  # ============================================================
+  docker-socket-proxy:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/tecnativa/docker-socket-proxy:v0.4.2
+    container_name: conclave-dev-socket-proxy
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # 沙箱和部署服务需要的端点
+      CONTAINERS: 1     # 创建/启动/停止/删除容器（沙箱 + 部署服务）
+      IMAGES: 1         # 拉取/列出镜像
+      BUILD: 1          # [修复] 允许 docker build（deploy_service 需要构建用户 Dockerfile）
+      NETWORKS: 1       # [修复] 允许网络查询（沙箱连接 L2 网络需要解析网络名）
+      VOLUMES: 1        # 允许卷管理（docker compose 多服务部署需要创建/管理卷；单容器部署使用预创建卷）
+      INFO: 1
+      VERSION: 1
+      PING: 1           # 健康检查
+      # 危险端点：严格禁用
+      EXEC: 0           # 禁止 docker exec（进入运行中容器，防止横向渗透）
+      SERVICES: 0       # 禁止 Swarm services
+      TASKS: 0
+      SECRETS: 0        # 禁止访问 Docker secrets
+      PLUGINS: 0
+      NODES: 0
+      SWARM: 0
+      DISTRIBUTION: 0
+      COMMIT: 0         # 禁止 docker commit（防止通过容器提交窃取镜像）
+      CONFIGS: 0
+      SESSION: 0
+      SYSTEM: 0         # 禁止 /system/* 端点（df、info 等通过 INFO=1 已覆盖）
+      EVENTS: 0         # 事件流不需要
+      AUTH: 0           # 禁止认证端点
+    networks:
+      - conclave-internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2375/version"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ============================================================
+  # DNS 代理 — L2 网络隔离的域名白名单解析
+  # ============================================================
+  sandbox-dns:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/jpillora/dnsmasq:latest
+    container_name: conclave-dev-sandbox-dns
+    restart: unless-stopped
+    command: --no-resolv --log-facility=- \
+      --address=/pypi.org/151.101.0.223 \
+      --address=/files.pythonhosted.org/151.101.0.223 \
+      --address=/pypi.python.org/151.101.0.223 \
+      --address=/pypi.tuna.tsinghua.edu.cn/101.6.15.130 \
+      --address=/mirrors.tuna.tsinghua.edu.cn/101.6.15.130 \
+      --address=/#/0.0.0.0
+    networks:
+      conclave-sandbox-l2:
+        ipv4_address: 10.20.0.10
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: conclave-backend
+    container_name: conclave-dev-backend
     ports:
       - "8000:8000"
+      - "6080:6080"   # noVNC Web 远程操作端口（CAPTCHA 值守模式）
     # [v4 安全加固] entrypoint 以 root 启动完成特权操作后降权到 uid 1000
     # 不再在 compose 中写死 user: "1000:1000"，而是由 entrypoint.sh 处理：
     #   1. root: 配置 docker.sock 权限、预拉取镜像、chown 目录
@@ -39,17 +103,17 @@ services:
       - SETUID
       - SETGID
       - DAC_OVERRIDE  # 处理 volume 权限
+      - SYS_ADMIN     # Xvfb 有头浏览器需要（值守模式）
     security_opt:
       - no-new-privileges:true
-      - seccomp:unconfined  # docker CLI + Playwright 需要 fork/exec 权限
+      - seccomp:unconfined  # docker CLI + Playwright + Xvfb 需要 fork/exec 权限
+    shm_size: "1g"  # Chromium + Xvfb 需要较大共享内存
     volumes:
-      # Docker socket：让后端能创建沙箱 sibling 容器
-      # entrypoint.sh 启动时自动配置权限，使 uid 1000 能访问
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker socket 不再直挂，通过 docker-socket-proxy 代理
       # 工作区命名卷：后端和沙箱容器共享
-      - conclave-workspace:/workspace
+      - conclave-dev-workspace:/workspace
       # 数据库持久化
-      - conclave-data:/app/data
+      - conclave-dev-data:/app/data
       # 挂载数据科学沙箱 Dockerfile（entrypoint 构建镜像需要）
       - ./backend/docker/sandbox-datascience:/app/docker/sandbox-datascience:ro
     tmpfs:
@@ -58,19 +122,32 @@ services:
     env_file:
       - .env
     environment:
+      - TZ=${TZ:-Asia/Shanghai}
       - CONCLAVE_WORKSPACE_DIR=/workspace
       - CONCLAVE_DB_PATH=/app/data/conclave.db
+      - CONCLAVE_SECRET_KEY=${CONCLAVE_SECRET_KEY:-}
       - CONCLAVE_SANDBOX_MODE=auto
       - CONCLAVE_QDRANT_URL=http://qdrant:6333
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://conclave:conclave_dev@postgres:5432/conclave}
+      - DATABASE_URL=postgresql+asyncpg://conclave:conclave_dev@postgres:5432/conclave
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - CONCLAVE_API_TOKEN=${CONCLAVE_API_TOKEN:-}
+      - CONCLAVE_LLM_TIMEOUT=${CONCLAVE_LLM_TIMEOUT:-120.0}
+      - CONCLAVE_PRODUCE_TIMEOUT=${CONCLAVE_PRODUCE_TIMEOUT:-1200.0}
       # [v4] Docker 监控默认启用（entrypoint 会自动配置好权限）
       # 如果在无 Docker 的环境运行，可设 CONCLAVE_DOCKER_DISABLED=true
       - CONCLAVE_DOCKER_DISABLED=${CONCLAVE_DOCKER_DISABLED:-false}
+      # Docker socket proxy: 通过代理连接 Docker API（不直挂 socket）
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      # [修复] 沙箱配置：工作区卷名和 L2 网络名（避免代码中硬编码与 compose 不一致）
+      - CONCLAVE_WORKSPACE_VOLUME=conclave-dev-workspace
+      - CONCLAVE_L2_NETWORK=conclave-dev-conclave-sandbox-l2
+      - CONCLAVE_L2_DNS=10.20.0.10
     dns:
       - 8.8.8.8
       - 223.5.5.5
+    networks:
+      - conclave-internal
+      - conclave-sandbox-l2
     deploy:
       resources:
         limits:
@@ -80,6 +157,8 @@ services:
           cpus: "0.5"
           memory: 512M
     depends_on:
+      docker-socket-proxy:
+        condition: service_healthy
       qdrant:
         condition: service_healthy
       postgres:
@@ -88,7 +167,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -98,7 +177,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: conclave-frontend
+    container_name: conclave-dev-frontend
     ports:
       - "5173:80"
     cap_drop:
@@ -124,77 +203,105 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    networks:
+      - conclave-internal
 
   # ============================================================
   # Qdrant 向量数据库（用于 RAG 文档检索）
   # ============================================================
   qdrant:
+    image: conclave-dev-qdrant:latest
     build:
       context: ./docker
       dockerfile: Dockerfile.qdrant
-    container_name: conclave-qdrant
+    container_name: conclave-dev-qdrant
     restart: unless-stopped
+    # 仅本机调试绑定；内部容器通过 conclave-internal 网络访问，无需对外暴露
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
-      - conclave-qdrant-data:/qdrant/storage
+      - conclave-dev-qdrant-data:/qdrant/storage
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - conclave-internal
 
   # ============================================================
   # PostgreSQL 16 + pgvector
   # ============================================================
   postgres:
-    image: docker.m.daocloud.io/pgvector/pgvector:pg16
-    container_name: conclave-postgres
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/pgvector/pgvector:pg16
+    container_name: conclave-dev-postgres
     restart: unless-stopped
+    # 仅本机调试绑定；内部容器通过 conclave-internal 网络访问 host postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       POSTGRES_DB: conclave
       POSTGRES_USER: conclave
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-conclave_dev}
     volumes:
-      - conclave-pg-data:/var/lib/postgresql/data
+      - conclave-dev-pg-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U conclave -d conclave || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - conclave-internal
 
   # ============================================================
   # Redis（会话缓存 / 限流 / 任务队列）
   # ============================================================
   redis:
-    image: docker.m.daocloud.io/library/redis:7-alpine
-    container_name: conclave-redis
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:7-alpine
+    container_name: conclave-dev-redis
     restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    # 仅本机调试绑定；内部容器通过 conclave-internal 网络访问
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: redis-server --save 60 1 --loglevel warning
     volumes:
-      - conclave-redis-data:/data
+      - conclave-dev-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
+    networks:
+      - conclave-internal
 
 volumes:
-  conclave-workspace:
+  conclave-dev-workspace:
     driver: local
-  conclave-data:
+  conclave-dev-data:
     driver: local
-  conclave-qdrant-data:
+  conclave-dev-qdrant-data:
     driver: local
-  conclave-pg-data:
+  conclave-dev-pg-data:
     driver: local
-  conclave-redis-data:
+  conclave-dev-redis-data:
     driver: local
+
+networks:
+  # 内部网络：backend ↔ socket-proxy ↔ 其他服务
+  conclave-internal:
+    driver: bridge
+  # L2 沙箱网络：DNS 过滤限制出站域名
+  conclave-sandbox-l2:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.0.0/16
+          gateway: 10.20.0.1
+

@@ -6,11 +6,21 @@ set -u  # 未定义变量时报错
 APP_UID=1000
 APP_GID=1000
 APP_USER=app
-SANDBOX_IMAGE="${CONCLAVE_SANDBOX_IMAGE:-docker.m.daocloud.io/library/python:3.12-slim}"
+SANDBOX_IMAGE="${CONCLAVE_SANDBOX_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim}"
 DATASCIENCE_IMAGE="${CONCLAVE_SANDBOX_IMAGE_DATASCIENCE:-conclave-python-datascience:latest}"
 DATASCIENCE_DOCKERFILE="${DATASCIENCE_DOCKERFILE:-/app/docker/sandbox-datascience/Dockerfile}"
 
 echo "[entrypoint] Conclave backend starting..."
+
+# ---- 0. 时区配置 ----
+TZ="${TZ:-Asia/Shanghai}"
+if [ -f "/usr/share/zoneinfo/$TZ" ]; then
+    ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+    echo "$TZ" > /etc/timezone
+    echo "[entrypoint] Timezone set to $TZ"
+else
+    echo "[entrypoint] WARNING: Timezone $TZ not found, using UTC"
+fi
 
 # 确保 app 用户存在（Dockerfile 中已创建，这里做兜底）
 if ! id "$APP_USER" >/dev/null 2>&1; then
@@ -52,9 +62,17 @@ if [ -S /var/run/docker.sock ]; then
     fi
 
     # 方法 C：如果以上都不行，最后尝试 chmod 666
+    # SECURITY: chmod 666 允许容器内所有用户读写 Docker socket，存在安全风险。
+    # 在生产多用户主机上，请设置 CONCLAVE_DISABLE_CHMOD666=1 禁用此 fallback，
+    # 并通过正确配置 docker 组 GID 映射来授予权限。
     if ! su -s /bin/bash "$APP_USER" -c "docker version --format '{{.Server.Version}}'" >/dev/null 2>&1; then
-        chmod 666 /var/run/docker.sock 2>/dev/null && \
-            echo "[entrypoint] Set socket 666 as fallback" || true
+        if [ "${CONCLAVE_DISABLE_CHMOD666:-0}" = "1" ]; then
+            echo "[entrypoint] SECURITY: chmod 666 fallback disabled by CONCLAVE_DISABLE_CHMOD666=1"
+        else
+            echo "[entrypoint] WARNING: Using chmod 666 fallback for Docker socket - this is insecure on multi-user hosts"
+            chmod 666 /var/run/docker.sock 2>/dev/null && \
+                echo "[entrypoint] Set socket 666 as fallback" || true
+        fi
     fi
 
     # 验证
@@ -86,9 +104,9 @@ if [ "$DOCKER_READY" = "1" ]; then
         if su -s /bin/bash "$APP_USER" -c "docker pull '$SANDBOX_IMAGE'" 2>&1; then
             echo "[entrypoint] Sandbox image pulled successfully"
         else
-            echo "[entrypoint] Primary pull failed, trying fallback python:3.12-slim..."
-            su -s /bin/bash "$APP_USER" -c "docker pull python:3.12-slim" 2>&1 || echo "[entrypoint] WARNING: fallback pull also failed"
-        fi
+        echo "[entrypoint] Primary pull failed, trying fallback swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim..."
+        su -s /bin/bash "$APP_USER" -c "docker pull swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim" 2>&1 || echo "[entrypoint] WARNING: fallback pull also failed"
+    fi
     fi
 
     # ---- 3. 构建数据科学沙箱镜像 ----
@@ -98,7 +116,7 @@ if [ "$DOCKER_READY" = "1" ]; then
         else
             echo "[entrypoint] Building data-science sandbox image (pandas/numpy/matplotlib/sklearn...)..."
             DS_CONTEXT=$(dirname "$DATASCIENCE_DOCKERFILE")
-            if su -s /bin/bash "$APP_USER" -c "docker build -t '$DATASCIENCE_IMAGE' -f '$DATASCIENCE_DOCKERFILE' '$DS_CONTEXT'" 2>&1 | tail -15; then
+            if su -s /bin/bash "$APP_USER" -c "docker build -t '$DATASCIENCE_IMAGE' -f '$DATASCIENCE_DOCKERFILE' '$DS_CONTEXT'" 2>&1 | tail -50; then
                 echo "[entrypoint] Data-science image built successfully"
             else
                 echo "[entrypoint] WARNING: Failed to build data-science image; analysis features will use standard image"
@@ -113,4 +131,4 @@ fi
 chown -R "$APP_UID:$APP_GID" /workspace /app/data 2>/dev/null || true
 
 echo "[entrypoint] Starting uvicorn as $APP_USER (uid=$APP_UID)..."
-exec su -s /bin/bash "$APP_USER" -c "cd /app && exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
+exec su -s /bin/bash "$APP_USER" -c "cd /app && exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --loop uvloop"

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Conclave — 闭门会议式多智能体决策</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei','Segoe UI',sans-serif;font-size:15px;line-height:1.8;color:#1a1a1a;background:#fff;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;min-height:100vh;overflow-x:hidden}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;font-size:inherit}
+a{color:inherit;text-decoration:none}
+:root{
+  --bg:#fff;--text:#1a1a1a;--text-2:#555;--text-3:#9a9a9a;
+  --line:#f0f0f0;--line-2:#e5e5e5;--hover:#fafafa;
+  --accent:#3b5998;--accent-2:#5b6cff;
+  --serif:'Noto Serif SC','Source Han Serif SC','Songti SC',serif;
+}
+[data-theme="dark"]{
+  --bg:#0f0f0f;--text:#e8e6e0;--text-2:#a0a0a0;--text-3:#666;
+  --line:#1e1e1e;--line-2:#2a2a2a;--hover:#1a1a1a;
+  --accent:#6b8cc7;--accent-2:#7c93d8;
+}
+
+/* ═══ Layout ═══ */
+.portal{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;position:relative;overflow:hidden}
+
+/* 背景装饰 */
+.portal-bg{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.5}
+.portal-bg::before{content:'';position:absolute;top:-20%;left:-10%;width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(91,108,255,.06) 0%,transparent 60%);animation:float1 20s ease-in-out infinite}
+.portal-bg::after{content:'';position:absolute;bottom:-15%;right:-5%;width:500px;height:500px;border-radius:50%;background:radial-gradient(circle,rgba(184,146,60,.05) 0%,transparent 60%);animation:float2 25s ease-in-out infinite}
+@keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(40px,30px)}}
+@keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(-30px,-20px)}}
+
+/* ═══ Brand ═══ */
+.portal-brand{position:relative;z-index:1;text-align:center;margin-bottom:48px;animation:fadeUp .8s ease-out}
+.portal-logo{display:inline-flex;align-items:center;gap:12px;margin-bottom:8px}
+.portal-logo-dot{width:10px;height:10px;border-radius:50%;background:var(--accent-2);animation:pulse 3s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(1.15)}}
+.portal-logo-name{font-family:var(--serif);font-size:42px;font-weight:400;letter-spacing:.03em;color:var(--text)}
+.portal-tagline{font-size:16px;color:var(--text-2);letter-spacing:.02em;margin-top:4px}
+.portal-desc{max-width:560px;font-size:14px;color:var(--text-3);line-height:1.9;margin:20px auto 0}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+
+/* ═══ Entry cards ═══ */
+.portal-cards{position:relative;z-index:1;display:flex;gap:24px;margin-top:8px;animation:fadeUp .8s .15s ease-out backwards}
+.portal-card{
+  width:280px;padding:40px 32px;border:1px solid var(--line-2);border-radius:16px;
+  background:var(--bg);transition:all .25s cubic-bezier(.4,0,.2,1);
+  display:flex;flex-direction:column;align-items:center;text-align:center;cursor:pointer;
+  position:relative;overflow:hidden
+}
+.portal-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent-2);transform:scaleX(0);transition:transform .25s ease}
+.portal-card:hover{border-color:var(--accent-2);transform:translateY(-4px);box-shadow:0 12px 40px rgba(91,108,255,.08)}
+.portal-card:hover::before{transform:scaleX(1)}
+.portal-card-icon{width:56px;height:56px;display:flex;align-items:center;justify-content:center;border-radius:16px;background:var(--accent-soft,rgba(91,108,255,.06));margin-bottom:20px;transition:transform .25s}
+.portal-card:hover .portal-card-icon{transform:scale(1.08)}
+.portal-card-icon svg{width:28px;height:28px;color:var(--accent-2)}
+.portal-card-title{font-family:var(--serif);font-size:20px;font-weight:400;color:var(--text);margin-bottom:6px}
+.portal-card-desc{font-size:13px;color:var(--text-3);line-height:1.7;margin-bottom:24px}
+.portal-card-btn{
+  display:inline-flex;align-items:center;gap:6px;padding:10px 24px;
+  border-radius:8px;font-size:14px;font-weight:500;transition:all .2s
+}
+.portal-card-btn.primary{background:var(--accent-2);color:#fff}
+.portal-card-btn.primary:hover{background:var(--accent);box-shadow:0 4px 16px rgba(91,108,255,.25)}
+.portal-card-btn.secondary{border:1px solid var(--line-2);color:var(--text)}
+.portal-card-btn.secondary:hover{border-color:var(--accent-2);color:var(--accent-2)}
+.portal-card-btn svg{width:14px;height:14px;transition:transform .2s}
+.portal-card-btn:hover svg{transform:translateX(3px)}
+
+/* ═══ Features ═══ */
+.portal-features{position:relative;z-index:1;display:flex;gap:48px;margin-top:64px;animation:fadeUp .8s .3s ease-out backwards}
+.portal-feature{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;max-width:160px}
+.portal-feature-icon{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--hover);color:var(--text-2)}
+.portal-feature-icon svg{width:20px;height:20px}
+.portal-feature-title{font-size:13px;font-weight:500;color:var(--text)}
+.portal-feature-desc{font-size:11px;color:var(--text-3);line-height:1.6}
+
+/* ═══ Footer ═══ */
+.portal-footer{position:relative;z-index:1;margin-top:64px;text-align:center;font-size:12px;color:var(--text-3);animation:fadeUp .8s .45s ease-out backwards}
+.portal-footer a{color:var(--accent-2);transition:color .15s}
+.portal-footer a:hover{text-decoration:underline}
+
+/* ═══ Theme toggle ═══ */
+.portal-theme{position:fixed;top:20px;right:20px;z-index:100;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid var(--line-2);background:var(--bg);color:var(--text-2);cursor:pointer;transition:all .2s}
+.portal-theme:hover{color:var(--text);border-color:var(--accent-2)}
+.portal-theme svg{width:18px;height:18px}
+
+/* ═══ Backend-not-ready modal ═══ */
+.modal-overlay{position:fixed;inset:0;z-index:1000;background:rgba(15,15,15,.45);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s ease}
+.modal-overlay.show{opacity:1;pointer-events:auto}
+.modal-card{width:380px;max-width:calc(100vw - 48px);background:var(--bg);border:1px solid var(--line-2);border-radius:14px;padding:28px 28px 24px;transform:translateY(12px);transition:transform .25s cubic-bezier(.4,0,.2,1);box-shadow:0 16px 48px rgba(0,0,0,.12)}
+.modal-overlay.show .modal-card{transform:translateY(0)}
+.modal-icon{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(220,80,80,.08);color:#d65050;margin-bottom:16px}
+.modal-icon svg{width:24px;height:24px}
+.modal-title{font-family:var(--serif);font-size:18px;font-weight:400;color:var(--text);margin-bottom:8px}
+.modal-desc{font-size:13px;color:var(--text-2);line-height:1.8;margin-bottom:22px}
+.modal-retry{font-size:12px;color:var(--text-3);margin-top:14px;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px}
+.modal-retry-btn{color:var(--accent-2);cursor:pointer;font-weight:500}
+.modal-retry-btn:hover{text-decoration:underline}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px}
+.modal-btn{padding:8px 20px;border-radius:8px;font-size:13px;font-weight:500;transition:all .2s}
+.modal-btn.primary{background:var(--accent-2);color:#fff}
+.modal-btn.primary:hover{background:var(--accent)}
+.modal-btn.ghost{border:1px solid var(--line-2);color:var(--text-2)}
+.modal-btn.ghost:hover{border-color:var(--accent-2);color:var(--accent-2)}
+.entry-checking{opacity:.6;pointer-events:none}
+
+/* ═══ Responsive ═══ */
+@media(max-width:680px){
+  .portal-cards{flex-direction:column;width:100%;max-width:320px}
+  .portal-card{width:100%}
+  .portal-features{flex-wrap:wrap;justify-content:center;gap:24px 32px}
+  .portal-logo-name{font-size:32px}
+  .portal-desc{font-size:13px}
+}
+</style>
+</head>
+<body>
+
+<button class="portal-theme" onclick="toggleTheme()" title="切换主题">
+  <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4"/>
+  </svg>
+</button>
+
+<div class="portal-bg"></div>
+
+<!-- Backend-not-ready modal -->
+<div class="modal-overlay" id="backend-modal">
+  <div class="modal-card">
+    <div class="modal-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>
+    </div>
+    <div class="modal-title">后端服务未启动</div>
+    <div class="modal-desc">无法连接到 Conclave 后端服务。请检查后端服务是否正常运行，或联系管理员。</div>
+    <div class="modal-actions">
+      <button class="modal-btn ghost" onclick="closeBackendModal()">知道了</button>
+      <button class="modal-btn primary" onclick="retryEnterSystem()">重新检测</button>
+    </div>
+    <div class="modal-retry" id="modal-retry-hint" style="display:none">
+      <span class="spinner" style="display:inline-block;width:12px;height:12px;border:2px solid var(--line-2);border-top-color:var(--accent-2);border-radius:50%;animation:spin .7s linear infinite"></span>
+      正在检测后端服务…
+    </div>
+  </div>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+
+<div class="portal">
+
+  <!-- Brand -->
+  <div class="portal-brand">
+    <div class="portal-logo">
+      <span class="portal-logo-dot"></span>
+      <span class="portal-logo-name">Conclave</span>
+    </div>
+    <div class="portal-tagline">闭门会议式多智能体决策</div>
+    <p class="portal-desc">多个 AI 智能体以会议形式协作，经历澄清、讨论、辩论、证据校验、仲裁、产出六阶段，最终生成结构化的决策文档与可交付物。</p>
+  </div>
+
+  <!-- Entry cards -->
+  <div class="portal-cards">
+    <div class="portal-card" id="entry-system" onclick="enterSystem()">
+      <div class="portal-card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/>
+        </svg>
+      </div>
+      <div class="portal-card-title">进入系统</div>
+      <div class="portal-card-desc">登录后创建会议、查看实时讨论、介入引导决策方向</div>
+      <button class="portal-card-btn primary">
+        进入系统
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </button>
+    </div>
+
+    <div class="portal-card" onclick="location.href='/demo'">
+      <div class="portal-card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <div class="portal-card-title">查看演示</div>
+      <div class="portal-card-desc">无需登录，直接体验多智能体会议的完整流程与报告产出</div>
+      <button class="portal-card-btn secondary">
+        观看演示
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Features -->
+  <div class="portal-features">
+    <div class="portal-feature">
+      <div class="portal-feature-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M15 18c0-2 2-3 2-3"/></svg>
+      </div>
+      <div class="portal-feature-title">多智能体协作</div>
+      <div class="portal-feature-desc">主持人、架构师、工程师等多角色辩论</div>
+    </div>
+    <div class="portal-feature">
+      <div class="portal-feature-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="17" r="3"/><line x1="20.5" y1="19.5" x2="23" y2="22"/></svg>
+      </div>
+      <div class="portal-feature-title">证据校验</div>
+      <div class="portal-feature-desc">搜索 + 工具验证，杜绝 AI 幻觉</div>
+    </div>
+    <div class="portal-feature">
+      <div class="portal-feature-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><line x1="9" y1="13" x2="16" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+      </div>
+      <div class="portal-feature-title">9 种产出类型</div>
+      <div class="portal-feature-desc">PRD、研究报告、代码分析、可部署服务等</div>
+    </div>
+    <div class="portal-feature">
+      <div class="portal-feature-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 12l16-8-6 16-3-7z"/><line x1="4" y1="12" x2="11" y2="12"/></svg>
+      </div>
+      <div class="portal-feature-title">人类介入</div>
+      <div class="portal-feature-desc">随时介入引导，不失控</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="portal-footer">
+    <span>Conclave · 多智能体决策系统</span>
+  </div>
+
+</div>
+
+<script>
+function toggleTheme(){
+  const html=document.documentElement;
+  const current=html.getAttribute('data-theme');
+  const next=current==='dark'?'light':'dark';
+  html.setAttribute('data-theme',next);
+  try{localStorage.setItem('conclave_theme',next)}catch(e){}
+}
+(function(){try{const t=localStorage.getItem('conclave_theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+
+/* ═══ 后端健康检查 ═══
+ * 点击"进入系统"时先检测后端 /health；
+ * 后端未连接或未就绪则弹窗提示，不进入系统、不回退演示模式。
+ * "查看演示"入口仍直接跳转 /demo（纯前端 mock，无需后端）。
+ */
+function checkBackendReady(timeoutMs){
+  return new Promise(function(resolve){
+    var ctrl=new AbortController();
+    var timer=setTimeout(function(){ctrl.abort();},timeoutMs||5000);
+    fetch('/health',{signal:ctrl.signal,cache:'no-store',headers:{'Accept':'application/json'}})
+      .then(function(res){
+        clearTimeout(timer);
+        if(!res.ok){resolve('error');return;}
+        // 校验响应体为真正的健康检查 JSON（含 status 字段），
+        // 而非 SPA 回退返回的 index.html（dev/preview 环境会把未知路径回退到 HTML）。
+        res.json().then(function(d){
+          resolve(d && typeof d.status==='string' ? d.status : 'error');
+        }).catch(function(){resolve('error');});
+      })
+      .catch(function(){clearTimeout(timer);resolve('error');});
+  });
+}
+
+function showBackendModal(){document.getElementById('backend-modal').classList.add('show');}
+function closeBackendModal(){document.getElementById('backend-modal').classList.remove('show');}
+
+function enterSystem(){
+  var card=document.getElementById('entry-system');
+  var btn=card.querySelector('.portal-card-btn');
+  var original=btn.innerHTML;
+  card.classList.add('entry-checking');
+  btn.innerHTML='正在检测服务…';
+  checkBackendReady(5000).then(function(status){
+    card.classList.remove('entry-checking');
+    btn.innerHTML=original;
+    if(status==='error'){
+      showBackendModal();
+    }else{
+      location.href='/app';
+    }
+  });
+}
+
+function retryEnterSystem(){
+  var hint=document.getElementById('modal-retry-hint');
+  hint.style.display='flex';
+  checkBackendReady(5000).then(function(status){
+    hint.style.display='none';
+    if(status==='error'){
+      // 保持弹窗，提示仍未就绪
+      var desc=document.querySelector('.modal-desc');
+      if(desc && desc.dataset.retried){desc.textContent='后端服务仍未就绪，请确认服务已启动后再试，或联系管理员。';}
+      desc.dataset.retried='1';
+    }else{
+      closeBackendModal();
+      location.href='/app';
+    }
+  });
+}
+</script>
+</body>
+</html>

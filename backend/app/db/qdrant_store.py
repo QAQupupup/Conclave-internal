@@ -2,13 +2,19 @@
 
 实现 VectorStore ABC，对接 Qdrant 向量数据库。
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue,
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
+    VectorParams,
 )
 
 from app.config import settings
@@ -54,10 +60,7 @@ class QdrantVectorStore(VectorStore):
         qdrant_filter = None
         if filter_conditions:
             qdrant_filter = Filter(
-                must=[
-                    FieldCondition(key=k, match=MatchValue(value=v))
-                    for k, v in filter_conditions.items()
-                ]
+                must=[FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filter_conditions.items()]
             )
 
         results = self._client.search(

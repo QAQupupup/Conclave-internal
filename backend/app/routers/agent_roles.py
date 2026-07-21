@@ -1,4 +1,4 @@
-﻿# Agent 角色管理：CRUD + 议题驱动自动生成
+# Agent 角色管理：CRUD + 议题驱动自动生成
 from __future__ import annotations
 
 import json
@@ -7,50 +7,22 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 from app.db_legacy import (
     delete_agent_role,
     get_agent_role,
-    get_agent_roles_by_ids,
     list_agent_roles,
     save_agent_role,
 )
 from app.models import AgentRole, AgentRoleListResponse
+from app.schemas.agent_role import (
+    CreateRoleRequest,
+    GenerateRolesRequest,
+    GenerateRolesResponse,
+    UpsertRoleResponse,
+)
 
 router = APIRouter(prefix="/agent-roles", tags=["agent-roles"])
-
-
-# ---------- 请求/响应模型 ----------
-
-class CreateRoleRequest(BaseModel):
-    """创建/更新角色请求"""
-    id: str = Field(..., description="英文标识，如 fullstack_engineer")
-    display_name: str = Field(..., description="中文名")
-    perspective: str = Field("", description="核心视角")
-    expertise_domains: list[str] = Field(default_factory=list)
-    risk_appetite: str = Field("balanced", description="conservative | balanced | aggressive")
-    default_stance: str = Field("")
-    evidence_preference: str = Field("balanced")
-    model_override: str = Field("")
-    background_brief: str = Field("")
-    prompt_template: str = Field("")
-
-
-class GenerateRolesRequest(BaseModel):
-    """议题驱动生成角色请求"""
-    topic: str = Field(..., description="会议议题")
-
-
-class GenerateRolesResponse(BaseModel):
-    """生成角色响应"""
-    roles: list[AgentRole]
-    generated_at: str
-
-
-class UpsertRoleResponse(BaseModel):
-    """单个角色 upsert 响应"""
-    role: AgentRole
 
 
 # ---------- 内置角色种子数据 ----------
@@ -93,8 +65,7 @@ BUILTIN_ROLES = [
         "default_stance": "feasibility-first",
         "evidence_preference": "constraints",
         "prompt_template": (
-            "你是工程师，兼负 QA 视角。关注可行性、实现风险、测试边界。"
-            "决策偏置：先质疑可行性，再谈方案；重执行细节。"
+            "你是工程师，兼负 QA 视角。关注可行性、实现风险、测试边界。决策偏置：先质疑可行性，再谈方案；重执行细节。"
         ),
         "background_brief": "全栈工程师，擅长快速原型开发与性能优化，对代码可维护性有执念。",
     },
@@ -106,10 +77,7 @@ BUILTIN_ROLES = [
         "risk_appetite": "conservative",
         "default_stance": "risk-first",
         "evidence_preference": "risk",
-        "prompt_template": (
-            "你是安全专家。关注认证、授权、数据安全、注入防护。"
-            "决策偏置：先找安全漏洞，重风险。"
-        ),
+        "prompt_template": ("你是安全专家。关注认证、授权、数据安全、注入防护。决策偏置：先找安全漏洞，重风险。"),
         "background_brief": "资深安全工程师，曾在多家金融科技公司负责安全架构设计，对OWASP十大漏洞了如指掌。",
     },
     {
@@ -120,10 +88,7 @@ BUILTIN_ROLES = [
         "risk_appetite": "balanced",
         "default_stance": "data-first",
         "evidence_preference": "constraints",
-        "prompt_template": (
-            "你是数据工程师。关注数据模型、存储、迁移、一致性。"
-            "决策偏置：重数据完整性。"
-        ),
+        "prompt_template": ("你是数据工程师。关注数据模型、存储、迁移、一致性。决策偏置：重数据完整性。"),
         "background_brief": "数据工程专家，精通SQL与NoSQL数据库选型，对数据一致性和查询性能有深刻理解。",
     },
     {
@@ -134,41 +99,41 @@ BUILTIN_ROLES = [
         "risk_appetite": "balanced",
         "default_stance": "user-first",
         "evidence_preference": "goals",
-        "prompt_template": (
-            "你是用户体验设计师。关注交互流程、可用性、错误处理。"
-            "决策偏置：重用户视角。"
-        ),
+        "prompt_template": ("你是用户体验设计师。关注交互流程、可用性、错误处理。决策偏置：重用户视角。"),
         "background_brief": "UX设计师，擅长将复杂系统简化，让非技术用户也能顺畅使用产品。",
     },
 ]
 
 
-def _init_builtin_roles() -> int:
+async def _init_builtin_roles() -> int:
     """初始化内置角色到数据库（仅当数据库为空时）"""
-    existing = list_agent_roles()
+    existing = await list_agent_roles()
     if existing:
         return 0
     now = datetime.now(timezone.utc).isoformat()
     count = 0
     for r in BUILTIN_ROLES:
-        save_agent_role({
-            **r,
-            "is_builtin": 1,
-            "is_active": 1,
-            "created_at": now,
-            "updated_at": now,
-        })
+        await save_agent_role(
+            {
+                **r,
+                "is_builtin": 1,
+                "is_active": 1,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
         count += 1
     return count
 
 
 # ---------- 端点 ----------
 
+
 @router.get("", response_model=AgentRoleListResponse)
 async def list_roles(active_only: bool = False) -> AgentRoleListResponse:
     """列出所有角色"""
-    _init_builtin_roles()
-    rows = list_agent_roles(active_only=active_only)
+    await _init_builtin_roles()
+    rows = await list_agent_roles(active_only=active_only)
     roles = [AgentRole.from_db_row(r) for r in rows]
     return AgentRoleListResponse(roles=roles, total=len(roles))
 
@@ -176,8 +141,8 @@ async def list_roles(active_only: bool = False) -> AgentRoleListResponse:
 @router.get("/{role_id}", response_model=AgentRole)
 async def get_role(role_id: str) -> AgentRole:
     """取单个角色"""
-    _init_builtin_roles()
-    row = get_agent_role(role_id)
+    await _init_builtin_roles()
+    row = await get_agent_role(role_id)
     if row is None:
         raise HTTPException(status_code=404, detail="角色不存在")
     return AgentRole.from_db_row(row)
@@ -186,7 +151,7 @@ async def get_role(role_id: str) -> AgentRole:
 @router.post("", response_model=UpsertRoleResponse)
 async def create_role(req: CreateRoleRequest) -> UpsertRoleResponse:
     """创建新角色"""
-    row = get_agent_role(req.id)
+    row = await get_agent_role(req.id)
     if row is not None:
         raise HTTPException(status_code=409, detail="角色 ID 已存在")
     now = datetime.now(timezone.utc).isoformat()
@@ -206,15 +171,15 @@ async def create_role(req: CreateRoleRequest) -> UpsertRoleResponse:
         "created_at": now,
         "updated_at": now,
     }
-    save_agent_role(role_dict)
-    saved = get_agent_role(req.id)
+    await save_agent_role(role_dict)
+    saved = await get_agent_role(req.id)
     return UpsertRoleResponse(role=AgentRole.from_db_row(saved or role_dict))
 
 
 @router.put("/{role_id}", response_model=UpsertRoleResponse)
 async def update_role(role_id: str, req: CreateRoleRequest) -> UpsertRoleResponse:
     """更新角色"""
-    existing = get_agent_role(role_id)
+    existing = await get_agent_role(role_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="角色不存在")
     now = datetime.now(timezone.utc).isoformat()
@@ -234,17 +199,17 @@ async def update_role(role_id: str, req: CreateRoleRequest) -> UpsertRoleRespons
         "created_at": existing["created_at"],
         "updated_at": now,
     }
-    save_agent_role(role_dict)
-    saved = get_agent_role(role_id)
+    await save_agent_role(role_dict)
+    saved = await get_agent_role(role_id)
     return UpsertRoleResponse(role=AgentRole.from_db_row(saved or role_dict))
 
 
 @router.delete("/{role_id}")
 async def remove_role(role_id: str) -> dict[str, Any]:
     """删除角色"""
-    deleted = delete_agent_role(role_id)
+    deleted = await delete_agent_role(role_id)
     if not deleted:
-        row = get_agent_role(role_id)
+        row = await get_agent_role(role_id)
         if row is None:
             raise HTTPException(status_code=404, detail="角色不存在")
         raise HTTPException(status_code=403, detail="内置角色不可删除")
@@ -254,14 +219,14 @@ async def remove_role(role_id: str) -> dict[str, Any]:
 @router.post("/generate", response_model=GenerateRolesResponse)
 async def generate_roles(req: GenerateRolesRequest) -> GenerateRolesResponse:
     """根据议题自动生成角色阵容"""
-    _init_builtin_roles()
+    await _init_builtin_roles()
 
-    from app.config import settings
     from app.agents.llm import RealLLM
+    from app.config import settings
 
     if not settings.use_real_llm:
         # 无 LLM 时返回内置角色兜底
-        rows = list_agent_roles(active_only=True)
+        rows = await list_agent_roles(active_only=True)
         roles = [AgentRole.from_db_row(r) for r in rows]
         return GenerateRolesResponse(
             roles=roles,
@@ -290,12 +255,10 @@ async def generate_roles(req: GenerateRolesRequest) -> GenerateRolesResponse:
         llm = RealLLM()
         result = await llm.complete(prompt)
         # RealLLM 无 schema_hint 时会把非 dict 结果包装为 {"result": ...}
-        if isinstance(result, dict) and "result" in result and len(result) == 1:
-            raw = result["result"]
-        else:
-            raw = result
+        raw = result["result"] if isinstance(result, dict) and "result" in result and len(result) == 1 else result
 
         # 解析 LLM 返回的 JSON
+        roles_data: Any
         if isinstance(raw, list):
             roles_data = raw
         elif isinstance(raw, str):
@@ -313,17 +276,19 @@ async def generate_roles(req: GenerateRolesRequest) -> GenerateRolesResponse:
         roles = []
         for r_data in roles_data[:5]:  # 最多 5 个
             role_id = r_data.get("id", f"gen-{uuid.uuid4().hex[:8]}")
-            roles.append(AgentRole(
-                id=role_id,
-                display_name=r_data.get("display_name", "未知角色"),
-                perspective=r_data.get("perspective", ""),
-                expertise_domains=r_data.get("expertise_domains", []),
-                risk_appetite=r_data.get("risk_appetite", "balanced"),
-                default_stance=r_data.get("default_stance", ""),
-                evidence_preference=r_data.get("evidence_preference", "balanced"),
-                background_brief=r_data.get("background_brief", ""),
-                prompt_template=r_data.get("prompt_template", ""),
-            ))
+            roles.append(
+                AgentRole(
+                    id=role_id,
+                    display_name=r_data.get("display_name", "未知角色"),
+                    perspective=r_data.get("perspective", ""),
+                    expertise_domains=r_data.get("expertise_domains", []),
+                    risk_appetite=r_data.get("risk_appetite", "balanced"),
+                    default_stance=r_data.get("default_stance", ""),
+                    evidence_preference=r_data.get("evidence_preference", "balanced"),
+                    background_brief=r_data.get("background_brief", ""),
+                    prompt_template=r_data.get("prompt_template", ""),
+                )
+            )
 
         return GenerateRolesResponse(
             roles=roles,
@@ -332,8 +297,9 @@ async def generate_roles(req: GenerateRolesRequest) -> GenerateRolesResponse:
 
     except Exception as e:
         import logging
+
         logging.getLogger("agent_roles").warning("角色生成失败，回退到内置角色: %s", e)
-        rows = list_agent_roles(active_only=True)
+        rows = await list_agent_roles(active_only=True)
         roles = [AgentRole.from_db_row(r) for r in rows]
         return GenerateRolesResponse(
             roles=roles,

@@ -3,7 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
 .Python
+backend/conclave_core/*.c
 *.egg-info/
 .eggs/
 build/
@@ -71,5 +73,17 @@ logs/
 # ===== Misc =====
 .trae-cn/
 .trae-html-share-packages/
+.trae/
 *.dev_token
 .dev_token
+docker-compose.override.yml
+.oss_sync_state.json
+
+# ===== Runtime / Backup =====
+backend/.trash/
+backend/data/
+.secret_key
+
+# ===== Temp files =====
+Qwen*/
+docs/audits/

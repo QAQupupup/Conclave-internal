@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from app.tools.domain_registry import tag_url, get_domain_tier
+from app.tools.domain_registry import tag_url
 
 
 @dataclass
@@ -25,24 +25,26 @@ class SearchResult:
     - Evidence 是从 SearchResult 对应页面提取的结构化内容块
     一个 SearchResult 可以产生多条 Evidence（多 chunk）
     """
+
     url: str
     title: str = ""
-    snippet: str = ""              # 搜索引擎摘要
+    snippet: str = ""  # 搜索引擎摘要
     domain: str = ""
-    source_tier: str = "C"         # S/A/B/C/D
+    source_tier: str = "C"  # S/A/B/C/D
     signals: dict[str, Any] = field(default_factory=dict)  # signals bag
-    rank: int = 0                  # 在 SERP 中的原始排名
-    engine: str = ""               # 来源搜索引擎名
+    rank: int = 0  # 在 SERP 中的原始排名
+    engine: str = ""  # 来源搜索引擎名
 
     def __post_init__(self) -> None:
         """自动填充 domain 和 source_tier（如果未设置）"""
         if not self.domain and self.url:
             from urllib.parse import urlparse
+
             self.domain = urlparse(self.url).hostname or ""
         if not self.signals:
             self.signals = tag_url(self.url) if self.url else {}
         if self.source_tier == "C" and self.signals:
-            self.source_tier = self.signals.get("source_tier", "C")
+            self.source_tier = str(self.signals.get("source_tier", "C"))
 
 
 @runtime_checkable
@@ -65,12 +67,13 @@ class SearchEngine(Protocol):
         """引擎是否可用（健康检查）"""
         ...
 
-    async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 5, **kwargs: Any) -> list[SearchResult]:
         """执行搜索，返回 SearchResult 列表
 
         Args:
             query: 搜索查询
             max_results: 最大结果数
+            **kwargs: 可选参数（time_range, country, language等）
         Returns:
             SearchResult 列表，按可信度排序
         Raises:
@@ -85,10 +88,12 @@ class SearchEngine(Protocol):
 
 class SearchEngineError(Exception):
     """搜索引擎故障异常"""
+
     pass
 
 
 # ---------- 引擎健康度追踪 ----------
+
 
 class EngineHealth:
     """引擎健康度追踪器：连续失败计数 + 冷却恢复
@@ -112,9 +117,7 @@ class EngineHealth:
             return True
         # 冷却期检查
         unavailable_time = self._unavailable_since.get(engine_name, 0)
-        if time.monotonic() - unavailable_time >= self._cooldown:
-            return True  # 冷却期已过，允许探活
-        return False
+        return time.monotonic() - unavailable_time >= self._cooldown
 
     def record_success(self, engine_name: str) -> None:
         """记录引擎调用成功"""
@@ -141,6 +144,7 @@ class EngineHealth:
 
 # ---------- 多引擎搜索调度器 ----------
 
+
 class MultiEngineSearch:
     """多引擎搜索调度器：按优先级尝试，自动 failover
 
@@ -158,8 +162,14 @@ class MultiEngineSearch:
         self,
         query: str,
         max_results: int = 5,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """执行多引擎搜索
+
+        Args:
+            query: 搜索查询
+            max_results: 最大结果数
+            **kwargs: 传递给各引擎的可选参数（time_range, country, language等）
 
         Returns:
             {
@@ -178,7 +188,7 @@ class MultiEngineSearch:
 
             try:
                 results = await asyncio.wait_for(
-                    engine.search(query, max_results),
+                    engine.search(query, max_results, **kwargs),
                     timeout=30.0,
                 )
                 self._health.record_success(engine.name)
@@ -227,11 +237,13 @@ def get_multi_engine_search() -> MultiEngineSearch:
         engines: list[SearchEngine] = []
         try:
             from app.tools.engines.bing_engine import BingPlaywrightEngine
+
             engines.append(BingPlaywrightEngine())
         except ImportError:
             pass
         try:
             from app.tools.engines.ddg_engine import DuckDuckGoEngine
+
             engines.append(DuckDuckGoEngine())
         except ImportError:
             pass

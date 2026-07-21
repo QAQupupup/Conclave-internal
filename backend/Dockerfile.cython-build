@@ -1,0 +1,42 @@
+﻿# ===== Conclave Cython 编译容器 =====
+# 用途：在 Docker 容器内编译 conclave_core 为 Cython 扩展（.so），
+#       避免宿主机环境污染，确保编译产物与 OSS 运行时的 Python 3.12 一致。
+#
+# 构建：
+#   docker build -t conclave-cython-build -f Dockerfile.cython-build .
+#
+# 编译：
+#   docker run --rm -v "$(pwd):/app" conclave-cython-build \
+#     python conclave_core/setup.py build_ext --inplace
+#
+# 或通过 publish_open_source.py：
+#   python scripts/publish_open_source.py --oss-repo ../Conclave-OSS --docker-build
+
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
+
+# pip 国内镜像源
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 替换 apt 源为清华 TUNA 镜像 + 安装编译工具链
+RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
+    { echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME) $(. /etc/os-release && echo $VERSION_CODENAME)-updates"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+      echo ""; \
+      echo "Types: deb"; \
+      echo "URIs: https://mirrors.tuna.tsinghua.edu.cn/debian-security"; \
+      echo "Suites: $(. /etc/os-release && echo $VERSION_CODENAME)-security"; \
+      echo "Components: main"; \
+      echo "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"; \
+    } > /etc/apt/sources.list.d/tuna.sources && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gcc libc6-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 安装 Cython 与构建工具（版本锁定，确保可复现）
+RUN pip install --no-cache-dir "Cython>=3.0" setuptools wheel
+
+WORKDIR /app

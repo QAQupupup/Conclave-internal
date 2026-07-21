@@ -387,11 +387,11 @@ WS /ws/meetings/{meeting_id}
 
 ---
 
-## 6. 项目目录树
+> **历史注记** (2026-07-14): 以下目录树反映迭代一初期状态。当前结构见 README.md。主要变化：`nodes.py` 已拆分为 `nodes/` 包，`db.py` 已拆分为 `db/` 包，`tools/` 已扩展为包含 `playwright/` 子包和 `engines/` 子目录。
 
-```text
-Conclave/
-├── README.md
+## 附录 A：项目目录树（迭代一初期）
+
+```
 ├── .gitignore
 ├── docs/
 │   ├── ideal-design.md
@@ -406,10 +406,10 @@ Conclave/
 │   │   ├── config.py               # 配置（LLM key、向量库地址）
 │   │   ├── models.py               # Pydantic 模型（见 §3）
 │   │   ├── events.py               # DomainEvent + InMemoryEventBus
-│   │   ├── db.py                   # SQLite + SQLModel
+│   │   ├── db.py                   # SQLite + SQLModel（现已拆分为 db/ 包）
 │   │   ├── orchestrator/
 │   │   │   ├── state.py            # 状态机 + 控制信号
-│   │   │   ├── nodes.py            # 六阶段节点
+│   │   │   ├── nodes.py            # 六阶段节点（现已拆分为 nodes/ 包）
 │   │   │   └── runner.py           # 编排运行器
 │   │   ├── agents/
 │   │   │   ├── llm.py              # LLM 调用封装

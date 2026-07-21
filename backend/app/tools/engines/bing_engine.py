@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.tools.search_engine import SearchResult, SearchEngineError
+from app.tools.search_engine import SearchEngineError, SearchResult
 
 logger = logging.getLogger("app.tools.engines.bing")
 
@@ -28,11 +28,12 @@ class BingPlaywrightEngine:
         """检查 Playwright 是否可用"""
         try:
             import playwright  # noqa: F401
+
             return True
         except ImportError:
             return False
 
-    async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 5, **kwargs: Any) -> list[SearchResult]:
         """执行 Bing 搜索，返回 SearchResult 列表
 
         流程：
@@ -45,8 +46,8 @@ class BingPlaywrightEngine:
             raise SearchEngineError("Playwright 未安装")
 
         try:
-            from app.tools.playwright_search import get_playwright_search
             from app.tools.domain_registry import rank_by_tier
+            from app.tools.playwright_search import get_playwright_search
 
             pw_search = get_playwright_search()
             # 请求 3x 结果用于 tier 重排
@@ -63,12 +64,14 @@ class BingPlaywrightEngine:
                 title = item.get("title", "")
                 if not url:
                     continue
-                results.append(SearchResult(
-                    url=url,
-                    title=title,
-                    rank=i,
-                    engine=self.name,
-                ))
+                results.append(
+                    SearchResult(
+                        url=url,
+                        title=title,
+                        rank=i,
+                        engine=self.name,
+                    )
+                )
 
             # 按 tier 重排
             url_to_idx = {r.url: i for i, r in enumerate(results)}
@@ -94,6 +97,7 @@ class BingPlaywrightEngine:
             return False
         try:
             from app.tools.playwright_search import get_playwright_search
+
             pw_search = get_playwright_search()
             await pw_search._ensure_browser()
             # 简单检查浏览器是否可用

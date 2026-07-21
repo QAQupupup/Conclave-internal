@@ -1,37 +1,60 @@
 """网络安全：SSRF 防护与 URL 白名单。
 
-[CON-14 修复] 旧版对外部 URL（用户提供的图片 URL、evidence 来源等）缺少 SSRF 防护。
-   攻击场景：用户提交 `http://169.254.169.254/latest/meta-data/` 可读取云元数据。
-   本模块提供：
-   1. 内网 IP 段黑名单（RFC 1918、链路本地、回环、IPv6 link-local 等）
-   2. URL 解析 + DNS 解析 + IP 校验三层防御
-   3. 用户可配置允许的域名白名单
+[H-03 修复] safe_fetch 改为异步 httpx.AsyncClient（不再阻塞事件循环），
+使用模块级连接池复用，多跳重定向限制（最多 5 跳，每跳 SSRF 校验）。
+
+[M-08 修复] 原实现 follow_redirects=False 后只检查第一跳 Location 头，
+既不跟随也不校验后续跳；改为手动跟随重定向，每一跳都做协议/DNS/IP 校验，
+防止攻击者通过 302 -> 302 -> 内网 多跳绕过 SSRF 检查。
 """
+
 from __future__ import annotations
 
+import contextlib
 import ipaddress
+import logging
 import socket
-from typing import Optional
-from urllib.parse import urlparse
+from typing import TYPE_CHECKING
+from urllib.parse import urljoin, urlparse
+
+from app.lazy_asyncio import LazyLock
+
+if TYPE_CHECKING:
+    import httpx
+
+logger = logging.getLogger("network_security")
 
 # ---- 黑名单：禁止访问的 IP 段 ----
-# RFC 1918 私有网段、loopback、link-local、metadata 服务、IPv6 私网/回环
 _BLOCKED_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),          # loopback
-    ipaddress.ip_network("10.0.0.0/8"),           # private class A
-    ipaddress.ip_network("172.16.0.0/12"),        # private class B
-    ipaddress.ip_network("192.168.0.0/16"),       # private class C
-    ipaddress.ip_network("169.254.0.0/16"),       # link-local (含云元数据 169.254.169.254)
-    ipaddress.ip_network("100.64.0.0/10"),        # CGNAT
-    ipaddress.ip_network("0.0.0.0/8"),             # 任意地址
-    ipaddress.ip_network("::1/128"),              # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),             # IPv6 ULA
-    ipaddress.ip_network("fe80::/10"),            # IPv6 link-local
-    ipaddress.ip_network("::ffff:0:0/96"),        # IPv4-mapped IPv6
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback
+    ipaddress.ip_network("10.0.0.0/8"),  # private class A
+    ipaddress.ip_network("172.16.0.0/12"),  # private class B
+    ipaddress.ip_network("192.168.0.0/16"),  # private class C
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local (含云元数据 169.254.169.254)
+    ipaddress.ip_network("100.64.0.0/10"),  # CGNAT
+    ipaddress.ip_network("0.0.0.0/8"),  # 任意地址
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),  # IPv6 ULA
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
+    ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped IPv6
 ]
 
-# ---- 允许的协议 ----
+# 显式禁止的主机名（云元数据端点等）
+_BLOCKED_HOSTNAMES = {
+    "metadata.google.internal",
+    "metadata",
+    "169.254.169.254",
+    "fd00:ec2::254",  # AWS IMDSv6
+}
+
 ALLOWED_SCHEMES = frozenset({"http", "https"})
+MAX_REDIRECTS = 5
+DEFAULT_MAX_BYTES = 5 * 1024 * 1024
+DEFAULT_TIMEOUT = 10.0
+
+# 模块级 AsyncClient 连接池（lazy 初始化）
+_async_client: httpx.AsyncClient | None = None
+_client_lock = LazyLock()
 
 
 def _is_blocked_ip(ip_str: str) -> bool:
@@ -39,14 +62,14 @@ def _is_blocked_ip(ip_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
-        return True  # 无效 IP 视为不安全
+        return True
     return any(ip in net for net in _BLOCKED_NETWORKS)
 
 
 def validate_url(
     url: str,
     *,
-    allowed_domains: Optional[set[str]] = None,
+    allowed_domains: set[str] | None = None,
     resolve_dns: bool = True,
 ) -> tuple[bool, str]:
     """验证 URL 是否安全可访问。
@@ -62,7 +85,6 @@ def validate_url(
     if not url:
         return False, "URL 为空"
 
-    # 1) 协议检查
     try:
         parsed = urlparse(url)
     except Exception as e:
@@ -74,31 +96,39 @@ def validate_url(
     if not parsed.hostname:
         return False, "URL 缺少主机名"
 
-    # 2) 域名白名单检查
-    if allowed_domains is not None:
-        host = parsed.hostname.lower()
-        if not any(host == d.lower() or host.endswith("." + d.lower()) for d in allowed_domains):
-            return False, f"域名 {host!r} 不在白名单"
+    hostname = parsed.hostname
 
-    # 3) 主机名 → IP 检查（直接给 IP 的情况）
+    # 禁止 userinfo@hostname 形式绕过（http://evil.com@allowed.com 实际访问 evil.com）
+    if parsed.username or parsed.password:
+        return False, "URL 不允许包含 userinfo（防止绕过域名检查）"
+
+    # 显式黑名单主机名
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        return False, f"主机名 {hostname!r} 在禁止列表中"
+
+    # 域名白名单检查
+    if allowed_domains is not None:
+        host_lower = hostname.lower()
+        if not any(host_lower == d.lower() or host_lower.endswith("." + d.lower()) for d in allowed_domains):
+            return False, f"域名 {host_lower!r} 不在白名单"
+
+    # 主机名 → IP 检查（直接给 IP 的情况）
     try:
-        # 如果是纯 IP 字符串
-        ipaddress.ip_address(parsed.hostname)
-        if _is_blocked_ip(parsed.hostname):
-            return False, f"目标 IP {parsed.hostname} 在内网黑名单中"
+        ipaddress.ip_address(hostname)
+        if _is_blocked_ip(hostname):
+            return False, f"目标 IP {hostname} 在内网黑名单中"
     except ValueError:
-        # 不是 IP 而是域名
         pass
 
-    # 4) DNS 解析后检查所有返回 IP（防 DNS rebinding）
+    # DNS 解析后检查所有返回 IP（防 DNS rebinding 初始检查）
     if resolve_dns:
         try:
-            infos = socket.getaddrinfo(parsed.hostname, None)
+            infos = socket.getaddrinfo(hostname, None)
         except socket.gaierror as e:
             return False, f"DNS 解析失败: {e}"
         seen_ips: set[str] = set()
-        for family, _type, _proto, _canon, sockaddr in infos:
-            ip_str = sockaddr[0]
+        for _family, _type, _proto, _canon, sockaddr in infos:
+            ip_str = str(sockaddr[0])
             if ip_str in seen_ips:
                 continue
             seen_ips.add(ip_str)
@@ -108,41 +138,164 @@ def validate_url(
     return True, "ok"
 
 
-def safe_fetch(
+async def _get_async_client() -> httpx.AsyncClient:
+    """获取或创建模块级 AsyncClient 连接池"""
+    global _async_client
+    if _async_client is not None:
+        return _async_client
+    async with _client_lock:
+        if _async_client is not None:
+            return _async_client
+        import httpx
+
+        _async_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=5.0),
+            follow_redirects=False,  # 我们手动跟随，以便每跳做 SSRF 校验
+            max_redirects=0,
+            trust_env=False,  # 不使用系统代理（防代理绕过 SSRF）
+            headers={"User-Agent": "Conclave-SafeFetch/1.0"},
+        )
+        return _async_client
+
+
+async def shutdown_async_client() -> None:
+    """关闭模块级 AsyncClient（在应用关闭时调用）"""
+    global _async_client
+    async with _client_lock:
+        if _async_client is not None:
+            with contextlib.suppress(Exception):
+                await _async_client.aclose()
+            _async_client = None
+
+
+async def safe_fetch(
     url: str,
     *,
-    allowed_domains: Optional[set[str]] = None,
-    timeout: float = 5.0,
-    max_bytes: int = 5 * 1024 * 1024,
-) -> tuple[bool, str]:
-    """带 SSRF 防护的 HTTP GET。
+    allowed_domains: set[str] | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    max_redirects: int = MAX_REDIRECTS,
+) -> tuple[bool, str | bytes]:
+    """带 SSRF 防护的异步 HTTP 请求。
+
+    [H-03 修复] 使用 httpx.AsyncClient 异步客户端，不阻塞事件循环。
+    [M-08 修复] 手动跟随重定向，每一跳都做 SSRF 校验，最多 max_redirects 跳。
 
     Args:
         url: 目标 URL
         allowed_domains: 可选域名白名单
-        timeout: 超时（秒）
-        max_bytes: 最大下载字节数（防止大文件 OOM）
+        timeout: 单次请求超时（秒）
+        max_bytes: 最大响应字节数（防止大文件 OOM）
+        method: HTTP 方法（默认 GET）
+        headers: 额外请求头
+        max_redirects: 最大重定向跳数
 
     Returns:
-        (ok, content_or_reason): ok=True 时 content_or_reason 是 body，False 时是错误原因。
+        (ok, content_or_reason): ok=True 时返回 bytes 内容，False 时返回错误原因字符串。
     """
-    ok, reason = validate_url(url, allowed_domains=allowed_domains)
+    import httpx
+
+    current_url = url
+    seen_urls: set[str] = set()
+
+    for hop in range(max_redirects + 1):
+        # 每跳都做 SSRF 校验
+        ok, reason = validate_url(current_url, allowed_domains=allowed_domains)
+        if not ok:
+            # 审计：SSRF 阻断
+            try:
+                from app.observability.audit import audit
+
+                audit(
+                    "security.ssrf_blocked",
+                    "blocked",
+                    {
+                        "url": current_url[:500],
+                        "original_url": url[:500],
+                        "hop": hop + 1,
+                        "reason": reason,
+                    },
+                )
+            except Exception:
+                pass
+            return False, f"SSRF 检查失败（第{hop + 1}跳）: {reason}"
+
+        # 防止循环重定向
+        if current_url in seen_urls:
+            return False, f"检测到重定向循环: {current_url}"
+        seen_urls.add(current_url)
+
+        try:
+            client = await _get_async_client()
+            req_headers = {"Accept": "*/*"}
+            if headers:
+                req_headers.update(headers)
+            resp = await client.request(
+                method if hop == 0 else "GET",
+                current_url,
+                headers=req_headers,
+                timeout=httpx.Timeout(timeout, connect=5.0),
+            )
+        except httpx.TimeoutException:
+            return False, f"请求超时（第{hop + 1}跳）"
+        except httpx.ConnectError as e:
+            return False, f"连接失败（第{hop + 1}跳）: {e}"
+        except Exception as e:
+            return False, f"请求失败（第{hop + 1}跳）: {type(e).__name__}: {e}"
+
+        # 处理重定向
+        if resp.status_code in (301, 302, 303, 307, 308):
+            if hop >= max_redirects:
+                return False, f"重定向次数超过限制（{max_redirects} 跳）"
+            loc = resp.headers.get("location", "")
+            if not loc:
+                return False, f"重定向响应缺少 Location 头（状态码 {resp.status_code}）"
+            # 解析相对 URL
+            current_url = urljoin(current_url, loc)
+            # 消耗响应体（连接复用）
+            await resp.aclose()
+            continue
+
+        # 非重定向响应：读取并限制大小
+        # 注意：不要用 resp.aread() 一次性读入（无大小限制），用流式读取
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                total += len(chunk)
+                if total > max_bytes:
+                    await resp.aclose()
+                    return False, f"响应超过大小限制（{max_bytes} 字节）"
+                chunks.append(chunk)
+        except Exception as e:
+            return False, f"读取响应失败: {type(e).__name__}: {e}"
+        finally:
+            await resp.aclose()
+
+        body = b"".join(chunks)
+        return True, body
+
+    return False, "重定向次数超限（不应到达此处）"
+
+
+async def safe_fetch_text(
+    url: str,
+    *,
+    allowed_domains: set[str] | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    encoding: str = "utf-8",
+) -> tuple[bool, str]:
+    """safe_fetch 的文本便捷封装"""
+    ok, result = await safe_fetch(
+        url,
+        allowed_domains=allowed_domains,
+        timeout=timeout,
+        max_bytes=max_bytes,
+    )
     if not ok:
-        return False, reason
-
-    try:
-        import httpx
-
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-            resp = client.get(url)
-            # 重定向到内网也拒绝
-            if resp.status_code in (301, 302, 303, 307, 308):
-                loc = resp.headers.get("location", "")
-                if loc:
-                    loc_ok, loc_reason = validate_url(loc, allowed_domains=allowed_domains)
-                    if not loc_ok:
-                        return False, f"重定向到不安全的 URL: {loc_reason}"
-            content = resp.content[:max_bytes]
-            return True, content.decode("utf-8", errors="replace")
-    except Exception as e:
-        return False, f"请求失败: {e}"
+        return False, result  # type: ignore[return-value]
+    assert isinstance(result, bytes)
+    return True, result.decode(encoding, errors="replace")

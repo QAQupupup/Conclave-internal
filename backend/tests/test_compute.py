@@ -1,13 +1,19 @@
 # Agent 计算解耦层测试
-import asyncio
 import pytest
 
 from app.agents.compute import (
-    ThinkRequest, ThinkResponse, LocalAgentCompute, GRPCAgentCompute,
-    get_compute, reset_compute,
-    build_clarify_prompt, build_intra_prompt,
-    build_cross_team_prompt, build_evidence_prompt,
-    build_arbitrate_prompt, build_produce_prompt,
+    GRPCAgentCompute,
+    LocalAgentCompute,
+    ThinkRequest,
+    ThinkResponse,
+    build_arbitrate_prompt,
+    build_clarify_prompt,
+    build_cross_team_prompt,
+    build_evidence_prompt,
+    build_intra_prompt,
+    build_produce_prompt,
+    get_compute,
+    reset_compute,
 )
 from app.models import Role
 
@@ -60,7 +66,7 @@ async def test_local_compute_batch_parallel():
     responses = await compute.think_batch(requests)
     assert len(responses) == 3
     # 验证并行执行（总耗时 < 串行耗时之和的 2 倍）
-    total_latency = sum(r.latency_ms for r in responses)
+    sum(r.latency_ms for r in responses)
     # stub 模式下 latency 为 0，只验证数量
     assert all(r.success for r in responses)
 
@@ -124,8 +130,10 @@ def test_get_compute_returns_local_by_default():
 
 def test_get_compute_returns_grpc_when_configured(monkeypatch):
     """配置启用时返回 GRPCAgentCompute"""
-    from app import config as config_mod
     from types import SimpleNamespace
+
+    from app import config as config_mod
+
     # Settings 为 frozen dataclass，无法直接 setattr，替换整个 settings 引用
     fake_settings = SimpleNamespace(
         use_grpc_compute=True,

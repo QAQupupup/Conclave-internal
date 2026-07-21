@@ -1,4 +1,4 @@
-﻿# 运维面板 API：快照 + 历史 + 组件连通性
+# 运维面板 API：快照 + 历史 + 组件连通性
 from __future__ import annotations
 
 import os
@@ -103,26 +103,28 @@ async def _health_checks() -> dict[str, Any]:
     """执行所有基础设施健康检查"""
     checks: dict[str, Any] = {}
 
-    # SQLite
+    # PostgreSQL 兼容层检查
     try:
         import time as _time
 
         t0 = _time.monotonic()
-        from app.db_legacy import _connect
+        from sqlalchemy import text as _text
 
-        conn = _connect()
-        conn.execute("SELECT 1")
-        conn.close()
-        checks["sqlite"] = {
+        from app.db.engine import async_session_factory as _asf
+
+        async with _asf() as session:
+            await session.execute(_text("SELECT 1"))
+        checks["postgresql"] = {
             "status": "ok",
             "latency_ms": round((_time.monotonic() - t0) * 1000, 1),
         }
     except Exception as e:
-        checks["sqlite"] = {"status": "error", "message": str(e)[:100]}
+        checks["postgresql"] = {"status": "error", "message": str(e)[:100]}
 
     # Qdrant
     try:
         import time as _time
+
         import httpx
 
         t0 = _time.monotonic()
@@ -151,8 +153,9 @@ async def _health_checks() -> dict[str, Any]:
     try:
         import asyncio as _aio
         import time as _time
-        import httpx
         from pathlib import Path as _Path
+
+        import httpx
 
         t0 = _time.monotonic()
         docker_disabled = os.environ.get("CONCLAVE_DOCKER_DISABLED", "").lower() in ("1", "true", "yes")
@@ -186,7 +189,8 @@ async def _health_checks() -> dict[str, Any]:
             # 本地 socket：尝试调用 CLI
             try:
                 proc = await _aio.create_subprocess_exec(
-                    "docker", "info",
+                    "docker",
+                    "info",
                     stdout=_aio.subprocess.DEVNULL,
                     stderr=_aio.subprocess.DEVNULL,
                 )
@@ -257,7 +261,11 @@ async def _health_checks() -> dict[str, Any]:
     healthy = {"ok", "closed", "half_open"}
     benign = {"unavailable", "unknown", "idle"}  # 视为可接受
     # 计算"严重"组件：状态不是 healthy 也不是 benign
-    severe = [k for k, c in checks.items() if isinstance(c, dict) and c.get("status") not in healthy and c.get("status") not in benign]
+    severe = [
+        k
+        for k, c in checks.items()
+        if isinstance(c, dict) and c.get("status") not in healthy and c.get("status") not in benign
+    ]
     all_ok = len(severe) == 0
     return {
         "status": "ok" if all_ok else "degraded",

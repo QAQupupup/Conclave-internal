@@ -19,6 +19,7 @@ class Chunk:
     - claims: 从该 chunk 提取的声明（预留，迭代三填充）
     - relations: 与其他 chunk 的关系（预留，迭代三填充）
     """
+
     chunk_id: str
     doc_id: str
     section: str  # 标题文本（不含 # 号）

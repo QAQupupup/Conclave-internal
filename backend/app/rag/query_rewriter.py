@@ -28,7 +28,15 @@ async def rewrite_query(query: str) -> list[str]:
 
     返回原始查询 + 改写查询的列表，最多 3 个去重查询
     """
-    if not settings.use_real_llm:
+    # 解析当前生效的 LLM 配置（支持租户级覆盖）
+    from app.tenants.context import get_tenant_id
+    from app.tenants.settings_override import resolve_llm_config
+
+    _tid = get_tenant_id()
+    base_url, api_key, model = resolve_llm_config(
+        _tid, settings.llm_base_url, settings.llm_api_key, settings.llm_model
+    )
+    if not base_url or not api_key:
         return [query]
 
     try:
@@ -36,13 +44,13 @@ async def rewrite_query(query: str) -> list[str]:
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
-                f"{settings.llm_base_url.rstrip('/')}/chat/completions",
+                f"{base_url.rstrip('/')}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.llm_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": settings.llm_model,
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.0,
                     "max_tokens": 200,

@@ -1,12 +1,11 @@
 # 角色模糊匹配测试 + 真实 LLM 回归防护
 # 防止 StubLLM 盲区：测试中文角色名、混合角色名、未知角色名等各种情况
 
-import pytest
 
 from app.models import Role
 
-
 # ---------- 角色模糊匹配单元测试 ----------
+
 
 def _match_role(role_str: str) -> Role | None:
     """从 nodes.py 提取的匹配逻辑（保持一致）"""
@@ -105,12 +104,14 @@ def test_match_expanded_roles():
 
 # ---------- intra_team 兜底逻辑测试 ----------
 
+
 def test_intra_team_fallback_when_no_match(client):
     """当 LLM 返回的角色全部不匹配时，使用默认配置兜底"""
+    import asyncio
+
     from app.models import MeetingState, MeetingStatus, Stage
     from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
-    import asyncio
 
     state = MeetingState(
         meeting_id="test-fallback-001",
@@ -135,10 +136,11 @@ def test_intra_team_fallback_when_no_match(client):
 
 def test_intra_team_with_chinese_role_names(client):
     """LLM 返回中文角色名时正确匹配"""
+    import asyncio
+
     from app.models import MeetingState, MeetingStatus, Stage
     from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
-    import asyncio
 
     state = MeetingState(
         meeting_id="test-chinese-roles-001",
@@ -171,6 +173,7 @@ def test_intra_team_with_chinese_role_names(client):
 
 # ---------- 真实 LLM 输出格式回归测试 ----------
 
+
 def test_stub_llm_returns_english_roles():
     """StubLLM 返回英文角色名（验证 mock 与真实 LLM 的差异）
 
@@ -180,8 +183,9 @@ def test_stub_llm_returns_english_roles():
 
     模糊匹配逻辑必须同时支持两种，否则真实场景会静默失败。
     """
-    from app.agents.llm import get_llm
     import asyncio
+
+    from app.agents.llm import get_llm
 
     llm = get_llm()
     # StubLLM 的 clarify 返回中 team_config 是英文

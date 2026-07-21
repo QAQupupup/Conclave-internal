@@ -34,7 +34,26 @@ class Settings:
     # LLM 配置：无 key 时走 StubLLM
     llm_api_key: str = _env("CONCLAVE_LLM_API_KEY", "")
     llm_base_url: str = _env("CONCLAVE_LLM_BASE_URL", "")
-    llm_model: str = _env("CONCLAVE_LLM_MODEL", "Qwen/Qwen3.5-4B")
+    llm_model: str = _env("CONCLAVE_LLM_MODEL", "deepseek-ai/DeepSeek-V3.2")
+
+    # LLM 确定性参数（全部支持环境变量覆盖，默认值保持向后兼容）
+    llm_seed: int = int(_env("CONCLAVE_LLM_SEED", "42"))
+    llm_top_p: float = float(_env("CONCLAVE_LLM_TOP_P", "1.0"))
+    llm_no_think: bool = _env("CONCLAVE_LLM_NO_THINK", "1") == "1"
+    llm_max_prompt_tokens: int = int(_env("CONCLAVE_LLM_MAX_PROMPT_TOKENS", "32000"))
+    llm_max_attempts: int = int(_env("CONCLAVE_LLM_MAX_ATTEMPTS", "3"))
+    llm_default_timeout: float = float(_env("CONCLAVE_LLM_TIMEOUT", "120.0"))
+    llm_produce_timeout: float = float(_env("CONCLAVE_PRODUCE_TIMEOUT", "1200.0"))
+
+    # 熔断器参数
+    llm_circuit_failure_threshold: int = int(_env("CONCLAVE_LLM_CIRCUIT_THRESHOLD", "5"))
+    llm_circuit_recovery_timeout: float = float(_env("CONCLAVE_LLM_CIRCUIT_RECOVERY", "60.0"))
+
+    # 阶段温度策略（JSON 字符串，支持完整覆盖）
+    llm_stage_temperatures: str = _env(
+        "CONCLAVE_LLM_STAGE_TEMPERATURES",
+        '{"clarify":0.0,"intra_team":0.3,"cross_team":0.0,"evidence_check":0.0,"arbitrate":0.0,"produce":0.1,"produce_prd_openapi":0.1,"produce_design_doc":0.1,"produce_comprehensive":0.1,"produce_research_report":0.1,"produce_business_report":0.1,"produce_code_analysis":0.1,"produce_tested_system":0.1,"produce_deployable_service":0.1}',
+    )
 
     # Embedding 配置：无 key 时走 StubEmbedding
     embed_api_key: str = _env("CONCLAVE_EMBED_API_KEY", "")
@@ -55,9 +74,6 @@ class Settings:
     qdrant_url: str = _env("CONCLAVE_QDRANT_URL", "")
     qdrant_collection: str = _env("CONCLAVE_QDRANT_COLLECTION", "conclave_chunks")
 
-    # 数据库路径：SQLite（兼容旧模式，逐步迁移到 PostgreSQL）
-    sqlite_path: str = os.getenv("CONCLAVE_DB_PATH", "conclave.db")
-
     # PostgreSQL 连接 URL（SQLAlchemy async）
     # 格式: postgresql+asyncpg://user:pass@host:5432/db
     database_url: str = os.getenv(
@@ -68,12 +84,8 @@ class Settings:
     # Redis 连接 URL
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-    # 数据库模式：sqlite | postgresql（自动检测）
-    @property
-    def db_mode(self) -> str:
-        if self.database_url.startswith("postgresql"):
-            return "postgresql"
-        return "sqlite"
+    # 数据目录路径（用于存放密钥文件等本地数据，非数据库路径）
+    db_path: str = _env("CONCLAVE_DB_PATH", str(Path.home() / ".conclave" / "data" / "conclave.db"))
 
     # StubEmbedding 伪向量维度（仅 stub 模式用）
     embed_dim: int = int(_env("CONCLAVE_EMBED_DIM", "64"))
@@ -118,6 +130,13 @@ class Settings:
     @property
     def use_qdrant(self) -> bool:
         return bool(self.qdrant_url)
+
+    @property
+    def db_mode(self) -> str:
+        """从 database_url 推断数据库模式：postgresql 或 sqlite"""
+        if self.database_url.startswith("postgresql"):
+            return "postgresql"
+        return "sqlite"
 
 
 settings = Settings()

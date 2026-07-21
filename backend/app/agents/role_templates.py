@@ -10,13 +10,14 @@ class RoleTemplate(BaseModel):
     每个模板描述该角色的核心视角和决策偏置，
     借调时取 prompt_template 注入到发言中。
     """
-    role_id: str                    # "product_architect" | "security_expert" | ...
-    display_name: str               # 中文展示名
-    perspective: str                # 核心视角描述
-    evidence_preference: str        # "constraints" | "risk" | "goals" | "policies"
-    risk_appetite: str             # "conservative" | "balanced" | "aggressive"
-    default_stance: str             # 默认立场
-    prompt_template: str            # 该角色的中文 prompt（核心视角 + 决策偏置）
+
+    role_id: str  # "product_architect" | "security_expert" | ...
+    display_name: str  # 中文展示名
+    perspective: str  # 核心视角描述
+    evidence_preference: str  # "constraints" | "risk" | "goals" | "policies"
+    risk_appetite: str  # "conservative" | "balanced" | "aggressive"
+    default_stance: str  # 默认立场
+    prompt_template: str  # 该角色的中文 prompt（核心视角 + 决策偏置）
 
 
 # 内置角色库（首期 6 个）
@@ -55,8 +56,7 @@ ROLE_LIBRARY: dict[str, RoleTemplate] = {
         risk_appetite="conservative",
         default_stance="feasibility-first",
         prompt_template=(
-            "你是工程师，兼负 QA 视角。关注可行性、实现风险、测试边界。"
-            "决策偏置：先质疑可行性，再谈方案；重执行细节。"
+            "你是工程师，兼负 QA 视角。关注可行性、实现风险、测试边界。决策偏置：先质疑可行性，再谈方案；重执行细节。"
         ),
     ),
     "security_expert": RoleTemplate(
@@ -67,10 +67,7 @@ ROLE_LIBRARY: dict[str, RoleTemplate] = {
         risk_appetite="conservative",
         default_stance="risk-first",
         # 与迭代一 BORROW_ROLE_PROMPTS["security_expert"] 内容一致，确保向后兼容
-        prompt_template=(
-            "你是安全专家。关注认证、授权、数据安全、注入防护。"
-            "决策偏置：先找安全漏洞，重风险。"
-        ),
+        prompt_template=("你是安全专家。关注认证、授权、数据安全、注入防护。决策偏置：先找安全漏洞，重风险。"),
     ),
     "data_engineer": RoleTemplate(
         role_id="data_engineer",
@@ -80,10 +77,7 @@ ROLE_LIBRARY: dict[str, RoleTemplate] = {
         risk_appetite="balanced",
         default_stance="data-first",
         # 与迭代一 BORROW_ROLE_PROMPTS["data_engineer"] 内容一致，确保向后兼容
-        prompt_template=(
-            "你是数据工程师。关注数据模型、存储、迁移、一致性。"
-            "决策偏置：重数据完整性。"
-        ),
+        prompt_template=("你是数据工程师。关注数据模型、存储、迁移、一致性。决策偏置：重数据完整性。"),
     ),
     "ux_designer": RoleTemplate(
         role_id="ux_designer",
@@ -93,9 +87,18 @@ ROLE_LIBRARY: dict[str, RoleTemplate] = {
         risk_appetite="balanced",
         default_stance="user-first",
         # 与迭代一 BORROW_ROLE_PROMPTS["ux_designer"] 内容一致，确保向后兼容
+        prompt_template=("你是用户体验设计师。关注交互流程、可用性、错误处理。决策偏置：重用户视角。"),
+    ),
+    "marketing_expert": RoleTemplate(
+        role_id="marketing_expert",
+        display_name="市场专家",
+        perspective="市场定位、用户增长、商业价值、竞争差异化",
+        evidence_preference="goals",
+        risk_appetite="aggressive",
+        default_stance="market-first",
         prompt_template=(
-            "你是用户体验设计师。关注交互流程、可用性、错误处理。"
-            "决策偏置：重用户视角。"
+            "你是市场专家。关注市场定位、用户增长、商业价值与竞争差异化。"
+            "决策偏置：先看市场价值与增长空间，重商业可行性；适度激进。"
         ),
     ),
 }

@@ -1,0 +1,111 @@
+# ===== Conclave 后端测试 Docker Compose =====
+# 专用测试栈：PostgreSQL + Redis + Qdrant + backend(pytest)
+# 使用与开发栈错开的端口，避免本地冲突。
+#
+# 启动测试依赖：
+#   docker compose -f docker-compose.test.yml up -d postgres-test redis-test qdrant-test
+# 运行后端测试：
+#   docker compose -f docker-compose.test.yml run --rm --build backend-test pytest -q --tb=short
+#
+name: conclave-test
+
+services:
+  # ============================================================
+  # PostgreSQL 16 + pgvector（测试数据库）
+  # ============================================================
+  postgres-test:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/pgvector/pgvector:pg16
+    container_name: conclave-test-postgres
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_DB: conclave_test
+      POSTGRES_USER: conclave
+      POSTGRES_PASSWORD: conclave_dev
+    volumes:
+      - conclave-test-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conclave -d conclave_test || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  # Redis（测试缓存 / 限流）
+  # ============================================================
+  redis-test:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:7-alpine
+    container_name: conclave-test-redis
+    ports:
+      - "6381:6379"
+    command: redis-server --save "" --appendonly no --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ============================================================
+  # Qdrant 向量数据库（测试用）
+  # ============================================================
+  qdrant-test:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.qdrant
+    container_name: conclave-test-qdrant
+    ports:
+      - "6337:6333"
+      - "6338:6334"
+    volumes:
+      - conclave-test-qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  # 后端测试运行器（一次性 pytest）
+  # ============================================================
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: conclave-test-backend
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "pip install --no-cache-dir pytest pytest-asyncio pytest-timeout pytest-xdist >/dev/null 2>&1; pytest -q --tb=short --timeout=30 --timeout-method=thread -n auto"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://conclave:conclave_dev@postgres-test:5432/conclave_test
+      REDIS_URL: redis://redis-test:6379/0
+      CONCLAVE_QDRANT_URL: http://qdrant-test:6333
+      CONCLAVE_TEST_MODE: "1"
+      APP_ENV: "test"
+      CONCLAVE_TEST_DISABLE_AUTH: "1"
+      CONCLAVE_MEMORY_DISABLED: "1"
+      CONCLAVE_DISABLE_SANDBOX_WARMUP: "1"
+      CONCLAVE_DISABLE_PRICING_LOADER: "1"
+      CONCLAVE_DISABLE_KEY_LOADER: "1"
+      CONCLAVE_DISABLE_METRICS: "1"
+      CONCLAVE_API_TOKEN: "test-token-for-ci"
+      CONCLAVE_WEB_SEARCH_MODE: "stub"
+      CONCLAVE_RATE_LIMIT_PER_MIN: "100000"
+      CONCLAVE_RATE_LIMIT_FAIL_PER_MIN: "100000"
+      CONCLAVE_LOG_LEVEL: "WARNING"
+      PLAYWRIGHT_BROWSERS_PATH: "/root/.cache/ms-playwright"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      qdrant-test:
+        condition: service_healthy
+
+volumes:
+  conclave-test-pg-data:
+    driver: local
+  conclave-test-qdrant-data:
+    driver: local

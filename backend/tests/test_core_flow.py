@@ -2,15 +2,13 @@
 # 使用 StubLLM（不烧 token），验证状态机和数据流正确性
 import asyncio
 
-import pytest
-
-from app.models import MeetingStatus, MeetingState
+from app.models import MeetingStatus
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
-from app.orchestrator.state import STAGE_ORDER, next_stage, is_terminal, should_pause
-
+from conclave_core.state import STAGE_ORDER, is_terminal, next_stage, should_pause
 
 # ---------- 状态机辅助函数 ----------
+
 
 def test_stage_order():
     """STAGE_ORDER 应为六阶段固定顺序"""
@@ -28,6 +26,7 @@ def test_is_terminal():
     """is_terminal 判断终态"""
     # 需要构造 MeetingState，这里简单测 status
     from app.models import MeetingState as MS
+
     state = MS(meeting_id="test", topic="test")
     state.status = MeetingStatus.DONE
     assert is_terminal(state) is True
@@ -42,6 +41,7 @@ def test_is_terminal():
 def test_should_pause():
     """should_pause 判断暂停态"""
     from app.models import MeetingState as MS
+
     state = MS(meeting_id="test", topic="test")
     state.status = MeetingStatus.PAUSED
     assert should_pause(state) is True
@@ -52,6 +52,7 @@ def test_should_pause():
 
 # ---------- 控制信号 ----------
 
+
 def test_pause_resume_signal(client):
     """pause/resume 信号正确改变状态"""
     resp = client.post("/meetings", json={"topic": "暂停恢复测试"})
@@ -61,7 +62,8 @@ def test_pause_resume_signal(client):
     # 创建后默认 PAUSED，先设为 RUNNING
     state.status = MeetingStatus.RUNNING
 
-    from app.orchestrator.state import apply_signal
+    from conclave_core.state import apply_signal
+
     state = apply_signal(state, "pause")
     assert state.status == MeetingStatus.PAUSED
 
@@ -77,7 +79,8 @@ def test_abort_signal(client):
     state = runner_mod.get_state(meeting_id)
     state.status = MeetingStatus.RUNNING
 
-    from app.orchestrator.state import apply_signal
+    from conclave_core.state import apply_signal
+
     apply_signal(state, "abort")
     assert state.status == MeetingStatus.ABORTED
     assert is_terminal(state)
@@ -91,13 +94,15 @@ def test_inject_signal(client):
     state = runner_mod.get_state(meeting_id)
     initial_count = len(state.injected_messages)
 
-    from app.orchestrator.state import apply_signal
+    from conclave_core.state import apply_signal
+
     apply_signal(state, "inject", {"role": "product_architect", "content": "额外补充：需要支持移动端"})
     assert len(state.injected_messages) == initial_count + 1
     assert state.injected_messages[-1]["content"] == "额外补充：需要支持移动端"
 
 
 # ---------- 端到端：clarify → intra_team ----------
+
 
 def test_clarify_to_intra_team_flow(client):
     """验证 clarify → intra_team 两阶段的状态流转 + 数据生成
@@ -116,6 +121,7 @@ def test_clarify_to_intra_team_flow(client):
 
     # 只跑前两个阶段：手动控制
     from app.orchestrator.nodes import clarify_node
+
     state = asyncio.run(clarify_node(state))
 
     # 验证 clarify 输出
@@ -130,6 +136,7 @@ def test_clarify_to_intra_team_flow(client):
 
     # 跑 intra_team
     from app.orchestrator.nodes import intra_team_node
+
     state = asyncio.run(intra_team_node(state))
 
     # 验证 intra_team 输出
@@ -188,10 +195,13 @@ def test_full_six_stage_flow(client):
 def test_deliverable_type_selection(client):
     """不同 deliverable_type 产出不同类型 artifact"""
     for deliverable_type in ["prd_openapi", "code_analysis", "tested_system", "deployable_service"]:
-        resp = client.post("/meetings", json={
-            "topic": f"测试 {deliverable_type}",
-            "deliverable_type": deliverable_type,
-        })
+        resp = client.post(
+            "/meetings",
+            json={
+                "topic": f"测试 {deliverable_type}",
+                "deliverable_type": deliverable_type,
+            },
+        )
         meeting_id = resp.json()["meeting_id"]
 
         state = runner_mod.get_state(meeting_id)

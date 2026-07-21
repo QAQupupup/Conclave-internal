@@ -19,13 +19,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
-from urllib.parse import urlparse
+from typing import Any
 
 logger = logging.getLogger("app.tools.navigation_skill")
 
@@ -33,54 +30,59 @@ logger = logging.getLogger("app.tools.navigation_skill")
 # C-2: NavigationSkill YAML Schema
 # ================================================================
 
+
 @dataclass
 class SuccessWhen:
     """success_when 条件定义"""
-    type: str = ""               # 8种条件类型
-    selector: str = ""           # CSS/XPath 选择器
-    contains: str = ""           # URL/text 包含检查
-    attribute: str = ""          # 属性名
-    value: str = ""              # 期望值
-    timeout_ms: int = 5000       # 等待超时
-    min_count: int = 1           # 最小元素数量
-    max_count: int = 0           # 最大元素数量（0=不限）
-    negative: bool = False       # 取反（条件不满足时才算成功）
+
+    type: str = ""  # 8种条件类型
+    selector: str = ""  # CSS/XPath 选择器
+    contains: str = ""  # URL/text 包含检查
+    attribute: str = ""  # 属性名
+    value: str = ""  # 期望值
+    timeout_ms: int = 5000  # 等待超时
+    min_count: int = 1  # 最小元素数量
+    max_count: int = 0  # 最大元素数量（0=不限）
+    negative: bool = False  # 取反（条件不满足时才算成功）
 
 
 @dataclass
 class NavStep:
     """导航工作流的一个步骤"""
+
     name: str = ""
-    action: str = ""             # goto / click / fill / scroll / wait / evaluate / extract / select / press
+    action: str = ""  # goto / click / fill / scroll / wait / evaluate / extract / select / press
     args: dict[str, Any] = field(default_factory=dict)
     success_when: list[SuccessWhen] = field(default_factory=list)
     compensating_action: dict[str, Any] = field(default_factory=dict)  # 补偿动作
-    timeout_ms: int = 30000      # 步骤超时
-    retries: int = 0             # 重试次数（非补偿）
+    timeout_ms: int = 30000  # 步骤超时
+    retries: int = 0  # 重试次数（非补偿）
 
 
 @dataclass
 class ExtractConfig:
     """数据提取配置"""
+
     selector: str = "body"
-    strategy: str = "auto"       # auto/css/xpath/text/role
+    strategy: str = "auto"  # auto/css/xpath/text/role
     fields: dict[str, str] = field(default_factory=dict)  # {field_name: selector}
-    js_expression: str = ""      # 自定义 JS 提取表达式
+    js_expression: str = ""  # 自定义 JS 提取表达式
     max_length: int = 10000
 
 
 @dataclass
 class NavigationSkill:
     """声明式导航工作流定义"""
+
     name: str = ""
     description: str = ""
     version: str = "1.0"
     steps: list[NavStep] = field(default_factory=list)
-    extract: Optional[ExtractConfig] = None
+    extract: ExtractConfig | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "NavigationSkill":
+    def from_dict(cls, data: dict[str, Any]) -> NavigationSkill:
         """从字典构建 NavigationSkill（通常来自 YAML 解析）"""
         steps = []
         for step_data in data.get("steps", []):
@@ -98,15 +100,17 @@ class NavigationSkill:
                 )
                 for sw in step_data.get("success_when", [])
             ]
-            steps.append(NavStep(
-                name=step_data.get("name", ""),
-                action=step_data.get("action", ""),
-                args=step_data.get("args", {}),
-                success_when=sw_list,
-                compensating_action=step_data.get("compensating_action", {}),
-                timeout_ms=step_data.get("timeout_ms", 30000),
-                retries=step_data.get("retries", 0),
-            ))
+            steps.append(
+                NavStep(
+                    name=step_data.get("name", ""),
+                    action=step_data.get("action", ""),
+                    args=step_data.get("args", {}),
+                    success_when=sw_list,
+                    compensating_action=step_data.get("compensating_action", {}),
+                    timeout_ms=step_data.get("timeout_ms", 30000),
+                    retries=step_data.get("retries", 0),
+                )
+            )
 
         extract_data = data.get("extract")
         extract_cfg = None
@@ -129,9 +133,10 @@ class NavigationSkill:
         )
 
     @classmethod
-    def from_yaml(cls, yaml_text: str) -> "NavigationSkill":
+    def from_yaml(cls, yaml_text: str) -> NavigationSkill:
         """从 YAML 文本构建 NavigationSkill"""
         import yaml
+
         data = yaml.safe_load(yaml_text)
         return cls.from_dict(data)
 
@@ -139,6 +144,7 @@ class NavigationSkill:
 # ================================================================
 # C-3: 8种 success_when 条件验证器
 # ================================================================
+
 
 class ConditionValidator:
     """success_when 条件验证器
@@ -194,10 +200,14 @@ class ConditionValidator:
             return True
         try:
             result = await self._browser.wait_for_element(
-                meeting_id, cond.selector, strategy="auto",
-                state="visible", timeout=cond.timeout_ms, page_index=pi,
+                meeting_id,
+                cond.selector,
+                strategy="auto",
+                state="visible",
+                timeout=cond.timeout_ms,
+                page_index=pi,
             )
-            return result.get("status") == "ok"
+            return result.get("status") == "ok"  # type: ignore[no-any-return]
         except Exception:
             return False
 
@@ -207,10 +217,14 @@ class ConditionValidator:
             return True
         try:
             result = await self._browser.wait_for_element(
-                meeting_id, cond.selector, strategy="auto",
-                state="hidden", timeout=cond.timeout_ms, page_index=pi,
+                meeting_id,
+                cond.selector,
+                strategy="auto",
+                state="hidden",
+                timeout=cond.timeout_ms,
+                page_index=pi,
             )
-            return result.get("status") == "ok"
+            return result.get("status") == "ok"  # type: ignore[no-any-return]
         except Exception:
             return False
 
@@ -256,10 +270,13 @@ class ConditionValidator:
         if not cond.selector or not cond.attribute:
             return True
         attr_val = await self._browser.get_attribute(
-            meeting_id, cond.selector, cond.attribute, page_index=pi,
+            meeting_id,
+            cond.selector,
+            cond.attribute,
+            page_index=pi,
         )
         if cond.value:
-            return attr_val == cond.value
+            return attr_val == cond.value  # type: ignore[no-any-return]
         return attr_val is not None
 
     async def _check_count_stable(self, meeting_id: str, cond: SuccessWhen, pi: int) -> bool:
@@ -268,20 +285,22 @@ class ConditionValidator:
             return True
         try:
             count1 = await self._browser.find_elements(
-                meeting_id, cond.selector, page_index=pi,
+                meeting_id,
+                cond.selector,
+                page_index=pi,
             )
             await asyncio.sleep(0.5)
             count2 = await self._browser.find_elements(
-                meeting_id, cond.selector, page_index=pi,
+                meeting_id,
+                cond.selector,
+                page_index=pi,
             )
             n1, n2 = len(count1), len(count2)
             if n1 != n2:
                 return False
             if cond.min_count and n1 < cond.min_count:
                 return False
-            if cond.max_count and n1 > cond.max_count:
-                return False
-            return True
+            return not (cond.max_count and n1 > cond.max_count)
         except Exception:
             return False
 
@@ -303,6 +322,7 @@ class ConditionValidator:
 # C-4: 四级元素定位回退
 # ================================================================
 
+
 class ElementLocator:
     """四级元素定位回退：CSS → structural → text → LLM
 
@@ -319,7 +339,10 @@ class ElementLocator:
         self._browser = browser_tool
         # fallback-rate 指标
         self._fallback_counts: dict[str, int] = {
-            "css": 0, "structural": 0, "text": 0, "llm": 0,
+            "css": 0,
+            "structural": 0,
+            "text": 0,
+            "llm": 0,
         }
         self._total_attempts = 0
 
@@ -335,7 +358,11 @@ class ElementLocator:
         # Level 1: CSS/XPath
         try:
             result = await self._browser.click(
-                meeting_id, selector, strategy="auto", timeout=3000, page_index=page_index,
+                meeting_id,
+                selector,
+                strategy="auto",
+                timeout=3000,
+                page_index=page_index,
             )
             if result.get("status") == "ok":
                 self._fallback_counts["css"] += 1
@@ -347,9 +374,13 @@ class ElementLocator:
         try:
             # 尝试将 selector 解析为 role:name 格式
             if ":" in selector:
-                role, name = selector.split(":", 1)
+                _role, name = selector.split(":", 1)
                 result = await self._browser.click(
-                    meeting_id, name, strategy="role", timeout=3000, page_index=page_index,
+                    meeting_id,
+                    name,
+                    strategy="role",
+                    timeout=3000,
+                    page_index=page_index,
                 )
                 if result.get("status") == "ok":
                     self._fallback_counts["structural"] += 1
@@ -360,7 +391,11 @@ class ElementLocator:
         # Level 3: Text
         try:
             result = await self._browser.click(
-                meeting_id, selector, strategy="text", timeout=3000, page_index=page_index,
+                meeting_id,
+                selector,
+                strategy="text",
+                timeout=3000,
+                page_index=page_index,
             )
             if result.get("status") == "ok":
                 self._fallback_counts["text"] += 1
@@ -371,7 +406,9 @@ class ElementLocator:
         # Level 4: LLM-assisted (simplified - uses find_by_text as approximation)
         try:
             elements = await self._browser.find_by_text(
-                meeting_id, selector, page_index=page_index,
+                meeting_id,
+                selector,
+                page_index=page_index,
             )
             if elements:
                 # 点击第一个匹配的元素
@@ -379,7 +416,11 @@ class ElementLocator:
                 # 尝试用 tag + text 组合定位
                 css_selector = f"{first.get('tag', 'button')}:has-text('{selector}')"
                 result = await self._browser.click(
-                    meeting_id, css_selector, strategy="css", timeout=3000, page_index=page_index,
+                    meeting_id,
+                    css_selector,
+                    strategy="css",
+                    timeout=3000,
+                    page_index=page_index,
                 )
                 if result.get("status") == "ok":
                     self._fallback_counts["llm"] += 1
@@ -409,25 +450,28 @@ class ElementLocator:
 # C-5: 执行引擎（compensating_action + partial 状态 + provenance）
 # ================================================================
 
+
 @dataclass
 class StepResult:
     """单步执行结果"""
+
     step_name: str = ""
     action: str = ""
-    status: str = "pending"       # "success" | "failed" | "skipped" | "compensated"
+    status: str = "pending"  # "success" | "failed" | "skipped" | "compensated"
     data: Any = None
     error: str = ""
     latency_ms: int = 0
     conditions_met: bool = False
     compensating_applied: bool = False
-    locator_strategy: str = ""    # 元素定位策略（用于 fallback-rate）
+    locator_strategy: str = ""  # 元素定位策略（用于 fallback-rate）
 
 
 @dataclass
 class SkillExecutionResult:
     """NavigationSkill 执行结果"""
+
     skill_name: str = ""
-    status: str = "failed"        # "success" | "partial" | "failed"
+    status: str = "failed"  # "success" | "partial" | "failed"
     data: Any = None
     steps: list[StepResult] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=dict)
@@ -443,9 +487,13 @@ class SkillExecutionResult:
             "data": self.data,
             "steps": [
                 {
-                    "step_name": sr.step_name, "action": sr.action, "status": sr.status,
-                    "error": sr.error, "latency_ms": sr.latency_ms,
-                    "conditions_met": sr.conditions_met, "compensating_applied": sr.compensating_applied,
+                    "step_name": sr.step_name,
+                    "action": sr.action,
+                    "status": sr.status,
+                    "error": sr.error,
+                    "latency_ms": sr.latency_ms,
+                    "conditions_met": sr.conditions_met,
+                    "compensating_applied": sr.compensating_applied,
                     "locator_strategy": sr.locator_strategy,
                 }
                 for sr in self.steps
@@ -470,6 +518,7 @@ class NavigationSkillEngine:
     def __init__(self, browser_tool: Any | None = None) -> None:
         if browser_tool is None:
             from app.tools.browser_tool import get_browser_tool
+
             browser_tool = get_browser_tool()
         self._browser = browser_tool
         self._validator = ConditionValidator(browser_tool)
@@ -495,12 +544,13 @@ class NavigationSkillEngine:
 
         # 获取排他锁（C-1）
         from app.tools.browser_tool import get_browser_pool
+
         pool = get_browser_pool()
         exclusive_lock = pool.get_exclusive_lock(meeting_id)
 
         async with exclusive_lock:
             # 逐步执行
-            for i, step in enumerate(skill.steps):
+            for _i, step in enumerate(skill.steps):
                 step_result = StepResult(step_name=step.name, action=step.action)
                 step_t0 = time.monotonic()
 
@@ -515,7 +565,9 @@ class NavigationSkillEngine:
                     # 验证 success_when 条件
                     if step.success_when:
                         conditions_ok = await self._validate_conditions(
-                            step.success_when, meeting_id, page_index,
+                            step.success_when,
+                            meeting_id,
+                            page_index,
                         )
                         step_result.conditions_met = conditions_ok
                         if not conditions_ok:
@@ -535,7 +587,9 @@ class NavigationSkillEngine:
                 if step_result.status == "failed":
                     if step.compensating_action:
                         compensated = await self._execute_compensating(
-                            step.compensating_action, meeting_id, page_index,
+                            step.compensating_action,
+                            meeting_id,
+                            page_index,
                         )
                         step_result.compensating_applied = compensated
                         if compensated:
@@ -584,48 +638,70 @@ class NavigationSkillEngine:
         args = step.args
 
         if action == "goto":
-            return await self._browser.goto(meeting_id, args.get("url", ""),
-                                            wait_until=args.get("wait_until", "domcontentloaded"),
-                                            timeout=args.get("timeout", 30000), page_index=pi)
+            return await self._browser.goto(
+                meeting_id,
+                args.get("url", ""),
+                wait_until=args.get("wait_until", "domcontentloaded"),
+                timeout=args.get("timeout", 30000),
+                page_index=pi,
+            )
         elif action == "click":
             # 使用四级定位
             return await self._locator.locate_and_click(
-                meeting_id, args.get("selector", ""), page_index=pi,
+                meeting_id,
+                args.get("selector", ""),
+                page_index=pi,
             )
         elif action == "fill":
             return await self._browser.fill(
-                meeting_id, args.get("selector", ""), args.get("value", ""),
-                strategy=args.get("strategy", "auto"), page_index=pi,
+                meeting_id,
+                args.get("selector", ""),
+                args.get("value", ""),
+                strategy=args.get("strategy", "auto"),
+                page_index=pi,
             )
         elif action == "scroll":
             return await self._browser.scroll(
-                meeting_id, direction=args.get("direction", "down"),
+                meeting_id,
+                direction=args.get("direction", "down"),
                 amount=args.get("amount", 500),
-                selector=args.get("selector"), page_index=pi,
+                selector=args.get("selector"),
+                page_index=pi,
             )
         elif action == "wait":
             return await self._browser.wait_for_element(
-                meeting_id, args.get("selector", ""),
+                meeting_id,
+                args.get("selector", ""),
                 state=args.get("state", "visible"),
-                timeout=args.get("timeout", 10000), page_index=pi,
+                timeout=args.get("timeout", 10000),
+                page_index=pi,
             )
         elif action == "evaluate":
             return await self._browser.evaluate(
-                meeting_id, args.get("expression", ""), page_index=pi,
+                meeting_id,
+                args.get("expression", ""),
+                page_index=pi,
             )
         elif action == "select":
             return await self._browser.select(
-                meeting_id, args.get("selector", ""),
-                value=args.get("value"), label=args.get("label"), page_index=pi,
+                meeting_id,
+                args.get("selector", ""),
+                value=args.get("value"),
+                label=args.get("label"),
+                page_index=pi,
             )
         elif action == "press":
             return await self._browser.press(
-                meeting_id, args.get("key", "Enter"),
-                selector=args.get("selector"), page_index=pi,
+                meeting_id,
+                args.get("key", "Enter"),
+                selector=args.get("selector"),
+                page_index=pi,
             )
         elif action == "extract":
             return await self._browser.extract_content(
-                meeting_id, max_length=args.get("max_length", 5000), page_index=pi,
+                meeting_id,
+                max_length=args.get("max_length", 5000),
+                page_index=pi,
             )
         elif action == "back":
             return await self._browser.back(meeting_id, page_index=pi)
@@ -635,7 +711,10 @@ class NavigationSkillEngine:
             return {"status": "error", "error": f"未知 action: {action}"}
 
     async def _validate_conditions(
-        self, conditions: list[SuccessWhen], meeting_id: str, pi: int,
+        self,
+        conditions: list[SuccessWhen],
+        meeting_id: str,
+        pi: int,
     ) -> bool:
         """验证所有 success_when 条件（AND 逻辑）"""
         for cond in conditions:
@@ -645,7 +724,10 @@ class NavigationSkillEngine:
         return True
 
     async def _execute_compensating(
-        self, comp: dict[str, Any], meeting_id: str, pi: int,
+        self,
+        comp: dict[str, Any],
+        meeting_id: str,
+        pi: int,
     ) -> bool:
         """执行补偿动作
 
@@ -665,7 +747,9 @@ class NavigationSkillEngine:
                 await self._browser.goto(meeting_id, args.get("url", ""), page_index=pi)
             elif action == "wait":
                 await self._browser.wait_for_element(
-                    meeting_id, args.get("selector", ""), page_index=pi,
+                    meeting_id,
+                    args.get("selector", ""),
+                    page_index=pi,
                 )
             else:
                 logger.warning("未知补偿 action: %s", action)
@@ -676,7 +760,10 @@ class NavigationSkillEngine:
             return False
 
     async def _try_extract(
-        self, skill: NavigationSkill, meeting_id: str, pi: int,
+        self,
+        skill: NavigationSkill,
+        meeting_id: str,
+        pi: int,
     ) -> Any:
         """尝试提取数据（即使部分步骤失败）"""
         if skill.extract:
@@ -690,28 +777,37 @@ class NavigationSkillEngine:
         """执行数据提取"""
         if config.js_expression:
             result = await self._browser.evaluate(
-                meeting_id, config.js_expression, page_index=pi,
+                meeting_id,
+                config.js_expression,
+                page_index=pi,
             )
             return result.get("data") if isinstance(result, dict) else result
 
         if config.fields:
             # 结构化提取
             return await self._browser.extract_structured(
-                meeting_id, config.selector, config.fields,
-                strategy=config.strategy, page_index=pi,
+                meeting_id,
+                config.selector,
+                config.fields,
+                strategy=config.strategy,
+                page_index=pi,
             )
 
         # 简单文本提取
         text = await self._browser.get_text(
-            meeting_id, selector=config.selector,
-            strategy=config.strategy, page_index=pi,
+            meeting_id,
+            selector=config.selector,
+            strategy=config.strategy,
+            page_index=pi,
         )
         if text and len(text) > config.max_length:
-            text = text[:config.max_length] + "..."
+            text = text[: config.max_length] + "..."
         return text
 
     def _build_provenance(
-        self, skill: NavigationSkill, step_results: list[StepResult],
+        self,
+        skill: NavigationSkill,
+        step_results: list[StepResult],
     ) -> dict[str, Any]:
         """构建数据来源追踪"""
         return {
@@ -725,6 +821,8 @@ class NavigationSkillEngine:
                 "selector": skill.extract.selector if skill.extract else None,
                 "strategy": skill.extract.strategy if skill.extract else None,
                 "has_js": bool(skill.extract and skill.extract.js_expression),
-            } if skill.extract else None,
+            }
+            if skill.extract
+            else None,
             "locator_strategies_used": [s.locator_strategy for s in step_results if s.locator_strategy],
         }
