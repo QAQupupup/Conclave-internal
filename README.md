@@ -39,7 +39,7 @@
 - **实时日志面板**：右侧可折叠面板，实时显示后端所有节点执行日志
 - **级别着色**：ERROR红色、WARNING橙色、INFO常规、DEBUG灰色
 - **进度追踪**：Produce阶段显示实时进度条（LLM生成→代码审查→沙箱部署）
-- **力导向拓扑图**：实时展示Agent关系和发言动态
+- **组件联通视图**：Topology 页面展示服务依赖关系、网络隔离层级、实时健康状态
 - **Token消耗统计**：实时显示成本消耗
 
 ### 内存安全
@@ -127,7 +127,7 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Frontend (React)                         │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐ │
-│  │ 聊天面板  │ │ 日志面板  │ │ 拓扑图   │ │ 运维面板  │ │ 监控  │ │
+│  │ 聊天面板  │ │ 日志面板  │ │ 联通图   │ │ 运维面板  │ │ 监控  │ │
 │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └──┬────┘ │
 │       │            │            │             │          │      │
 │       └────────────┴────────────┴─────────────┴──────────┘      │
@@ -183,7 +183,7 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 | 组件 | 文件 | 职责 |
 |---|---|---|
 | **MeetingManager** | `backend/app/orchestrator/manager.py` | 系统级调度与治理中枢，统一交互层 |
-| **Scheduler** | `backend/app/orchestrator/scheduler.py` | 显式 DAG 任务调度器，支持递归子任务 |
+| **TaskGraph** | `backend/app/orchestrator/task_graph.py` | 显式 DAG 任务图，支持拓扑排序与递归子任务 |
 | **ContextManager** | `backend/app/orchestrator/context_manager.py` | 上下文治理：窗口监控、分层选择、摘要压缩 |
 | **AgentRuntime** | `backend/app/agents/agent_runtime.py` | 统一 Agent 运行时，差异通过配置表达 |
 | **TaskBaseline** | `backend/app/agents/task_baseline.py` | 领域基线模板（软件系统、股票分析等） |
@@ -191,7 +191,7 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 ### 解决的核心问题
 
 1. **上下文溢出**：ContextManager 显式预算 + 优先级分层 + 自动裁剪
-2. **缺少显式 DAG**：Scheduler 把阶段/子任务建模为可拓扑排序的有向图
+2. **缺少显式 DAG**：TaskGraph 把阶段/子任务建模为可拓扑排序的有向图
 3. **Agent 抽象不统一**：AgentRuntime 让所有 Agent 共享同一执行接口
 4. **组件交互混乱**：Manager 作为 Storage/EventBus/Sandbox/Agent 之间的统一协议层
 5. **领域扩展困难**：TaskBaseline 按领域定义团队角色、必需产物、质量门
@@ -230,9 +230,10 @@ Conclave/
 │   │   ├── docker_hosts.py            # Docker主机管理（注册/健康检查/调度策略）
 │   │   ├── orchestrator/              # 编排核心
 │   │   │   ├── runner.py              # 主循环 + 崩溃恢复 + 资源清理
+│   │   │   ├── stage_runners.py       # 六阶段执行入口 + 结论锁定逻辑
 │   │   │   ├── state.py               # 阶段流转 + 控制信号
 │   │   │   ├── manager.py             # V3：MeetingManager 统一交互层
-│   │   │   ├── scheduler.py           # V3：DAG 任务调度器
+│   │   │   ├── task_graph.py          # DAG 任务图（拓扑排序调度）
 │   │   │   ├── context_manager.py     # V3：上下文治理
 │   │   │   ├── nodes/                 # 六阶段节点实现
 │   │   │   │   ├── clarify.py         # 澄清阶段
@@ -243,13 +244,17 @@ Conclave/
 │   │   │   │   ├── produce.py         # 产出交付（含进度反馈）
 │   │   │   │   ├── borrow.py          # 动态借调
 │   │   │   │   └── _helpers.py        # 节点辅助函数
-│   │   │   ├── conclusion_chain.py    # 结论锁定链（防漂移）
 │   │   │   ├── react_loop.py          # ReAct工具调用循环
 │   │   │   ├── refine_loop.py         # 代码自修复循环
 │   │   │   ├── stage_planners.py      # V3 阶段规划器
 │   │   │   ├── stage_reducers.py      # V3 阶段结果归约器
 │   │   │   ├── stage_common.py        # 阶段公共辅助函数
-│   │   │   └── task_graph.py          # DAG 任务图
+│   │   │   ├── evidence_helpers.py    # 证据校验辅助
+│   │   │   ├── produce_helpers.py     # 产出辅助
+│   │   │   ├── borrow_helpers.py      # 借调辅助
+│   │   │   ├── phased_generation.py   # 分阶段生成
+│   │   │   ├── instant.py             # 即时响应
+│   │   │   └── system_prompt.py       # 系统提示词构建
 │   │   ├── agents/                    # Agent计算层
 │   │   │   ├── compute.py             # LLM调用 + 多模型路由
 │   │   │   ├── agent_runtime.py       # V3：统一 Agent 运行时
@@ -299,7 +304,7 @@ Conclave/
 │   │   ├── domain/                    # 领域模型（WS消息/事件payload Pydantic化）
 │   │   ├── observability/             # 可观测性门面（统一 logger + audit + log_bus）
 │   │   ├── services/                  # 业务服务（key_store 加密管理）
-│   │   ├── db/                        # 数据层（engine/models/redis/base Mixin）
+│   │   ├── db/                        # 数据层（engine/redis/base Mixin/models 子包/qdrant_store/vector_store）
 │   │   ├── core/                      # 核心基础设施（AppException + ErrorCode 枚举）
 │   │   └── prompts/                   # Prompt模板 + Bug Pattern
 │   ├── workspace/                     # 沙箱工作目录
@@ -313,24 +318,38 @@ Conclave/
 │   │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── components/                # React组件
-│   │   │   ├── ChatPanel.tsx          # 聊天流面板
-│   │   │   ├── LogPanel.tsx           # 实时日志面板（可折叠）
-│   │   │   ├── AgentGraph.tsx         # 力导向拓扑图
-│   │   │   ├── StageIndicator.tsx     # 阶段进度指示器
-│   │   │   ├── ArtifactPanel.tsx      # 产出物面板
-│   │   │   ├── EvidencePanel.tsx      # 证据面板
-│   │   │   ├── ModelsView.tsx         # 模型中心
-│   │   │   ├── FloatingBadges.tsx     # 右侧浮动徽标
+│   │   ├── views/                     # 页面组件
+│   │   │   ├── Landing.tsx            # 首页
+│   │   │   ├── Login.tsx              # 登录页
+│   │   │   ├── Board.tsx              # 会议列表看板
+│   │   │   ├── Meeting.tsx            # 会议详情（聊天流+日志+产出）
+│   │   │   ├── Models.tsx             # 模型中心（API Key 配置）
+│   │   │   ├── Topology.tsx           # 组件联通图（服务健康+网络隔离）
+│   │   │   ├── Monitor.tsx            # 监控面板
 │   │   │   ├── DevOpsPanel.tsx        # 运维面板（Docker主机管理）
-│   │   │   └── ...
-│   │   ├── store/                     # 状态管理
-│   │   │   ├── MeetingContext.tsx     # 会议Context（key={meetingId}防内存泄漏）
-│   │   │   └── meetingReducer.ts      # 事件驱动reducer
+│   │   │   ├── Report.tsx             # 报告查看
+│   │   │   ├── Settings.tsx           # 设置
+│   │   │   └── NotFound.tsx           # 404
+│   │   ├── components/                # 可复用组件
+│   │   │   ├── Topbar.tsx             # 顶栏
+│   │   │   ├── NavRail.tsx            # 侧边导航
+│   │   │   ├── LogPanel.tsx           # 实时日志面板（可折叠）
+│   │   │   ├── PhasedProgress.tsx     # 阶段进度指示器
+│   │   │   ├── MeetingToolbar.tsx     # 会议工具栏
+│   │   │   ├── ContextPanel.tsx       # 上下文面板
+│   │   │   ├── ServiceViewer.tsx      # 服务查看器
+│   │   │   ├── CommandPalette.tsx     # 命令面板
+│   │   │   ├── TenantSwitcher.tsx     # 租户切换
+│   │   │   ├── Toast.tsx              # 通知
+│   │   │   ├── ConfirmModal.tsx       # 确认弹窗
+│   │   │   ├── ErrorBoundary.tsx      # 错误边界
+│   │   │   ├── RequireAuth.tsx        # 路由鉴权
+│   │   │   └── SessionExpiredModal.tsx # 会话过期
+│   │   ├── state/AppContext.tsx       # 全局状态
 │   │   ├── hooks/                     # 自定义Hook
-│   │   │   └── useWebSocket.ts        # WebSocket（自动重连+心跳+批处理）
 │   │   ├── types/                     # TypeScript类型
-│   │   └── lib/                       # 工具库
+│   │   ├── data/                      # 静态数据与布局配置
+│   │   └── lib/                       # 工具库（api/client 等）
 │   ├── Dockerfile                     # 前端Nginx镜像
 │   └── nginx.conf
 ├── docker-compose.yml                 # 5服务编排（backend/frontend/postgres/redis/qdrant）
@@ -379,7 +398,7 @@ Conclave/
 |---|---|
 | 事件总线 `_history` | 单会议上限1000条，自动裁剪最旧事件；会议删除时清空 |
 | 事件总线 `_subs` | unsubscribe后自动清理空列表键 |
-| 前端日志 `logs` | reducer中上限500条；切换会议key变化自动重置state |
+| 前端日志 `logs` | AppContext 中上限 500 条（`.slice(0, 500)`）；切换会议重置 state |
 | RAG向量缓存 `_stores` | 会议结束/删除时调用`clear_store()`释放chunks和向量 |
 | 沙箱服务 `_running_services` | 会议结束时`stop_service()`停止容器释放端口；应用关闭时`cleanup_all_services()` |
 | 浏览器上下文 | 会议结束时`release_meeting()`释放Playwright上下文 |
