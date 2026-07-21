@@ -40,7 +40,7 @@
 - **级别着色**：ERROR红色、WARNING橙色、INFO常规、DEBUG灰色
 - **进度追踪**：Produce阶段显示实时进度条（LLM生成→代码审查→沙箱部署）
 - **组件联通视图**：Topology 页面展示服务依赖关系、网络隔离层级、实时健康状态
-- **Token消耗统计**：实时显示成本消耗
+- **上下文面板**：议题概览、证据库、产出物、Token与成本、模型调度（ContextPanel 多 tab 切换）
 
 ### 内存安全
 - 事件总线单会议历史上限1000条，自动裁剪
@@ -82,7 +82,7 @@ docker compose up -d --build
 # OpenAI兼容接口（支持硅基流动、DeepSeek、通义千问等）
 CONCLAVE_LLM_API_KEY=your-api-key
 CONCLAVE_LLM_BASE_URL=https://api.siliconflow.cn/v1
-CONCLAVE_LLM_MODEL=Qwen/Qwen2.5-72B-Instruct
+CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 
 # Qdrant向量库（可选，留空走内存向量）
 CONCLAVE_QDRANT_URL=http://qdrant:6333
@@ -98,7 +98,7 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 4. 点击"开始会议"，观察六阶段自动执行
 5. 会议过程中：
    - 点击右侧蓝色箭头打开实时日志面板
-   - 点击右侧浮动徽标查看议题、证据、产出物、Token消耗等
+   - 通过上下文面板查看议题概览、证据库、产出物、Token与成本、模型调度
    - 可通过"介入"功能向会议注入指令
 6. 会议完成后在"产出"面板查看结果
 
@@ -482,26 +482,29 @@ npm run dev
 
 ## 当前状态
 
-迭代一（六阶段主闭环）和迭代二（系统化升级）已完成，主要功能可用：
+核心功能已全部可用：
 - 多Agent六阶段会议管线 ✅
 - 独立人格角色 + 动态借调 ✅
 - Docker沙箱代码执行 ✅
-- 多主机分布式Docker调度 ✅
-- 运维面板（Docker主机集群管理） ✅
+- 多主机分布式Docker调度（5种调度策略）✅
+- 运维面板（Docker主机集群管理）✅
 - 数据科学分析（Pandas/NumPy/Matplotlib）✅
 - 可部署服务自动生成和部署 ✅
-- RAG文档检索 ✅
-- 实时日志面板 ✅
-- 进度反馈 ✅
-- 内存安全机制 ✅
+- RAG文档检索（Qdrant + bge-m3 + Reranker）✅
+- 实时日志面板 + 进度反馈 ✅
+- 内存安全机制（事件总线1000条/日志500条上限）✅
+- 核心业务全量迁移到 PostgreSQL（ORM 模型 + Redis Pub/Sub）✅
+- 多租户隔离（tenant_id + 上下文 + 配置覆盖 + RBAC）✅
+- 插件框架（PluginRegistry / HookSpec / AuthPlugin）✅
+- 用户认证（JWT + PBKDF2 600k 迭代 + CSRF 防护）✅
 - Docker Compose一键部署 ✅
 
-待完善方向：
+待完善方向（详见"已知限制与待办"章节）：
+- gRPC Agent Worker 横向扩展（当前单进程 stub）
+- RAG 高级检索策略（HyDE / Multi-Query / Graph RAG）
+- 证据事实验证（当前仅语义相似度比对）
 - 跨会议长期记忆和观点演化
-- 多模型交叉验证（同一论点由不同模型独立生成后互审）
-- 基于议题复杂度的自动Agent数量调节
 - 部署后自动化功能冒烟测试
-- Chunk Graph知识图谱检索升级
 - 数据分析结果的前端图表渲染
 
 ---
