@@ -593,11 +593,13 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 - **验收**：新增 `test_instruction_injection.py` 验证防护生效；Few-shot 示例库可配置
 - **影响范围**：`app/orchestrator/system_prompt.py`、`app/orchestrator/nodes/`
 
-#### M1.5 Redis Pub/Sub 可靠投递（断线丢事件）
-- **现状**：`events.py` 用 Redis Pub/Sub（fire-and-forget），listener 断线期间消息丢失。近实时 WS 场景可接受，但影响断线重连后的状态一致性。
-- **目标**：评估迁移到 Redis Stream 的成本收益，必要时实施（Stream 支持消费者组 + ACK + pending list 重投递）
-- **验收**：listener 断线重连后不丢消息；新增 `test_redis_stream_recovery.py`
-- **影响范围**：`app/events.py`、`app/db/redis.py`
+#### M1.5 Redis Pub/Sub 可靠投递（已评估，无需迁移）
+- **评估结论**：现有 PG 持久化 + replay 机制已覆盖可靠性需求，无需迁移到 Redis Stream。
+- **依据**：
+  1. 事件持久化在 PostgreSQL（`save_event` → INSERT INTO events 表）
+  2. WS 断线重连时通过 `from_seq` 参数 + `bus.replay(meeting_id, from_seq)` 从 PG 恢复增量事件（`routers/ws.py:316`）
+  3. Pub/Sub 只是实时通知通道，丢失只影响"断线期间的实时推送延迟"，不影响数据完整性
+  4. 迁移到 Redis Stream 的成本（改协议/消费者组/ACK）远大于收益
 
 #### M1.6 Embedding 客户端循环感知（潜在崩溃）
 - **现状**：`SiliconFlowEmbedder._get_client()` 已实现懒加载单例（`self._client` 缓存），但未做 asyncio 循环感知，跨循环调用会报 `attached to a different loop`。
