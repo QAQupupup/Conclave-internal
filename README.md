@@ -563,7 +563,7 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 ### P1（功能完善）
 
 - **gRPC Agent Worker 未实现**（`app/agents/worker.py`）：当前为 stub 模式，使用 `LocalAgentCompute` 单进程执行。gRPC 服务端代码已预留注释块，实现路线图见 worker.py 文件头文档。横向扩展时需完成 protobuf 定义 + gRPC 服务端 + Manager 端客户端 + 负载均衡。
-- **Embedding 客户端未用连接池单例**：当前每次调用新建 `httpx.AsyncClient`，高频调用时会有连接建立开销。计划：改为模块级单例 + 循环感知。
+- **Embedding 客户端单例的循环感知**：当前 `SiliconFlowEmbedder._get_client()` 已实现懒加载单例（`self._client` 缓存），但未做 asyncio 循环感知（绑定到首个循环后，跨循环调用会报错）。计划：参考 `app/db/engine.py::_ensure_engine()` 的循环检测模式，在 `_get_client()` 中加入 `loop.is_closed()` 检测。
 - **Redis Pub/Sub 消息不持久化**：listener 断线期间的消息会丢失。近实时 WS 场景可接受；若需可靠事件投递应迁移到 Redis Stream。
 
 ### P2（架构优化）
