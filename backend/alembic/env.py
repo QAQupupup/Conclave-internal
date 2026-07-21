@@ -1,22 +1,37 @@
 """Alembic 迁移环境配置。
 
 支持异步 PostgreSQL + SQLAlchemy 2.0。
+
+注意：本文件必须通过 `alembic upgrade head` / `alembic revision` 等 CLI 命令调用，
+不能直接 `python alembic/env.py` 运行。`from alembic import context` 中的 `context`
+是 Alembic 框架在运行时注入的全局对象（类似 Flask 的 `g`），独立运行时不存在。
 """
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from alembic import context  # context 由 alembic CLI 注入
 from app.config import settings
 from app.db.base import Base
+
 # 导入所有 ORM 模型以确保 Base.metadata 包含全部表
 from app.db.models import (  # noqa: F401
-    MeetingModel, MessageModel, EventModel, MeetingTagModel,
-    AgentRoleModel, UserPreferenceModel, NetAuthRequestModel,
-    MeetingAuxModel, ApiKeyModel, DocumentModel, CostRecordModel,
-    RawMemoryModel, FeatureMemoryModel, ProfileMemoryModel,
+    AgentRoleModel,
+    ApiKeyModel,
+    CostRecordModel,
+    DocumentModel,
+    EventModel,
+    FeatureMemoryModel,
+    MeetingAuxModel,
+    MeetingModel,
+    MeetingTagModel,
+    MessageModel,
+    NetAuthRequestModel,
+    ProfileMemoryModel,
+    RawMemoryModel,
+    UserPreferenceModel,
 )
 
 # Alembic Config 对象
