@@ -32,6 +32,8 @@ class MeetingManager:
         self.context_manager = context_manager or ContextManager()
         self.scheduler = scheduler
         self.max_recursion_depth = max_recursion_depth
+        # M1.1: 懒加载 LLM 客户端，用于上下文摘要生成
+        self._llm: Any = None
 
     async def run_stage(
         self,
@@ -67,8 +69,10 @@ class MeetingManager:
         state = shared.get("state")
         baseline = shared.get("baseline")
 
-        # 1. 准备上下文
-        ctx_slice = self.context_manager.prepare(state, task.stage, task.role)
+        # 1. 准备上下文（M1.1: 动态窗口 + 摘要压缩）
+        ctx_slice = await self.context_manager.prepare_async(
+            state, task.stage, task.role, llm_summarize=self._summarize_callback
+        )
 
         # 2. 构建 Agent 并执行
         role_def = {"role": task.role, "instructions": task.description}
@@ -105,6 +109,28 @@ class MeetingManager:
     def select_baseline(self, topic: str, domain_hint: str = "") -> TaskBaseline:
         """根据议题选择基线"""
         return get_baseline(topic, domain_hint)
+
+    # ---------- M1.1: 上下文摘要 LLM 回调 ----------
+
+    def _get_llm(self) -> Any:
+        """懒加载 LLM 客户端（缓存，避免每次摘要都创建新连接池）"""
+        if self._llm is None:
+            from app.agents import llm as _llm_mod
+
+            self._llm = _llm_mod.get_llm()
+        return self._llm
+
+    async def _summarize_callback(self, prompt: str) -> str:
+        """ContextManager 摘要压缩的 LLM 回调。
+
+        使用 complete_text() 做纯文本补全（无 JSON schema）。
+        失败时返回空字符串，ContextManager 自动降级为裁剪。
+        """
+        llm = self._get_llm()
+        if hasattr(llm, "complete_text"):
+            return await llm.complete_text(prompt)
+        # 兼容：LLM 客户端无 complete_text 时降级
+        return ""
 
     # ---------- 统一交互层（后续逐步替换 Runner 中直接调用） ----------
     async def persist_state(self, state: Any) -> None:
