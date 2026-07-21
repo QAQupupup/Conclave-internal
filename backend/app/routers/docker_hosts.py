@@ -49,6 +49,7 @@ def _tenant_filter_for_update():
 async def _get_host_with_access(session, host_id: int, for_write: bool = False) -> DockerHostModel:
     """获取主机并校验租户访问权限。for_write=True 时仅允许访问自己租户的主机。"""
     from sqlalchemy import and_
+
     if for_write:
         cond = and_(DockerHostModel.id == host_id, _tenant_filter_for_update())
     else:
@@ -187,9 +188,7 @@ def _model_to_config_dict(m: DockerHostModel, secret: DockerHostSecretModel | No
 async def list_hosts() -> dict[str, Any]:
     """列出当前租户可见的 Docker 主机（含系统主机）。"""
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(DockerHostModel).where(_tenant_filter()).order_by(DockerHostModel.id)
-        )
+        result = await session.execute(select(DockerHostModel).where(_tenant_filter()).order_by(DockerHostModel.id))
         hosts = list(result.scalars().all())
     return {
         "hosts": [_model_to_response(h) for h in hosts],

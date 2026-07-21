@@ -1,4 +1,5 @@
 """租户服务：建表、CRUD、迁移、成员管理。"""
+
 from __future__ import annotations
 
 import logging
@@ -35,8 +36,9 @@ async def ensure_tenants_table() -> None:
     """
     async with async_session_factory() as session:
         # 1. 创建 tenants 表
-        await session.execute(text(
-            f"""
+        await session.execute(
+            text(
+                f"""
             CREATE TABLE IF NOT EXISTS {TENANTS_TABLE} (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(128) NOT NULL,
@@ -48,14 +50,14 @@ async def ensure_tenants_table() -> None:
                 updated_at TIMESTAMP NOT NULL DEFAULT NOW()
             )
             """
-        ))
-        await session.execute(
-            text(f"CREATE INDEX IF NOT EXISTS idx_tenants_slug ON {TENANTS_TABLE}(slug)")
+            )
         )
+        await session.execute(text(f"CREATE INDEX IF NOT EXISTS idx_tenants_slug ON {TENANTS_TABLE}(slug)"))
 
         # 2. users 表添加 tenant_id 列（如不存在）
-        await session.execute(text(
-            """
+        await session.execute(
+            text(
+                """
             DO $$
             BEGIN
                 IF NOT EXISTS (
@@ -66,14 +68,14 @@ async def ensure_tenants_table() -> None:
                 END IF;
             END $$;
             """
-        ))
-        await session.execute(
-            text("CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)")
+            )
         )
+        await session.execute(text("CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)"))
 
         # 3. 添加外键约束（如不存在）
-        await session.execute(text(
-            f"""
+        await session.execute(
+            text(
+                f"""
             DO $$
             BEGIN
                 IF NOT EXISTS (
@@ -85,11 +87,13 @@ async def ensure_tenants_table() -> None:
                 END IF;
             END $$;
             """
-        ))
+            )
+        )
 
         # 4. tenants.owner_id 外键（users 表可能是后建的，所以延迟添加）
-        await session.execute(text(
-            f"""
+        await session.execute(
+            text(
+                f"""
             DO $$
             BEGIN
                 IF NOT EXISTS (
@@ -101,7 +105,8 @@ async def ensure_tenants_table() -> None:
                 END IF;
             END $$;
             """
-        ))
+            )
+        )
 
         await session.commit()
 
@@ -111,6 +116,7 @@ async def create_tenant(data: TenantCreate) -> TenantInfo:
     import json as _json
 
     from sqlalchemy.exc import IntegrityError as _IntegrityError
+
     async with async_session_factory() as session:
         try:
             result = await session.execute(
@@ -156,10 +162,7 @@ async def get_tenant(tenant_id: int) -> TenantInfo | None:
     """根据 ID 获取租户。"""
     async with async_session_factory() as session:
         result = await session.execute(
-            text(
-                f"SELECT id, name, slug, plan, owner_id, settings, created_at "
-                f"FROM {TENANTS_TABLE} WHERE id = :id"
-            ),
+            text(f"SELECT id, name, slug, plan, owner_id, settings, created_at FROM {TENANTS_TABLE} WHERE id = :id"),
             {"id": tenant_id},
         )
         row = result.mappings().first()
@@ -181,8 +184,7 @@ async def get_tenant_by_slug(slug: str) -> TenantInfo | None:
     async with async_session_factory() as session:
         result = await session.execute(
             text(
-                f"SELECT id, name, slug, plan, owner_id, settings, created_at "
-                f"FROM {TENANTS_TABLE} WHERE slug = :slug"
+                f"SELECT id, name, slug, plan, owner_id, settings, created_at FROM {TENANTS_TABLE} WHERE slug = :slug"
             ),
             {"slug": slug},
         )
@@ -210,11 +212,13 @@ async def _get_or_create_default_tenant() -> TenantInfo:
     existing = await get_default_tenant()
     if existing:
         return existing
-    return await create_tenant(TenantCreate(
-        name=DEFAULT_TENANT_NAME,
-        slug=DEFAULT_TENANT_SLUG,
-        plan="free",
-    ))
+    return await create_tenant(
+        TenantCreate(
+            name=DEFAULT_TENANT_NAME,
+            slug=DEFAULT_TENANT_SLUG,
+            plan="free",
+        )
+    )
 
 
 async def create_default_tenant_for_existing_users() -> TenantInfo | None:
@@ -226,9 +230,7 @@ async def create_default_tenant_for_existing_users() -> TenantInfo | None:
 
     async with async_session_factory() as session:
         # 统计有多少用户没有 tenant_id
-        result = await session.execute(
-            text("SELECT COUNT(*) as cnt FROM users WHERE tenant_id IS NULL")
-        )
+        result = await session.execute(text("SELECT COUNT(*) as cnt FROM users WHERE tenant_id IS NULL"))
         cnt = int(result.scalar() or 0)
         if cnt == 0:
             return None
@@ -284,8 +286,9 @@ async def ensure_business_tables_tenant_id() -> None:
 
     async with async_session_factory() as session:
         for table in _BUSINESS_TABLES:
-            await session.execute(text(
-                f"""
+            await session.execute(
+                text(
+                    f"""
                 DO $$
                 BEGIN
                     IF NOT EXISTS (
@@ -296,26 +299,26 @@ async def ensure_business_tables_tenant_id() -> None:
                     END IF;
                 END $$;
                 """
-            ))
+                )
+            )
 
         await session.commit()
 
         # 回填默认租户 ID
         if default_tid is not None:
             for table in _BUSINESS_TABLES:
-                await session.execute(text(
-                    f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL"
-                ), {"tid": default_tid})
+                await session.execute(
+                    text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL"), {"tid": default_tid}
+                )
             await session.commit()
             logger.info("已为核心业务表回填默认租户 id=%d", default_tid)
 
         # 添加索引和外键
         for table in _BUSINESS_TABLES:
-            await session.execute(text(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_tenant_id ON {table}(tenant_id)"
-            ))
-            await session.execute(text(
-                f"""
+            await session.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{table}_tenant_id ON {table}(tenant_id)"))
+            await session.execute(
+                text(
+                    f"""
                 DO $$
                 BEGIN
                     IF NOT EXISTS (
@@ -327,7 +330,8 @@ async def ensure_business_tables_tenant_id() -> None:
                     END IF;
                 END $$;
                 """
-            ))
+                )
+            )
         await session.commit()
 
     logger.info("核心业务表 tenant_id 列迁移完成")
@@ -393,10 +397,7 @@ async def list_tenant_members(tenant_id: int) -> list[TenantMember]:
         # 如果 owner 不在列表中（例如 owner 已切换到其他租户），补充查询 owner 信息
         if owner_id is not None and owner_id not in existing_ids:
             owner_result = await session.execute(
-                text(
-                    "SELECT id, username, display_name, tenant_id, created_at "
-                    "FROM users WHERE id = :oid"
-                ),
+                text("SELECT id, username, display_name, tenant_id, created_at FROM users WHERE id = :oid"),
                 {"oid": owner_id},
             )
             owner_row = owner_result.mappings().first()
@@ -405,14 +406,16 @@ async def list_tenant_members(tenant_id: int) -> list[TenantMember]:
 
     members = []
     for r in rows:
-        members.append(TenantMember(
-            user_id=r["id"],
-            username=r["username"],
-            display_name=r["display_name"] or r["username"],
-            email=None,
-            role=ROLE_OWNER if r["id"] == owner_id else ROLE_MEMBER,
-            joined_at=r["created_at"].isoformat() if r.get("created_at") else None,
-        ))
+        members.append(
+            TenantMember(
+                user_id=r["id"],
+                username=r["username"],
+                display_name=r["display_name"] or r["username"],
+                email=None,
+                role=ROLE_OWNER if r["id"] == owner_id else ROLE_MEMBER,
+                joined_at=r["created_at"].isoformat() if r.get("created_at") else None,
+            )
+        )
     return members
 
 
@@ -447,9 +450,7 @@ async def is_tenant_owner(user_id: int, tenant_id: int) -> bool:
     """检查用户是否是租户 owner。"""
     async with async_session_factory() as session:
         result = await session.execute(
-            text(
-                f"SELECT 1 FROM {TENANTS_TABLE} WHERE id = :tid AND owner_id = :uid"
-            ),
+            text(f"SELECT 1 FROM {TENANTS_TABLE} WHERE id = :tid AND owner_id = :uid"),
             {"tid": tenant_id, "uid": user_id},
         )
         return result.scalar() is not None
@@ -458,6 +459,7 @@ async def is_tenant_owner(user_id: int, tenant_id: int) -> bool:
 def generate_unique_slug(name: str) -> str:
     """从名称生成唯一 slug（带随机后缀）。实际唯一性由数据库 UNIQUE 约束保证。"""
     import secrets
+
     base = _slugify(name)
     suffix = secrets.token_hex(3)
     return f"{base}-{suffix}"

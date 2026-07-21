@@ -44,9 +44,7 @@ async def generate_hypothetical_document(query: str) -> str:
     from app.tenants.settings_override import resolve_llm_config
 
     _tid = get_tenant_id()
-    base_url, api_key, model = resolve_llm_config(
-        _tid, settings.llm_base_url, settings.llm_api_key, settings.llm_model
-    )
+    base_url, api_key, model = resolve_llm_config(_tid, settings.llm_base_url, settings.llm_api_key, settings.llm_model)
     if not base_url or not api_key:
         logger.debug("HyDE 跳过：LLM 未配置")
         return ""

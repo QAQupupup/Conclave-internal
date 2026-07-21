@@ -4,6 +4,7 @@
 是两个独立的总线。现有 events.py 继续服务 WebSocket 实时推送；本 EventBus 专门
 用于插件间解耦通信，不持久化、不用于 WS。
 """
+
 from __future__ import annotations
 
 import asyncio

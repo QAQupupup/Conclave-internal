@@ -1,4 +1,5 @@
 """PluginRegistry 拓扑排序测试。"""
+
 from __future__ import annotations
 
 import pytest

@@ -965,6 +965,7 @@ def get_state(meeting_id: str) -> MeetingState | None:
     """
     from app.tenants import get_tenant_id as _get_tid
     from app.tenants import is_system_tenant as _is_sys
+
     with _states_lock:
         st = _states.get(meeting_id)
         if st is not None:
@@ -975,7 +976,9 @@ def get_state(meeting_id: str) -> MeetingState | None:
                 if st.tenant_id is not None and current_tid is not None and st.tenant_id != current_tid:
                     logger.warning(
                         "租户隔离：拒绝跨租户访问内存状态 meeting=%s state_tid=%s current_tid=%s",
-                        meeting_id, st.tenant_id, current_tid,
+                        meeting_id,
+                        st.tenant_id,
+                        current_tid,
                     )
                     return None
             _state_last_access[meeting_id] = time.monotonic()
@@ -1106,6 +1109,7 @@ def cleanup_meeting_resources(meeting_id: str) -> None:
 def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
     """创建新的会议运行态"""
     from app.tenants import get_tenant_id as _get_tid
+
     state = MeetingState(
         meeting_id=meeting_id,
         topic=topic,

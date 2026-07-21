@@ -34,12 +34,11 @@ class Base(DeclarativeBase):
 # 主键 Mixin
 # ============================================================
 
+
 class UUIDPrimaryKeyMixin:
     """UUID 字符串主键（String(36)），默认自动生成 uuid4。"""
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
 
 class IntegerPrimaryKeyMixin:
@@ -52,12 +51,11 @@ class IntegerPrimaryKeyMixin:
 # 时间戳 Mixin
 # ============================================================
 
+
 class CreatedAtMixin:
     """仅 created_at（不可变记录，如 events、messages、tags）。"""
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class UpdatedAtMixin:
@@ -78,6 +76,7 @@ class TimestampMixin(CreatedAtMixin, UpdatedAtMixin):
 # ============================================================
 # 多租户 Mixin（纵深防御）
 # ============================================================
+
 
 class TenantScopeMixin:
     """tenant_id 多租户字段。

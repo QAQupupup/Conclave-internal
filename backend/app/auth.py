@@ -269,7 +269,9 @@ async def _load_users_from_db() -> None:
             }
 
 
-async def _create_user_in_db(username: str, password_hash: str, role: str, display_name: str, tenant_id: int | None = None) -> dict | None:
+async def _create_user_in_db(
+    username: str, password_hash: str, role: str, display_name: str, tenant_id: int | None = None
+) -> dict | None:
     """在数据库中创建用户"""
     async with async_session_factory() as session:
         try:
@@ -350,6 +352,7 @@ async def change_password(username: str, old_password: str, new_password: str) -
     if len(new_password) < 6 or len(new_password) > 128:
         return False
     from bcrypt import gensalt, hashpw
+
     new_hash = hashpw(new_password.encode("utf-8"), gensalt()).decode("utf-8")
     async with async_session_factory() as session:
         await session.execute(

@@ -127,8 +127,10 @@ class MeetingManager:
         失败时返回空字符串，ContextManager 自动降级为裁剪。
         """
         llm = self._get_llm()
-        if hasattr(llm, "complete_text"):
-            return await llm.complete_text(prompt)
+        complete_text_fn = getattr(llm, "complete_text", None)
+        if complete_text_fn is not None:
+            result: str = await complete_text_fn(prompt)
+            return result
         # 兼容：LLM 客户端无 complete_text 时降级
         return ""
 

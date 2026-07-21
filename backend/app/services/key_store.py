@@ -194,9 +194,7 @@ async def list_api_keys() -> list[dict[str, Any]]:
                 .order_by(ApiKeyModel.tenant_id.desc(), ApiKeyModel.provider, ApiKeyModel.name)
             )
         else:
-            result = await session.execute(
-                select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name)
-            )
+            result = await session.execute(select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name))
         records = result.scalars().all()
 
     keys = []
@@ -226,11 +224,13 @@ async def get_api_key(provider: str, name: str = "default") -> str:
     async with async_session_factory() as session:
         if tid is not None:
             result = await session.execute(
-                select(ApiKeyModel).where(
+                select(ApiKeyModel)
+                .where(
                     ApiKeyModel.provider == provider,
                     ApiKeyModel.name == name,
                     or_(ApiKeyModel.tenant_id == tid, ApiKeyModel.tenant_id.is_(None)),
-                ).order_by(ApiKeyModel.tenant_id.desc())
+                )
+                .order_by(ApiKeyModel.tenant_id.desc())
             )
         else:
             result = await session.execute(

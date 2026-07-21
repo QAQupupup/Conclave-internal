@@ -4,6 +4,7 @@
 lifespan 启动时自动关联到默认租户(slug='default')。
 每个测试使用唯一 slug/名称避免测试间数据冲突。
 """
+
 from __future__ import annotations
 
 import uuid

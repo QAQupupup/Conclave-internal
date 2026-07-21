@@ -249,10 +249,7 @@ class ContextManager:
             avg_msg_tokens = max(
                 self._MIN_MSG_TOKENS,
                 int(
-                    sum(
-                        self._estimate_text_tokens(str(m.get("content", "")))
-                        for m in sample_msgs
-                    )
+                    sum(self._estimate_text_tokens(str(m.get("content", ""))) for m in sample_msgs)
                     / max(len(sample_msgs), 1)
                 ),
             )

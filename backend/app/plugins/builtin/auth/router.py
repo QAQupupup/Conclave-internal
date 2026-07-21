@@ -6,6 +6,7 @@
 - 新增 /auth/logout /auth/refresh /auth/csrf-token
 - 原有 /auth/change-password /auth/users 等端点保持在 app/routers/auth.py（Phase 2 迁移）
 """
+
 from __future__ import annotations
 
 import logging
@@ -180,6 +181,7 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Logi
 
     # 登录时设置租户上下文：使用用户的默认租户（tenant_id 字段）
     from app.tenants import set_tenant_id as _set_tid
+
     login_tenant_id = user.get("tenant_id")
     if login_tenant_id:
         _set_tid(int(login_tenant_id))
@@ -192,13 +194,21 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Logi
     if login_tenant_id:
         from app.tenants.service import get_tenant as _get_tenant
         from app.tenants.service import list_user_tenants
+
         t = await _get_tenant(int(login_tenant_id))
         if t:
             tenant_info = {"id": t.id, "name": t.name, "slug": t.slug, "plan": t.plan}
         tenants = await list_user_tenants(int(user_id))
         from app.plugins.builtin.auth.tenants_router import ROLE_MEMBER, ROLE_OWNER
+
         tenant_list = [
-            {"id": tt.id, "name": tt.name, "slug": tt.slug, "role": ROLE_OWNER if tt.owner_id == int(user_id) else ROLE_MEMBER, "plan": tt.plan}
+            {
+                "id": tt.id,
+                "name": tt.name,
+                "slug": tt.slug,
+                "role": ROLE_OWNER if tt.owner_id == int(user_id) else ROLE_MEMBER,
+                "plan": tt.plan,
+            }
             for tt in tenants
         ]
 
@@ -280,6 +290,7 @@ async def refresh_token(
 
     # 3. 查询用户（验证用户仍存在且未禁用）
     from app.auth import _load_users_from_db, _users_cache
+
     if not _users_cache:
         await _load_users_from_db()
     user = None
@@ -353,6 +364,7 @@ async def me(request: Request) -> MeResponse:
 
     # 查询用户详情（从缓存）
     from app.auth import _users_cache
+
     user = _users_cache.get(username)
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在")
@@ -361,6 +373,7 @@ async def me(request: Request) -> MeResponse:
     tenant_info: dict | None = None
     if tenant_id is not None:
         from app.tenants.service import get_tenant
+
         t = await get_tenant(tenant_id)
         if t:
             tenant_info = {
@@ -372,9 +385,11 @@ async def me(request: Request) -> MeResponse:
 
     # 查询用户所属租户列表
     from app.tenants.service import list_user_tenants
+
     tenants = await list_user_tenants(int(user_id))
     from app.plugins.builtin.auth.tenants_router import ROLE_MEMBER as _RM
     from app.plugins.builtin.auth.tenants_router import ROLE_OWNER as _RO
+
     tenant_list = [
         {"id": t.id, "name": t.name, "slug": t.slug, "role": _RO if t.owner_id == int(user_id) else _RM, "plan": t.plan}
         for t in tenants
@@ -402,11 +417,14 @@ async def update_profile(request: Request, body: UpdateProfileRequest) -> dict:
         raise HTTPException(status_code=401, detail="未登录")
 
     from app.auth import update_display_name as _update_dn
+
     updated = await _update_dn(username, body.display_name)
     if not updated:
         raise HTTPException(status_code=400, detail="更新失败")
 
-    audit("auth.profile_update", "success", {"display_name": body.display_name}, username=username, user_id=str(user_id))
+    audit(
+        "auth.profile_update", "success", {"display_name": body.display_name}, username=username, user_id=str(user_id)
+    )
     return {"success": True, "display_name": updated.get("display_name", body.display_name)}
 
 
@@ -420,9 +438,17 @@ async def change_password_endpoint(request: Request, body: ChangePasswordRequest
         raise HTTPException(status_code=401, detail="未登录")
 
     from app.auth import change_password as _change_pw
+
     ok = await _change_pw(username, body.old_password, body.new_password)
     if not ok:
-        audit("auth.password_change", "failure", {"reason": "invalid_old_password_or_policy"}, username=username, user_id=str(user_id), ip=ip)
+        audit(
+            "auth.password_change",
+            "failure",
+            {"reason": "invalid_old_password_or_policy"},
+            username=username,
+            user_id=str(user_id),
+            ip=ip,
+        )
         raise HTTPException(status_code=400, detail="旧密码错误或新密码不符合要求（至少 6 位）")
 
     audit("auth.password_change", "success", {}, username=username, user_id=str(user_id), ip=ip)

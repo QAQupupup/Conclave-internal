@@ -19,7 +19,6 @@ from app.orchestrator.evidence_helpers import (
     _preliminary_fact_check_status,
 )
 
-
 # ── Schema 字段测试 ─────────────────────────────────────────
 
 

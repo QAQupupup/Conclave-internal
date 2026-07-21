@@ -5,6 +5,7 @@
 2. 所有公开函数可正常导入
 3. SQLAlchemy select/or_/delete 在模块级可用
 """
+
 from __future__ import annotations
 
 
@@ -20,6 +21,7 @@ def test_key_store_module_imports():
         load_keys_to_providers,
         save_api_key,
     )
+
     # 确认函数对象存在
     assert callable(save_api_key)
     assert callable(get_api_key)

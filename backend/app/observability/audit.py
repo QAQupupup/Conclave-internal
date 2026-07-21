@@ -297,16 +297,10 @@ class AuditLogger:
 
         since_ts = (datetime.now(timezone.utc) - timedelta(minutes=since_minutes)).isoformat()
         async with async_session_factory() as session:
-            total = (
-                await session.execute(
-                    select(func.count()).select_from(AuditLogModel)
-                )
-            ).scalar() or 0
+            total = (await session.execute(select(func.count()).select_from(AuditLogModel))).scalar() or 0
             errors = (
                 await session.execute(
-                    select(func.count()).select_from(AuditLogModel).where(
-                        AuditLogModel.status == "error"
-                    )
+                    select(func.count()).select_from(AuditLogModel).where(AuditLogModel.status == "error")
                 )
             ).scalar() or 0
             by_action_result = await session.execute(

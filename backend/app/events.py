@@ -261,9 +261,7 @@ class InMemoryEventBus:
             self._redis_pubsub = redis_client.pubsub()
             await self._redis_pubsub.psubscribe(_REDIS_CHANNEL_PATTERN)
             # 启动后台监听任务
-            self._redis_listener_task = asyncio.create_task(
-                self._redis_listener(), name="event-bus-redis-listener"
-            )
+            self._redis_listener_task = asyncio.create_task(self._redis_listener(), name="event-bus-redis-listener")
             self._loop = loop
             logger.info("事件总线 Redis Pub/Sub 桥接已启动（instance_id=%s）", self._instance_id[:8])
         except Exception as e:
@@ -430,6 +428,7 @@ class InMemoryEventBus:
         if mem_events:
             return list(mem_events)
         import asyncio as _asyncio
+
         try:
             _loop = _asyncio.get_running_loop()
         except RuntimeError:
@@ -472,12 +471,14 @@ class InMemoryEventBus:
         if events:
             return events[-1].seq
         import asyncio as _asyncio
+
         try:
             _loop = _asyncio.get_running_loop()
         except RuntimeError:
             _loop = None
         if _loop is None:
             from app.db_legacy import last_event_seq as _les
+
             return _asyncio.run(_les(meeting_id))
         return 0
 

@@ -56,9 +56,7 @@ class AuditLogModel(Base, IntegerPrimaryKeyMixin):
 
     __tablename__ = "audit_logs"
 
-    timestamp: Mapped[str] = mapped_column(
-        String(40), nullable=False, index=True, comment="ISO8601 UTC 时间戳"
-    )
+    timestamp: Mapped[str] = mapped_column(String(40), nullable=False, index=True, comment="ISO8601 UTC 时间戳")
     category: Mapped[str] = mapped_column(String(20), nullable=False, default="其他", index=True)
     action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False, default="-")

@@ -177,6 +177,7 @@ class TavilyWebSearch:
         try:
             from app.tenants.context import get_tenant_id
             from app.tenants.settings_override import get_cached_overrides
+
             tid = get_tenant_id()
             if tid is not None:
                 ov = get_cached_overrides(tid)

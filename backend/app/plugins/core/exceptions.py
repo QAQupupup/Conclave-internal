@@ -1,4 +1,5 @@
 """插件系统异常类（从 app.core.exceptions 重新导出，保持向后兼容）。"""
+
 from __future__ import annotations
 
 from typing import Any

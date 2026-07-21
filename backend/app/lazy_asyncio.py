@@ -5,6 +5,7 @@
 本模块提供 LazyLock / LazySemaphore，在首次访问时绑定到当前循环，
 并在检测到循环变化时自动重建。
 """
+
 from __future__ import annotations
 
 import asyncio

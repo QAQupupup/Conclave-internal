@@ -14,7 +14,6 @@ import pytest
 
 from app.orchestrator.context_manager import ContextBudget, ContextManager, ContextSlice
 
-
 # ── 测试用 Mock State ──────────────────────────────────────
 
 
@@ -71,10 +70,7 @@ class MockState:
 
 def _make_messages(n: int, content_template: str = "这是第 {} 条发言，内容较为丰富") -> list[dict]:
     """生成 n 条测试发言"""
-    return [
-        {"stage": "intra_team", "role": f"agent_{i % 3}", "content": content_template.format(i)}
-        for i in range(n)
-    ]
+    return [{"stage": "intra_team", "role": f"agent_{i % 3}", "content": content_template.format(i)} for i in range(n)]
 
 
 # ── 动态窗口测试 ─────────────────────────────────────────────
@@ -165,9 +161,7 @@ class TestSummarization:
             call_count += 1
             return "这是旧消息的摘要：agent_0 和 agent_1 讨论了核心方案。"
 
-        slice_ = await cm.prepare_async(
-            state, "cross_team", "engineer", llm_summarize=mock_summarize
-        )
+        slice_ = await cm.prepare_async(state, "cross_team", "engineer", llm_summarize=mock_summarize)
         assert call_count == 1
         assert slice_.summarized_older_messages != ""
         assert "摘要" in slice_.summarized_older_messages
@@ -186,9 +180,7 @@ class TestSummarization:
             call_count += 1
             return "不应被调用"
 
-        slice_ = await cm.prepare_async(
-            state, "intra_team", "engineer", llm_summarize=mock_summarize
-        )
+        slice_ = await cm.prepare_async(state, "intra_team", "engineer", llm_summarize=mock_summarize)
         assert call_count == 0
         assert slice_.summarized_older_messages == ""
 
@@ -224,9 +216,7 @@ class TestSummarization:
         async def failing_summarize(prompt: str) -> str:
             raise RuntimeError("LLM 不可用")
 
-        slice_ = await cm.prepare_async(
-            state, "cross_team", "engineer", llm_summarize=failing_summarize
-        )
+        slice_ = await cm.prepare_async(state, "cross_team", "engineer", llm_summarize=failing_summarize)
         # 不崩溃，摘要为空（降级）
         assert slice_.summarized_older_messages == ""
 
@@ -375,9 +365,7 @@ class TestPromptText:
         async def mock_summarize(prompt: str) -> str:
             return "历史讨论摘要：核心方案已确定。"
 
-        slice_ = await cm.prepare_async(
-            state, "cross_team", "engineer", llm_summarize=mock_summarize
-        )
+        slice_ = await cm.prepare_async(state, "cross_team", "engineer", llm_summarize=mock_summarize)
         text = slice_.to_prompt_text()
         assert "历史发言摘要" in text
         assert "核心方案已确定" in text

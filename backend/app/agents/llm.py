@@ -423,7 +423,7 @@ class StubLLM:
                 lines.append(stripped)
         if not lines:
             return "（stub 摘要：无发言内容）"
-        return "历史摘要（stub）：" + "；".join(l[:60] for l in lines[:5])
+        return "历史摘要（stub）：" + "；".join(line[:60] for line in lines[:5])
 
     @staticmethod
     def _extract_topic(prompt: str) -> str:
@@ -586,9 +586,7 @@ class RealLLM:
 
             tid = get_tenant_id()
             if tid is not None:
-                t_base, t_key, t_model = resolve_llm_config(
-                    tid, self.base_url, self.api_key, self.model
-                )
+                t_base, t_key, t_model = resolve_llm_config(tid, self.base_url, self.api_key, self.model)
                 if t_base and t_key and t_model:
                     return t_base, t_key, t_model
         except Exception:

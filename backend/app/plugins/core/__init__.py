@@ -1,4 +1,5 @@
 """插件系统核心模块：类型、Hook 协议、注册中心、事件总线、异常。"""
+
 from __future__ import annotations
 
 from app.plugins.core.context import plugin_scope

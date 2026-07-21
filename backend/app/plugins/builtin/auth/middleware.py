@@ -8,6 +8,7 @@
 - CSRF double-submit cookie 保护（仅对 Cookie 认证的写操作）
 - 公共路径白名单（/health, /auth/login, /auth/csrf-token, /setup/* 等）
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,6 +107,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
             set_user_role("admin")
             set_tenant_id(None)
             from app.tenants.context import set_system_tenant as _set_sys
+
             _set_sys(True)
             return await call_next(request)  # type: ignore[no-any-return]
 
@@ -124,6 +126,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
             set_user_role("")
             set_tenant_id(None)
             from app.tenants.context import set_system_tenant as _set_sys
+
             _set_sys(False)
             request.state.auth_user = None
             return await call_next(request)  # type: ignore[no-any-return]
@@ -170,6 +173,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
             set_user_role("admin")
             set_tenant_id(None)
             from app.tenants.context import set_system_tenant as _set_sys2
+
             _set_sys2(True)
             request.state.auth_user = {"username": "dev", "role": "admin", "uid": None}
 
@@ -219,6 +223,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
             _tid = tenant_id if isinstance(tenant_id, int) else (int(tenant_id) if tenant_id else None)
             set_tenant_id(_tid)
             from app.tenants.context import set_system_tenant as _set_sys3
+
             _set_sys3(False)
             # 预热租户配置覆盖缓存（fire-and-forget，不阻塞请求）
             if _tid is not None:
@@ -226,6 +231,7 @@ def setup_auth_middleware(app, plugin=None) -> None:
                     import asyncio as _asyncio
 
                     from app.tenants.settings_override import load_tenant_overrides as _load_ov
+
                     _warmup_task = _asyncio.create_task(_load_ov(_tid))
                     _warmup_task.add_done_callback(lambda _t: None)  # 防止 GC 回收
                 except Exception:

@@ -9,6 +9,7 @@
 - 热开关：内存版 disable_plugin/enable_plugin（Redis 版 P1b 扩展）
 - 健康检查：后台任务每 30 秒并发 health_check，CORE 连续 3 次失败记 CRITICAL
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -76,9 +77,7 @@ class _PluginEntry:
     state: PluginState = PluginState.DISCOVERED
     health: PluginHealth = field(default_factory=lambda: PluginHealth(healthy=True))
     timeout_count: int = 0  # 1 分钟窗口内超时次数
-    last_timeout_window: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    last_timeout_window: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class PluginRegistry:
@@ -125,11 +124,7 @@ class PluginRegistry:
         return len(self._entries) > 0
 
     def ready_plugins(self) -> list[str]:
-        return [
-            name
-            for name, e in self._entries.items()
-            if e.state == PluginState.READY
-        ]
+        return [name for name, e in self._entries.items() if e.state == PluginState.READY]
 
     def loaded_count(self) -> int:
         """返回当前已注册插件总数。"""
@@ -250,18 +245,14 @@ class PluginRegistry:
                 in_degree[name] += 1
 
         if missing_hard:
-            raise PluginDependencyError(
-                f"硬依赖缺失: {', '.join(missing_hard)}"
-            )
+            raise PluginDependencyError(f"硬依赖缺失: {', '.join(missing_hard)}")
 
         # Kahn：初始入度为 0 的节点，按 (tier, priority, name) 排序
         def _sort_key(n: str) -> tuple[int, int, str]:
             p = self._entries[n].plugin
             return (_TIER_ORDER[p.tier], p.priority, n)
 
-        queue: deque[str] = deque(
-            sorted([n for n, d in in_degree.items() if d == 0], key=_sort_key)
-        )
+        queue: deque[str] = deque(sorted([n for n, d in in_degree.items() if d == 0], key=_sort_key))
         order: list[str] = []
         while queue:
             # 每轮取最小 key 的节点保证确定性
@@ -310,7 +301,9 @@ class PluginRegistry:
                     entry.state = PluginState.FAILED
                     logger.critical(
                         "CORE 插件启动失败，进程将退出: name=%s error=%s: %s",
-                        name, type(e).__name__, e,
+                        name,
+                        type(e).__name__,
+                        e,
                     )
                     raise
                 if plugin.tier == PluginTier.CROSSCUTTING:
@@ -318,14 +311,16 @@ class PluginRegistry:
                     entry.health = PluginHealth(healthy=False, message=str(e))
                     logger.error(
                         "CROSSCUTTING 插件启动失败，标记为 DEGRADED: name=%s error=%s",
-                        name, e,
+                        name,
+                        e,
                     )
                 else:
                     entry.state = PluginState.DISABLED
                     entry.health = PluginHealth(healthy=False, message=str(e))
                     logger.warning(
                         "OPTIONAL 插件启动失败，标记为 DISABLED: name=%s error=%s",
-                        name, e,
+                        name,
+                        e,
                     )
 
         # 启动健康检查后台任务
@@ -411,8 +406,7 @@ class PluginRegistry:
             targets = [
                 (name, e)
                 for name, e in self._entries.items()
-                if e.state in (PluginState.READY, PluginState.DEGRADED)
-                and isinstance(e.plugin, LifecycleMixin)
+                if e.state in (PluginState.READY, PluginState.DEGRADED) and isinstance(e.plugin, LifecycleMixin)
             ]
             if not targets:
                 continue
@@ -420,9 +414,7 @@ class PluginRegistry:
             async def _check(name: str, entry: _PluginEntry) -> None:
                 plugin: LifecycleMixin = entry.plugin  # type: ignore[assignment]  # 已通过 isinstance 过滤
                 try:
-                    result: PluginHealth = await asyncio.wait_for(
-                        plugin.health_check(), timeout=5.0
-                    )
+                    result: PluginHealth = await asyncio.wait_for(plugin.health_check(), timeout=5.0)
                     result.last_check = datetime.now(timezone.utc)
                     entry.health = result
                     if result.healthy:
@@ -433,25 +425,18 @@ class PluginRegistry:
                     else:
                         consecutive_failures[name] += 1
                         entry.state = PluginState.DEGRADED
-                        if (
-                            entry.plugin.tier == PluginTier.CORE
-                            and consecutive_failures[name] >= 3
-                        ):
+                        if entry.plugin.tier == PluginTier.CORE and consecutive_failures[name] >= 3:
                             logger.critical(
                                 "CORE 插件健康检查连续 3 次失败: %s (%s)",
-                                name, result.message,
+                                name,
+                                result.message,
                             )
                 except Exception as err:
                     consecutive_failures[name] += 1
                     entry.health = PluginHealth(healthy=False, message=str(err))
                     entry.state = PluginState.DEGRADED
-                    if (
-                        entry.plugin.tier == PluginTier.CORE
-                        and consecutive_failures[name] >= 3
-                    ):
-                        logger.critical(
-                            "CORE 插件健康检查异常连续 3 次: %s error=%s", name, err
-                        )
+                    if entry.plugin.tier == PluginTier.CORE and consecutive_failures[name] >= 3:
+                        logger.critical("CORE 插件健康检查异常连续 3 次: %s error=%s", name, err)
 
             await asyncio.gather(*[_check(n, e) for n, e in targets])
 
@@ -509,7 +494,8 @@ class PluginRegistry:
             entry.state = PluginState.DEGRADED
             logger.warning(
                 "插件 1 分钟内超时 %d 次，标记为 DEGRADED: %s",
-                entry.timeout_count, entry.plugin.name,
+                entry.timeout_count,
+                entry.plugin.name,
             )
 
     async def fire_interceptor(
@@ -535,11 +521,9 @@ class PluginRegistry:
             plugin = entry.plugin
             method = getattr(plugin, hook_name)
             try:
-                result = await asyncio.wait_for(
-                    method(ctx, *args), timeout=self._hook_timeout
-                )
+                result = await asyncio.wait_for(method(ctx, *args), timeout=self._hook_timeout)
             except asyncio.TimeoutError:
-                logger.warning("钩子超时(%dms): plugin=%s hook=%s", int(self._hook_timeout*1000), name, hook_name)
+                logger.warning("钩子超时(%dms): plugin=%s hook=%s", int(self._hook_timeout * 1000), name, hook_name)
                 self._record_timeout(entry)
                 continue
             except Fallback as fb:
@@ -547,20 +531,26 @@ class PluginRegistry:
                 if aggregate:
                     rejected.append(fb)
                     continue
-                raise HTTPException(status_code=fb.status_code, detail={
-                    "code": fb.code, "message": fb.reason, "details": fb.details,
-                }) from None
+                raise HTTPException(
+                    status_code=fb.status_code,
+                    detail={
+                        "code": fb.code,
+                        "message": fb.reason,
+                        "details": fb.details,
+                    },
+                ) from None
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 if entry.plugin.tier == PluginTier.CORE:
-                    logger.critical(
-                        "CORE 插件钩子异常: plugin=%s hook=%s error=%s", name, hook_name, e
-                    )
+                    logger.critical("CORE 插件钩子异常: plugin=%s hook=%s error=%s", name, hook_name, e)
                     raise
                 logger.warning(
                     "插件钩子异常（已跳过）: plugin=%s hook=%s error=%s: %s",
-                    name, hook_name, type(e).__name__, e,
+                    name,
+                    hook_name,
+                    type(e).__name__,
+                    e,
                 )
                 continue
 
@@ -572,11 +562,14 @@ class PluginRegistry:
                 if aggregate:
                     rejected.append(result)
                     continue
-                raise HTTPException(status_code=result.status_code, detail={
-                    "code": result.code,
-                    "message": result.reason,
-                    "details": result.details,
-                })
+                raise HTTPException(
+                    status_code=result.status_code,
+                    detail={
+                        "code": result.code,
+                        "message": result.reason,
+                        "details": result.details,
+                    },
+                )
             # 返回了非标准值：视为 Override
             return result
 
@@ -608,13 +601,14 @@ class PluginRegistry:
             except Exception as e:
                 logger.warning(
                     "观察钩子异常（已隔离）: plugin=%s hook=%s error=%s: %s",
-                    name, hook_name, type(e).__name__, e,
+                    name,
+                    hook_name,
+                    type(e).__name__,
+                    e,
                 )
 
         if concurrent:
-            await asyncio.gather(
-                *[_safe_call(n, e) for n, e in plugins], return_exceptions=True
-            )
+            await asyncio.gather(*[_safe_call(n, e) for n, e in plugins], return_exceptions=True)
         else:
             for n, e in plugins:
                 await _safe_call(n, e)

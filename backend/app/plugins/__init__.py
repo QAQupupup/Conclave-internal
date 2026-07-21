@@ -7,6 +7,7 @@ Phase 1a/1b: 填充内置插件（auth/billing/audit/team）。
     from app.plugins import get_registry
     registry = get_registry()
 """
+
 from __future__ import annotations
 
 from app.plugins.core.registry import PluginRegistry, get_registry, set_global_registry

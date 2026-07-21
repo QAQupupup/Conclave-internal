@@ -7,6 +7,7 @@ Phase 1a 实现：
 - /setup 首次部署管理员创建流程
 - /auth/login、/auth/logout、/auth/me、/auth/refresh 路由
 """
+
 from __future__ import annotations
 
 from app.plugins.builtin.auth.plugin import AuthPlugin

@@ -230,6 +230,7 @@ def create_app() -> FastAPI:
 
     # 注册内置插件（Phase 1a：auth 插件接管认证）
     from app.plugins.builtin.auth import AuthPlugin
+
     _registry.register(AuthPlugin())
 
     # CORS：生产环境必须通过 CONCLAVE_CORS_ORIGINS 限制；开发环境默认允许常见本地端口

@@ -15,6 +15,7 @@
 - 不强制替换所有现有 logging.getLogger 调用，仅用于新代码和关键路径；
 - 审计事件（auth/权限/敏感操作）仍走 app.observability.audit，不合并到这里。
 """
+
 from __future__ import annotations
 
 import logging

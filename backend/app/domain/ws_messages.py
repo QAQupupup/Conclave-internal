@@ -9,6 +9,7 @@
 - 调用方根据 validation_result.is_valid 决定是否处理该消息；
 - 严格校验控制信号路径（control.signal），防止注入/非法字段。
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -65,12 +66,7 @@ class WsTypingMessage(BaseModel):
 
 # 所有入站类型的 Union
 WsInboundMessage = (
-    WsPongMessage
-    | WsPingMessage
-    | WsControlSignalMessage
-    | WsChatMessage
-    | WsReactionMessage
-    | WsTypingMessage
+    WsPongMessage | WsPingMessage | WsControlSignalMessage | WsChatMessage | WsReactionMessage | WsTypingMessage
 )
 
 

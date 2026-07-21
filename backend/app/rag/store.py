@@ -86,6 +86,7 @@ class SiliconFlowEmbedding:
         """解析当前生效的 (base_url, api_key, model)。"""
         from app.tenants.context import get_tenant_id
         from app.tenants.settings_override import resolve_embed_config
+
         tid = get_tenant_id()
         return resolve_embed_config(tid, self._base_url, self._api_key, self._model)
 
@@ -195,6 +196,7 @@ class SiliconFlowReranker:
     def _resolve_config(self) -> tuple[str, str, str]:
         from app.tenants.context import get_tenant_id
         from app.tenants.settings_override import resolve_rerank_config
+
         tid = get_tenant_id()
         return resolve_rerank_config(tid, self._base_url, self._api_key, self._model)
 

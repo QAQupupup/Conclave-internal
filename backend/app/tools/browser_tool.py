@@ -1351,11 +1351,7 @@ def get_browser_pool() -> BrowserPool:
     global _pool_instance, _pool_loop
     cur = _current_loop()
     need_new = (
-        _pool_instance is None
-        or _pool_loop is None
-        or _pool_loop.is_closed()
-        or cur is None
-        or _pool_loop is not cur
+        _pool_instance is None or _pool_loop is None or _pool_loop.is_closed() or cur is None or _pool_loop is not cur
     )
     if need_new:
         _pool_instance = BrowserPool()
@@ -1369,11 +1365,7 @@ def get_browser_tool() -> BrowserTool:
     global _tool_instance, _tool_loop
     cur = _current_loop()
     need_new = (
-        _tool_instance is None
-        or _tool_loop is None
-        or _tool_loop.is_closed()
-        or cur is None
-        or _tool_loop is not cur
+        _tool_instance is None or _tool_loop is None or _tool_loop.is_closed() or cur is None or _tool_loop is not cur
     )
     if need_new:
         _tool_instance = BrowserTool()

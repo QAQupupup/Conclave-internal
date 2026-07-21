@@ -16,6 +16,7 @@
     4. Manager 端实现 GrpcAgentCompute 客户端（app/agents/compute.py 已预留 Protocol）
     5. 负载均衡：多 Worker 注册 + Least Loaded 调度
 """
+
 import argparse
 import asyncio
 import contextlib

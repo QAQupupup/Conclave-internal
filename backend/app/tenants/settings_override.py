@@ -8,6 +8,7 @@
 4. 优雅降级：DB 查询失败时回退到全局配置，不阻断主流程。
 5. 同步安全：提供 sync 读缓存方法（返回空 dict 当未加载），供无法 await 的调用点使用。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -200,10 +201,14 @@ def resolve_embed_config(
     model: str,
 ) -> tuple[str, str, str]:
     return (
-        ov.get("embed_base_url", base_url) or base_url,
-        ov.get("embed_api_key", api_key) or api_key,
-        ov.get("embed_model", model) or model,
-    ) if (ov := get_cached_overrides(tenant_id)) else (base_url, api_key, model)
+        (
+            ov.get("embed_base_url", base_url) or base_url,
+            ov.get("embed_api_key", api_key) or api_key,
+            ov.get("embed_model", model) or model,
+        )
+        if (ov := get_cached_overrides(tenant_id))
+        else (base_url, api_key, model)
+    )
 
 
 def resolve_rerank_config(
@@ -213,10 +218,14 @@ def resolve_rerank_config(
     model: str,
 ) -> tuple[str, str, str]:
     return (
-        ov.get("rerank_base_url", base_url) or base_url,
-        ov.get("rerank_api_key", api_key) or api_key,
-        ov.get("rerank_model", model) or model,
-    ) if (ov := get_cached_overrides(tenant_id)) else (base_url, api_key, model)
+        (
+            ov.get("rerank_base_url", base_url) or base_url,
+            ov.get("rerank_api_key", api_key) or api_key,
+            ov.get("rerank_model", model) or model,
+        )
+        if (ov := get_cached_overrides(tenant_id))
+        else (base_url, api_key, model)
+    )
 
 
 def resolve_web_search_config(
