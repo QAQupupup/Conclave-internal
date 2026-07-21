@@ -118,4 +118,5 @@ async def hyde_retrieve(
         return []
 
     # 用假设文档作为查询（store.search 内部会 embed 并搜索）
-    return await store.search(hypo_doc, top_k=top_k)
+    results: list[tuple[Any, float]] = list(await store.search(hypo_doc, top_k=top_k))
+    return results

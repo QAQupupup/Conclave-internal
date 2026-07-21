@@ -257,7 +257,7 @@ async def delete_api_key(provider: str, name: str = "default") -> bool:
         q = q.where(ApiKeyModel.tenant_id == tid) if tid is not None else q.where(ApiKeyModel.tenant_id.is_(None))
         result = await session.execute(q)
         await session.commit()
-        return result.rowcount > 0  # type: ignore[no-any-return]
+        return result.rowcount > 0  # type: ignore[attr-defined, no-any-return]
 
 
 async def load_keys_to_providers() -> int:

@@ -52,7 +52,7 @@ async def retrieve(
 
 def _build_chunk_dict(chunk: Any, score: float, store: Any) -> dict[str, Any]:
     """将 (chunk, score) 转换为带元数据的字典视图（含邻居链上下文）。"""
-    d = chunk.to_dict()
+    d: dict[str, Any] = dict(chunk.to_dict())
     d["score"] = round(score, 4)
     d["summary"] = chunk.summary(max_len=200)
     d["full_length"] = len(chunk.text)

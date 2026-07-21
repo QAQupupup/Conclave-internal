@@ -304,7 +304,7 @@ class ContextManager:
         prompt = self._SUMMARIZE_PROMPT.format(messages=msg_text)
 
         # 调用 LLM 生成摘要
-        summary = await llm_summarize(prompt)
+        summary: str = str(await llm_summarize(prompt))
         # 截断摘要（防止过长）
         if len(summary) > self._MAX_SUMMARY_TOKENS * 4:  # 粗略 token→字符转换
             summary = summary[: self._MAX_SUMMARY_TOKENS * 4] + "..."

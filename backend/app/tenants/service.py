@@ -443,7 +443,7 @@ async def add_user_to_tenant(user_id: int, tenant_id: int, role: str = ROLE_MEMB
             {"tid": tenant_id, "uid": user_id},
         )
         await session.commit()
-        return (result.rowcount or 0) > 0
+        return (result.rowcount or 0) > 0  # type: ignore[attr-defined]
 
 
 async def is_tenant_owner(user_id: int, tenant_id: int) -> bool:

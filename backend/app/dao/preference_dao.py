@@ -95,4 +95,4 @@ async def delete_preference(user_id: str, key: str) -> bool:
             {"user_id": user_id, "key": key, **tparams},
         )
         await session.commit()
-        return result.rowcount > 0  # type: ignore[no-any-return]
+        return result.rowcount > 0  # type: ignore[attr-defined, no-any-return]

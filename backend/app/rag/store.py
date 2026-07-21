@@ -80,6 +80,7 @@ class SiliconFlowEmbedding:
             # 循环变化时直接丢弃旧 client 引用（GC 会回收，避免跨循环 aclose 报错）
             self._client = httpx.AsyncClient(timeout=30.0)
             self._client_loop = cur_loop
+        assert self._client is not None
         return self._client
 
     def _resolve_config(self) -> tuple[str, str, str]:

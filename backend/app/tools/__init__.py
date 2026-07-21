@@ -181,9 +181,9 @@ class TavilyWebSearch:
             tid = get_tenant_id()
             if tid is not None:
                 ov = get_cached_overrides(tid)
-                key = ov.get("web_search_api_key") if ov else None
+                key: str | None = ov.get("web_search_api_key") if ov else None
                 if key:
-                    return key
+                    return str(key)
         except Exception:
             pass
         return self.api_key
