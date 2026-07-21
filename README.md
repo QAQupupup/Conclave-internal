@@ -565,33 +565,29 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 
 ---
 
-### 里程碑 M1：核心逻辑与功能缺陷修复（当前推进重点）
+### 里程碑 M1：核心逻辑与功能缺陷修复（全部完成）
 
 > 这些缺陷直接影响会议管线的正确性、产出质量和运行稳定性，优先于可观测性生态接入。当前日志/指标/追踪已自研覆盖（LogBus + MetricsStore + CallTrace + audit），满足问题定位需求。
 
-#### M1.1 ContextManager 窗口管理（上下文丢失影响产出质量）
-- **现状**：`context_manager.py:108` 硬编码取最近 8 条消息（`state.messages[-8:]`），超预算时按优先级粗暴丢弃（`_trim_to_budget`），无摘要压缩。长会议中早期关键信息直接丢失。
-- **目标**：1) 超预算时调用 LLM 对旧消息生成摘要保留关键信息；2) 根据 `budget.available_tokens` 动态计算窗口大小替代硬编码 `[-8:]`
-- **验收**：长会议（50+ 轮发言）中早期关键信息不丢失；`_estimate_tokens` 误差 < 15%
-- **影响范围**：`app/orchestrator/context_manager.py`
+#### M1.1 ContextManager 窗口管理（已完成）
+- **改进**：`context_manager.py` 新增 `prepare_async()` 动态窗口 + LLM 摘要压缩。动态窗口根据 token 预算自适应计算窗口大小（[2,20] 范围），替代硬编码 `[-8:]`；旧消息通过 `complete_text()` 生成摘要保留关键信息。摘要结果缓存，失败时降级为裁剪。
+- **影响范围**：`app/orchestrator/context_manager.py`、`app/orchestrator/manager.py`、`app/agents/llm.py`
+- **测试**：`tests/test_context_manager.py`（22 用例）
 
-#### M1.2 证据校验事实化（evidence_check 阶段无法真正验证论点）
-- **现状**：`evidence_check.py` + `evidence_helpers.py` 仅做 RAG 检索 + LLM 语义相似度判断，未做事实验证（Fact-checking），无法区分"文档提到 A"和"文档证明 A 正确"。
-- **目标**：引入事实校验机制（如外部知识库比对或 LLM 事实判断），输出 `fact_check_status` 字段
-- **验收**：`evidence_check` 阶段输出包含 `fact_check_status` 字段；新增 `test_evidence_fact_check.py`
-- **影响范围**：`app/orchestrator/nodes/evidence_check.py`、`app/orchestrator/evidence_helpers.py`
+#### M1.2 证据校验事实化（已完成）
+- **改进**：`EvidenceAssessmentItem` 新增 `fact_check_status` 字段（verified / contradicted / unverifiable / disputed）。EVIDENCE_CHECK prompt 增加事实核查判断规则，ARBITRATE prompt 增加事实核查加权规则。`_collect_evidence` 根据来源类型预分配状态（doc:* → verified，web:* → unverifiable）。
+- **影响范围**：`app/agents/schemas.py`、`app/agents/prompts.py`、`app/orchestrator/evidence_helpers.py`
+- **测试**：`tests/test_evidence_fact_check.py`（14 用例）
 
-#### M1.3 RAG 检索策略增强（召回率不足）
-- **现状**：`app/rag/` 仅有 Embedding → Reranker 单轮向量检索，无 HyDE/Multi-Query/Parent Document 等高级策略。
-- **目标**：至少实现 HyDE（假设性文档）或 Multi-Query（多查询扩写）之一
-- **验收**：新增 `test_hyde_retrieval.py`，召回率对比基线提升
-- **影响范围**：`app/rag/store.py`、`app/rag/` 新增检索策略模块
+#### M1.3 RAG 检索策略增强（已完成）
+- **改进**：新增 `app/rag/hyde.py` 实现 HyDE（Hypothetical Document Embeddings）：LLM 生成假设性技术文档，用该文档的 embedding 检索向量库，弥补 query-document 语义鸿沟。`retrieve_for_conflict` 将 HyDE 与已有 Multi-Query（`query_rewriter.py`）并行检索，结果合并去重后统一 Reranker 重排。HyDE 失败时自动降级为纯 Multi-Query。
+- **影响范围**：`app/rag/hyde.py`（新增）、`app/rag/retriever.py`
+- **测试**：`tests/test_rag_hyde.py`（18 用例）
 
-#### M1.4 提示词工程（静态模板 + 无指令注入防护）
-- **现状**：提示词为静态模板，缺少 Few-shot 动态检索机制；缺少指令注入防护（instruction delimiters），用户上传文档中的 `<|system|>` 等内容可能劫持 LLM。
-- **目标**：1) Few-shot 示例库 + 动态检索注入；2) 指令注入防护（分隔符 + 内容清洗）
-- **验收**：新增 `test_instruction_injection.py` 验证防护生效；Few-shot 示例库可配置
-- **影响范围**：`app/orchestrator/system_prompt.py`、`app/orchestrator/nodes/`
+#### M1.4 提示词工程（已完成）
+- **改进**：新增 `app/orchestrator/prompt_safety.py` 实现指令注入防护（`sanitize_untrusted_content`、`wrap_untrusted`、`sanitize_rag_chunks`、`sanitize_doc_summaries`）。clarify prompt 对用户 topic/文档摘要/参考上下文进行清洗包装；evidence_helpers 对 RAG 检索结果和 Web 搜索结果应用防护。
+- **影响范围**：`app/orchestrator/prompt_safety.py`（新增）、`app/agents/compute.py`、`app/orchestrator/evidence_helpers.py`
+- **测试**：`tests/test_instruction_injection.py`（24 用例）
 
 #### M1.5 Redis Pub/Sub 可靠投递（已评估，无需迁移）
 - **评估结论**：现有 PG 持久化 + replay 机制已覆盖可靠性需求，无需迁移到 Redis Stream。
@@ -601,17 +597,14 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
   3. Pub/Sub 只是实时通知通道，丢失只影响"断线期间的实时推送延迟"，不影响数据完整性
   4. 迁移到 Redis Stream 的成本（改协议/消费者组/ACK）远大于收益
 
-#### M1.6 Embedding 客户端循环感知（潜在崩溃）
-- **现状**：`SiliconFlowEmbedder._get_client()` 已实现懒加载单例（`self._client` 缓存），但未做 asyncio 循环感知，跨循环调用会报 `attached to a different loop`。
-- **目标**：参考 `app/db/engine.py::_ensure_engine()` 的循环检测模式，在 `_get_client()` 中加入 `loop.is_closed()` 检测
-- **验收**：跨事件循环调用 embed 不报错；新增 `test_embedding_loop_safety.py`
+#### M1.6 Embedding 客户端循环感知（已完成）
+- **改进**：`SiliconFlowEmbedding._get_client()` 增加 asyncio 循环感知：保存创建时的 loop 引用，`get()` 时检测 `loop.is_closed()` 或 `loop is not current_loop`，如是则重建。`aclose()` 重置 loop 引用。
 - **影响范围**：`app/rag/store.py`
+- **测试**：`tests/test_embedding_loop_safety.py`（5 用例）
 
-#### M1.7 审计日志迁移到 PostgreSQL（数据持久化遗漏）
-- **现状**：`app/observability/audit.py` 持久化到独立 `audit.db`（SQLite），是核心业务迁移到 PostgreSQL 时的遗漏。
-- **目标**：迁移到 PostgreSQL 独立表 `audit_logs`，通过 SQLAlchemy ORM 操作
-- **验收**：`audit.py` 无 `import sqlite3`；`audit_logs` 表在 PostgreSQL 中存在；历史 SQLite 数据迁移脚本就绪
-- **影响范围**：`app/observability/audit.py`、`app/db/models/`
+#### M1.7 审计日志迁移到 PostgreSQL（已完成）
+- **改进**：`app/observability/audit.py` 从 SQLite 迁移到 PostgreSQL。新增 `AuditLogModel` ORM（`audit_logs` 表），后台线程批量写入（2s 刷新间隔，5000 缓冲上限）。`log()` 保持同步接口兼容性，`query()`/`stats()` 改为异步。移除 `import sqlite3`。
+- **影响范围**：`app/observability/audit.py`、`app/db/models/observability.py`、`app/routers/audit_logs.py`
 
 ---
 
