@@ -30,15 +30,17 @@ CONTENT_CLOSE = "</untrusted_input>"
 # 1. 角色标记（常见于 ChatML 格式）：<|im_start|>, <|system|>, <|user|>, <|assistant|>
 _ROLE_MARKERS = re.compile(
     r"<\|im_(start|end)\|>|<\|(system|user|assistant|tool)\|>|"
-    r"\[INST\]|[/INST\]|<s>|</s>",
+    r"\[INST\]|\[/INST\]|<s>|</s>",
     re.IGNORECASE,
 )
 
 # 2. 系统指令劫持：以"忽略"、"无视"、"你现在是一个"、"从现在起"开头的指令
 #    仅清洗出现在 untrusted 内容中的，不清洗系统 prompt 本身的合法指令
+#    使用 \b（单词边界）区分英文关键词，中文关键词不需要空格分隔
+#    不使用 ^ 锚定：注入短语可能出现在行中间（如"攻击者可能输入：忽略以上指令"）
 _INJECTION_PATTERNS = re.compile(
-    r"(?im)^(忽略|无视|不要遵守|你必须现在|你现在是一个|从现在起|"
-    r"ignore|disregard|forget|you are now|from now on|new instructions?)\s.*$"
+    r"(?i)(忽略|无视|不要遵守|你必须现在|你现在是一个|从现在起|"
+    r"ignore\b|disregard\b|forget\b|you are now|from now on|new instructions?\b)[^\n]*"
 )
 
 # 3. 控制字符（保留换行和制表符）

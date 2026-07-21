@@ -180,17 +180,17 @@ class TestBuildChunkDict:
         mock_chunk = MagicMock()
         mock_chunk.to_dict.return_value = {"chunk_id": "c1", "text": "内容", "doc_id": "d1"}
         mock_chunk.summary.return_value = "摘要..."
-        mock_chunk.text = "完整内容" * 50
+        mock_chunk.text = "完整内容" * 51  # 204 chars > 200，确保 expandable=True
         mock_chunk.chunk_id = "c1"
 
         mock_store = MagicMock()
-        mock_store.get_neighbor_context.return_value = "邻居内容"
+        mock_store.get_neighbor_context.return_value = "邻居内容" * 100  # 400 chars > 204，确保附加
 
         d = _build_chunk_dict(mock_chunk, 0.92, mock_store)
         assert d["chunk_id"] == "c1"
         assert d["score"] == 0.92
         assert d["summary"] == "摘要..."
-        assert d["full_length"] == 200  # "完整内容" * 50 = 200 chars
+        assert d["full_length"] == 204  # "完整内容" * 51 = 204 chars
         assert d["expandable"] is True
         assert "neighbor_context" in d
 

@@ -29,6 +29,10 @@ redis[hiredis]>=5.0
 # 加密（API Key 持久化）
 cryptography>=42.0
 
-# 开发依赖（测试用）
+# 测试 + lint + type check（单一依赖文件，Docker 容器内和本地均可使用）
 pytest>=8.0
 pytest-asyncio>=0.23
+pytest-timeout>=2.3
+pytest-xdist>=3.5
+ruff>=0.5.0
+mypy>=1.10
