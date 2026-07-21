@@ -146,7 +146,7 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ### 3.3 推送
 
-- 当前主开发分支：`refactor/v3-manager-agent-runtime`
+- 当前主干分支：`main`（V3 重构分支已合并）
 - 推送前本地跑过 2.1/2.2/2.3 检查
 - `git push origin <branch-name>`，不要 force push 到已共享分支
 

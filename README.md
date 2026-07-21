@@ -172,11 +172,11 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 
 ---
 
-## V3 重构方向（Manager + 统一 Agent 运行时）
+## V3 架构（Manager + 统一 Agent 运行时）
 
-> 分支：`refactor/v3-manager-agent-runtime`（基于 `feature/v3-enhancement`）
+> 原 V3 重构分支（`refactor/v3-manager-agent-runtime`、`feature/v3-enhancement`）已合并到主干，以下组件已在 main 分支落地。
 
-针对市面多智能体系统对比分析中发现的结构性缺口，V3 正在引入以下新组件：
+针对市面多智能体系统对比分析中发现的结构性缺口，V3 引入了以下核心组件：
 
 ### 新增核心组件
 
@@ -552,30 +552,96 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 
 ---
 
-## 已知限制与待办
+## 已知限制与演进路线图
 
-> 本章节记录项目中已知的技术债、未完成功能和待优化项，确保透明可追踪。
+> 本章节整合项目中所有已知技术债、未完成功能和待优化项，按优先级和依赖关系组织为可执行的演进路线图。每项均经过代码核验（见 AGENTS.md §4.16/§4.17），标注了现状、目标和验收标准。
 
-### P0（影响生产可用性）
+### P0（影响生产可用性，必须优先）
 
-- **mypy 历史遗留类型错误（22 个）**：主要为 SQLAlchemy 2.0 stub 不完整（`rowcount` 属性）、`Any` 返回值未收紧、`AsyncTransaction.run_sync` union-attr 等。分布 在 8 个文件，属于渐进式严格模式的存量问题，非本次引入。计划：按模块逐步修复，目标 mypy 0 errors。
+- **mypy 历史遗留类型错误**：主要为 SQLAlchemy 2.0 stub 不完整（`rowcount` 属性）、`Any` 返回值未收紧、`AsyncTransaction.run_sync` union-attr 等。分布在 8 个文件，属于渐进式严格模式的存量问题。
+  - 现状：非零 errors（具体数量需重新跑 `mypy --config-file pyproject.toml app conclave_core` 确认，历史值为 22）
+  - 目标：mypy 0 errors
+  - 验收：`docker compose -f docker-compose.test.yml run --rm backend-test mypy --config-file pyproject.toml app conclave_core` 退出码 0
+
+---
+
+### 里程碑 M1：可观测性生态接入（当前推进重点）
+
+> 当前日志/指标/追踪全部自研（LogBus + MetricsStore + CallTrace），未对接任何外部生态。本里程碑目标是接入开源可观测性套件，实现真正的全链路追踪。
+
+#### M1.1 Prometheus 指标接入
+- **现状**：`/metrics` 端点（`routers/metrics.py`）返回 JSON 格式，非 Prometheus exposition format。MetricsStore 是内存 deque 环形缓冲。
+- **目标**：`/metrics` 增加 `text/plain; version=0.0.4` 格式输出，可被 Prometheus scrape。docker-compose 新增 Prometheus + Grafana 服务。
+- **验收**：`curl -H "Accept: text/plain" /metrics` 返回 Prometheus 格式；Grafana 面板可展示 CPU/内存/Token/成本/请求量指标。
+- **依赖**：`pip install prometheus-client`（需开 ADR）
+
+#### M1.2 分布式全链路追踪（OpenTelemetry）
+- **现状**：`context.py` 有三层 contextvars（`request_id`/`meeting_id`/`runner_session_id`），但 `request_id` 只在单进程内传播，不跨服务。无 span 概念，RAG 检索/沙箱执行/Web 搜索的耗时不在 trace 中。无采样策略。
+- **目标**：引入 OpenTelemetry SDK，实现：
+  1. **跨服务传播**：HTTP 请求注入/提取 `traceparent` header，`request_id` 关联 `trace_id`
+  2. **Span 覆盖**：LLM 调用、RAG 检索、沙箱执行、Web 搜索、工具调用均创建 span，记录耗时/属性/状态
+  3. **采样策略**：默认 `ParentBased(TraceIdRatio(0.1))` 采样 10%，错误请求 100% 采样；可通过环境变量 `CONCLAVE_TRACE_SAMPLE_RATIO` 配置
+  4. **导出**：默认 OTLP gRPC 导出到 Jaeger/Tempo，docker-compose 新增 Jaeger 服务
+- **验收**：`curl -H "traceparent: 00-{trace_id}-{span_id}-01" /meetings` 请求在 Jaeger UI 可见完整调用链；任意会议在 Jaeger 可见 LLM/RAG/Sandbox 各 span 耗时。
+- **依赖**：`pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi opentelemetry-exporter-otlp`（需开 ADR）
+
+#### M1.3 日志聚合（Loki）
+- **现状**：`JSONFileSink` 输出 JSON Lines 到文件，注释声称"可被 ELK/Loki 消费"但未实际集成。
+- **目标**：docker-compose 新增 Loki + Promtail（或 Fluent Bit），采集 `logs/*.jsonl` 文件。LogBus 的 `request_id`/`meeting_id` 作为 Loki labels 支持按会议/请求过滤。
+- **验收**：Grafana Logs 面板可按 `meeting_id` 过滤日志，可从 Trace 跳转到对应日志（Trace → Log 关联）。
+- **依赖**：M1.2（trace_id 关联日志）
+
+#### M1.4 审计日志迁移到 PostgreSQL
+- **现状**：`app/observability/audit.py` 持久化到独立 `audit.db`（SQLite），是核心业务迁移到 PostgreSQL 时的遗漏。
+- **目标**：迁移到 PostgreSQL 独立表 `audit_logs`，通过 SQLAlchemy ORM 操作。
+- **验收**：`audit.py` 无 `import sqlite3`；`audit_logs` 表在 PostgreSQL 中存在；历史 SQLite 数据迁移脚本就绪。
+
+#### M1.5 CallTrace 扩展为 Span 覆盖
+- **现状**：CallTrace 只记录 LLM 调用（`LLMCallRecord`），RAG 检索/沙箱执行/Web 搜索的耗时不在 trace 中。
+- **目标**：与 M1.2 协同，将 CallTrace 升级为通用 Span 记录，或直接由 OpenTelemetry SDK 接管（CallTrace 退化为 OTel Span 的薄封装）。
+- **验收**：`/meetings/{id}/trace` 端点返回的记录包含非 LLM 操作的 span。
+
+---
 
 ### P1（功能完善）
 
-- **gRPC Agent Worker 未实现**（`app/agents/worker.py`）：当前为 stub 模式，使用 `LocalAgentCompute` 单进程执行。gRPC 服务端代码已预留注释块，实现路线图见 worker.py 文件头文档。横向扩展时需完成 protobuf 定义 + gRPC 服务端 + Manager 端客户端 + 负载均衡。
-- **Embedding 客户端单例的循环感知**：当前 `SiliconFlowEmbedder._get_client()` 已实现懒加载单例（`self._client` 缓存），但未做 asyncio 循环感知（绑定到首个循环后，跨循环调用会报错）。计划：参考 `app/db/engine.py::_ensure_engine()` 的循环检测模式，在 `_get_client()` 中加入 `loop.is_closed()` 检测。
+- **gRPC Agent Worker 未实现**（`app/agents/worker.py`）：当前为 stub 模式，使用 `LocalAgentCompute` 单进程执行。gRPC 服务端代码已预留注释块，实现路线图见 worker.py 文件头文档。
+  - 目标：完成 protobuf 定义 + gRPC 服务端 + Manager 端客户端 + 负载均衡
+  - 验收：多主机 Agent Worker 部署后，Manager 可分发任务到远程 Worker 执行
+
+- **Embedding 客户端单例的循环感知**：当前 `SiliconFlowEmbedder._get_client()` 已实现懒加载单例（`self._client` 缓存），但未做 asyncio 循环感知（绑定到首个循环后，跨循环调用会报错）。
+  - 目标：参考 `app/db/engine.py::_ensure_engine()` 的循环检测模式，在 `_get_client()` 中加入 `loop.is_closed()` 检测
+  - 验收：跨事件循环调用 embed 不报 `attached to a different loop`
+
 - **Redis Pub/Sub 消息不持久化**：listener 断线期间的消息会丢失。近实时 WS 场景可接受；若需可靠事件投递应迁移到 Redis Stream。
+  - 目标：评估迁移到 Redis Stream 的成本收益，必要时实施
+  - 验收：listener 断线重连后不丢消息
+
+---
 
 ### P2（架构优化）
 
-- **未接入外部可观测性生态**：当前日志/指标/追踪全部自研（LogBus + MetricsStore + CallTrace），未对接 Prometheus（指标）、ELK/Loki（日志）、Jaeger/Tempo（分布式追踪）。`/metrics` 端点返回 JSON 非 Prometheus exposition format。计划：1) `/metrics` 增加 `text/plain; version=0.0.4` Prometheus 格式输出；2) JSONFileSink 的 JSON Lines 可直接被 Loki/Fluentd 采集，需补 docker-compose 配置；3) 引入 OpenTelemetry SDK 实现 request_id 跨服务传播。
-- **审计日志仍用 SQLite**：`app/observability/audit.py` 持久化到独立 `audit.db`（SQLite），未随核心业务迁移到 PostgreSQL。计划：迁移到 PostgreSQL 独立表。
-- **LLM 追踪不覆盖非 LLM 操作**：CallTrace 只记录 LLM 调用，RAG 检索/沙箱执行/Web 搜索的耗时不在 trace 中。计划：引入 span 概念，覆盖所有关键操作。
-- **ContextManager 窗口管理粗糙**：当前为固定 8 条窗口 + 优先级丢弃裁剪，未实现摘要压缩（旧消息直接丢弃导致信息丢失）和动态滑动窗口（根据 token 预算计算窗口大小）。计划：1) 超预算时调用 LLM 对旧消息生成摘要保留关键信息；2) 根据 `budget.available_tokens` 动态计算窗口大小替代硬编码 `[-8:]`。
-- **RAG 检索策略单一**：当前只有 Embedding → Reranker 单轮向量检索。缺少 HyDE（假设性文档）、Multi-Query（多查询扩写）、Parent Document 检索、Graph RAG 等高级策略。
+- **ContextManager 窗口管理粗糙**：当前为固定 8 条窗口 + 优先级丢弃裁剪，未实现摘要压缩和动态滑动窗口。
+  - 目标：1) 超预算时调用 LLM 对旧消息生成摘要保留关键信息；2) 根据 `budget.available_tokens` 动态计算窗口大小替代硬编码 `[-8:]`
+  - 验收：长会议（50+ 轮发言）中早期关键信息不丢失；`_estimate_tokens` 误差 < 15%
+
+- **RAG 检索策略单一**：当前只有 Embedding → Reranker 单轮向量检索。缺少 HyDE、Multi-Query、Parent Document 检索、Graph RAG 等高级策略。
+  - 目标：至少实现 HyDE 或 Multi-Query 之一
+  - 验收：新增 `test_hyde_retrieval.py`，召回率对比基线提升
+
 - **证据校验为语义相似度比对**：未做事实验证（Fact-checking），无法区分"文档提到 A"和"文档证明 A 正确"。
+  - 目标：引入事实校验机制（如外部知识库比对或 LLM 事实判断）
+  - 验收：`evidence_check` 阶段输出包含 `fact_check_status` 字段
+
 - **提示词为静态模板**：缺少 Few-shot 动态检索机制和指令注入防护（instruction delimiters）。
+  - 目标：1) Few-shot 示例库 + 动态检索注入；2) 指令注入防护（`<|user|>`/`<|system|>` 分隔符）
+  - 验收：新增 `test_instruction_injection.py` 验证防护生效
+
 - **MeetingState 平铺字段访问**：已提供嵌套 `sections` 视图，但 orchestrator 各节点仍使用平铺字段访问，需逐步迁移。
+  - 目标：orchestrator 节点统一通过 `state.sections.xxx` 访问
+  - 验收：`grep "state\.\(topic\|claims\|conflicts\|evidence\)" backend/app/orchestrator/nodes/` 无结果
+
+---
 
 ### P3（体验优化）
 
