@@ -1,7 +1,21 @@
-# Agent 计算 Worker：独立进程，监听 gRPC 请求，执行 LLM 调用
-# 启动方式：python -m app.agents.worker --port 50051
-# 可部署在多台机器上实现横向扩展
+"""Agent 计算 Worker（gRPC 横向扩展预留）。
 
+架构说明：
+    当前 Conclave 使用 LocalAgentCompute 在主进程内执行 Agent LLM 调用。
+    本文件预留了 gRPC Worker 模式，用于将 Agent 计算卸载到独立进程/独立机器，
+    实现横向扩展。gRPC 服务端代码尚未实现（见下方 TODO 注释块），当前为 stub。
+
+当前状态：STUB - 未实现 gRPC 服务端，仅运行 LocalAgentCompute 验证接口
+待办优先级：P2（见 README "已知限制与待办" 章节）
+启动方式：python -m app.agents.worker --port 50051
+
+实现路线图：
+    1. 定义 protobuf（agent_compute.proto）
+    2. 生成 Python stub（agent_compute_pb2_grpc.py）
+    3. 实现 AgentComputeServicer（取消下方注释并完善）
+    4. Manager 端实现 GrpcAgentCompute 客户端（app/agents/compute.py 已预留 Protocol）
+    5. 负载均衡：多 Worker 注册 + Least Loaded 调度
+"""
 import argparse
 import asyncio
 import contextlib

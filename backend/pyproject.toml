@@ -44,6 +44,12 @@ include = ["app*", "conclave_core*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+# 默认启用多进程并行测试（pytest-xdist）
+# -n auto: 自动按 CPU 核心数分配 worker
+# --timeout=30: 单测超时 30s
+# --timeout-method=thread: 线程超时（兼容 asyncio）
+# 如需禁用多进程（调试单测）：pytest -p no:xdist
+addopts = "-n auto --timeout=30 --timeout-method=thread"
 
 [tool.ruff]
 target-version = "py310"

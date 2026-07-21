@@ -292,6 +292,15 @@ Conclave/
 │   │   │       ├── bing_engine.py     # Bing Playwright 引擎
 │   │   │       └── ddg_engine.py      # DuckDuckGo 备用引擎
 │   │   ├── skills/                    # YAML技能规范
+│   │   ├── plugins/                   # 插件系统（auth/observability 等可插拔模块）
+│   │   │   ├── core/                  # 插件框架核心（Registry/HookSpec/PluginBase）
+│   │   │   └── builtin/               # 内置插件（auth JWT/多租户/OAuth）
+│   │   ├── tenants/                   # 多租户隔离（租户管理/上下文/配置覆盖）
+│   │   ├── domain/                    # 领域模型（WS消息/事件payload Pydantic化）
+│   │   ├── observability/             # 可观测性门面（统一 logger + audit + log_bus）
+│   │   ├── services/                  # 业务服务（key_store 加密管理）
+│   │   ├── db/                        # 数据层（engine/models/redis/base Mixin）
+│   │   ├── core/                      # 核心基础设施（AppException + ErrorCode 枚举）
 │   │   └── prompts/                   # Prompt模板 + Bug Pattern
 │   ├── workspace/                     # 沙箱工作目录
 │   ├── tests/                         # 测试文件
@@ -461,21 +470,36 @@ npm run dev
 
 ## 测试
 
-### 运行新增重构测试（无需真实 LLM）
+> **强制规范**：所有 lint/typecheck/test 必须在 Docker 容器内执行（见 [AGENTS.md](AGENTS.md) §0.5.2）。禁止在宿主机直接运行 pytest/ruff/mypy。
+
+### 运行全量测试（Docker Compose，推荐）
 
 ```bash
-cd backend
-python -m pytest tests/test_scheduler.py tests/test_context_manager.py tests/test_manager.py tests/test_e2e_refactor.py -v
+# 后端全量测试（含 ruff/mypy/pytest，多进程并行）
+docker compose -f docker-compose.test.yml up --build --exit-code-from backend-test
 ```
 
-这些测试：
-- 使用 stub/mock compute，不调用真实大模型 API
-- 基于历史会议议题（Wiki 系统、股票分析）作为端到端输入
-- 验证 Manager、Scheduler、ContextManager、AgentRuntime、TaskBaseline 的协同工作
+测试栈使用独立端口（PostgreSQL 5434 / Redis 6381 / Qdrant 6337），不与 dev 环境冲突。
+pytest-xdist 默认启用多进程并行（`-n auto`），每个 worker 自动使用独立 PG 库 / Redis DB / Qdrant collection。
+
+### 运行指定测试
 
 ```bash
-# 单元测试 (mock，无需真实浏览器/LLM)
-python -m pytest tests/test_web_search_unit.py -v
+# 在测试容器内运行指定测试文件
+docker compose -f docker-compose.test.yml run --rm backend-test \
+  sh -c 'pytest tests/test_key_store_import.py -v --no-header'
+```
+
+### 运行静态检查
+
+```bash
+# ruff（lint）
+docker compose -f docker-compose.test.yml run --rm backend-test \
+  sh -c 'pip install --no-cache-dir ruff >/dev/null 2>&1; ruff check app conclave_core tests'
+
+# mypy（类型检查）
+docker compose -f docker-compose.test.yml run --rm backend-test \
+  sh -c 'pip install --no-cache-dir mypy >/dev/null 2>&1; mypy --config-file pyproject.toml app conclave_core'
 ```
 
 ### 避免测试调用真实 LLM
@@ -484,3 +508,43 @@ python -m pytest tests/test_web_search_unit.py -v
 - 不要运行 `tests/test_real_llm_e2e.py`
 - 确保未设置 `CONCLAVE_LLM_API_KEY`，或将其留空以走 StubLLM 模式
 - 新增测试已通过 monkeypatch 替换 `app.agents.compute._compute`，不依赖外部配置
+
+---
+
+## 已知限制与待办
+
+> 本章节记录项目中已知的技术债、未完成功能和待优化项，确保透明可追踪。
+
+### P0（影响生产可用性）
+
+- **mypy 历史遗留类型错误（22 个）**：主要为 SQLAlchemy 2.0 stub 不完整（`rowcount` 属性）、`Any` 返回值未收紧、`AsyncTransaction.run_sync` union-attr 等。分布 在 8 个文件，属于渐进式严格模式的存量问题，非本次引入。计划：按模块逐步修复，目标 mypy 0 errors。
+
+### P1（功能完善）
+
+- **gRPC Agent Worker 未实现**（`app/agents/worker.py`）：当前为 stub 模式，使用 `LocalAgentCompute` 单进程执行。gRPC 服务端代码已预留注释块，实现路线图见 worker.py 文件头文档。横向扩展时需完成 protobuf 定义 + gRPC 服务端 + Manager 端客户端 + 负载均衡。
+- **Embedding 客户端未用连接池单例**：当前每次调用新建 `httpx.AsyncClient`，高频调用时会有连接建立开销。计划：改为模块级单例 + 循环感知。
+- **Redis Pub/Sub 消息不持久化**：listener 断线期间的消息会丢失。近实时 WS 场景可接受；若需可靠事件投递应迁移到 Redis Stream。
+
+### P2（架构优化）
+
+- **RAG 检索策略单一**：当前只有 Embedding → Reranker 单轮向量检索。缺少 HyDE（假设性文档）、Multi-Query（多查询扩写）、Parent Document 检索、Graph RAG 等高级策略。
+- **证据校验为语义相似度比对**：未做事实验证（Fact-checking），无法区分"文档提到 A"和"文档证明 A 正确"。
+- **提示词为静态模板**：缺少 Few-shot 动态检索机制和指令注入防护（instruction delimiters）。
+- **MeetingState 平铺字段访问**：已提供嵌套 `sections` 视图，但 orchestrator 各节点仍使用平铺字段访问，需逐步迁移。
+
+### P3（体验优化）
+
+- **前端图表渲染**：数据分析结果的前端图表渲染未完成。
+- **跨会议长期记忆**：记忆系统当前仅支持单会议，未实现跨会议观点演化。
+- **部署后冒烟测试**：服务部署后缺少自动化功能冒烟测试。
+
+---
+
+## 贡献指南
+
+1. 提交前阅读 [AGENTS.md](AGENTS.md)（AI 助手实战纪律）和 [PROJECT_CONVENTIONS.md](PROJECT_CONVENTIONS.md)（工程规范）
+2. 所有 lint/typecheck/test 在 Docker 容器内执行（见测试章节）
+3. Commit Message 遵循 Conventional Commits（`feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`）
+4. P0/P1 Bug 修复必须归档修复报告到 `docs/retrospectives/`
+5. 新增功能必须配套测试；Bug 修复先加复现用例再修复
+6. 单次 PR 控制在 400 行以内（不含 lock 文件/生成代码）
