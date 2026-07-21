@@ -117,7 +117,7 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 | **实时通信** | WebSocket + 事件总线（内存缓存 + PostgreSQL 持久化 + Redis Pub/Sub 多副本广播 + 增量回放） |
 | **沙箱环境** | Python 3.12-slim（标准）/ 数据科学镜像（Pandas/NumPy/Matplotlib） |
 | **浏览器自动化** | Playwright + Chromium |
-| **可观测性** | 结构化日志（LogBus）+ 指标采集（MetricsStore）+ 成本追踪（CostTracker） |
+| **可观测性** | 结构化日志（LogBus，JSON Lines 文件输出）+ 指标采集（MetricsStore，JSON API）+ 成本追踪（CostTracker）+ LLM 调用追踪（CallTrace）+ 审计日志（audit.db，SQLite）。未接入 Prometheus/ELK/Grafana 等外部生态 |
 
 ---
 
@@ -568,6 +568,9 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 
 ### P2（架构优化）
 
+- **未接入外部可观测性生态**：当前日志/指标/追踪全部自研（LogBus + MetricsStore + CallTrace），未对接 Prometheus（指标）、ELK/Loki（日志）、Jaeger/Tempo（分布式追踪）。`/metrics` 端点返回 JSON 非 Prometheus exposition format。计划：1) `/metrics` 增加 `text/plain; version=0.0.4` Prometheus 格式输出；2) JSONFileSink 的 JSON Lines 可直接被 Loki/Fluentd 采集，需补 docker-compose 配置；3) 引入 OpenTelemetry SDK 实现 request_id 跨服务传播。
+- **审计日志仍用 SQLite**：`app/observability/audit.py` 持久化到独立 `audit.db`（SQLite），未随核心业务迁移到 PostgreSQL。计划：迁移到 PostgreSQL 独立表。
+- **LLM 追踪不覆盖非 LLM 操作**：CallTrace 只记录 LLM 调用，RAG 检索/沙箱执行/Web 搜索的耗时不在 trace 中。计划：引入 span 概念，覆盖所有关键操作。
 - **ContextManager 窗口管理粗糙**：当前为固定 8 条窗口 + 优先级丢弃裁剪，未实现摘要压缩（旧消息直接丢弃导致信息丢失）和动态滑动窗口（根据 token 预算计算窗口大小）。计划：1) 超预算时调用 LLM 对旧消息生成摘要保留关键信息；2) 根据 `budget.available_tokens` 动态计算窗口大小替代硬编码 `[-8:]`。
 - **RAG 检索策略单一**：当前只有 Embedding → Reranker 单轮向量检索。缺少 HyDE（假设性文档）、Multi-Query（多查询扩写）、Parent Document 检索、Graph RAG 等高级策略。
 - **证据校验为语义相似度比对**：未做事实验证（Fact-checking），无法区分"文档提到 A"和"文档证明 A 正确"。

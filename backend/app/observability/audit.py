@@ -6,7 +6,8 @@
 3. 行为分析（用户操作路径、功能使用频率）
 4. 合规审计（完整的操作链路可追溯）
 
-审计事件持久化到 SQLite 数据库（独立表），同时通过 log_bus 输出到日志。
+审计事件持久化到 SQLite 数据库（独立表，audit.db），同时通过 log_bus 输出到日志。
+注意：审计日志仍用 SQLite（独立于主业务 PostgreSQL），待后续统一迁移到 PostgreSQL。
 """
 
 from __future__ import annotations
