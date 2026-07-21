@@ -24,7 +24,7 @@
 ### 数据科学与代码执行
 - **Docker沙箱隔离**：Sibling Containers架构，代码执行在独立容器中，安全隔离
 - **多主机分布式调度**：支持注册多台远程Docker主机（SSH密钥/密码/TCP+TLS/Unix Socket），内置5种调度策略（least_loaded/local_first/tag_match/manual/round_robin）
-- **运维面板**：可视化管理Docker主机集群，实时查看CPU/内存/磁盘/容器状态，一键健康检查与资源清理
+- **运维面板**：可视化管理Docker主机集群，实时查看CPU/内存/磁盘/容器状态，一键健康检查
 - **Python数据科学环境**：预装Pandas、NumPy、Matplotlib等库
 - **自动代码修复**：代码执行失败时自动分析错误并修复（RefineLoop，默认最多5轮）
 - **Web搜索能力**：Agent可通过BrowserTool主动搜索资料支撑论点
@@ -303,7 +303,7 @@ Conclave/
 │   │   ├── skills/                    # YAML技能规范
 │   │   ├── plugins/                   # 插件系统（auth/observability 等可插拔模块）
 │   │   │   ├── core/                  # 插件框架核心（Registry/HookSpec/PluginBase）
-│   │   │   └── builtin/               # 内置插件（auth JWT/多租户/OAuth）
+│   │   │   └── builtin/               # 内置插件（auth JWT/多租户 RBAC）
 │   │   ├── tenants/                   # 多租户隔离（租户管理/上下文/配置覆盖）
 │   │   ├── domain/                    # 领域模型（WS消息/事件payload Pydantic化）
 │   │   ├── observability/             # 可观测性门面（统一 logger + audit + log_bus）
