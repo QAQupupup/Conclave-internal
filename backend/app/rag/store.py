@@ -188,10 +188,28 @@ class SiliconFlowReranker:
         self._base_url = settings.rerank_base_url.rstrip("/") if settings.rerank_base_url else ""
         self._model = settings.rerank_model
         self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
+        """返回当前 AsyncClient；如已关闭或绑定到不同/已关闭循环，则重建。
+
+        循环感知参照 SiliconFlowEmbedding._get_client()。
+        """
+        try:
+            cur_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            cur_loop = None
+        need_new = (
+            self._client is None
+            or self._client_loop is None
+            or self._client_loop.is_closed()
+            or cur_loop is None
+            or self._client_loop is not cur_loop
+        )
+        if need_new:
             self._client = httpx.AsyncClient(timeout=30.0)
+            self._client_loop = cur_loop
+        assert self._client is not None
         return self._client
 
     def _resolve_config(self) -> tuple[str, str, str]:

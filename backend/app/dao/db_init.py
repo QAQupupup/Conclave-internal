@@ -134,6 +134,8 @@ async def init_db() -> None:
         "CREATE INDEX IF NOT EXISTS idx_user_preferences_tenant_id ON user_preferences(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_meeting_tags_tenant_id ON meeting_tags(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_meeting_aux_tenant_id ON meeting_aux(tenant_id)",
+        # 联合索引：覆盖多租户会议列表查询（WHERE tenant_id=? AND status!=deleted ORDER BY created_at DESC）
+        "CREATE INDEX IF NOT EXISTS idx_meetings_tenant_status_created ON meetings(tenant_id, status, created_at DESC)",
     ]
     async with async_session_factory() as session:
         for stmt in ddl_statements:
