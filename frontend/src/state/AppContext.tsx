@@ -1,4 +1,4 @@
-import {
+﻿import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode,
 } from 'react';
@@ -8,13 +8,33 @@ import type { TenantInfo } from '../lib/api';
 import { MeetingWsClient, connectSystemWs, STAGE_KEYS } from '../lib/ws';
 import { STAGES, MEETINGS as MOCK_MEETINGS } from '../data/mock';
 import { type ToastKind } from '../components/Toast';
+import type { Conflict, Claim, ConfidenceFlag } from '../types/meeting';
+
+/** 会议列表项（精简版，兼容 mock 和 API 返回） */
+export interface MeetingListItem {
+  meeting_id?: string;
+  id?: string;
+  topic: string;
+  status: string;
+  stage?: string;
+  deliverable_type?: string;
+  created_at?: string;
+  updated_at?: string;
+  owner_username?: string;
+  tenant_id?: number;
+  title?: string;
+  date?: string;
+  progress?: string;
+  is_running?: boolean;
+  tags?: unknown[];
+}
 
 export type LogLevel = 'ALL' | 'INFO' | 'DEBUG' | 'WARN' | 'ERROR';
 export type CtxType = 'overview' | 'evidence' | 'artifact' | 'token' | 'model';
 
 export interface LogEntry { time: string; level: LogLevel; msg: string; category?: string }
 
-/** 结构化会议消息类型，消除 any */
+/** 结构化会议消息类型 */
 export interface MeetingMessage {
   id?: string;
   speaker: string;
@@ -39,9 +59,9 @@ export interface BorrowRequest {
 
 export interface MeetingState {
   messages: MeetingMessage[];
-  conflicts: any[];
-  claims: any[];
-  confidence: any[];
+  conflicts: Conflict[];
+  claims: Claim[];
+  confidence: ConfidenceFlag[];
   stage: number;
   status: string;
   currentMeetingId: string | null;
@@ -105,7 +125,7 @@ interface AppApi {
   closeCtx: () => void;
   selectedType: string;
   setSelectedType: (t: string) => void;
-  meetings: any[];
+  meetings: MeetingListItem[];
   meetingsLoading: boolean;
   meetingsError: string | null;
   refreshBoard: () => Promise<void>;
@@ -157,7 +177,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [ctx, setCtx] = useState<{ open: boolean; type: CtxType }>({ open: false, type: 'overview' });
   const [selectedType, setSelectedType] = useState('prd_openapi');
-  const [meetings, setMeetings] = useState<any[]>([]);
+  const [meetings, setMeetings] = useState<MeetingListItem[]>([]);
   const [meetingsLoading, setMeetingsLoading] = useState(false);
   const [meetingsError, setMeetingsError] = useState<string | null>(null);
   const [meeting, setMeeting] = useState<MeetingState>(INITIAL_MEETING);
@@ -275,7 +295,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshBoard = useCallback(async () => {
     // 演示模式：直接使用 mock 数据，不调用真实 API
     if (demoMode) {
-      const list = MOCK_MEETINGS.map((m: any) => ({
+      const list = MOCK_MEETINGS.map((m) => ({
         id: m.id,
         title: m.title,
         topic: m.topic || m.title,
@@ -294,29 +314,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setMeetingsError(null);
     try {
       const data = await apiListMeetings('', 50, 0, false);
-      const raw = Array.isArray(data) ? data : (data?.items || data?.meetings || []);
+      const raw = Array.isArray(data) ? data : ((data as Record<string, unknown>)?.items || (data as Record<string, unknown>)?.meetings || []);
       const stageLabel: Record<string, string> = {
         clarify: '澄清', intra: '讨论', intra_team: '讨论',
         cross: '辩论', cross_team: '辩论',
         evidence: '校验', evidence_check: '校验',
         arbitrate: '仲裁', produce: '产出',
       };
-      const list = raw.map((m: any) => ({
+      const list = (raw as Record<string, unknown>[]).map((m) => ({
         id: m.id || m.meeting_id,
         title: m.title || m.topic || '未命名议题',
         topic: m.topic || '',
         status: m.status || 'pending',
-        date: m.date || (m.created_at ? m.created_at.slice(0, 16).replace('T', ' ') : '—'),
-        progress: m.progress || stageLabel[m.stage] || (m.stage ? m.stage : '—'),
+        date: m.date || (m.created_at ? String(m.created_at).slice(0, 16).replace('T', ' ') : '—'),
+        progress: m.progress || stageLabel[m.stage as string] || (m.stage ? m.stage : '—'),
         is_running: !!m.is_running,
         tags: m.tags || [],
-      }));
+      })) as MeetingListItem[];
       setMeetings(list);
-    } catch (e: any) {
-      setMeetingsError(e.message || '加载会议列表失败');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      setMeetingsError(err.message || '加载会议列表失败');
       setMeetings([]); // 失败时清空，不显示旧的 mock 数据
-      toast('会议列表加载失败: ' + (e.message || '请检查后端连接'), 'error', 6000);
-      appendLog('刷新会议列表失败: ' + e.message, 'error', 'board');
+      toast('会议列表加载失败: ' + (err.message || '请检查后端连接'), 'error', 6000);
+      appendLog('刷新会议列表失败: ' + err.message, 'error', 'board');
     } finally {
       setMeetingsLoading(false);
     }
@@ -325,12 +345,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* ── 状态辅助 ── */
   const statusText = useCallback((s: string) => STATUS_TEXT[s] || s, []);
   const stageName = useCallback((s: string) => {
-    const i = STAGE_KEYS.indexOf(s as any);
+    const i = STAGE_KEYS.indexOf(s as typeof STAGE_KEYS[number]);
     return i >= 0 ? STAGES[i].name : '';
   }, []);
 
   const updateStageTrack = useCallback((stage: string) => {
-    const i = STAGE_KEYS.indexOf(stage as any);
+    const i = STAGE_KEYS.indexOf(stage as typeof STAGE_KEYS[number]);
     if (i >= 0) setMeeting((m) => ({ ...m, stage: i }));
   }, []);
   const updateMeetingStatus = useCallback((status: string) => {
@@ -358,41 +378,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
       wsRef.current = new MeetingWsClient({
         onSnapshot: (state) => setMeeting((m) => ({
           ...m,
-          messages: state.messages ?? m.messages,
-          conflicts: state.conflicts ?? m.conflicts,
-          claims: state.claims ?? m.claims,
-          confidence: state.confidence_flags ?? m.confidence,
-          stage: state.stage != null ? Math.max(0, STAGE_KEYS.indexOf(state.stage)) : m.stage,
+          messages: (state.messages as MeetingMessage[]) ?? m.messages,
+          conflicts: (state.conflicts as Conflict[]) ?? m.conflicts,
+          claims: (state.claims as Claim[]) ?? m.claims,
+          confidence: (state.confidence_flags as ConfidenceFlag[]) ?? m.confidence,
+          stage: state.stage != null ? Math.max(0, STAGE_KEYS.indexOf(String(state.stage) as typeof STAGE_KEYS[number])) : m.stage,
           status: state.status ?? m.status,
-          startedAt: state.started_at ? new Date(state.started_at).getTime() : m.startedAt,
-          paused: state.paused ?? m.paused,
+          startedAt: state.started_at ? new Date(state.started_at as string).getTime() : m.startedAt,
+          paused: (state.paused as boolean) ?? m.paused,
         })),
         onAgentSpoke: (msg) => appendMeetingMessage({
-          speaker: msg.payload?.speaker || msg.speaker || '',
-          speaker_role: msg.payload?.speaker_role || msg.payload?.role,
-          content: msg.payload?.content || msg.content || '',
-          stage: msg.payload?.stage || msg.stage || '',
+          speaker: String(msg.payload?.speaker || msg.speaker || ''),
+          speaker_role: String(msg.payload?.speaker_role || msg.payload?.role || ''),
+          content: String(msg.payload?.content || msg.content || ''),
+          stage: String(msg.payload?.stage || msg.stage || ''),
           ts: Date.now(),
-          id: msg.payload?.message_id || msg.id,
+          id: msg.payload?.message_id ? String(msg.payload.message_id) : (msg.id as string | undefined),
         }),
         onStageChanged: (msg) => {
-          const to = msg.payload?.to || msg.to;
+          const to = String(msg.payload?.to || msg.to || '');
           updateStageTrack(to);
           appendLog(`阶段切换 → ${stageName(to) || to}`, 'info', 'stage');
         },
         onRunStarted: () => { updateMeetingStatus('running'); appendLog('会议已开始运行', 'info', 'meeting'); },
-        onControlSignal: (msg) => { const s = msg.payload?.status || msg.status; if (s) updateMeetingStatus(s); },
-        onControlAck: (msg) => updateMeetingStatus(msg.status),
+        onControlSignal: (msg) => { const s = String(msg.payload?.status || msg.status || ''); if (s) updateMeetingStatus(s); },
+        onControlAck: (msg) => updateMeetingStatus(String(msg.status || '')),
         onInterventionReply: (msg) => {
-          const reply = msg.payload?.message;
+          const reply = msg.payload?.message as Record<string, unknown> | undefined;
           if (reply) appendMeetingMessage({
-            speaker: '主持人', content: reply.content || reply.text || '',
+            speaker: '主持人', content: String(reply.content || reply.text || ''),
             stage: 'intervention', ts: Date.now(), isIntervention: true,
-            id: reply.id,
+            id: reply.id as string | undefined,
           });
         },
         onBorrowRequest: (msg) => {
-          const req = msg.payload?.pending_borrow_request || msg.pending_borrow_request;
+          const req = (msg.payload?.pending_borrow_request || msg.pending_borrow_request) as BorrowRequest | null;
           if (req) {
             setMeeting((m) => ({ ...m, borrowRequest: req }));
             appendLog(`收到借调请求：${req.from_role} → ${req.to_role}`, 'info', 'borrow');
@@ -407,7 +427,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
         onProduceProgress: (msg) => {
           const p = msg.payload || {};
-          if (p.message) appendLog(p.message, 'info', 'produce');
+          if (p.message) appendLog(String(p.message), 'info', 'produce');
           // 派发window事件，供PhasedProgress组件监听
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('produce-progress', { detail: p }));
@@ -418,8 +438,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           toast('产出降级，请查看日志', 'warning');
         },
         onLogEntry: (msg) => {
-          const e = msg.payload || {};
-          appendLog(e.message || e.msg || '', e.level || 'info', e.category);
+          const e = (msg.payload || {}) as Record<string, unknown>;
+          appendLog(String(e.message || e.msg || ''), String(e.level || 'info'), e.category as string | undefined);
         },
         onAuthRequired: () => {
           if (!authExpiredFired.current) {
@@ -443,23 +463,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadMeetingDetail = useCallback(async (meetingId: string) => {
     try {
-      const data = await apiGetMeeting(meetingId);
+      const data = await apiGetMeeting(meetingId) as Record<string, unknown>;
       setMeeting((m) => ({
         ...m,
-        messages: data.messages ?? m.messages,
-        conflicts: data.conflicts ?? m.conflicts,
-        claims: data.claims ?? m.claims,
-        confidence: data.confidence_flags ?? m.confidence,
-        stage: data.stage ? Math.max(0, STAGE_KEYS.indexOf(data.stage)) : m.stage,
-        status: data.status || m.status,
-        title: (data.clarified_topic || data.topic || m.title).trim(),
-        type: data.deliverable_type || m.type,
+        messages: (data.messages as MeetingMessage[]) ?? m.messages,
+        conflicts: (data.conflicts as Conflict[]) ?? m.conflicts,
+        claims: (data.claims as Claim[]) ?? m.claims,
+        confidence: (data.confidence_flags as ConfidenceFlag[]) ?? m.confidence,
+        stage: data.stage ? Math.max(0, STAGE_KEYS.indexOf(String(data.stage) as typeof STAGE_KEYS[number])) : m.stage,
+        status: (data.status as string) || m.status,
+        title: String(data.clarified_topic || data.topic || m.title).trim(),
+        type: (data.deliverable_type as string) || m.type,
         currentMeetingId: meetingId,
-        startedAt: data.started_at ? new Date(data.started_at).getTime() : m.startedAt,
-        paused: data.paused ?? m.paused,
+        startedAt: data.started_at ? new Date(data.started_at as string).getTime() : m.startedAt,
+        paused: (data.paused as boolean) ?? m.paused,
       }));
-    } catch (e: any) {
-      appendLog('加载会议详情失败: ' + e.message, 'error', 'meeting');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      appendLog('加载会议详情失败: ' + err.message, 'error', 'meeting');
       toast('加载会议失败', 'error');
     }
   }, [appendLog, toast]);
@@ -483,8 +503,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     try {
       appendLog('正在创建会议...', 'info', 'meeting');
-      const result = await apiCreateMeeting(topic, type);
-      const meetingId = result.meeting_id;
+      const result = await apiCreateMeeting(topic, type) as Record<string, unknown>;
+      const meetingId = result.meeting_id as string;
       appendLog(`会议已创建: ${meetingId}`, 'info', 'meeting');
       setMeeting({ ...INITIAL_MEETING, currentMeetingId: meetingId, title: topic, type, status: 'running', startedAt: Date.now() });
       connectMeeting(meetingId);
@@ -492,9 +512,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       appendLog('会议已启动，观察实时进度', 'info', 'meeting');
       toast('会议已启动', 'success');
       return meetingId;
-    } catch (e: any) {
-      appendLog('启动会议失败: ' + e.message, 'error', 'meeting');
-      toast('启动会议失败: ' + e.message, 'error');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      appendLog('启动会议失败: ' + err.message, 'error', 'meeting');
+      toast('启动会议失败: ' + err.message, 'error');
       return null;
     }
   }, [appendLog, connectMeeting, demoMode, toast]);
@@ -508,9 +528,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setMeeting((m) => ({ ...m, paused: willPause, status: willPause ? 'paused' : 'running' }));
       appendLog(willPause ? '会议已暂停' : '会议已恢复', 'info', 'meeting');
       toast(willPause ? '会议已暂停' : '会议已恢复', 'info');
-    } catch (e: any) {
-      appendLog('控制失败: ' + e.message, 'error', 'meeting');
-      toast('操作失败: ' + e.message, 'error');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      appendLog('控制失败: ' + err.message, 'error', 'meeting');
+      toast('操作失败: ' + err.message, 'error');
     }
   }, [meeting.currentMeetingId, meeting.paused, appendLog, toast]);
 
@@ -530,9 +550,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       appendLog('会议已终止', 'warning', 'meeting');
       updateMeetingStatus('aborted');
       toast('会议已终止', 'warning');
-    } catch (e: any) {
-      appendLog('终止失败: ' + e.message, 'error', 'meeting');
-      toast('终止失败: ' + e.message, 'error');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      appendLog('终止失败: ' + err.message, 'error', 'meeting');
+      toast('终止失败: ' + err.message, 'error');
     }
   }, [meeting.currentMeetingId, appendLog, updateMeetingStatus, requestConfirm, toast]);
 
@@ -552,9 +572,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         stage: 'intervention', ts: Date.now(), isUser: true, isIntervention: true,
       });
       appendLog(replyToId ? '介入已发送（引用回复），等待 Agent 回复...' : '介入已发送，等待 Agent 回复...', 'info', 'intervention');
-    } catch (e: any) {
-      appendLog('介入失败: ' + e.message, 'error', 'intervention');
-      toast('介入失败: ' + e.message, 'error');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      appendLog('介入失败: ' + err.message, 'error', 'intervention');
+      toast('介入失败: ' + err.message, 'error');
     }
   }, [meeting.currentMeetingId, meeting.replyTarget, appendLog, appendMeetingMessage, toast, user?.username]);
 
@@ -603,8 +623,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const list = await apiListTenants();
       setTenants(Array.isArray(list) ? list : []);
-    } catch (e: any) {
-      appendLog('加载租户列表失败: ' + e.message, 'error', 'tenant');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      appendLog('加载租户列表失败: ' + err.message, 'error', 'tenant');
     } finally {
       setTenantsLoading(false);
     }
@@ -624,9 +644,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // 延迟刷新，等待 token 更新
       setTimeout(() => { refreshBoard(); refreshTenants(); }, 300);
       return true;
-    } catch (e: any) {
-      appendLog('切换租户失败: ' + e.message, 'error', 'tenant');
-      toast('切换租户失败: ' + e.message, 'error');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      appendLog('切换租户失败: ' + err.message, 'error', 'tenant');
+      toast('切换租户失败: ' + err.message, 'error');
       return false;
     }
   }, [appendLog, refreshBoard, refreshTenants, toast]);
@@ -638,9 +658,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       appendLog(`创建组织成功: ${t.name} (#${t.id})`, 'info', 'tenant');
       await refreshTenants();
       return t;
-    } catch (e: any) {
-      toast('创建组织失败: ' + e.message, 'error');
-      appendLog('创建组织失败: ' + e.message, 'error', 'tenant');
+    } catch (e: unknown) { const err = e instanceof Error ? e : new Error(String(e));
+      toast('创建组织失败: ' + err.message, 'error');
+      appendLog('创建组织失败: ' + err.message, 'error', 'tenant');
       return null;
     }
   }, [appendLog, refreshTenants, toast]);
@@ -680,3 +700,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }
+
+
+

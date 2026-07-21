@@ -488,7 +488,7 @@ function renderBlock(block: ReportBlock): JSX.Element {
     case 'attachments': return <AttachmentsBlock data={block.data} />;
     case 'phased_pipeline': return <PhasedPipelineBlock data={block.data} />;
     case 'raw':
-      return <div className="report-p" style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: sanitizeRich(block.data?.text || '') }} />;
+      return <div className="report-p" style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: sanitizeRich((block.data?.text as string) || '') }} />;
     default:
       return <div className="report-p" style={{ color: 'var(--text-3)' }}>[未知块类型: {block.type}]</div>;
   }
@@ -663,15 +663,15 @@ function blockToMd(b: ReportBlock): string {
   switch (b.type) {
     case 'paragraph':
     case 'raw':
-      return d.text || '';
+      return (d.text as string) || '';
     case 'list': {
-      const items: string[] = d.items || [];
+      const items: string[] = (d.items as string[]) || [];
       return d.ordered
         ? items.map((it, i) => `${i + 1}. ${it}`).join('\n')
         : items.map(it => `- ${it}`).join('\n');
     }
     case 'findings': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return items.map(f => `**${f.num ? f.num + ' ' : ''}${f.topic || ''}**\n\n${f.detail || ''}${f.sources && f.sources.length ? `\n\n来源: ${f.sources.join(', ')}` : ''}`).join('\n\n');
     }
     case 'code': {
@@ -679,45 +679,45 @@ function blockToMd(b: ReportBlock): string {
       return '```' + lang + '\n' + (d.code || '') + '\n```';
     }
     case 'api_table': {
-      const eps: string[] = d.endpoints || [];
+      const eps: string[] = (d.endpoints as string[]) || [];
       return eps.map(ep => `- \`${ep}\``).join('\n');
     }
     case 'kpi_grid': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return '| 指标 | 值 | 趋势 |\n|---|---|---|\n' + items.map(k => `| ${k.label || ''} | ${k.value || ''}${k.unit || ''} | ${k.trend || ''} |`).join('\n');
     }
     case 'conflicts': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return items.map((c, i) => `${i + 1}. ${c.summary || ''}\n   - A: ${c.sideA || ''}\n   - B: ${c.sideB || ''}\n   - 裁决: ${c.verdict || ''} — ${c.rationale || ''}${c.trace ? `\n   - 溯源: ${c.trace}` : ''}`).join('\n\n');
     }
     case 'risks': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return items.map(r => `- [${r.level || 'mid'}] ${r.desc || ''}`).join('\n');
     }
     case 'timeline': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return items.map(t => `- ${t.date || ''}: ${t.text || ''}`).join('\n');
     }
     case 'data_model': {
-      const ents: any[] = d.entities || [];
+      const ents: any[] = (d.entities as any[]) || [];
       return ents.map(e => `**${e.entity || ''}**: ${(e.fields || []).join(', ')}`).join('\n');
     }
     case 'test_groups': {
-      const tests: any[] = d.tests || [];
+      const tests: any[] = (d.tests as any[]) || [];
       return tests.map(t => `- [${t.result}] ${t.name} (${t.time})`).join('\n');
     }
     case 'file_tree': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return '```\n' + items.map(f => `${'  '.repeat(f.indent || 0)}${f.name}`).join('\n') + '\n```';
     }
     case 'field':
       return `**${d.label || ''}**: ${d.value || ''}`;
     case 'team_config': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return items.map(m => `- **${m.role || ''}**: ${m.stance || ''}`).join('\n');
     }
     case 'attachments': {
-      const items: any[] = d.items || [];
+      const items: any[] = (d.items as any[]) || [];
       return items.map(a => `- ${a.filename || ''} (${((a.size || 0) / 1024).toFixed(1)}KB)`).join('\n');
     }
     default:
@@ -818,7 +818,7 @@ export default function Report() {
     try {
       const spec = await apiGetReportLayout(meetingId, reportType, false);
       if (spec && spec.sections) {
-        setRemoteLayout(spec as ReportLayout);
+        setRemoteLayout(spec as unknown as ReportLayout);
       } else {
         setRemoteLayout(null);
       }

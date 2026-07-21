@@ -108,7 +108,7 @@ export default function Monitor() {
         const cards: MetricCard[] = [
           { label: '会议总数', value: String(m.meetings_total ?? '-'), unit: '', trend: `运行中 ${m.active_meetings ?? 0}` },
           { label: 'LLM 调用次数', value: String(m.llm_calls_total ?? '-'), unit: '', trend: `失败 ${m.llm_calls_failed ?? 0} 次` },
-          { label: '平均响应耗时', value: m.avg_response_ms != null ? `${Math.round(m.avg_response_ms)}` : '-', unit: 'ms', trend: '' },
+          { label: '平均响应耗时', value: m.avg_response_ms != null ? `${Math.round(m.avg_response_ms as number)}` : '-', unit: 'ms', trend: '' },
           { label: 'WS 连接数', value: String(m.ws_connections ?? '-'), unit: '', trend: '' },
           { label: '沙箱运行中', value: String(m.running_sandboxes ?? '-'), unit: '', trend: '' },
           { label: '审计事件', value: String(m.audit_events_today ?? '-'), unit: '', trend: '今日' },
@@ -119,8 +119,8 @@ export default function Monitor() {
       // 处理安全/系统事件
       if (eventsData.status === 'fulfilled' && eventsData.value) {
         const allEvents = [
-          ...(eventsData.value.security_events || []),
-          ...(eventsData.value.system_errors || []),
+          ...((eventsData.value.security_events as any[]) || []),
+          ...((eventsData.value.system_errors as any[]) || []),
         ].sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 20);
         setEvents(allEvents);
       }
