@@ -362,6 +362,24 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 **双层 Hook 速查**：pre-commit 秒级检查（版本校验+暂存文件）、pre-push Docker 检查（CI 环境一致性验证）。详见 `docs/ci-stability-guide.md`。
 
+### 4.19 PowerShell + 中文 Commit Message 编码问题
+
+**症状**：`git commit -m "中文消息"` 在 PowerShell 中静默失败（exit code 1，无错误输出），但同样的消息在 Git Bash 中正常。
+
+**根因**：PowerShell 对内联中文字符串的编码处理与 git 的预期不一致，导致 commit message 传递失败。不是 hook 的问题（hook 本身通过了）。
+
+**规则**：在 PowerShell 中提交中文 commit message 时，**必须用 `-F` 文件方式**，不要用 `-m` 内联。
+
+```bash
+# 错误（PowerShell 中会静默失败）
+git commit -m "fix(rag): 修复多路召回并发问题"
+
+# 正确（写入文件再引用）
+git commit -F commit-msg.txt
+```
+
+**参考**：commit `2348664` 的提交过程中发现并确认。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -475,4 +493,4 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 ---
 
-> 本文件最后更新：2026-07-22（§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-22（§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
