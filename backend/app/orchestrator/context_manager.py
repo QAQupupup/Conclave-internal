@@ -161,12 +161,24 @@ class ContextManager:
         """构建基础切片（宪章、结论、证据、物料）。
 
         兼容多种 state 类型：MeetingState（Pydantic 模型属性）和简单 dict/list。
+
+        ADR-009: 对 MeetingState 类型，优先通过 sections 视图读取。
         """
         slice_ = ContextSlice()
 
+        # 通过 sections 视图获取分组数据（ADR-009 Phase 1）
+        # sections 属性返回 5 个分组的 model_copy，只读
+        sections = getattr(state, "sections", None)
+
         # 1. 宪章（最高优先级，始终保留）
-        if hasattr(state, "charter") and state.charter:
+        charter = None
+        if sections is not None:
+            # MeetingState: 通过 observability section 读取
+            charter = sections["observability"].charter
+        elif hasattr(state, "charter") and state.charter:
             charter = state.charter
+
+        if charter:
             if isinstance(charter, dict):
                 slice_.charter = charter
             elif hasattr(charter, "model_dump"):
@@ -176,8 +188,13 @@ class ContextManager:
                 slice_.charter = {"topic": str(charter)}
 
         # 2. 已锁定结论（兼容 list / ConclusionChain Pydantic 模型）
-        if hasattr(state, "conclusion_chain"):
+        chain = None
+        if sections is not None:
+            chain = sections["observability"].conclusion_chain
+        elif hasattr(state, "conclusion_chain"):
             chain = state.conclusion_chain
+
+        if chain is not None:
             if isinstance(chain, list):
                 conclusions = chain
             elif hasattr(chain, "conclusions"):
@@ -197,14 +214,20 @@ class ContextManager:
                 for c in (conclusions if isinstance(conclusions, list) else [])
             ]
 
-        # 3. 证据（兼容 state.evidence / state.evidence_set）
+        # 3. 证据（通过 debate section 读取，兼容 state.evidence / state.evidence_set）
         evidence_list: list[dict[str, Any]] = []
-        for attr in ("evidence", "evidence_set"):
-            if hasattr(state, attr):
-                val = getattr(state, attr)
-                if isinstance(val, list):
-                    evidence_list = val
-                    break
+        if sections is not None:
+            # MeetingState: 通过 debate section 读取 evidence_set
+            val = sections["debate"].evidence_set
+            if isinstance(val, list):
+                evidence_list = val
+        else:
+            for attr in ("evidence", "evidence_set"):
+                if hasattr(state, attr):
+                    val = getattr(state, attr)
+                    if isinstance(val, list):
+                        evidence_list = val
+                        break
         if stage == "evidence_check":
             slice_.evidence = evidence_list
         else:
@@ -223,10 +246,17 @@ class ContextManager:
         2. 剩余可用 token 除以平均消息 token 估算窗口大小
         3. 窗口大小限制在 [2, 20] 之间
         """
-        if not hasattr(state, "messages") or not isinstance(state.messages, list):
+        # ADR-009: 通过 debate section 读取 messages
+        sections = getattr(state, "sections", None)
+        all_messages = None
+        if sections is not None:
+            all_messages = sections["debate"].messages
+        elif hasattr(state, "messages") and isinstance(state.messages, list):
+            all_messages = state.messages
+
+        if not all_messages or not isinstance(all_messages, list):
             return slice_
 
-        all_messages = state.messages
         if not all_messages:
             return slice_
 
@@ -261,10 +291,16 @@ class ContextManager:
 
     def _get_older_messages(self, state: Any, slice_: ContextSlice) -> list[dict[str, Any]]:
         """获取被动态窗口排除的旧消息（用于摘要压缩）。"""
-        if not hasattr(state, "messages") or not isinstance(state.messages, list):
-            return []
+        # ADR-009: 通过 debate section 读取 messages
+        sections = getattr(state, "sections", None)
+        all_messages = None
+        if sections is not None:
+            all_messages = sections["debate"].messages
+        elif hasattr(state, "messages") and isinstance(state.messages, list):
+            all_messages = state.messages
 
-        all_messages = state.messages
+        if not all_messages or not isinstance(all_messages, list):
+            return []
         if not all_messages:
             return []
 
