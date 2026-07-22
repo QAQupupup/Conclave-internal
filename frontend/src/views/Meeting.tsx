@@ -98,7 +98,7 @@ export default function Meeting() {
     });
     if (found) {
       const roleKey = found.speaker_role || found.speaker || 'moderator';
-      const role = (ROLES as any)[roleKey] || { name: roleKey };
+      const role = ROLES[roleKey] || { name: roleKey, color: 'var(--text-2)' };
       const content = found.content || '';
       const lines = content.split('\n');
       const lineIdx = lines.findIndex((l: string) => l.includes(claimId));
@@ -271,7 +271,7 @@ export default function Meeting() {
                     )}
                     {msgs.map((msg, mi) => {
                       const roleKey = msg.speaker_role || msg.speaker || 'moderator';
-                      const role = (ROLES as any)[roleKey] || { name: msg.speaker || roleKey, color: 'var(--text-2)' };
+                      const role = ROLES[roleKey] || { name: msg.speaker || roleKey, color: 'var(--text-2)' };
                       const content = msg.content || '';
                       const timeStr = formatTime(msg.ts);
                       const isIntervention = msg.isIntervention;

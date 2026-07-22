@@ -21,6 +21,13 @@ import {
   type TenantMember,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
+import type { PreferenceValue } from '../types/meeting';
+
+/** 从 catch 的 unknown 错误中提取 message */
+function getErrMessage(e: unknown, fallback = '未知错误'): string {
+  if (e instanceof Error) return e.message || fallback;
+  return fallback;
+}
 
 // Key 配置支持的 LLM Provider 列表
 const KEY_PROVIDERS: { value: string; label: string; defaultBase?: string }[] = [
@@ -49,7 +56,7 @@ export default function Settings() {
   const [checkingBalance, setCheckingBalance] = useState<string | null>(null);
 
   // ── 偏好 ──
-  const [prefs, setPrefs] = useState<Record<string, any>>({});
+  const [prefs, setPrefs] = useState<Record<string, unknown>>({});
   const [prefsLoading, setPrefsLoading] = useState(true);
   const [prefsError, setPrefsError] = useState<string | null>(null);
   const [editingPref, setEditingPref] = useState<string | null>(null);
@@ -108,17 +115,17 @@ export default function Settings() {
         const data = await apiGetKeys(true);
         const list = Array.isArray(data) ? data : (data?.keys ?? []);
         if (!cancelled) setKeys(list as LlmKey[]);
-      } catch (e: any) {
-        if (!cancelled) setKeysError('加载失败: ' + (e?.message || '未知错误'));
+      } catch (e: unknown) {
+      if (!cancelled) setKeysError('加载失败: ' + getErrMessage(e));
       } finally {
         if (!cancelled) setKeysLoading(false);
       }
       // Preferences
       try {
-        const data: any = await apiGetPreferences(true);
+        const data = await apiGetPreferences(true);
         if (!cancelled) setPrefs((data && typeof data === 'object') ? data : {});
-      } catch (e: any) {
-        if (!cancelled) setPrefsError('加载失败: ' + (e?.message || '未知错误'));
+      } catch (e: unknown) {
+        if (!cancelled) setPrefsError('加载失败: ' + getErrMessage(e));
       } finally {
         if (!cancelled) setPrefsLoading(false);
       }
@@ -153,8 +160,8 @@ export default function Settings() {
       const list = Array.isArray(data) ? data : (data?.keys ?? []);
       setKeys(list as LlmKey[]);
       setKeysError(null);
-    } catch (e: any) {
-      setKeysError('加载失败: ' + (e?.message || '未知错误'));
+    } catch (e: unknown) {
+      setKeysError('加载失败: ' + getErrMessage(e));
     }
   }
 
@@ -192,8 +199,8 @@ export default function Settings() {
       setFormBaseUrl('');
       setShowForm(false);
       await reloadKeys();
-    } catch (e: any) {
-      const msg = '保存失败: ' + (e?.message || '未知错误');
+    } catch (e: unknown) {
+      const msg = '保存失败: ' + getErrMessage(e);
       setFormError(msg);
       appendLog(msg, 'error');
     } finally {
@@ -209,8 +216,8 @@ export default function Settings() {
       appendLog(`已删除 Key: ${k.provider}/${k.name}`, 'info');
       toast.show('Key 已删除', 'success');
       await reloadKeys();
-    } catch (e: any) {
-      toast.show('删除失败: ' + (e?.message || '未知错误'), 'error');
+    } catch (e: unknown) {
+      toast.show('删除失败: ' + getErrMessage(e), 'error');
     } finally {
       setDeletingKey(null);
     }
@@ -222,8 +229,8 @@ export default function Settings() {
       const result = await apiQueryBalanceForKey(k.provider, '', k.base_url);
       // 余额查询需要实际 key，这里仅提示功能入口
       toast.show('余额检测：请在会议创建时验证 Key 有效性', 'info');
-    } catch (e: any) {
-      toast.show('检测失败: ' + (e?.message || '未知错误'), 'error');
+    } catch (e: unknown) {
+      toast.show('检测失败: ' + getErrMessage(e), 'error');
     } finally {
       setCheckingBalance(null);
     }
@@ -237,10 +244,10 @@ export default function Settings() {
       setUser(data.user);
       toast.show(`已切换到团队: ${data.user.tenant?.name || ''}`, 'success');
       await reloadKeys();
-      const pdata: any = await apiGetPreferences(true);
+      const pdata = await apiGetPreferences(true);
       setPrefs((pdata && typeof pdata === 'object') ? pdata : {});
-    } catch (e: any) {
-      toast.show('切换失败: ' + (e?.message || '未知错误'), 'error');
+    } catch (e: unknown) {
+      toast.show('切换失败: ' + getErrMessage(e), 'error');
     } finally {
       setSwitchingTenant(null);
     }
@@ -258,8 +265,8 @@ export default function Settings() {
       await handleSwitchTenant(t.id);
       const updated = await apiListTenants();
       setTenants(updated);
-    } catch (e: any) {
-      toast.show('创建失败: ' + (e?.message || '未知错误'), 'error');
+    } catch (e: unknown) {
+      toast.show('创建失败: ' + getErrMessage(e), 'error');
     } finally {
       setCreatingTeam(false);
     }
@@ -276,8 +283,8 @@ export default function Settings() {
       toast.show('显示名已更新', 'success');
       setEditingDisplayName(false);
       appendLog(`显示名已更新为: ${result.display_name}`, 'info');
-    } catch (e: any) {
-      toast.show('更新失败: ' + (e?.message || '未知错误'), 'error');
+    } catch (e: unknown) {
+      toast.show('更新失败: ' + getErrMessage(e), 'error');
     } finally {
       setSavingDisplayName(false);
     }
@@ -301,32 +308,32 @@ export default function Settings() {
       setShowPasswordForm(false);
       setOldPassword(''); setNewPassword(''); setConfirmPassword('');
       appendLog('密码已修改成功', 'info');
-    } catch (e: any) {
-      setPasswordError('修改失败: ' + (e?.message || '旧密码错误'));
+    } catch (e: unknown) {
+      setPasswordError('修改失败: ' + getErrMessage(e, '旧密码错误'));
     } finally {
       setChangingPassword(false);
     }
   }
 
   // ── 偏好操作 ──
-  async function handlePrefChange(k: string, v: any) {
+  async function handlePrefChange(k: string, v: unknown) {
     const prev = prefs[k];
     setPrefs((p) => ({ ...p, [k]: v }));
     try {
-      await apiSetPreference(k, v);
+      await apiSetPreference(k, v as PreferenceValue);
       toast.show(`偏好已更新: ${k}`, 'success');
-    } catch (e: any) {
+    } catch (e: unknown) {
       setPrefs((p) => ({ ...p, [k]: prev }));
-      toast.show('偏好保存失败: ' + (e?.message || '未知错误'), 'error');
+      toast.show('偏好保存失败: ' + getErrMessage(e), 'error');
     }
   }
-  function startEditPref(k: string, currentVal: any) {
+  function startEditPref(k: string, currentVal: unknown) {
     setEditingPref(k);
     setEditValue(typeof currentVal === 'object' ? JSON.stringify(currentVal) : String(currentVal ?? ''));
   }
   function cancelEditPref() { setEditingPref(null); setEditValue(''); }
   async function saveEditPref(k: string) {
-    let parsed: any = editValue;
+    let parsed: unknown = editValue;
     const trimmed = editValue.trim();
     if (trimmed === 'true') parsed = true;
     else if (trimmed === 'false') parsed = false;
@@ -340,9 +347,9 @@ export default function Settings() {
     const prev = prefs[k];
     setPrefs((p) => { const n = { ...p }; delete n[k]; return n; });
     try { await apiDeletePreference(k); toast.show(`已删除偏好: ${k}`, 'success'); }
-    catch (e: any) { setPrefs((p) => ({ ...p, [k]: prev })); toast.show('删除失败: ' + (e?.message || '未知错误'), 'error'); }
+    catch (e: unknown) { setPrefs((p) => ({ ...p, [k]: prev })); toast.show('删除失败: ' + getErrMessage(e), 'error'); }
   }
-  function isBoolPref(v: any): boolean { return typeof v === 'boolean'; }
+  function isBoolPref(v: unknown): boolean { return typeof v === 'boolean'; }
   const prefEntries = Object.entries(prefs);
 
   // ── 角色标签 ──

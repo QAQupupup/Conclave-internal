@@ -97,6 +97,7 @@ export interface ContainerInfo {
   image: string;
   status: string;
   state: string;
+  ports?: string;
 }
 
 /** 偏好设置值 */

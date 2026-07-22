@@ -24,7 +24,7 @@ interface SecurityEvent {
   action: string;
   username: string;
   status: string;
-  details: any;
+  details: Record<string, unknown>;
 }
 
 const HEALTH_LABELS: Record<string, { name: string; desc: string }> = {
@@ -68,15 +68,15 @@ export default function Monitor() {
   const loadData = useCallback(async () => {
     // 演示模式：直接使用 mock 数据
     if (demoMode) {
-      setHealthChecks(MOCK_HEALTH.map((h: any) => ({
-        name: h.name, status: h.status === 'healthy' ? 'ok' : (h.status === 'unavailable' ? 'unavailable' : 'error'),
-        latency_ms: h.latency, message: h.message,
+      setHealthChecks((MOCK_HEALTH as unknown as Record<string, unknown>[]).map((h: Record<string, unknown>) => ({
+        name: String(h.name), status: h.status === 'healthy' ? 'ok' : (h.status === 'unavailable' ? 'unavailable' : 'error'),
+        latency_ms: h.latency as number | undefined, message: h.message as string | undefined,
       })));
-      setMetrics(MOCK_METRICS.map((m: any) => ({ label: m.label, value: m.value, unit: m.unit || '', trend: m.trend || '' })));
-      setEvents(MOCK_EVENTS.map((e: any, i: number) => ({
-        id: i, timestamp: e.time || new Date().toISOString(),
-        category: e.category || 'system', action: e.action || e.event || '',
-        username: e.user || 'demo', status: e.status || 'info', details: {},
+      setMetrics(MOCK_METRICS.map((m) => ({ label: m.label, value: String(m.value), unit: m.unit || '', trend: m.trend || '' })));
+      setEvents((MOCK_EVENTS as unknown as Record<string, unknown>[]).map((e: Record<string, unknown>, i: number) => ({
+        id: i, timestamp: String(e.time || new Date().toISOString()),
+        category: String(e.category || 'system'), action: String(e.action || e.event || ''),
+        username: String(e.user || 'demo'), status: String(e.status || 'info'), details: {},
       })));
       setLoading(false);
       setError(null);
@@ -92,12 +92,15 @@ export default function Monitor() {
 
       // 处理健康检查
       if (healthData.status === 'fulfilled' && healthData.value) {
-        const checks: HealthCheck[] = Object.entries(healthData.value).map(([key, val]: [string, any]) => ({
-          name: HEALTH_LABELS[key]?.name || key,
-          status: val?.status || 'error',
-          latency_ms: val?.latency_ms,
-          message: val?.message,
-        }));
+        const checks: HealthCheck[] = Object.entries(healthData.value).map(([key, val]) => {
+          const v = val as Record<string, unknown> | undefined;
+          return {
+            name: HEALTH_LABELS[key]?.name || key,
+            status: ((v?.status as string) || 'error') as HealthCheck['status'],
+            latency_ms: v?.latency_ms as number | undefined,
+            message: v?.message as string | undefined,
+          };
+        });
         // 添加 LLM 熔断器状态（从 metrics 获取）
         setHealthChecks(checks);
       }
@@ -118,10 +121,12 @@ export default function Monitor() {
 
       // 处理安全/系统事件
       if (eventsData.status === 'fulfilled' && eventsData.value) {
-        const allEvents = [
-          ...((eventsData.value.security_events as any[]) || []),
-          ...((eventsData.value.system_errors as any[]) || []),
-        ].sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 20);
+        const allEvents = ([
+          ...((eventsData.value.security_events as SecurityEvent[]) || []),
+          ...((eventsData.value.system_errors as SecurityEvent[]) || []),
+        ] as SecurityEvent[])
+          .sort((a, b) => (b.id || 0) - (a.id || 0))
+          .slice(0, 20);
         setEvents(allEvents);
       }
 
@@ -134,8 +139,8 @@ export default function Monitor() {
           .join('; ');
         setError(failedReasons || '部分数据加载失败');
       }
-    } catch (e: any) {
-      setError(e.message || '加载监控数据失败');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '加载监控数据失败');
     } finally {
       setLoading(false);
     }

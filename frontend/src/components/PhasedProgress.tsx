@@ -2,6 +2,14 @@
 // 监听 produce.progress 事件，展示7阶段进度
 import { useState, useEffect } from 'react';
 
+/** produce-progress 自定义事件的 detail 载荷 */
+interface ProduceProgressDetail {
+  meeting_id?: string;
+  step?: string;
+  message?: string;
+  percent?: number;
+}
+
 interface PhaseInfo {
   key: string;
   name: string;
@@ -145,8 +153,9 @@ export function usePhasedProgress(meetingId?: string) {
 
   useEffect(() => {
     // 这里通过window自定义事件总线监听，具体绑定在集成时处理
-    const handler = (e: any) => {
-      const data = e.detail || {};
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<ProduceProgressDetail>).detail;
+      const data: ProduceProgressDetail = detail ?? {};
       if (meetingId && data.meeting_id !== meetingId) return;
       const step: string = data.step || '';
       const msg: string = data.message || '';

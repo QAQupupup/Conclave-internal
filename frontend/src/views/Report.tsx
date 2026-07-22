@@ -26,7 +26,7 @@ import {
   escHtml,
   cnSectionTitle,
 } from '../lib/format';
-import { useApp } from '../state/AppContext';
+import { useApp, type MeetingState } from '../state/AppContext';
 import { apiGetReportLayout } from '../lib/api';
 import ServiceViewer from '../components/ServiceViewer';
 import PhasedProgress from '../components/PhasedProgress';
@@ -49,17 +49,17 @@ function TraceTag({ trace }: { trace?: string }) {
   );
 }
 
-function ParagraphBlock({ data }: { data: any }) {
-  return <div className="report-p" dangerouslySetInnerHTML={{ __html: sanitizeRich(data?.text || '') }} />;
+function ParagraphBlock({ data }: { data: Record<string, unknown> }) {
+  return <div className="report-p" dangerouslySetInnerHTML={{ __html: sanitizeRich((data.text as string) || '') }} />;
 }
 
-function ListBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function ListBlock({ data }: { data: Record<string, unknown> }) {
+  const items: unknown[] = (data.items as unknown[]) || [];
   // 提取文本：处理三种情况
   // 1. 字符串且非 dict → 直接用
   // 2. 字符串但形如 Python dict（后端 str(claim_obj) 导致）→ 正则提取 claim 字段
   // 3. 对象 → 取 .claim 或 .text 字段
-  const extractText = (it: any): string => {
+  const extractText = (it: unknown): string => {
     if (typeof it === 'string') {
       // 后端 bug：claim 对象被 str() 转成 "{'claim': '...', 'risk_level': None, ...}" 字符串
       // 前端兜底：正则提取 'claim' 字段的值
@@ -67,7 +67,10 @@ function ListBlock({ data }: { data: any }) {
       if (dictMatch) return dictMatch[1];
       return it;
     }
-    if (it && typeof it === 'object') return it.claim || it.text || it.content || it.summary || '';
+    if (it && typeof it === 'object') {
+      const obj = it as Record<string, unknown>;
+      return String(obj.claim || obj.text || obj.content || obj.summary || '');
+    }
     return String(it || '');
   };
   if (data?.ordered) {
@@ -84,44 +87,51 @@ function ListBlock({ data }: { data: any }) {
   );
 }
 
-function FindingsBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function FindingsBlock({ data }: { data: Record<string, unknown> }) {
+  const items: unknown[] = (data.items as unknown[]) || [];
   // 提取文本：处理 dict 字符串（后端 str(claim_obj)）和对象两种情况
-  const extractText = (it: any): string => {
+  const extractText = (it: unknown): string => {
     if (typeof it === 'string') {
       const dictMatch = it.match(/^\{['"]claim['"]:\s*['"](.+?)['"],/s);
       if (dictMatch) return dictMatch[1];
       return it;
     }
-    if (it && typeof it === 'object') return it.claim || it.text || it.content || it.summary || it.detail || '';
+    if (it && typeof it === 'object') {
+      const obj = it as Record<string, unknown>;
+      return String(obj.claim || obj.text || obj.content || obj.summary || obj.detail || '');
+    }
     return String(it || '');
   };
   return (
     <div className="report-findings-list">
       {items.map((f, i) => {
         // 兼容后端返回的 claim 对象
-        if (typeof f === 'object' && f.claim) {
-          return (
-            <div className="report-finding-card" key={i}>
-              <div className="report-finding-topic">
-                {f.agent_role ? `${f.agent_role}: ` : ''}
-                <TraceTag trace={f.id} />
+        if (typeof f === 'object' && f !== null) {
+          const fObj = f as Record<string, unknown>;
+          if (fObj.claim) {
+            return (
+              <div className="report-finding-card" key={i}>
+                <div className="report-finding-topic">
+                  {fObj.agent_role ? `${fObj.agent_role}: ` : ''}
+                  <TraceTag trace={fObj.id as string | undefined} />
+                </div>
+                <div className="report-finding-detail" dangerouslySetInnerHTML={{ __html: sanitizeRich(String(fObj.claim)) }} />
+                {!!fObj.risk_level && <div className="report-finding-sources"><span style={{ color: 'var(--text-3)' }}>风险</span> <span className="report-finding-source">{String(fObj.risk_level)}</span></div>}
               </div>
-              <div className="report-finding-detail" dangerouslySetInnerHTML={{ __html: sanitizeRich(f.claim) }} />
-              {f.risk_level && <div className="report-finding-sources"><span style={{ color: 'var(--text-3)' }}>风险</span> <span className="report-finding-source">{f.risk_level}</span></div>}
-            </div>
-          );
+            );
+          }
         }
+        const fRec = (typeof f === 'object' && f !== null ? f : {}) as Record<string, unknown>;
         return (
         <div className="report-finding-card" key={i}>
-          {f.num ? <div className="report-finding-num">{f.num}</div> : null}
-          <div className="report-finding-topic">{f.topic || ''} <TraceTag trace={f.trace} /></div>
-          <div className="report-finding-detail" dangerouslySetInnerHTML={{ __html: sanitizeRich(f.detail || '') }} />
-          {f.sources && f.sources.length ? (
+          {fRec.num ? <div className="report-finding-num">{String(fRec.num)}</div> : null}
+          <div className="report-finding-topic">{String(fRec.topic || '')} <TraceTag trace={fRec.trace as string | undefined} /></div>
+          <div className="report-finding-detail" dangerouslySetInnerHTML={{ __html: sanitizeRich(String(fRec.detail || '')) }} />
+          {fRec.sources && (fRec.sources as unknown[]).length ? (
             <div className="report-finding-sources">
               <span style={{ color: 'var(--text-3)' }}>来源</span>
               {' '}
-              {f.sources.map((s: string, j: number) => <span className="report-finding-source" key={j}>{s}</span>)}
+              {(fRec.sources as unknown[]).map((s: unknown, j: number) => <span className="report-finding-source" key={j}>{String(s)}</span>)}
             </div>
           ) : null}
         </div>
@@ -131,9 +141,9 @@ function FindingsBlock({ data }: { data: any }) {
   );
 }
 
-function CodeBlock({ data }: { data: any }) {
-  const code: string = data?.code || '';
-  const lang: string = data?.lang || 'TEXT';
+function CodeBlock({ data }: { data: Record<string, unknown> }) {
+  const code: string = (data.code as string) || '';
+  const lang: string = (data.lang as string) || 'TEXT';
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const collapsible = code.split('\n').length > 12;
@@ -144,7 +154,7 @@ function CodeBlock({ data }: { data: any }) {
 
   const onCopy = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
-    const clip = (navigator as any).clipboard;
+    const clip = navigator.clipboard;
     if (clip?.writeText) {
       clip.writeText(code).then(() => {
         setCopied(true);
@@ -173,8 +183,8 @@ function CodeBlock({ data }: { data: any }) {
   );
 }
 
-function ApiTableBlock({ data }: { data: any }) {
-  const endpoints: string[] = data?.endpoints || [];
+function ApiTableBlock({ data }: { data: Record<string, unknown> }) {
+  const endpoints: string[] = (data.endpoints as string[]) || [];
   return (
     <div className="sc-api-table">
       {endpoints.map((ep, i) => {
@@ -199,38 +209,38 @@ function ApiTableBlock({ data }: { data: any }) {
   );
 }
 
-function KpiGridBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function KpiGridBlock({ data }: { data: Record<string, unknown> }) {
+  const items: Record<string, unknown>[] = (data.items as Record<string, unknown>[]) || [];
   return (
     <div className="sc-kpi-grid">
       {items.map((k, i) => (
         <div className="sc-kpi" key={i}>
-          <div className="sc-kpi-label">{k.label || ''}</div>
+          <div className="sc-kpi-label">{String(k.label || '')}</div>
           <div className="sc-kpi-value">
-            {k.value || ''}
-            {k.unit ? <span className="sc-kpi-trend" style={{ fontSize: '13px', marginLeft: '4px' }}>{k.unit}</span> : null}
+            {String(k.value || '')}
+            {k.unit ? <span className="sc-kpi-trend" style={{ fontSize: '13px', marginLeft: '4px' }}>{String(k.unit)}</span> : null}
           </div>
-          <div className={`sc-kpi-trend ${k.trend?.includes('↑') || k.trend?.includes('+') ? 'up' : k.trend?.includes('↓') || k.trend?.includes('-') ? 'down' : ''}`}>{k.trend || ''}</div>
+          <div className={`sc-kpi-trend ${String(k.trend || '').includes('↑') || String(k.trend || '').includes('+') ? 'up' : String(k.trend || '').includes('↓') || String(k.trend || '').includes('-') ? 'down' : ''}`}>{String(k.trend || '')}</div>
         </div>
       ))}
     </div>
   );
 }
 
-function ConflictsBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function ConflictsBlock({ data }: { data: Record<string, unknown> }) {
+  const items: Record<string, unknown>[] = (data.items as Record<string, unknown>[]) || [];
   return (
     <div className="report-conflicts">
       {items.map((c, i) => (
         <div className="report-conflict" key={i}>
-          <div className="report-conflict-summary">{i + 1}. {c.summary || ''} <TraceTag trace={c.trace} /></div>
+          <div className="report-conflict-summary">{i + 1}. {String(c.summary || '')} <TraceTag trace={c.trace as string | undefined} /></div>
           <div className="report-conflict-sides">
-            <div className="report-conflict-side"><div className="report-conflict-side-label">A 方</div>{c.sideA || ''}</div>
-            <div className="report-conflict-side"><div className="report-conflict-side-label">B 方</div>{c.sideB || ''}</div>
+            <div className="report-conflict-side"><div className="report-conflict-side-label">A 方</div>{String(c.sideA || '')}</div>
+            <div className="report-conflict-side"><div className="report-conflict-side-label">B 方</div>{String(c.sideB || '')}</div>
           </div>
           <div className="report-verdict">
-            <span className={`report-verdict-badge ${c.verdict || 'compromise'}`}>{c.verdict === 'a' ? '采纳A方' : c.verdict === 'b' ? '采纳B方' : '折中'}</span>
-            <span>{c.rationale || ''}</span>
+            <span className={`report-verdict-badge ${String(c.verdict || 'compromise')}`}>{c.verdict === 'a' ? '采纳A方' : c.verdict === 'b' ? '采纳B方' : '折中'}</span>
+            <span>{String(c.rationale || '')}</span>
           </div>
         </div>
       ))}
@@ -238,45 +248,45 @@ function ConflictsBlock({ data }: { data: any }) {
   );
 }
 
-function RisksBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function RisksBlock({ data }: { data: Record<string, unknown> }) {
+  const items: Record<string, unknown>[] = (data.items as Record<string, unknown>[]) || [];
   return (
     <>
       {items.map((risk, i) => (
         <div className="report-risk-item" key={i}>
-          <span className={`report-risk-level ${risk.level || 'mid'}`}>{risk.level === 'high' ? '高' : risk.level === 'mid' ? '中' : '低'}</span>
-          <div className="report-risk-desc">{risk.desc || ''}</div>
+          <span className={`report-risk-level ${String(risk.level || 'mid')}`}>{risk.level === 'high' ? '高' : risk.level === 'mid' ? '中' : '低'}</span>
+          <div className="report-risk-desc">{String(risk.desc || '')}</div>
         </div>
       ))}
     </>
   );
 }
 
-function TimelineBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function TimelineBlock({ data }: { data: Record<string, unknown> }) {
+  const items: Record<string, unknown>[] = (data.items as Record<string, unknown>[]) || [];
   return (
     <>
       {items.map((t, i) => (
         <div className="report-timeline-item" key={i}>
-          <span className="report-timeline-date">{t.date || ''}</span>
-          <span className="report-timeline-text">{t.text || ''}</span>
+          <span className="report-timeline-date">{String(t.date || '')}</span>
+          <span className="report-timeline-text">{String(t.text || '')}</span>
         </div>
       ))}
     </>
   );
 }
 
-function DataModelBlock({ data }: { data: any }) {
-  const entities: any[] = data?.entities || [];
+function DataModelBlock({ data }: { data: Record<string, unknown> }) {
+  const entities: Record<string, unknown>[] = (data.entities as Record<string, unknown>[]) || [];
   return (
     <div className="report-data-model">
       {entities.map((e, i) => (
         <div className="report-data-entity" key={i}>
-          <span className="report-entity-name">{e.entity || ''}</span>
+          <span className="report-entity-name">{String(e.entity || '')}</span>
           <span className="report-entity-fields">
-            {(e.fields || []).map((f: string, j: number) => {
+            {((e.fields as unknown[]) || []).map((f: unknown, j: number) => {
               const pk = String(f).includes('[PK]'), fk = String(f).includes('[FK]');
-              return <span className={`report-entity-field ${pk ? 'pk' : fk ? 'fk' : ''}`} key={j}>{f}</span>;
+              return <span className={`report-entity-field ${pk ? 'pk' : fk ? 'fk' : ''}`} key={j}>{String(f)}</span>;
             })}
           </span>
         </div>
@@ -285,7 +295,7 @@ function DataModelBlock({ data }: { data: any }) {
   );
 }
 
-function TestGroup({ group, items }: { group: string; items: any[] }) {
+function TestGroup({ group, items }: { group: string; items: Record<string, unknown>[] }) {
   const [collapsed, setCollapsed] = useState(false);
   const allPass = items.every(t => t.result === 'pass');
   return (
@@ -300,9 +310,9 @@ function TestGroup({ group, items }: { group: string; items: any[] }) {
         <div className="sc-test-group-body">
           {items.map((t, i) => (
             <div className="sc-test-item" key={i}>
-              <span className="sc-test-item-name">{t.name}</span>
+              <span className="sc-test-item-name">{String(t.name)}</span>
               <span className={`sc-test-item-result ${t.result}`}>{String(t.result).toUpperCase()}</span>
-              <span className="sc-test-item-time">{t.time || ''}</span>
+              <span className="sc-test-item-time">{String(t.time || '')}</span>
             </div>
           ))}
         </div>
@@ -311,9 +321,9 @@ function TestGroup({ group, items }: { group: string; items: any[] }) {
   );
 }
 
-function TestGroupsBlock({ data }: { data: any }) {
-  const tests: any[] = data?.tests || [];
-  const groups: Record<string, any[]> = {};
+function TestGroupsBlock({ data }: { data: Record<string, unknown> }) {
+  const tests: Record<string, unknown>[] = (data.tests as Record<string, unknown>[]) || [];
+  const groups: Record<string, Record<string, unknown>[]> = {};
   tests.forEach(t => {
     const prefix = String(t.name).replace(/^test_/, '').split('_')[0];
     if (!groups[prefix]) groups[prefix] = [];
@@ -326,15 +336,15 @@ function TestGroupsBlock({ data }: { data: any }) {
   );
 }
 
-function FileTreeBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function FileTreeBlock({ data }: { data: Record<string, unknown> }) {
+  const items: Record<string, unknown>[] = (data.items as Record<string, unknown>[]) || [];
   return (
     <div className="sc-file-tree">
       <div className="sc-file-tree-header">项目结构</div>
       {items.map((f, i) => (
         <div
           className={f.type === 'dir' ? 'sc-file-tree-item dir' : 'sc-file-tree-item'}
-          style={{ paddingLeft: `${14 + (f.indent || 0) * 14}px` }}
+          style={{ paddingLeft: `${14 + (Number(f.indent) || 0) * 14}px` }}
           key={i}
         >
           <svg className="ft-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
@@ -344,46 +354,46 @@ function FileTreeBlock({ data }: { data: any }) {
               <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>
             )}
           </svg>
-          {f.name || ''}
+          {String(f.name || '')}
         </div>
       ))}
     </div>
   );
 }
 
-function FieldBlock({ data }: { data: any }) {
+function FieldBlock({ data }: { data: Record<string, unknown> }) {
   return (
     <div className="report-field">
-      <div className="report-field-label">{data?.label || ''}</div>
-      <div className="report-field-value">{data?.value || ''}</div>
+      <div className="report-field-label">{String(data.label || '')}</div>
+      <div className="report-field-value">{String(data.value || '')}</div>
     </div>
   );
 }
 
-function TeamConfigBlock({ data }: { data: any }) {
-  const items: any[] = data?.items || [];
+function TeamConfigBlock({ data }: { data: Record<string, unknown> }) {
+  const items: Record<string, unknown>[] = (data.items as Record<string, unknown>[]) || [];
   return (
     <div className="report-findings">
       {items.map((m, i) => (
         <div className="report-finding" key={i}>
-          <div className="report-finding-topic">{m.role || ''}</div>
-          <div className="report-finding-detail">{m.stance || ''}</div>
+          <div className="report-finding-topic">{String(m.role || '')}</div>
+          <div className="report-finding-detail">{String(m.stance || '')}</div>
         </div>
       ))}
     </div>
   );
 }
 
-function AttachmentsBlock({ data }: { data: any }) {
+function AttachmentsBlock({ data }: { data: Record<string, unknown> }) {
   const toast = useToast();
-  const items: any[] = data?.items || [];
+  const items: Record<string, unknown>[] = (data.items as Record<string, unknown>[]) || [];
   return (
     <div className="report-attachments">
       {items.map((att, i) => (
-        <div className="report-attachment" key={i} onClick={() => toast.show('准备下载: ' + (att.filename || '附件'), 'info')}>
+        <div className="report-attachment" key={i} onClick={() => toast.show('准备下载: ' + String(att.filename || '附件'), 'info')}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4M5 20h14" /></svg>
-          <span>{att.filename || ''}</span>
-          <span className="report-attachment-size">{((att.size || 0) / 1024).toFixed(1)}KB</span>
+          <span>{String(att.filename || '')}</span>
+          <span className="report-attachment-size">{((Number(att.size) || 0) / 1024).toFixed(1)}KB</span>
         </div>
       ))}
     </div>
@@ -394,21 +404,21 @@ function AttachmentsBlock({ data }: { data: any }) {
  *  专业化查看器（shadcn风格）
  * ════════════════════════════════════════════════════════════════ */
 
-function ServiceViewerBlock({ data }: { data: any }) {
-  const appCode = data?.app_code || '';
-  const title = data?.title || '项目预览';
-  const port = data?.port || undefined;
-  const runCommand = data?.run_command || '';
-  const fileCount = data?.file_count || 0;
+function ServiceViewerBlock({ data }: { data: Record<string, unknown> }) {
+  const appCode = (data.app_code as string) || '';
+  const title = (data.title as string) || '项目预览';
+  const port = data.port as number | undefined;
+  const runCommand = (data.run_command as string) || '';
+  const fileCount = Number(data.file_count) || 0;
 
   // 顶部信息条（shadcn card风格）
   return (
     <div style={{ margin: '12px 0' }}>
-      {data?.complexity && (
+      {!!data.complexity && (
         <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
           <span className="sc-badge sc-badge-outline">{title}</span>
           <span className="sc-badge sc-badge-secondary">{fileCount > 0 ? `${fileCount} 文件` : ''}</span>
-          {data.complexity && (
+          {!!data.complexity && (
             <span className={`sc-badge ${data.complexity === 'large' ? 'sc-badge-warning' : data.complexity === 'medium' ? 'sc-badge-info' : 'sc-badge-success'}`}>
               {data.complexity === 'large' ? '大型' : data.complexity === 'medium' ? '中型' : data.complexity === 'small' ? '小型' : '微服务'}
             </span>
@@ -420,14 +430,14 @@ function ServiceViewerBlock({ data }: { data: any }) {
   );
 }
 
-function CodeCardBlock({ data }: { data: any }) {
-  const code: string = data?.code || '';
-  const lang: string = (data?.lang || 'TEXT').toUpperCase();
+function CodeCardBlock({ data }: { data: Record<string, unknown> }) {
+  const code: string = (data.code as string) || '';
+  const lang: string = ((data.lang as string) || 'TEXT').toUpperCase();
   const [copied, setCopied] = useState(false);
 
   const onCopy = () => {
-    if ((navigator as any).clipboard?.writeText) {
-      (navigator as any).clipboard.writeText(code).then(() => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(code).then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       });
@@ -455,13 +465,13 @@ function CodeCardBlock({ data }: { data: any }) {
   );
 }
 
-function PhasedPipelineBlock({ data }: { data: any }) {
+function PhasedPipelineBlock({ data }: { data: Record<string, unknown> }) {
   return (
     <PhasedProgress
-      percent={data?.percent || 0}
-      currentStage={data?.current_stage || null}
-      stageMessage={data?.message || ''}
-      completedStages={data?.completed || []}
+      percent={Number(data.percent) || 0}
+      currentStage={(data.current_stage as string | null) || null}
+      stageMessage={(data.message as string) || ''}
+      completedStages={(data.completed as string[]) || []}
     />
   );
 }
@@ -503,7 +513,10 @@ const CONF_LABELS: Record<string, string> = {
   evidence_check: '校验', arbitrate: '仲裁', produce: '产出',
 };
 
-function ReportHeader({ title, subtitle, meeting, confidence }: { title: string; subtitle: string; meeting: any; confidence?: Record<string, string> }) {
+/** 兼容旧字段 id/startTime（MeetingState 中无此属性但历史代码引用了） */
+type ReportMeeting = MeetingState & { id?: string; startTime?: number | string };
+
+function ReportHeader({ title, subtitle, meeting, confidence }: { title: string; subtitle: string; meeting: ReportMeeting; confidence?: Record<string, string> }) {
   const meetingId = meeting?.currentMeetingId || meeting?.id || '--';
   const meetingStatus = meeting?.status;
   const statusLabel = meetingStatus === 'done' ? '已完成' :
@@ -558,18 +571,18 @@ function ReportToc({ items, onJump }: { items: string[]; onJump?: (i: number) =>
   );
 }
 
-function ReportAppendix({ secNum, withId = true, trace }: { secNum?: number; withId?: boolean; trace?: Record<string, any> }) {
+function ReportAppendix({ secNum, withId = true, trace }: { secNum?: number; withId?: boolean; trace?: Record<string, unknown> }) {
   const id = withId ? (secNum ? `sec-${secNum}` : 'report-appendix') : undefined;
   const t = trace || {};
   return (
     <div className="report-appendix" id={id}>
       <div className="report-appendix-title">附录 — 执行追踪</div>
       <div className="report-trace">
-        <div className="report-trace-row"><span className="report-trace-label">LLM 调用次数</span><span className="report-trace-value">{t.totalCalls ?? '--'}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">成功率</span><span className="report-trace-value">{t.successRate ?? '--'}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">总 Token</span><span className="report-trace-value">{t.totalTokens ?? '--'}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">输入 Token</span><span className="report-trace-value">{t.inputTokens ?? '--'}</span></div>
-        <div className="report-trace-row"><span className="report-trace-label">输出 Token</span><span className="report-trace-value">{t.outputTokens ?? '--'}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">LLM 调用次数</span><span className="report-trace-value">{String(t.totalCalls ?? '--')}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">成功率</span><span className="report-trace-value">{String(t.successRate ?? '--')}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">总 Token</span><span className="report-trace-value">{String(t.totalTokens ?? '--')}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">输入 Token</span><span className="report-trace-value">{String(t.inputTokens ?? '--')}</span></div>
+        <div className="report-trace-row"><span className="report-trace-label">输出 Token</span><span className="report-trace-value">{String(t.outputTokens ?? '--')}</span></div>
       </div>
     </div>
   );
@@ -618,7 +631,7 @@ function Section({ index, section, withId = true }: { index: number; section: Re
 
   const onCopy = () => {
     const text = ref.current?.innerText.trim() || '';
-    const clip = (navigator as any).clipboard;
+    const clip = navigator.clipboard;
     if (clip?.writeText) {
       clip.writeText(text).then(() => {
         setCopied(true);
@@ -671,54 +684,57 @@ function blockToMd(b: ReportBlock): string {
         : items.map(it => `- ${it}`).join('\n');
     }
     case 'findings': {
-      const items: any[] = (d.items as any[]) || [];
-      return items.map(f => `**${f.num ? f.num + ' ' : ''}${f.topic || ''}**\n\n${f.detail || ''}${f.sources && f.sources.length ? `\n\n来源: ${f.sources.join(', ')}` : ''}`).join('\n\n');
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
+      return items.map(f => {
+        const sources = f.sources as unknown[] | undefined;
+        return `**${f.num ? `${f.num} ` : ''}${f.topic || ''}**\n\n${f.detail || ''}${sources && sources.length ? `\n\n来源: ${sources.join(', ')}` : ''}`;
+      }).join('\n\n');
     }
     case 'code': {
       const lang = d.lang ? String(d.lang).toLowerCase() : '';
-      return '```' + lang + '\n' + (d.code || '') + '\n```';
+      return '```' + lang + '\n' + String(d.code || '') + '\n```';
     }
     case 'api_table': {
       const eps: string[] = (d.endpoints as string[]) || [];
       return eps.map(ep => `- \`${ep}\``).join('\n');
     }
     case 'kpi_grid': {
-      const items: any[] = (d.items as any[]) || [];
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
       return '| 指标 | 值 | 趋势 |\n|---|---|---|\n' + items.map(k => `| ${k.label || ''} | ${k.value || ''}${k.unit || ''} | ${k.trend || ''} |`).join('\n');
     }
     case 'conflicts': {
-      const items: any[] = (d.items as any[]) || [];
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
       return items.map((c, i) => `${i + 1}. ${c.summary || ''}\n   - A: ${c.sideA || ''}\n   - B: ${c.sideB || ''}\n   - 裁决: ${c.verdict || ''} — ${c.rationale || ''}${c.trace ? `\n   - 溯源: ${c.trace}` : ''}`).join('\n\n');
     }
     case 'risks': {
-      const items: any[] = (d.items as any[]) || [];
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
       return items.map(r => `- [${r.level || 'mid'}] ${r.desc || ''}`).join('\n');
     }
     case 'timeline': {
-      const items: any[] = (d.items as any[]) || [];
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
       return items.map(t => `- ${t.date || ''}: ${t.text || ''}`).join('\n');
     }
     case 'data_model': {
-      const ents: any[] = (d.entities as any[]) || [];
-      return ents.map(e => `**${e.entity || ''}**: ${(e.fields || []).join(', ')}`).join('\n');
+      const ents: Record<string, unknown>[] = (d.entities as Record<string, unknown>[]) || [];
+      return ents.map(e => `**${e.entity || ''}**: ${((e.fields as unknown[]) || []).join(', ')}`).join('\n');
     }
     case 'test_groups': {
-      const tests: any[] = (d.tests as any[]) || [];
+      const tests: Record<string, unknown>[] = (d.tests as Record<string, unknown>[]) || [];
       return tests.map(t => `- [${t.result}] ${t.name} (${t.time})`).join('\n');
     }
     case 'file_tree': {
-      const items: any[] = (d.items as any[]) || [];
-      return '```\n' + items.map(f => `${'  '.repeat(f.indent || 0)}${f.name}`).join('\n') + '\n```';
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
+      return '```\n' + items.map(f => `${'  '.repeat(Number(f.indent) || 0)}${f.name}`).join('\n') + '\n```';
     }
     case 'field':
       return `**${d.label || ''}**: ${d.value || ''}`;
     case 'team_config': {
-      const items: any[] = (d.items as any[]) || [];
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
       return items.map(m => `- **${m.role || ''}**: ${m.stance || ''}`).join('\n');
     }
     case 'attachments': {
-      const items: any[] = (d.items as any[]) || [];
-      return items.map(a => `- ${a.filename || ''} (${((a.size || 0) / 1024).toFixed(1)}KB)`).join('\n');
+      const items: Record<string, unknown>[] = (d.items as Record<string, unknown>[]) || [];
+      return items.map(a => `- ${a.filename || ''} (${((Number(a.size) || 0) / 1024).toFixed(1)}KB)`).join('\n');
     }
     default:
       return '';
@@ -773,14 +789,14 @@ ${content}
  *  数据对象选择
  * ════════════════════════════════════════════════════════════════ */
 
-function getDataForType(type: string): any {
+function getDataForType(type: string): Record<string, unknown> {
   switch (type) {
-    case 'prd_openapi': return REPORT_DATA;
-    case 'research_report': return REPORT_RESEARCH;
-    case 'business_report': return REPORT_BUSINESS;
-    case 'comprehensive': return REPORT_COMPREHENSIVE;
-    case 'deployable_service': return REPORT_DEPLOYABLE;
-    default: return REPORT_DATA; // 其余类型用 REPORT_DATA 作 fallback
+    case 'prd_openapi': return REPORT_DATA as unknown as Record<string, unknown>;
+    case 'research_report': return REPORT_RESEARCH as unknown as Record<string, unknown>;
+    case 'business_report': return REPORT_BUSINESS as unknown as Record<string, unknown>;
+    case 'comprehensive': return REPORT_COMPREHENSIVE as unknown as Record<string, unknown>;
+    case 'deployable_service': return REPORT_DEPLOYABLE as unknown as Record<string, unknown>;
+    default: return REPORT_DATA as unknown as Record<string, unknown>;
   }
 }
 
@@ -822,9 +838,9 @@ export default function Report() {
       } else {
         setRemoteLayout(null);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       setRemoteLayout(null);
-      setLayoutError(e.message || '报告加载失败');
+      setLayoutError(e instanceof Error ? e.message : '报告加载失败');
     } finally {
       setLayoutLoading(false);
     }

@@ -69,8 +69,8 @@ export default function Login() {
       setUser(data.user);
       setLoginSuccess(true);
       setPassword('');
-    } catch (e: any) {
-      setError(e.message || '登录失败');
+    } catch (e: unknown) {
+      setError((e instanceof Error && e.message) ? e.message : '登录失败');
     } finally {
       setLoading(false);
     }

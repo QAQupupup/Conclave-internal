@@ -30,15 +30,15 @@ export default function Board() {
     const f = filter.trim();
     let items = list;
     if (f) {
-      items = list.filter((m: any) =>
+      items = list.filter((m) =>
         (m.title && String(m.title).includes(f)) ||
         (m.topic && String(m.topic).includes(f)),
       );
     }
     const sorted = items.slice();
-    if (sort === 'date') sorted.sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)));
-    if (sort === 'status') sorted.sort((a: any, b: any) => String(a.status).localeCompare(String(b.status)));
-    if (sort === 'title') sorted.sort((a: any, b: any) => String(a.title).localeCompare(String(b.title)));
+    if (sort === 'date') sorted.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    if (sort === 'status') sorted.sort((a, b) => String(a.status).localeCompare(String(b.status)));
+    if (sort === 'title') sorted.sort((a, b) => String(a.title).localeCompare(String(b.title)));
     return sorted;
   }, [meetings, filter, sort]);
 
@@ -97,11 +97,11 @@ export default function Board() {
             <span className="board-cell board-cell-progress">进度</span>
             <span className="board-cell board-cell-date">创建时间</span>
           </div>
-          {pageItems.map((m: any) => (
+          {pageItems.map((m) => (
             <div
               className="board-row"
               key={m.id}
-              onClick={() => { openMeeting(m.id); navigate(`/meeting/${m.id}`); }}
+              onClick={() => { openMeeting(m.id!); navigate(`/meeting/${m.id}`); }}
             >
               <span className="board-cell board-cell-title">
                 <span className="board-cell-main">{m.title}</span>
