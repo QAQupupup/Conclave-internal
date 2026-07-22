@@ -95,4 +95,6 @@ class QdrantVectorStore(VectorStore):
 
     async def count(self, collection: str) -> int:
         info = self._client.get_collection(collection)
-        return info.points_count if info else 0
+        if info and info.points_count is not None:
+            return info.points_count
+        return 0

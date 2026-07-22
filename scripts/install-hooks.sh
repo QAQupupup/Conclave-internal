@@ -153,11 +153,63 @@ HOOK_EOF
 
 chmod +x "$HOOK_FILE"
 echo "✓ Pre-commit hook installed to $HOOK_FILE"
+
+# ============================================================
+# Pre-push hook: Docker CI parity check
+# ============================================================
+# 在推送前用 Docker 容器运行与 CI 完全相同的 ruff/mypy 检查
+# 确保本地通过 = CI 通过，彻底杜绝版本漂移
+PUSH_HOOK="$HOOK_DIR/pre-push"
+
+cat > "$PUSH_HOOK" << 'PUSH_EOF'
+#!/usr/bin/env bash
+# Conclave pre-push hook — Docker CI parity check
+# 在 Docker 中运行与 CI 完全相同的检查，确保推送前 CI 必过
+#
+# 原理：用同一个 requirements.lock 在 Linux 容器中安装 ruff/mypy，
+# 运行与 CI 相同的命令。版本/环境 100% 一致。
+#
+# 跳过：git push --no-verify（紧急情况）
+# Docker 未运行时自动跳过（不阻塞推送，但 CI 仍会检查）
+
+set -e
+
+# pre-push hook 从 stdin 读取推送的 ref 信息
+# 格式: <local ref> <local sha> <remote ref> <remote sha>
+while read local_ref local_sha remote_ref remote_sha; do
+    # 只对分支推送触发检查，标签推送跳过
+    if [[ "$remote_ref" == refs/heads/* ]]; then
+        DO_DOCKER_CHECK=1
+    fi
+done
+
+if [ -z "$DO_DOCKER_CHECK" ]; then
+    exit 0
+fi
+
+# 获取仓库根目录
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# 调用 Docker CI 检查脚本
+bash "$REPO_ROOT/scripts/docker-ci-check.sh"
+PUSH_EOF
+
+chmod +x "$PUSH_HOOK"
+echo "✓ Pre-push hook installed to $PUSH_HOOK"
+
 echo ""
-echo "Hook 检查项（三层防护）："
-echo "  1. Ruff 版本校验：本地 ruff 必须与 requirements.lock 一致（防止版本漂移）"
-echo "  2. 配置变更全量检查：requirements.lock / pyproject.toml 变更时检查全部文件"
-echo "  3. 常规检查：ruff check + format（暂存文件）+ tsc + eslint + compose 校验"
+echo "Hook 检查项（双层防护）："
+echo ""
+echo "  [pre-commit] 秒级本地检查："
+echo "    1. Ruff 版本校验：本地 ruff 必须与 requirements.lock 一致"
+echo "    2. 配置变更全量检查：requirements.lock / pyproject.toml 变更时全量检查"
+echo "    3. 常规检查：ruff check + format（暂存文件）+ tsc + eslint + compose"
+echo ""
+echo "  [pre-push] Docker CI 一致性验证："
+echo "    - 在 Linux 容器中用 requirements.lock 安装 ruff/mypy"
+echo "    - 运行与 CI 完全相同的命令（ruff check + format + mypy）"
+echo "    - 确保本地通过 = CI 通过，杜绝版本漂移"
+echo "    - Docker 未运行时自动跳过（不阻塞，CI 仍会检查）"
 echo ""
 echo "注意：集成测试（pytest）不在 hook 中运行，由 CI 负责（§0.5.2）"
-echo "如需跳过 hook：git commit --no-verify（仅限紧急情况）"
+echo "跳过 hook：git commit --no-verify / git push --no-verify（仅限紧急情况）"

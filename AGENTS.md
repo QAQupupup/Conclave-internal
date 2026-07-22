@@ -389,18 +389,29 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 7. **ruff 和 mypy 版本必须三处一致**（`requirements.lock` → `.pre-commit-config.yaml` `rev` → 本地安装版本）。修改 ruff/mypy 版本时必须同步更新这三处。Pre-commit hook 会自动校验本地 ruff 版本与 `requirements.lock` 是否一致，不一致时阻止提交并提示安装正确版本。mypy 虽不在 hook 中运行，但版本不一致同样会导致本地通过 CI 失败。
 8. **依赖冲突必须在本地验证**。修改 `requirements.txt` / `requirements.lock` 后，必须运行 `pip install --dry-run -r requirements.lock` 验证无冲突。Pre-commit hook 已内置此检查（`requirements-lock-validate`）。
 9. **ruff 配置变更时必须全量检查**。当 `requirements.lock` 或 `pyproject.toml` 变更时，Pre-commit hook 会自动对全部文件执行 ruff check + format，而非仅检查暂存文件——因为版本/规则变更可能影响所有文件的格式。
+10. **pre-push Docker CI 一致性验证**。推送前自动在 Docker 容器中运行与 CI 完全相同的 ruff/mypy 检查（`scripts/docker-ci-check.sh`），确保"本地通过 = CI 通过"。Docker 未运行时自动跳过（不阻塞推送），但 CI 仍会检查。首次运行 ~30s（拉镜像 + pip install），后续 ~5s（pip cache volume 命中）。手动执行：`bash scripts/docker-ci-check.sh`。
 
-**Pre-commit hook 配置说明**：
-- Hook 文件：`.git/hooks/pre-commit`（由 `scripts/install-hooks.sh` 生成）
+**双层 Hook 防护体系**：
+
+**[pre-commit] 秒级本地检查**（`.git/hooks/pre-commit`，由 `scripts/install-hooks.sh` 生成）：
 - 不依赖 `pre-commit` pip 包，直接调用 `ruff` 和 `npx tsc`/`npm run lint`
 - 不运行 pytest（需要 PostgreSQL/Redis，违反 §0.5.2，由 CI 的 `backend-integration-tests` job 负责）
 - `.pre-commit-config.yaml` 保留作为 `pre-commit` 包的配置（`rev` 必须与 `requirements.lock` 中 ruff 版本一致）
-- **三层防护**：
+- 三层防护：
   1. **版本校验**：提交前校验本地 ruff 版本 == `requirements.lock` 版本，不一致直接阻止提交
   2. **配置变更全量检查**：`requirements.lock` / `pyproject.toml` 变更时，对全部文件执行 ruff check + format
   3. **常规暂存文件检查**：正常提交时只检查暂存文件（ruff check + format + tsc + eslint + compose 校验）
 
-**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。后续追加修复：websockets 依赖冲突（12.0→13.0）、RUF009+UP038 规则忽略、ruff 版本对齐（0.5.0→0.15.22 三处同步）、mypy 版本对齐（1.10.0→2.3.0 + continue-on-error）、pre-commit hook 三层防护（版本校验+全量检查+暂存检查）。
+**[pre-push] Docker CI 一致性验证**（`.git/hooks/pre-push`，由 `scripts/install-hooks.sh` 生成）：
+- 脚本：`scripts/docker-ci-check.sh`
+- 镜像：`swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim`（与项目 Dockerfile 一致）
+- 用同一个 `requirements.lock` 安装 ruff/mypy，运行与 CI 完全相同的命令
+- pip 缓存卷 `conclave-ci-pip-cache` 跨次运行复用，加速 pip install
+- Docker 未运行时自动跳过（不阻塞推送，CI 仍会检查）
+- mypy 与 CI 一致设为 `continue-on-error`（warnings 不阻塞推送）
+- 手动执行：`bash scripts/docker-ci-check.sh`
+
+**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。后续追加修复：websockets 依赖冲突（12.0→13.0）、RUF009+UP038 规则忽略、ruff 版本对齐（0.5.0→0.15.22 三处同步）、mypy 版本对齐（1.10.0→2.3.0 + continue-on-error）、pre-commit hook 三层防护（版本校验+全量检查+暂存检查）、pre-push Docker CI 一致性验证（彻底杜绝版本漂移）、qdrant_store.py mypy 类型修复。
 
 ---
 
@@ -514,4 +525,4 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ---
 
-> 本文件最后更新：2026-07-22（§4.18 新增规则 7/8/9 版本同步纪律 + 三层防护说明、ruff 0.5.0→0.15.22 三处对齐、mypy 1.10.0→2.3.0 对齐 + continue-on-error、pre-commit hook 版本校验+全量检查、CI 添加 ruff/mypy 版本打印步骤）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-22（§4.18 新增规则 7-10 + 双层 Hook 防护体系、ruff 0.5.0→0.15.22 三处对齐、mypy 1.10.0→2.3.0 对齐 + continue-on-error、pre-commit hook 三层防护、pre-push Docker CI 一致性验证、qdrant_store.py 类型修复）。若发现新的高频坑，追加到第 4 节并更新日期。
