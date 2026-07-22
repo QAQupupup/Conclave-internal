@@ -10,7 +10,10 @@ from typing import Any, Protocol
 import httpx
 
 from app.config import settings
+from app.logging_config import get_logger
 from app.rag.chunker import Chunk
+
+logger = get_logger("rag.store")
 
 
 class Embedding(Protocol):
@@ -253,9 +256,7 @@ class SiliconFlowReranker:
             results = data.get("results", [])
             return [(r["index"], float(r.get("relevance_score", 0.0))) for r in results]
         except Exception as e:
-            import logging
-
-            logging.getLogger("app.rag.store").warning(
+            logger.warning(
                 "Reranker API 调用失败，回退关键词重排序: %s: %s",
                 type(e).__name__,
                 str(e)[:200],
@@ -574,10 +575,27 @@ class QdrantVectorStore(InMemoryVectorStore):
                 vec_candidates.append((chunk, r.score or 0.0))
 
             # 2. 关键词检索（内存中计分）
+            # 注意：关键词检索遍历内存缓存 self._store，Qdrant 可能有更多 chunk
+            # 不在内存中（内存只缓存 add_chunks 时写入的 chunk）。
+            # 如果内存覆盖率不足，关键词召回会漏数据，日志会警告。
             query_terms = _tokenize_query(query)
+            mem_chunk_count = len(self._store)
             kw_scored = [(chunk, _keyword_score(chunk.text, query_terms)) for chunk, _ in self._store.values()]
             kw_scored.sort(key=lambda x: x[1], reverse=True)
             kw_candidates = kw_scored[: top_k * 2]
+
+            # 审计日志：关键词检索覆盖率
+            if mem_chunk_count == 0:
+                logger.warning(
+                    "Qdrant 混合检索: 内存缓存为空，关键词召回被跳过 （向量检索仍有效，但 RRF 融合退化为纯向量排序）"
+                )
+            elif len(vec_candidates) > mem_chunk_count:
+                # Qdrant 向量检索返回的候选数 > 内存缓存数，说明内存可能不全
+                logger.debug(
+                    "Qdrant 混合检索: 内存缓存=%d, 向量候选=%d, 关键词检索仅覆盖内存中的 chunk",
+                    mem_chunk_count,
+                    len(vec_candidates),
+                )
 
             # 3. RRF 融合
             rrf_k = 60
@@ -596,12 +614,12 @@ class QdrantVectorStore(InMemoryVectorStore):
             merged = sorted(chunk_ranks.values(), key=lambda x: x[1], reverse=True)
             return [(chunk, round(rrf_score, 4)) for chunk, rrf_score, _ in merged[:top_k]]
 
-        except Exception:
-            import logging
-
-            logging.getLogger("app.rag.store").warning(
-                "Qdrant 混合检索失败，回退内存混合检索（内存缓存: %d 条）",
+        except Exception as e:
+            logger.warning(
+                "Qdrant 混合检索失败，回退内存混合检索（内存缓存: %d 条）: %s: %s",
                 len(self._store),
+                type(e).__name__,
+                str(e)[:200],
             )
             return await super().search(query, top_k)
 

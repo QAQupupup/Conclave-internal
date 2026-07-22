@@ -4,9 +4,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from app.logging_config import get_logger
 from app.rag.hyde import hyde_retrieve
 from app.rag.query_rewriter import rewrite_query
 from app.rag.store import get_reranker, get_store
+
+logger = get_logger("rag.retriever")
 
 
 async def retrieve(
@@ -26,6 +29,7 @@ async def retrieve(
     """
     store = get_store(meeting_id)
     if not store.all_chunks():
+        logger.debug("retrieve: store 无 chunk，返回空列表 (meeting_id=%s)", meeting_id)
         return []
     # 召回阶段取更多候选，给 reranker 留空间
     candidates = await store.search(query, top_k=max(top_k * 2, 10))
@@ -68,38 +72,86 @@ def _build_chunk_dict(chunk: Any, score: float, store: Any) -> dict[str, Any]:
     return d
 
 
+async def _safe_search(
+    store: Any,
+    query: str,
+    top_k: int,
+    route_name: str,
+) -> list[tuple[Any, float]]:
+    """单路召回的异常隔离包装。
+
+    任何异常都不会中断整体流程，但会打 warning 日志供审计。
+    返回空列表表示该路召回失败。
+    """
+    try:
+        results = await store.search(query, top_k=top_k)
+        logger.debug(
+            "多路召回 [%s] 成功: query=%s, 候选数=%d",
+            route_name,
+            query[:80],
+            len(results),
+        )
+        return list(results)
+    except Exception as e:
+        logger.warning(
+            "多路召回 [%s] 失败，该路返回空（不影响其他路）: query=%s, error=%s: %s",
+            route_name,
+            query[:80],
+            type(e).__name__,
+            e,
+        )
+        return []
+
+
 async def retrieve_for_conflict(
     meeting_id: str,
     conflict_summary: str,
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
-    """针对单个冲突检索证据：查询改写 + HyDE → 多路召回 → 合并去重 → 重排 → 邻居链扩展
+    """针对单个冲突检索证据：查询改写 + HyDE → 多路并发召回 → 合并去重 → 重排 → 邻居链扩展
 
     流程：
     1. 查询改写 + HyDE 并行：LLM 生成 2 个改写查询 + 原始查询 + 假设文档检索
        （HyDE 用假设文档的 embedding 检索，弥补 query-document 语义鸿沟）
-    2. 多路召回：每路检索 top_k*2 个候选
+    2. 多路并发召回：每路检索 top_k*2 个候选，用 asyncio.gather 并发执行
+       每路独立异常隔离，单路失败不阻塞其他路
     3. 合并去重：按 chunk_id 去重，保留最高分
     4. Reranker 重排：使用 get_reranker()（真实 API 或关键词 fallback）
     5. 邻居链扩展：附带前后 N 个 chunk 上下文
     """
     store = get_store(meeting_id)
     if not store.all_chunks():
+        logger.debug("retrieve_for_conflict: store 无 chunk，返回空列表 (meeting_id=%s)", meeting_id)
         return []
 
-    # 1. 查询改写 + HyDE 并行（减少总延迟）
     search_k = max(top_k * 2, 10)
+
+    # 1. 查询改写 + HyDE 并行（减少总延迟）
+    logger.info(
+        "retrieve_for_conflict 开始: meeting_id=%s, conflict=%s..., top_k=%d", meeting_id, conflict_summary[:80], top_k
+    )
     queries_task = rewrite_query(conflict_summary)
     hyde_task = hyde_retrieve(store, conflict_summary, top_k=search_k)
 
-    queries, hyde_candidates = await asyncio.gather(queries_task, hyde_task)
+    queries, hyde_candidates = await asyncio.gather(queries_task, hyde_task, return_exceptions=False)
 
-    # 2. 多路召回 + HyDE 召回 → 合并去重
+    logger.info(
+        "查询改写完成: %d 路查询 (原始+%d 改写), HyDE 候选=%d",
+        len(queries),
+        len(queries) - 1,
+        len(hyde_candidates),
+    )
+
+    # 2. 多路并发召回（asyncio.gather + 异常隔离）
+    # 每路独立 _safe_search 包装，单路失败返回空列表不阻塞其他路
+    search_tasks = [_safe_search(store, q, search_k, f"multi_query_{i}") for i, q in enumerate(queries)]
+    search_results = await asyncio.gather(*search_tasks)
+
+    # 合并去重：按 chunk_id 去重，保留最高分
     seen: dict[str, dict[str, Any]] = {}
 
-    # Multi-Query 召回
-    for q in queries:
-        candidates = await store.search(q, top_k=search_k)
+    # Multi-Query 召回结果合并
+    for candidates in search_results:
         for chunk, score in candidates:
             d = _build_chunk_dict(chunk, score, store)
             # 去重：同一 chunk_id 保留最高分
@@ -114,7 +166,18 @@ async def retrieve_for_conflict(
 
     base = list(seen.values())
     if not base:
+        logger.warning(
+            "retrieve_for_conflict: 所有路召回均为空，返回空列表 (meeting_id=%s, conflict=%s...)",
+            meeting_id,
+            conflict_summary[:80],
+        )
         return []
+
+    logger.info(
+        "多路召回合并去重: 总候选=%d (来自 %d 路查询 + HyDE)",
+        len(base),
+        len(queries),
+    )
 
     # 按初始分数排序（reranker 内部再重排）
     base.sort(key=lambda x: x["score"], reverse=True)
@@ -122,11 +185,33 @@ async def retrieve_for_conflict(
     # 3. 使用 Reranker Protocol 统一重排（SiliconFlow 失败自动回退关键词）
     reranker = get_reranker()
     documents = [c["text"] for c in base]
-    reranked = await reranker.rerank(conflict_summary, documents, top_n=top_k)
+    try:
+        reranked = await reranker.rerank(conflict_summary, documents, top_n=top_k)
+        logger.info(
+            "Reranker 重排完成: 输入=%d, 输出=%d, reranker=%s",
+            len(documents),
+            len(reranked),
+            type(reranker).__name__,
+        )
+    except Exception as e:
+        logger.error(
+            "Reranker 重排异常（非预期，get_reranker 内部应已回退）: %s: %s",
+            type(e).__name__,
+            e,
+        )
+        # 最后防线：用初始分数排序的前 top_k
+        return base[:top_k]
+
     results: list[dict[str, Any]] = []
     for idx, rel_score in reranked:
         if 0 <= idx < len(base):
             item = base[idx].copy()
             item["score"] = round(rel_score, 4)
             results.append(item)
+
+    logger.info(
+        "retrieve_for_conflict 完成: 返回 %d 条证据 (meeting_id=%s)",
+        len(results),
+        meeting_id,
+    )
     return results
