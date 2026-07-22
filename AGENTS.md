@@ -76,8 +76,9 @@
 
 **每次 `git commit` 前必须逐项确认，不得跳过：**
 
-> **Pre-commit hook 已激活**：`.git/hooks/pre-commit` 会自动运行 ruff check + ruff format --check（后端）和 tsc + eslint（前端）。
+> **双层 Hook 已激活**：pre-commit（秒级 ruff/tsc/eslint）+ pre-push（Docker CI 一致性验证）。
 > Hook 安装：`bash scripts/install-hooks.sh`（首次克隆仓库后执行一次）。
+> Hook 配置详见 `PROJECT_CONVENTIONS.md` §8，CI 稳定性详见 `docs/ci-stability-guide.md`。
 > 如 hook 未安装，以下手动检查必须逐项执行。
 
 ### 2.1 后端
@@ -110,36 +111,11 @@
 
 ### 3.1 Commit Message（Conventional Commits，强制）
 
-格式：
-```
-<type>(<scope>): <中文描述>
+遵循 Conventional Commits 规范，完整 type/scope 列表见 `PROJECT_CONVENTIONS.md` §4.1。
 
-[可选 body，说明为什么这样改、踩了什么坑]
+格式：`<type>(<scope>): <中文描述>`，body 说明为什么改，footer 用 `Refs:` 引用修复报告。
 
-[可选 footer，如 Refs: docs/retrospectives/2026-xx-xx-xxx.html]
-```
-
-允许的 `type`（严格限定，禁止自造）：
-- `feat` 新功能
-- `fix` Bug 修复
-- `refactor` 重构（不改功能）
-- `docs` 文档
-- `test` 测试
-- `chore` 构建/工具/依赖
-- `perf` 性能优化
-- `style` 代码风格（不影响逻辑）
-- `ci` CI/CD 变更
-
-`scope` 常用值：`backend`、`frontend`、`docker`、`orchestrator`、`agents`、`tools`、`db`、`auth`、`docs`。
-
-**示例**：
-```
-fix(events): 修复并发发布事件导致 seq 逆序的问题
-
-publish 时并发调用 save_event，虽然 DB seq 单调递增，但
-内存历史追加顺序受 async 调度影响，导致 e2e 测试中出现
-seq 39->38 逆序。修复：append 后按 seq 排序。
-```
+type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope: `backend`/`frontend`/`docker`/`orchestrator`/`agents`/`tools`/`db`/`auth`/`docs`。
 
 ### 3.2 修复报告归档（P0/P1 Bug / 系统性修复必须）
 
@@ -160,6 +136,8 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 ## 4. 高频踩坑清单（血泪教训）
 
 > 这些坑都踩过，每次出现都导致 CI 红或生产 Bug。**写代码时主动避开。**
+>
+> **篇幅纪律**：每条不超过 1.5KB。超出时将详细背景/修复历史拆到 `docs/retrospectives/` 或专门文档，本文件只保留规则和速查。
 
 ### 4.1 asyncio 事件循环（最常见大坑）
 
@@ -366,52 +344,23 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ### 4.18 CI 稳定性纪律（禁止"红 CI 提交"）
 
-**症状**：GitHub CI 失败率居高不下，每次 push/PR 后 CI 红灯，开发者习惯性忽略 CI 结果，导致 CI 形同虚设。
+**症状**：CI 反复失败，开发者习惯性忽略 CI 结果。
 
-**根因**：
-1. Pre-commit hook 未安装/未激活，本地零卡点，所有问题涌入 CI
-2. mypy 存在历史遗留 errors，CI 的 mypy 步骤必然失败，开发者形成"CI 红是正常的"错误习惯（现已设为 `continue-on-error: true` + 版本对齐到 2.3.0）
-3. ruff format 未在本地执行，67 个文件格式不规范，CI 的 `ruff format --check` 必然失败
-4. CI 分支触发配置过时（引用已合并的 `refactor/v3-manager-agent-runtime` 分支）
-5. **ruff 版本漂移**：本地 ruff 版本与 CI（`requirements.lock`）不一致，格式化结果不同，本地通过但 CI 失败
-6. **依赖冲突未在本地暴露**：`requirements.lock` 中依赖版本冲突（如 `websockets==12.0` vs `uvicorn[standard]` 需 `>=13.0`），Windows pip 静默忽略，Linux CI 失败
+**根因**：版本漂移（本地 ruff/mypy 与 CI `requirements.lock` 不一致）、依赖冲突（Windows pip 静默忽略）、pre-commit hook 未安装。详细背景和修复历史见 `docs/ci-stability-guide.md`。
 
-**规则（强制，违反等同违反工程规范）**：
-1. **Pre-commit hook 必须激活**。首次克隆仓库后执行 `bash scripts/install-hooks.sh`。Hook 会自动运行 ruff check + ruff format --check（后端）和 tsc + eslint（前端），任何一项失败阻止 commit。
-2. **禁止提交已知会导致 CI 红的代码**。提交前必须确认：
-   - `ruff check` 通过（0 errors）
-   - `ruff format --check` 通过（0 files need reformatting）
-   - `mypy` 不引入**新的** errors（CI 中 mypy 已设为 `continue-on-error` + 版本对齐到 2.3.0，不得新增）
-3. **mypy 历史遗留 errors 是已知存量**（此前约 25 个，分布在 13 个文件），CI 中 mypy 步骤已设为 `continue-on-error: true`，不阻塞 CI。mypy 版本已从 1.10.0 对齐到 2.3.0（与本地一致），本地 mypy 2.3.0 显示 0 errors。如 CI 中 mypy 2.3.0 也通过，可在后续移除 `continue-on-error`。但每次提交不得新增 mypy errors——新增的必须当场修复。
-4. **CI 分支触发配置必须与当前主干分支一致**。当前主干为 `main`，CI 触发分支为 `main`。如主干分支变更，必须同步更新 `.github/workflows/ci.yml`。
-5. **`--no-verify` 跳过 hook 仅限紧急情况**（如修复 CI 本身故障），正常开发不得使用。使用后必须在后续 commit 中补回被跳过的检查。
-6. **CI 红灯必须在 24 小时内修复**。不允许 CI 长期红灯继续开发。如果 CI 红灯是历史遗留（如 mypy），应在 CI 配置中标注 `continue-on-error` 而非放任不管。
-7. **ruff 和 mypy 版本必须三处一致**（`requirements.lock` → `.pre-commit-config.yaml` `rev` → 本地安装版本）。修改 ruff/mypy 版本时必须同步更新这三处。Pre-commit hook 会自动校验本地 ruff 版本与 `requirements.lock` 是否一致，不一致时阻止提交并提示安装正确版本。mypy 虽不在 hook 中运行，但版本不一致同样会导致本地通过 CI 失败。
-8. **依赖冲突必须在本地验证**。修改 `requirements.txt` / `requirements.lock` 后，必须运行 `pip install --dry-run -r requirements.lock` 验证无冲突。Pre-commit hook 已内置此检查（`requirements-lock-validate`）。
-9. **ruff 配置变更时必须全量检查**。当 `requirements.lock` 或 `pyproject.toml` 变更时，Pre-commit hook 会自动对全部文件执行 ruff check + format，而非仅检查暂存文件——因为版本/规则变更可能影响所有文件的格式。
-10. **pre-push Docker CI 一致性验证**。推送前自动在 Docker 容器中运行与 CI 完全相同的 ruff/mypy 检查（`scripts/docker-ci-check.sh`），确保"本地通过 = CI 通过"。Docker 未运行时自动跳过（不阻塞推送），但 CI 仍会检查。首次运行 ~30s（拉镜像 + pip install），后续 ~5s（pip cache volume 命中）。手动执行：`bash scripts/docker-ci-check.sh`。
+**规则（强制）**：
+1. **Pre-commit + pre-push hook 必须激活**。`bash scripts/install-hooks.sh`。
+2. **禁止提交已知会导致 CI 红的代码**：ruff check 0 errors、ruff format 0 files need reformatting、mypy 不新增 errors。
+3. **mypy 设为 `continue-on-error`**（CI 中），版本已对齐到 2.3.0。不得新增 errors。
+4. **CI 分支触发必须与主干一致**（当前 `main`）。
+5. **`--no-verify` 仅限紧急情况**，后续 commit 必须补回检查。
+6. **CI 红灯 24 小时内必须修复**。
+7. **ruff/mypy 版本三处一致**：`requirements.lock` → `.pre-commit-config.yaml` `rev` → 本地安装版本。
+8. **依赖冲突必须本地验证**：`pip install --dry-run -r requirements.lock`。
+9. **ruff 配置变更时全量检查**：`requirements.lock`/`pyproject.toml` 变更时 hook 自动全量 ruff check + format。
+10. **pre-push Docker CI 一致性验证**：`scripts/docker-ci-check.sh`，Docker 未运行时自动跳过。
 
-**双层 Hook 防护体系**：
-
-**[pre-commit] 秒级本地检查**（`.git/hooks/pre-commit`，由 `scripts/install-hooks.sh` 生成）：
-- 不依赖 `pre-commit` pip 包，直接调用 `ruff` 和 `npx tsc`/`npm run lint`
-- 不运行 pytest（需要 PostgreSQL/Redis，违反 §0.5.2，由 CI 的 `backend-integration-tests` job 负责）
-- `.pre-commit-config.yaml` 保留作为 `pre-commit` 包的配置（`rev` 必须与 `requirements.lock` 中 ruff 版本一致）
-- 三层防护：
-  1. **版本校验**：提交前校验本地 ruff 版本 == `requirements.lock` 版本，不一致直接阻止提交
-  2. **配置变更全量检查**：`requirements.lock` / `pyproject.toml` 变更时，对全部文件执行 ruff check + format
-  3. **常规暂存文件检查**：正常提交时只检查暂存文件（ruff check + format + tsc + eslint + compose 校验）
-
-**[pre-push] Docker CI 一致性验证**（`.git/hooks/pre-push`，由 `scripts/install-hooks.sh` 生成）：
-- 脚本：`scripts/docker-ci-check.sh`
-- 镜像：`swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim`（与项目 Dockerfile 一致）
-- 用同一个 `requirements.lock` 安装 ruff/mypy，运行与 CI 完全相同的命令
-- pip 缓存卷 `conclave-ci-pip-cache` 跨次运行复用，加速 pip install
-- Docker 未运行时自动跳过（不阻塞推送，CI 仍会检查）
-- mypy 与 CI 一致设为 `continue-on-error`（warnings 不阻塞推送）
-- 手动执行：`bash scripts/docker-ci-check.sh`
-
-**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。后续追加修复：websockets 依赖冲突（12.0→13.0）、RUF009+UP038 规则忽略、ruff 版本对齐（0.5.0→0.15.22 三处同步）、mypy 版本对齐（1.10.0→2.3.0 + continue-on-error）、pre-commit hook 三层防护（版本校验+全量检查+暂存检查）、pre-push Docker CI 一致性验证（彻底杜绝版本漂移）、qdrant_store.py mypy 类型修复。
+**双层 Hook 速查**：pre-commit 秒级检查（版本校验+暂存文件）、pre-push Docker 检查（CI 环境一致性验证）。详见 `docs/ci-stability-guide.md`。
 
 ---
 
@@ -489,15 +438,16 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 | `PROJECT_CONVENTIONS.md` | **唯一权威工程规范**（部署/构建/镜像源/提交/卡点） |
 | `AGENTS.md` | 本文件，AI 助手实战纪律（就是你正在读的） |
 | `docs/design/design-principles.md` | 11 条固化设计原则（RAG五原则、借调三问法、MVP三问等） |
-| `docs/design/adr/001-008` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额等） |
+| `docs/design/adr/001-009` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移等） |
 | `docs/RETROSPECTIVE_CONVENTIONS.md` | 修复报告归档规范（HTML 格式、commit 区间、13 种错误模式） |
+| `docs/ci-stability-guide.md` | CI 稳定性详细指南（双层 Hook 体系、历史修复记录，§4.18 的补充） |
 | `docs/conclave-sandbox-directory-standard.md` | 沙箱目录规范 |
 | `docs/report-layout-spec.md` | 报告布局 Spec 规范 |
 | `backend/app/skills/code_conventions.yaml` | 代码生成正面规范（API 设计、安全、Docker） |
 | `backend/app/skills/ui_design_system.yaml` | UI 设计系统（色板、排版、形状、CSS 反模式） |
 | `backend/app/skills/communication_style.yaml` | Agent 发言风格（中文、方括号标签、禁止 emoji 等） |
 | `backend/app/skills/deliverable_quality.yaml` | 产出验收标准（critical/high 等级） |
-| `.pre-commit-config.yaml` | 预提交卡点配置 |
+| `.pre-commit-config.yaml` | 预提交卡点配置（`rev` 必须与 `requirements.lock` 一致） |
 | `.github/workflows/ci.yml` | CI 流水线定义（6 个 job） |
 
 ---
@@ -525,4 +475,4 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ---
 
-> 本文件最后更新：2026-07-22（§4.18 新增规则 7-10 + 双层 Hook 防护体系、ruff 0.5.0→0.15.22 三处对齐、mypy 1.10.0→2.3.0 对齐 + continue-on-error、pre-commit hook 三层防护、pre-push Docker CI 一致性验证、qdrant_store.py 类型修复）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-22（§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。

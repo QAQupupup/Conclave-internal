@@ -1,4 +1,4 @@
-﻿# Conclave 项目工程规范
+# Conclave 项目工程规范
 
 > 本文档是 Conclave 项目的**唯一权威工程规范**。所有贡献者、AI 助手、CI/CD 流水线在操作本项目时必须遵守本文档中的规则。
 >
@@ -261,19 +261,29 @@ pnpm config set registry https://registry.npmmirror.com
 
 ## 8. 预提交卡点
 
-项目使用 `pre-commit` 框架，提交前自动执行以下检查（配置见 `.pre-commit-config.yaml`）：
+项目使用自定义 bash hook（不依赖 `pre-commit` pip 包），通过 `scripts/install-hooks.sh` 安装。双层防护：
 
-| 卡点 | 阶段 | 说明 |
-|------|------|------|
-| ruff lint | commit | Python 代码风格检查 |
-| ruff format | commit | Python 代码格式化 |
-| pytest smoke | commit | 后端冒烟测试 |
-| tsc --noEmit | commit | 前端类型检查 |
-| compose validate | commit | Docker Compose 配置校验 |
-| frontend build | push | 前端生产构建 |
-| OSS manifest validate | commit | 开源清单 JSON 校验 |
+### 8.0.1 pre-commit（秒级本地检查）
 
-**安装**：`pip install pre-commit && pre-commit install`
+| 卡点 | 说明 |
+|------|------|
+| ruff 版本校验 | 本地 ruff 必须与 `requirements.lock` 一致 |
+| ruff lint + format | Python 代码风格检查（暂存文件） |
+| 配置变更全量检查 | `requirements.lock`/`pyproject.toml` 变更时全量检查 |
+| tsc --noEmit | 前端类型检查 |
+| eslint | 前端 lint |
+| compose validate | Docker Compose 配置校验 |
+| OSS manifest validate | 开源清单 JSON 校验 |
+
+### 8.0.2 pre-push（Docker CI 一致性验证）
+
+| 卡点 | 说明 |
+|------|------|
+| Docker CI parity check | 在 Linux 容器中用 `requirements.lock` 运行 ruff + mypy，确保与 CI 一致 |
+
+**安装**：`bash scripts/install-hooks.sh`（详见 `docs/ci-stability-guide.md`）
+
+注意：不在 hook 中运行 pytest（需要 PostgreSQL/Redis，违反 §0.5.2，由 CI 负责）。
 
 ### 8.1 CI/CD 流水线
 
@@ -281,7 +291,7 @@ pnpm config set registry https://registry.npmmirror.com
 
 | 流水线文件 | 触发条件 | Job |
 |-----------|---------|-----|
-| `ci.yml` | push/PR 到 main、refactor/v3 | backend-checks（ruff + mypy）、frontend-checks（ESLint + tsc + build）、frontend-tests（vitest）、compose-check（docker compose config 校验）、backend-integration-tests（docker compose test）、publish-oss（自动同步到开源仓库） |
+| `ci.yml` | push/PR 到 main | backend-checks（ruff + mypy）、frontend-checks（ESLint + tsc + build）、frontend-tests（vitest）、compose-check（docker compose config 校验）、backend-integration-tests（docker compose test）、publish-oss（自动同步到开源仓库） |
 | `release-oss.yml` | ci.yml 调用或手动触发 | Cython 编译（Docker 容器内）、SSH 认证、auto-sync 分支推送 |
 
 **镜像源**：CI 中通过 `PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple` 和 `NPM_CONFIG_REGISTRY: https://registry.npmmirror.com` 环境变量注入。
