@@ -89,8 +89,8 @@ export default function Landing() {
               <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>在上方输入议题，创建第一场会议</div>
             </div>
           ) : (
-            recent.map((m: any) => (
-              <div className="list-item" key={m.id} onClick={() => { openMeeting(m.id); navigate(`/meeting/${m.id}`); }}>
+            recent.map((m) => (
+              <div className="list-item" key={m.id} onClick={() => { openMeeting(m.id!); navigate(`/meeting/${m.id}`); }}>
                 <span className="list-item-title">{m.title}</span>
                 <span className="list-item-status">
                   <span className={`status-dot ${m.status}`} />

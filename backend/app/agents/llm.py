@@ -167,12 +167,16 @@ class StubLLM:
                         "quote": "系统应支持异步任务处理以解耦耗时操作",
                         "source": "doc:架构",
                         "supports": "a",
+                        "strength": "strong",
+                        "fact_check_status": "verified",
                     },
                     {
                         "evidence_id": "ev-1",
                         "quote": "短期 MVP 不应引入额外中间件",
                         "source": "doc:范围",
                         "supports": "b",
+                        "strength": "strong",
+                        "fact_check_status": "verified",
                     },
                 ],
             }
@@ -404,6 +408,23 @@ class StubLLM:
         # 兜底
         return {"result": "stub"}
 
+    async def complete_text(self, prompt: str, temperature: float = 0.1) -> str:
+        """M1.1: 桩摘要生成——从 prompt 中提取发言行生成简化摘要"""
+        lines = []
+        for line in prompt.splitlines():
+            stripped = line.strip()
+            if (
+                stripped
+                and not stripped.startswith("请")
+                and not stripped.startswith("丢弃")
+                and not stripped.startswith("发言内容")
+                and not stripped.startswith("摘要")
+            ):
+                lines.append(stripped)
+        if not lines:
+            return "（stub 摘要：无发言内容）"
+        return "历史摘要（stub）：" + "；".join(line[:60] for line in lines[:5])
+
     @staticmethod
     def _extract_topic(prompt: str) -> str:
         """从 prompt 中提取议题文本"""
@@ -565,9 +586,7 @@ class RealLLM:
 
             tid = get_tenant_id()
             if tid is not None:
-                t_base, t_key, t_model = resolve_llm_config(
-                    tid, self.base_url, self.api_key, self.model
-                )
+                t_base, t_key, t_model = resolve_llm_config(tid, self.base_url, self.api_key, self.model)
                 if t_base and t_key and t_model:
                     return t_base, t_key, t_model
         except Exception:
@@ -767,6 +786,31 @@ class RealLLM:
         stub = StubLLM()
         return await stub.complete(prompt, schema_hint=schema_hint)
 
+    async def complete_text(self, prompt: str, temperature: float = 0.1) -> str:
+        """M1.1: 纯文本补全（非 JSON schema），用于上下文摘要生成等场景。
+
+        比 complete() 轻量：无 schema 校验、无 JSON 解析、无 provider 回退链。
+        失败时返回空字符串（ContextManager 已处理空值降级）。
+        """
+        if not _circuit_breaker.can_call():
+            logger.warning("熔断器打开，跳过摘要 LLM 调用")
+            return ""
+        try:
+            content = await self._call_api(
+                prompt,
+                schema_desc="",
+                stage="summarize",
+                attempt=1,
+                agent_role="context_summarizer",
+                system_message_override="你是会议助手。请用简洁的中文生成摘要，保留关键观点和结论。",
+            )
+            _circuit_breaker.record_success()
+            return content
+        except Exception as e:
+            _circuit_breaker.record_failure()
+            logger.warning("摘要 LLM 调用失败，返回空字符串: %s", e)
+            return ""
+
     # ---------- 请求层 ----------
 
     @staticmethod
@@ -786,6 +830,7 @@ class RealLLM:
         config_override: tuple[str, str, str] | None = None,
         agent_role: str = "",
         provider_id: str = "",
+        system_message_override: str = "",
     ) -> str:
         """调用 chat completions，返回 message content 字符串
 
@@ -813,14 +858,18 @@ class RealLLM:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        system_content = "你是会议决策助手，严格输出 JSON，不要输出多余文本。"
-        if schema_desc:
-            system_content += (
-                f"\n输出必须严格符合以下 JSON Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n{schema_desc}"
-            )
-        # 关闭 Qwen3.5 思考模式，防止思考过程干扰 JSON 输出
-        if settings.llm_no_think:
-            system_content += "\n/no_think"
+        if system_message_override:
+            # M1.1: 纯文本模式（摘要生成等），不强制 JSON，不加 /no_think（允许模型思考）
+            system_content = system_message_override
+        else:
+            system_content = "你是会议决策助手，严格输出 JSON，不要输出多余文本。"
+            if schema_desc:
+                system_content += (
+                    f"\n输出必须严格符合以下 JSON Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n{schema_desc}"
+                )
+            # 关闭 Qwen3.5 思考模式，防止思考过程干扰 JSON 输出
+            if settings.llm_no_think:
+                system_content += "\n/no_think"
         # 分阶段温度：按 stage 查表，默认 0（最严格）
         temp = STAGE_TEMPERATURES().get(stage, 0.0)
         body: dict[str, Any] = {
@@ -834,8 +883,8 @@ class RealLLM:
             "top_p": 1.0,
             "seed": 42,
         }
-        # 请求层：优先传 json_object 响应格式（按base_url+model维度缓存支持情况）
-        if self._supports_json(base_url, model):
+        # 请求层：纯文本模式不传 response_format；JSON 模式按 base_url+model 缓存支持情况
+        if not system_message_override and self._supports_json(base_url, model):
             body["response_format"] = {"type": "json_object"}
 
         latency_ms = 0

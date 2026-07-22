@@ -1,4 +1,5 @@
 """插件系统异常类（从 app.core.exceptions 重新导出，保持向后兼容）。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -44,22 +45,22 @@ QuotaExceeded = QuotaExceededError
 AccessDenied = AccessDeniedError
 
 __all__ = [
-    "ConclaveException",
-    "PluginRejected",
-    "SetupRequired",
-    "QuotaExceeded",
     "AccessDenied",
+    "AccessDeniedError",
+    "AlreadyExistsError",
+    "AppException",
+    "BadRequestError",
+    "ConclaveException",
+    "ConflictError",
+    "ErrorCode",
+    "InvalidCredentialsError",
+    "NotFoundError",
     "PluginDependencyError",
     "PluginLoadError",
-    "ErrorCode",
-    "ValidationError",
-    "NotFoundError",
-    "AlreadyExistsError",
-    "ConflictError",
-    "BadRequestError",
-    "UnauthenticatedError",
-    "AccessDeniedError",
-    "InvalidCredentialsError",
+    "PluginRejected",
+    "QuotaExceeded",
     "QuotaExceededError",
-    "AppException",
+    "SetupRequired",
+    "UnauthenticatedError",
+    "ValidationError",
 ]

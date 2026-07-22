@@ -3,6 +3,7 @@
 拦截型（PreCall/Error）：可返回 Override/Fallback/Next 影响调用链
 观察型（PostCall）：不影响主流程，用于审计/计量/日志
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -69,9 +70,7 @@ class LLMPreCallMixin(Protocol):
       - Next/None:    弃权，交给下一个插件
     """
 
-    async def on_llm_pre_call(
-        self, ctx: PluginContext, req: LLMRequest
-    ) -> LLMOverride | Next | Fallback | None: ...
+    async def on_llm_pre_call(self, ctx: PluginContext, req: LLMRequest) -> LLMOverride | Next | Fallback | None: ...
 
 
 @runtime_checkable

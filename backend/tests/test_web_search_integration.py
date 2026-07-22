@@ -30,7 +30,9 @@ os.environ.setdefault("CONCLAVE_WEB_SEARCH_MODE", "playwright")
 # 标准 CI（无外网）默认跳过 web_search 集成测试；
 # 需要验证 Playwright 搜索时设置 CONCLAVE_RUN_WEBSEARCH_TESTS=1
 _run_websearch = os.environ.get("CONCLAVE_RUN_WEBSEARCH_TESTS", "") == "1"
-pytestmark = pytest.mark.skipif(not _run_websearch, reason="需要外网+Playwright 环境，设置 CONCLAVE_RUN_WEBSEARCH_TESTS=1 启用")
+pytestmark = pytest.mark.skipif(
+    not _run_websearch, reason="需要外网+Playwright 环境，设置 CONCLAVE_RUN_WEBSEARCH_TESTS=1 启用"
+)
 
 
 # ── 测试 1: 基础搜索 ──────────────────────────────────────────

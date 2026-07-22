@@ -2,6 +2,7 @@
  * 统一 HTTP 客户端：自动注入 JWT、401 处理、JSON 解析、超时、重试。 */
 import { getToken, clearToken, commitLogin, commitLogout, updateAuthUser } from './auth';
 import type { ConclaveUser, ConclaveTenant } from './auth';
+import type { HealthCheckResult, DockerHostPreset, ContainerInfo, PreferenceValue } from '../types/meeting';
 
 const API_BASE = ''; // 同源
 
@@ -28,7 +29,7 @@ export interface ApiOptions extends RequestInit {
   retries?: number;
 }
 
-export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
+export async function api<T = Record<string, unknown>>(path: string, opts: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers || {}),
@@ -71,25 +72,26 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       return (res.status === 204 ? null : await res.json()) as T;
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
       clearTimeout(timer);
-      lastError = e;
+      lastError = err;
 
       // AbortError（超时/取消）不重试
-      if (e.name === 'AbortError') {
+      if (err.name === 'AbortError') {
         if (opts.signal?.aborted) throw new Error('请求已取消', { cause: e });
         throw new Error(`请求超时（${Math.round(timeout / 1000)}秒）`, { cause: e });
       }
 
       // 网络错误且还有重试次数时，短暂延迟后重试
-      const isNetworkError = e.message === 'Failed to fetch' || e.message?.includes('network');
+      const isNetworkError = err.message === 'Failed to fetch' || err.message?.includes('network');
       if (isNetworkError && attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
         continue;
       }
 
-      if (e.message === 'Failed to fetch') throw new Error('无法连接服务器，请检查后端是否启动', { cause: e });
-      throw e;
+      if (err.message === 'Failed to fetch') throw new Error('无法连接服务器，请检查后端是否启动', { cause: e });
+      throw err;
     }
   }
   throw lastError!;
@@ -152,15 +154,15 @@ export async function apiRunMeeting(meetingId: string) {
   return api(`/meetings/${meetingId}/run`, { method: 'POST', timeout: LONG_TIMEOUT });
 }
 export async function apiHealthCheckHost(id: number) {
-  return api<DockerHost & { health_detail?: any }>(`/docker-hosts/${id}/health-check`, { method: 'POST', timeout: LONG_TIMEOUT });
+  return api<HealthCheckResult>(`/docker-hosts/${id}/health-check`, { method: 'POST', timeout: LONG_TIMEOUT });
 }
 export async function apiHealthCheckAllHosts() {
-  return api<{ checked: number; results: any[] }>('/docker-hosts/health-check-all', { method: 'POST', timeout: LONG_TIMEOUT });
+  return api<{ checked: number; results: HealthCheckResult[] }>('/docker-hosts/health-check-all', { method: 'POST', timeout: LONG_TIMEOUT });
 }
 export async function apiGetProgress(meetingId: string) {
   return api(`/meetings/${meetingId}/progress`);
 }
-export async function apiControlMeeting(meetingId: string, signal: string, payload: any = {}) {
+export async function apiControlMeeting(meetingId: string, signal: string, payload: Record<string, unknown> = {}) {
   return api(`/meetings/${meetingId}/control`, {
     method: 'POST',
     body: JSON.stringify({ signal, payload }),
@@ -209,7 +211,7 @@ export async function apiGetSecurityEvents(limit = 50) {
 export async function apiGetPreferences(silent = false) {
   return api('/preferences/', { silent });
 }
-export async function apiSetPreference(key: string, value: any) {
+export async function apiSetPreference(key: string, value: PreferenceValue) {
   return api(`/preferences/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify({ value }) });
 }
 export async function apiDeletePreference(key: string) {
@@ -331,15 +333,15 @@ export async function apiDeleteDockerHost(id: number) {
   return api(`/docker-hosts/${id}`, { method: 'DELETE' });
 }
 export async function apiGetDockerPresets() {
-  return api<{ presets: any[]; connection_types: any[]; required_fields: any }>('/docker-hosts/presets');
+  return api<DockerHostPreset>('/docker-hosts/presets');
 }
 export async function apiGetDockerSetupScript() {
   return api<{ script: string; instructions: string[]; quick_install: string }>('/docker-hosts/setup-script');
 }
 export async function apiGetHostContainers(id: number) {
-  return api<{ ok: boolean; containers: any[]; host: string }>(`/docker-hosts/${id}/containers`);
+  return api<{ ok: boolean; containers: ContainerInfo[]; host: string }>(`/docker-hosts/${id}/containers`);
 }
-export async function apiSelectDeployTarget(requirements?: any, preferredHostId?: number, strategy?: string) {
+export async function apiSelectDeployTarget(requirements?: Record<string, unknown>, preferredHostId?: number, strategy?: string) {
   const params = new URLSearchParams();
   if (preferredHostId) params.set('preferred_host_id', String(preferredHostId));
   if (strategy) params.set('strategy', strategy);
@@ -352,7 +354,7 @@ export async function apiSelectDeployTarget(requirements?: any, preferredHostId?
 /* ═══ Tenant API ═══ */
 export interface TenantInfo extends ConclaveTenant {
   owner_id?: number;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
   created_at?: string;
 }
 export interface TenantMember {

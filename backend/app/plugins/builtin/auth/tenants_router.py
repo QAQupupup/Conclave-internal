@@ -6,10 +6,10 @@
 - GET  /api/tenants/{id}/members 列出租户成员
 - POST /api/tenants/{id}/switch  切换到指定租户（返回新 JWT）
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -17,19 +17,10 @@ from pydantic import BaseModel, Field
 from app.auth import create_access_token, create_refresh_token
 from app.context import get_user_id, get_username
 from app.plugins.builtin.auth.csrf import (
-    CSRF_COOKIE_NAME,
     generate_csrf_token,
 )
-from app.plugins.builtin.auth.middleware import (
-    COOKIE_ACCESS_TOKEN,
-    COOKIE_REFRESH_TOKEN,
-)
 from app.plugins.builtin.auth.router import (
-    COOKIE_PATH,
-    COOKIE_SAMESITE,
-    COOKIE_SECURE,
     JWT_EXPIRE_SECONDS,
-    REFRESH_TOKEN_EXPIRE_SECONDS,
     _set_auth_cookies,
 )
 from app.tenants import (
@@ -102,6 +93,7 @@ class TenantSwitchResponse(BaseModel):
 
 class TenantSettingsUpdateRequest(BaseModel):
     """租户级 AI 配置覆盖（仅白名单字段）。"""
+
     llm_api_key: str | None = Field(None, max_length=512, description="LLM API Key")
     llm_base_url: str | None = Field(None, max_length=512, description="LLM Base URL")
     llm_model: str | None = Field(None, max_length=128, description="LLM 模型名")
@@ -130,8 +122,8 @@ def _require_auth() -> tuple[int, str]:
         raise HTTPException(status_code=401, detail="未登录")
     try:
         return int(uid_str), uname
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=401, detail="无效的用户标识")
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=401, detail="无效的用户标识") from exc
 
 
 def _tenant_to_response(t, current_user_id: int) -> TenantInfoResponse:
@@ -178,18 +170,20 @@ async def create_new_tenant(
 
     # 创建租户（owner_id 已设置，不自动改变用户当前 tenant_id；用户可通过 /switch 切换）
     try:
-        tenant = await create_tenant(TenantCreate(
-            name=body.name,
-            slug=slug,
-            plan="free",
-            owner_id=user_id,
-        ))
+        tenant = await create_tenant(
+            TenantCreate(
+                name=body.name,
+                slug=slug,
+                plan="free",
+                owner_id=user_id,
+            )
+        )
     except ValueError as e:
         # slug 重复
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except Exception as e:
         logger.exception("创建租户失败")
-        raise HTTPException(status_code=500, detail="创建租户失败")
+        raise HTTPException(status_code=500, detail="创建租户失败") from e
 
     logger.info("用户 %s 创建租户 %s(id=%d)", username, tenant.name, tenant.id)
     return _tenant_to_response(tenant, user_id)
@@ -207,6 +201,7 @@ async def get_tenant_members(tenant_id: int, request: Request) -> TenantMemberLi
 
     # 验证访问权限（系统租户模式下跳过权限检查）
     from app.tenants import is_system_tenant
+
     if not is_system_tenant() and not await user_has_tenant_access(user_id, tenant_id):
         raise HTTPException(status_code=403, detail="无权访问该租户")
 
@@ -252,7 +247,7 @@ async def _do_switch_tenant(
     response: Response,
 ) -> TenantSwitchResponse:
     """切换租户的核心逻辑：验证权限 → 更新 DB → 重发 JWT + Cookie。"""
-    from app.tenants import set_tenant_id as _set_tid, get_tenant_id as _get_tid
+    from app.tenants import set_tenant_id as _set_tid
 
     user_id, username = _require_auth()
 
@@ -263,6 +258,7 @@ async def _do_switch_tenant(
 
     # 验证访问权限（系统租户模式下跳过权限检查）
     from app.tenants import is_system_tenant
+
     if not is_system_tenant() and not await user_has_tenant_access(user_id, tenant_id):
         raise HTTPException(status_code=403, detail="无权访问该租户")
 
@@ -274,6 +270,7 @@ async def _do_switch_tenant(
 
     # 构建 user dict 用于签发 token（需要 tenant_id）
     from app.auth import _users_cache
+
     user = _users_cache.get(username)
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在")
@@ -293,7 +290,13 @@ async def _do_switch_tenant(
     # 构造返回的 tenants 列表
     tenants = await list_user_tenants(user_id)
     tenant_list = [
-        {"id": t.id, "name": t.name, "slug": t.slug, "role": (ROLE_OWNER if t.owner_id == user_id else ROLE_MEMBER), "plan": t.plan}
+        {
+            "id": t.id,
+            "name": t.name,
+            "slug": t.slug,
+            "role": (ROLE_OWNER if t.owner_id == user_id else ROLE_MEMBER),
+            "plan": t.plan,
+        }
         for t in tenants
     ]
     user_info = {
@@ -328,10 +331,12 @@ async def get_tenant_settings(tenant_id: int, request: Request) -> TenantSetting
         raise HTTPException(status_code=404, detail="租户不存在")
 
     from app.tenants import is_system_tenant
+
     if not is_system_tenant() and not await user_has_tenant_access(user_id, tenant_id):
         raise HTTPException(status_code=403, detail="无权访问该租户")
 
     from app.tenants.settings_override import OVERRIDABLE_KEYS, _filter_overrides
+
     current = tenant.settings or {}
     filtered = _filter_overrides(current if isinstance(current, dict) else {})
     # 脱敏：api_key 字段仅显示前后 4 位
@@ -360,17 +365,19 @@ async def update_tenant_settings_endpoint(
     if not tenant:
         raise HTTPException(status_code=404, detail="租户不存在")
 
-    from app.tenants import is_system_tenant, is_tenant_owner
+    from app.tenants import is_system_tenant
+
     if not is_system_tenant() and not await is_tenant_owner(user_id, tenant_id):
         raise HTTPException(status_code=403, detail="仅租户所有者可修改配置")
 
     patch = body.model_dump(exclude_unset=True, exclude_none=True)
     try:
         from app.tenants.settings_override import update_tenant_settings
+
         updated = await update_tenant_settings(tenant_id, patch)
     except Exception as e:
         logger.exception("更新租户 settings 失败")
-        raise HTTPException(status_code=400, detail=f"更新失败: {e}")
+        raise HTTPException(status_code=400, detail=f"更新失败: {e}") from e
 
     logger.info("用户 %s 更新租户 %d 的 settings, keys=%s", user_id, tenant_id, list(patch.keys()))
     return TenantSettingsResponse(settings=updated)

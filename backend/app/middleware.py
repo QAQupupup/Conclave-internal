@@ -12,7 +12,7 @@ import sys
 import time
 from collections import defaultdict
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -278,7 +278,7 @@ def setup_auth_middleware(app: FastAPI) -> None:
             set_user_id("test")
             set_username("test")
             set_user_role("admin")
-            return await call_next(request)
+            return cast(Response, await call_next(request))
 
         # 速率限制（所有请求包括公开路径都限流）
         ok, reason = _check_rate_limit(client_ip_str, is_failed_attempt=False)
@@ -291,11 +291,11 @@ def setup_auth_middleware(app: FastAPI) -> None:
 
         # OPTIONS 预检请求直接放行（CORS 中间件在外层已处理，这里再次确保）
         if request.method == "OPTIONS":
-            return await call_next(request)
+            return cast(Response, await call_next(request))
 
         # 公开路径免认证（但不免限流）
         if _is_public(path):
-            return await call_next(request)
+            return cast(Response, await call_next(request))
 
         # 提取 token：仅从 Authorization header 读取
         # [C-04 修复] 普通 HTTP 请求不接受 ?token= 查询参数（防 token 在 URL/日志/Referer 中泄露）。
@@ -353,7 +353,7 @@ def setup_auth_middleware(app: FastAPI) -> None:
             set_user_id(str(auth_user.get("uid", "") or ""))
             set_username(auth_user.get("username", ""))
             _set_ur(auth_user.get("role", ""))
-            return await call_next(request)
+            return cast(Response, await call_next(request))
 
         # 认证方式2：Dev token（向后兼容，视为 admin）
         if hmac.compare_digest(
@@ -367,7 +367,7 @@ def setup_auth_middleware(app: FastAPI) -> None:
             set_user_id("dev")
             set_username("dev")
             _set_ur2("admin")
-            return await call_next(request)
+            return cast(Response, await call_next(request))
 
         # 全部认证失败
         ok2, _reason2 = _check_rate_limit(client_ip_str, is_failed_attempt=True)
@@ -459,7 +459,7 @@ def setup_trace_middleware(app: FastAPI) -> None:
         path = request.url.path
 
         try:
-            response = await call_next(request)
+            response: Response = cast(Response, await call_next(request))
         except Exception as e:
             elapsed = (time.monotonic() - t0) * 1000
             logger.error(

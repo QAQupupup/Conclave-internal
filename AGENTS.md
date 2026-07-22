@@ -14,6 +14,8 @@
 4. 如果要改架构/数据模型，读 `docs/design/adr/` 下相关 ADR。
 5. 如果要写修复报告，读 `docs/RETROSPECTIVE_CONVENTIONS.md`。
 6. 开始编码前，用 `git status` 确认工作区干净，避免无关文件混入提交。
+7. **如果要写/改文档（README/ADR/待办）**，必须先读 §4.16（文档真实性核查）。每一条事实性声明必须 grep 核验，禁止凭记忆写文档。
+8. **如果要回应代码审查/外部评审**，必须先读 §4.17（问题评估与绕过检查）。逐条 grep 核验问题是否真实存在，禁止"声明式修复"。
 
 ---
 
@@ -74,9 +76,14 @@
 
 **每次 `git commit` 前必须逐项确认，不得跳过：**
 
+> **Pre-commit hook 已激活**：`.git/hooks/pre-commit` 会自动运行 ruff check + ruff format --check（后端）和 tsc + eslint（前端）。
+> Hook 安装：`bash scripts/install-hooks.sh`（首次克隆仓库后执行一次）。
+> 如 hook 未安装，以下手动检查必须逐项执行。
+
 ### 2.1 后端
 - [ ] `cd backend && python -m ruff check app conclave_core tests` → **0 errors**
-- [ ] `cd backend && python -m mypy --config-file pyproject.toml app conclave_core` → **0 errors**
+- [ ] `cd backend && python -m ruff format --check app conclave_core tests` → **0 files need reformatting**
+- [ ] `cd backend && python -m mypy --config-file pyproject.toml app conclave_core` → **0 新增 errors**（mypy 2.3.0 本地显示 0 errors，见 §4.18，不得新增）
 - [ ] 若改了 ORM 模型，确认 `app/dao/db_init.py` 的 DDL 与模型字段一致（尤其是新增列/默认值/JSONB）
 - [ ] 若改了 API 路由，确认所有路径都在前端 `vite.config.ts` 的 proxy 列表和 `nginx.conf` 中
 
@@ -144,7 +151,7 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ### 3.3 推送
 
-- 当前主开发分支：`refactor/v3-manager-agent-runtime`
+- 当前主干分支：`main`（V3 重构分支已合并）
 - 推送前本地跑过 2.1/2.2/2.3 检查
 - `git push origin <branch-name>`，不要 force push 到已共享分支
 
@@ -278,6 +285,134 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 **教训**：Phase 1b 为所有业务表加了 tenant_id 列和 ALTER TABLE 外键，但多个模块（key_store、docker_hosts、net_auth、documents）的 DAO/路由层忘记实际使用该列进行过滤，导致跨租户数据泄露。参见修复报告 `docs/retrospectives/2026-07-21-multitenant-isolation-and-settings-ux.html`。
 
+### 4.14 函数内 import 与模块级 import 的取舍
+
+**症状**：代码审查发现大量 `from xxx import yyy` 写在函数体内，而非文件头部。
+
+**规则**：
+1. **默认放在模块级**（文件开头）。Python 的 import 是幂等的，模块级 import 不会重复加载。
+2. **仅在以下情况允许函数内 import**：
+   - 存在循环依赖（A import B，B import A）——用函数内 import 打破循环
+   - 重依赖延迟加载（如 `cryptography.fernet`、`playwright`）——仅在首次使用时加载，减少冷启动时间
+   - 可选依赖（如 `grpc`，未安装时降级）——在 try/except 中 import
+3. **重构前必须验证无循环依赖**：用 `grep -r "from app.xxx" backend/app/` 检查目标模块是否反向引用当前模块。无反向引用则安全提到模块级。
+4. **禁止"习惯性函数内 import"**：不要因为"不确定有没有循环依赖"就全部塞到函数里。这会导致 import 重复执行、IDE 跳转失效、代码可读性下降。
+
+**参考**：`app/services/key_store.py` 已完成模块级 import 重构（commit `b21ec1f`），验证无循环依赖。
+
+### 4.15 Alembic env.py 的 context 注入
+
+**症状**：直接运行 `python alembic/env.py` 报错 `ImportError: cannot import name 'context'` 或 `ModuleNotFoundError`。
+
+**根因**：`from alembic import context` 中的 `context` 不是 alembic 包的普通模块，而是 Alembic 框架在运行迁移时通过 `alembic.ini` 配置注入的全局对象（类似 Flask 的 `g`）。独立运行时该对象不存在。
+
+**规则**：
+1. `alembic/env.py` **必须通过 `alembic upgrade head` / `alembic revision` 等 CLI 命令调用**，不能直接 `python alembic/env.py`。
+2. 不要为了"修复"这个 import 错误而把 `context` 改成其他写法，那会破坏 alembic 迁移。
+3. IDE 中显示红色波浪线是正常的（静态分析无法识别 alembic 的运行时注入），可加 `# noqa: I001` 抑制 ruff 误报。
+
+### 4.16 文档真实性核查（README/CHANGELOG/ADR 与代码对齐）
+
+**症状**：README 中描述的功能/路径/文件/配置与实际代码严重脱节，出现"力导向图"（实际不存在）、`AgentGraph.tsx`（文件不存在）、`/api/meetings`（实际无 `/api` 前缀）、"OAuth"（代码无任何引用）、"默认模型 Qwen2.5-72B"（实际 DeepSeek-V3.2）等失实描述。导致新成员/评审者被误导，PR 评审失去参照系。
+
+**根因**：文档与代码分头演进，代码改了文档没同步；或文档先行描述了"计划做"的功能，后来功能未实现/改名/删除，但文档未回滚；或 AI 助手凭记忆/推测补写文档，未 grep 核验。
+
+**规则（强制，违反等同违反工程规范）**：
+1. **写文档时每一条事实性声明必须 grep 核验**。包括但不限于：文件路径、类名/函数名、API 路径、配置项默认值、依赖库名、枚举值、按钮文案、端口号。
+   - 文件存在性：`Glob` 扫描实际目录结构，不要凭记忆列文件树。
+   - API 路径：`grep -n "@router\.\|APIRouter\|prefix=" backend/app/routers/`。
+   - 配置默认值：`grep -n "Field\|_env\|default=" backend/app/config.py`。
+   - 枚举值：`grep -n "class.*Enum\|=\s*\""` 在 enums.py。
+   - 前端按钮文案：`grep -n "按钮文案"` 在 frontend/src/。
+2. **区分"已实现"和"计划做"**。文档中描述计划功能必须显式标注"计划中/TODO/未实现"，不能用现在时陈述（"支持 X" 暗示已实现）。
+3. **README 项目结构树必须用 Glob 扫描生成**，不要手写。手写的文件树几乎必然过时。
+4. **V3/重构章节的"已完成"vs"后续工作"必须基于代码实际状态**。迁移已完成的工作必须从"后续工作"移到"已完成"，不能留在待办列表制造假象。
+5. **文档变更 commit 必须在 message 中列出核验方式**（如"验证方式: grep + Glob 逐条核对"），便于审查者追溯。
+6. **定期全量审查**：每次大版本合并后，对 README/ADR/CHANGELOG 做一次全量核对，修正失实描述。
+
+**反面案例（本次事件）**：
+- README 写"力导向拓扑图" → 实际无 d3-force、无相关依赖、AgentGraph.tsx 不存在
+- README 写"OAuth" → grep -ri oauth 零结果
+- README 写"每次调用新建 AsyncClient" → 实际 `_get_client()` 已实现懒加载单例
+- README 写 V3"核心业务迁移到 PostgreSQL"为后续工作 → 实际已完成（10+ ORM 模型）
+- API 表路径全部带 `/api` 前缀 → 实际路由无全局前缀
+
+**参考修复**：commit `41b1439` 及之前 7 个 docs commit，逐条 grep 核验后修正。
+
+### 4.17 问题评估与绕过检查（禁止"声明式修复"）
+
+**症状**：面对代码审查/外部评审指出的问题，AI 助手直接"认领"问题并写进待办/修复报告，但实际未 grep 核验问题是否真实存在。导致：
+- 把不存在的"问题"写进 README 待办（如"Embedding 客户端未用单例"——实际已用单例）
+- 用"已记录到待办"绕过立即修复（问题明明可以当场修，却推到未来）
+- 对评审意见"全盘接受"而不客观校正其中的事实性错误
+
+**根因**：AI 助手倾向"讨好"评审者，遇到批评就认领，缺乏"先验证再回应"的纪律；或为快速结束对话，用"已记录待办"代替实际修复。
+
+**规则（强制）**：
+1. **收到问题清单时，必须逐条 grep 核验后再回应**。对每一条声明给出"已验证存在/不存在/部分准确"的判定，附上核验证据（文件:行号 + grep 命令）。
+2. **禁止"声明式修复"**：不能只写"已修复"或"已记录待办"就结束，必须展示实际代码改动或 grep 核验结果。
+3. **问题可当场修复的必须当场修**，不要推到"待办"。只有以下情况允许记待办：
+   - 修复需要引入新依赖/新架构（需开 ADR）
+   - 修复影响范围超过单次 PR 400 行限制
+   - 修复依赖尚未就绪的外部条件（如 gRPC stub 等待 protobuf 定义）
+4. **对评审意见要客观校正，不要全盘接受**。评审者也会犯事实性错误（如 DeepSeek 误判"SQLite 持久化"——实际已是 PostgreSQL）。校正时必须给出代码证据，区分"认可/部分认可/不认可"。
+5. **待办项必须有可验证的验收标准**。"改进 RAG"不是合格待办，"实现 HyDE 检索策略，新增 test_hyde_retrieval.py 验证"才是。
+6. **README/待办中的每一条缺陷描述必须经过代码核验**，不能凭印象写。写完待办后回头用 grep 自查一遍。
+
+**反面案例（本次事件）**：
+- 声明"Embedding 客户端未用连接池单例" → grep 核验发现 `_get_client()` 已实现单例 → 声明错误，已修正
+- 声明"mypy 22 个历史遗留错误" → 实际未在当前环境重新跑 mypy 验证，数字可能过时 → 应标注"基于历史验证，需重新跑确认"
+- 对 DeepSeek 评审"全盘认可"其中 RAG B- 评级 → 实际 ContextManager 的窗口预算管理是 DeepSeek 未识别的加分项，应客观补充
+
+### 4.18 CI 稳定性纪律（禁止"红 CI 提交"）
+
+**症状**：GitHub CI 失败率居高不下，每次 push/PR 后 CI 红灯，开发者习惯性忽略 CI 结果，导致 CI 形同虚设。
+
+**根因**：
+1. Pre-commit hook 未安装/未激活，本地零卡点，所有问题涌入 CI
+2. mypy 存在历史遗留 errors，CI 的 mypy 步骤必然失败，开发者形成"CI 红是正常的"错误习惯（现已设为 `continue-on-error: true` + 版本对齐到 2.3.0）
+3. ruff format 未在本地执行，67 个文件格式不规范，CI 的 `ruff format --check` 必然失败
+4. CI 分支触发配置过时（引用已合并的 `refactor/v3-manager-agent-runtime` 分支）
+5. **ruff 版本漂移**：本地 ruff 版本与 CI（`requirements.lock`）不一致，格式化结果不同，本地通过但 CI 失败
+6. **依赖冲突未在本地暴露**：`requirements.lock` 中依赖版本冲突（如 `websockets==12.0` vs `uvicorn[standard]` 需 `>=13.0`），Windows pip 静默忽略，Linux CI 失败
+
+**规则（强制，违反等同违反工程规范）**：
+1. **Pre-commit hook 必须激活**。首次克隆仓库后执行 `bash scripts/install-hooks.sh`。Hook 会自动运行 ruff check + ruff format --check（后端）和 tsc + eslint（前端），任何一项失败阻止 commit。
+2. **禁止提交已知会导致 CI 红的代码**。提交前必须确认：
+   - `ruff check` 通过（0 errors）
+   - `ruff format --check` 通过（0 files need reformatting）
+   - `mypy` 不引入**新的** errors（CI 中 mypy 已设为 `continue-on-error` + 版本对齐到 2.3.0，不得新增）
+3. **mypy 历史遗留 errors 是已知存量**（此前约 25 个，分布在 13 个文件），CI 中 mypy 步骤已设为 `continue-on-error: true`，不阻塞 CI。mypy 版本已从 1.10.0 对齐到 2.3.0（与本地一致），本地 mypy 2.3.0 显示 0 errors。如 CI 中 mypy 2.3.0 也通过，可在后续移除 `continue-on-error`。但每次提交不得新增 mypy errors——新增的必须当场修复。
+4. **CI 分支触发配置必须与当前主干分支一致**。当前主干为 `main`，CI 触发分支为 `main`。如主干分支变更，必须同步更新 `.github/workflows/ci.yml`。
+5. **`--no-verify` 跳过 hook 仅限紧急情况**（如修复 CI 本身故障），正常开发不得使用。使用后必须在后续 commit 中补回被跳过的检查。
+6. **CI 红灯必须在 24 小时内修复**。不允许 CI 长期红灯继续开发。如果 CI 红灯是历史遗留（如 mypy），应在 CI 配置中标注 `continue-on-error` 而非放任不管。
+7. **ruff 和 mypy 版本必须三处一致**（`requirements.lock` → `.pre-commit-config.yaml` `rev` → 本地安装版本）。修改 ruff/mypy 版本时必须同步更新这三处。Pre-commit hook 会自动校验本地 ruff 版本与 `requirements.lock` 是否一致，不一致时阻止提交并提示安装正确版本。mypy 虽不在 hook 中运行，但版本不一致同样会导致本地通过 CI 失败。
+8. **依赖冲突必须在本地验证**。修改 `requirements.txt` / `requirements.lock` 后，必须运行 `pip install --dry-run -r requirements.lock` 验证无冲突。Pre-commit hook 已内置此检查（`requirements-lock-validate`）。
+9. **ruff 配置变更时必须全量检查**。当 `requirements.lock` 或 `pyproject.toml` 变更时，Pre-commit hook 会自动对全部文件执行 ruff check + format，而非仅检查暂存文件——因为版本/规则变更可能影响所有文件的格式。
+10. **pre-push Docker CI 一致性验证**。推送前自动在 Docker 容器中运行与 CI 完全相同的 ruff/mypy 检查（`scripts/docker-ci-check.sh`），确保"本地通过 = CI 通过"。Docker 未运行时自动跳过（不阻塞推送），但 CI 仍会检查。首次运行 ~30s（拉镜像 + pip install），后续 ~5s（pip cache volume 命中）。手动执行：`bash scripts/docker-ci-check.sh`。
+
+**双层 Hook 防护体系**：
+
+**[pre-commit] 秒级本地检查**（`.git/hooks/pre-commit`，由 `scripts/install-hooks.sh` 生成）：
+- 不依赖 `pre-commit` pip 包，直接调用 `ruff` 和 `npx tsc`/`npm run lint`
+- 不运行 pytest（需要 PostgreSQL/Redis，违反 §0.5.2，由 CI 的 `backend-integration-tests` job 负责）
+- `.pre-commit-config.yaml` 保留作为 `pre-commit` 包的配置（`rev` 必须与 `requirements.lock` 中 ruff 版本一致）
+- 三层防护：
+  1. **版本校验**：提交前校验本地 ruff 版本 == `requirements.lock` 版本，不一致直接阻止提交
+  2. **配置变更全量检查**：`requirements.lock` / `pyproject.toml` 变更时，对全部文件执行 ruff check + format
+  3. **常规暂存文件检查**：正常提交时只检查暂存文件（ruff check + format + tsc + eslint + compose 校验）
+
+**[pre-push] Docker CI 一致性验证**（`.git/hooks/pre-push`，由 `scripts/install-hooks.sh` 生成）：
+- 脚本：`scripts/docker-ci-check.sh`
+- 镜像：`swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim`（与项目 Dockerfile 一致）
+- 用同一个 `requirements.lock` 安装 ruff/mypy，运行与 CI 完全相同的命令
+- pip 缓存卷 `conclave-ci-pip-cache` 跨次运行复用，加速 pip install
+- Docker 未运行时自动跳过（不阻塞推送，CI 仍会检查）
+- mypy 与 CI 一致设为 `continue-on-error`（warnings 不阻塞推送）
+- 手动执行：`bash scripts/docker-ci-check.sh`
+
+**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。后续追加修复：websockets 依赖冲突（12.0→13.0）、RUF009+UP038 规则忽略、ruff 版本对齐（0.5.0→0.15.22 三处同步）、mypy 版本对齐（1.10.0→2.3.0 + continue-on-error）、pre-commit hook 三层防护（版本校验+全量检查+暂存检查）、pre-push Docker CI 一致性验证（彻底杜绝版本漂移）、qdrant_store.py mypy 类型修复。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -288,12 +423,20 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 - **大改前先开 ADR**：如果要引入新架构/新依赖/新范式，先在 `docs/design/adr/` 写一篇 ADR（Accepted 后再动手），不要边写边设计。
 - **单次 PR 控制在 400 行以内**（不含 lock 文件/生成代码）。超过就拆。
 
-### 5.2 禁止"AI 凭感觉编码"（Anti-Vibe-Coding）
+### 5.2 禁止"AI 凭感觉编码/写文档/评估问题"（Anti-Vibe-Coding）
 
+**编码**：
 - 不要凭"应该是这样吧"写代码。**读现有实现 → 理解数据流 → 改最小范围 → 跑测试验证**。
 - 不要"先写了再说，等测试报错再修"。先理解函数签名、调用链、异常路径。
 - 不要为了消一个类型错误就加 `# type: ignore` 或 `as any`。先理解为什么类型不对，治本。
 - 不要批量自动修复 lint 错误然后提交。手工检查每个自动修复是否改变语义。
+
+**写文档/评估问题（见 §4.16 §4.17）**：
+- 不要凭记忆/推测写 README/ADR/待办。每一条事实性声明必须 grep 核验。
+- 不要凭"应该是这个默认值"写配置说明。`grep config.py` 确认实际默认值。
+- 不要凭"评审说的应该对"就认领问题。先 grep 核验问题是否真实存在，再决定认可/部分认可/不认可。
+- 不要用"已记录待办"绕过可当场修复的问题。能当场修就当场修。
+- 写完文档/待办后，用 grep 自查一遍每一条声明是否与代码一致。
 
 ### 5.3 禁止引入未授权依赖
 
@@ -378,7 +521,8 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 - `Get-Content`、`Select-Object`、`Select-String` 是 PowerShell 等价的 cat/head/grep。
 - 容器内是 Linux，shell 脚本用 bash 语法。
 - `.gitattributes` 已配置行尾：`.sh`/`Dockerfile*` 强制 LF，`.ps1`/`.bat`/`.cmd` 保持 CRLF。
+- **docker compose run 输出捕获陷阱**：PowerShell 下 `docker compose run` 的 stdout 会被 PowerShell 当作 stderr 处理（`NativeCommandError`），导致 `2>&1` 和 `Out-File` 捕获不到容器内 pytest 输出。解决方案：用 `Start-Process -RedirectStandardOutput` + `-RedirectStandardError` 分别重定向，或直接用 `docker run` 替代 `docker compose run`。
 
 ---
 
-> 本文件最后更新：2026-07-21（§4.12 SA FK 与 raw SQL 表混用陷阱、§4.13 多租户隔离 Checklist；Phase 2b 全局资源隔离完成，修复 SA create_all NoReferencedTableError 崩溃）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-22（§4.18 新增规则 7-10 + 双层 Hook 防护体系、ruff 0.5.0→0.15.22 三处对齐、mypy 1.10.0→2.3.0 对齐 + continue-on-error、pre-commit hook 三层防护、pre-push Docker CI 一致性验证、qdrant_store.py 类型修复）。若发现新的高频坑，追加到第 4 节并更新日期。

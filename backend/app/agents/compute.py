@@ -361,13 +361,23 @@ def build_clarify_prompt(
     reference_context: str = "",
 ) -> ThinkRequest:
     """构造 clarify 阶段的思考请求"""
-    prompt = render(MODERATOR_CLARIFY, topic=topic, doc_summaries="; ".join(doc_summaries) if doc_summaries else "无")
+    # M1.4: 用户 topic 和文档摘要经过指令注入防护
+    from app.orchestrator.prompt_safety import sanitize_and_wrap, sanitize_doc_summaries
+
+    safe_topic = sanitize_and_wrap(topic, label="用户议题")
+    safe_summaries = sanitize_doc_summaries(doc_summaries)
+    prompt = render(
+        MODERATOR_CLARIFY,
+        topic=safe_topic,
+        doc_summaries="; ".join(safe_summaries) if safe_summaries else "无",
+    )
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     prompt = _inject_skills(prompt, stage="clarify", role=Role.MODERATOR.value)
     if available_tools:
         prompt = _inject_tools_to_prompt(prompt, available_tools)
     if reference_context:
-        prompt = reference_context + "\n\n" + prompt
+        # reference_context 也需要清洗（可能来自历史记忆）
+        prompt = sanitize_and_wrap(reference_context, label="参考上下文") + "\n\n" + prompt
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(

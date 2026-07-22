@@ -9,12 +9,12 @@
 - 调用方根据 validation_result.is_valid 决定是否处理该消息；
 - 严格校验控制信号路径（control.signal），防止注入/非法字段。
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
-
+from pydantic import BaseModel, Field, ValidationError
 
 # ---------------------------------------------------------------------------
 # 入站消息
@@ -66,12 +66,7 @@ class WsTypingMessage(BaseModel):
 
 # 所有入站类型的 Union
 WsInboundMessage = (
-    WsPongMessage
-    | WsPingMessage
-    | WsControlSignalMessage
-    | WsChatMessage
-    | WsReactionMessage
-    | WsTypingMessage
+    WsPongMessage | WsPingMessage | WsControlSignalMessage | WsChatMessage | WsReactionMessage | WsTypingMessage
 )
 
 
@@ -125,4 +120,5 @@ def validate_inbound(raw: dict[str, Any]) -> WsValidationResult:
             error=f"消息格式错误: {e.errors()[0].get('msg', 'invalid') if e.errors() else 'invalid'}",
             raw_type=msg_type,
         )
-    return WsValidationResult(is_valid=True, message=parsed, raw_type=msg_type)
+    # mypy: parsed 类型是 BaseModel，运行时是 WsInboundMessage 的子类
+    return WsValidationResult(is_valid=True, message=parsed, raw_type=msg_type)  # type: ignore[arg-type]

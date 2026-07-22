@@ -3,6 +3,7 @@
 包含 PluginTier、PluginState、PluginHealth、PluginBase Protocol、
 钩子返回值类型（Override/Next/Fallback）以及 PluginContext。
 """
+
 from __future__ import annotations
 
 import enum
@@ -30,15 +31,15 @@ class PluginTier(str, enum.Enum):
 class PluginState(str, enum.Enum):
     """插件生命周期状态。"""
 
-    DISCOVERED = "discovered"      # 已注册但未启动
-    LOADED = "loaded"              # 拓扑排序完成
+    DISCOVERED = "discovered"  # 已注册但未启动
+    LOADED = "loaded"  # 拓扑排序完成
     INITIALIZING = "initializing"  # on_startup 中
-    READY = "ready"                # 启动成功，可服务
-    DEGRADED = "degraded"          # 启动成功但健康检查失败（CROSSCUTTING）
+    READY = "ready"  # 启动成功，可服务
+    DEGRADED = "degraded"  # 启动成功但健康检查失败（CROSSCUTTING）
     SHUTTING_DOWN = "shutting_down"
-    FAILED = "failed"              # 启动失败（CORE 抛异常，或硬依赖缺失）
-    STOPPED = "stopped"            # 正常关闭
-    DISABLED = "disabled"          # 被热开关禁用，或 OPTIONAL 启动失败
+    FAILED = "failed"  # 启动失败（CORE 抛异常，或硬依赖缺失）
+    STOPPED = "stopped"  # 正常关闭
+    DISABLED = "disabled"  # 被热开关禁用，或 OPTIONAL 启动失败
 
 
 @dataclass
@@ -107,9 +108,9 @@ class LLMFallback:
 class PluginContext:
     """传递给插件钩子的上下文对象。"""
 
-    app: Any                                        # FastAPI 实例
-    registry: Any                                   # PluginRegistry 实例
-    event_bus: PluginEventBus | None = None       # 插件间事件总线
+    app: Any  # FastAPI 实例
+    registry: Any  # PluginRegistry 实例
+    event_bus: PluginEventBus | None = None  # 插件间事件总线
     request_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -130,8 +131,8 @@ class PluginBase(Protocol):
             priority = 100
     """
 
-    name: str                # 全局唯一，如 "auth", "team", "billing"
-    version: str             # semver，如 "1.0.0"
-    tier: PluginTier         # CORE / CROSSCUTTING / OPTIONAL
+    name: str  # 全局唯一，如 "auth", "team", "billing"
+    version: str  # semver，如 "1.0.0"
+    tier: PluginTier  # CORE / CROSSCUTTING / OPTIONAL
     dependencies: list[str]  # 所依赖的其他插件 name 列表；后缀 "?" 表示软依赖
-    priority: int            # 同 tier 内排序，默认 100，数值越小越先执行
+    priority: int  # 同 tier 内排序，默认 100，数值越小越先执行

@@ -24,7 +24,39 @@ interface ModelCatalogItem {
   output?: number;
   recommended?: boolean;
   cat?: string;
-  score?: number;
+  score?: number | null;
+  tier?: string;
+}
+
+/** API/mock 返回的原始 Provider 数据结构（字段名兼容 snake_case / camelCase） */
+interface RawProvider {
+  id: string;
+  name: string;
+  has_key?: boolean;
+  hasKey?: boolean;
+  balance?: string;
+  currency?: string;
+  base_url?: string;
+  baseUrl?: string;
+  model_count?: number;
+  models?: number;
+  pricing_note?: string;
+}
+
+/** API/mock 返回的原始模型数据结构 */
+interface RawModel {
+  id: string;
+  name: string;
+  provider: string;
+  desc?: string;
+  input?: number;
+  output?: number;
+  input_price?: number;
+  output_price?: number;
+  recommended?: boolean;
+  cat?: string;
+  category?: string;
+  score?: number | null;
   tier?: string;
 }
 
@@ -81,12 +113,12 @@ export default function Models() {
 
       // 演示模式：使用 mock 数据
       if (demoMode) {
-        const mockProviders: Provider[] = MOCK_PROVIDERS.map((p: any) => ({
+        const mockProviders: Provider[] = MOCK_PROVIDERS.map((p: RawProvider) => ({
           id: p.id, name: p.name, hasKey: true, balance: '演示', currency: 'CNY',
-          baseUrl: p.base_url || '', models: MOCK_CATALOG.filter((m: any) => m.provider === p.id).length,
+          baseUrl: p.base_url || '', models: MOCK_CATALOG.filter((m: RawModel) => m.provider === p.id).length,
           pricingNote: '演示数据',
         }));
-        const mockCatalog: ModelCatalogItem[] = MOCK_CATALOG.map((m: any) => ({
+        const mockCatalog: ModelCatalogItem[] = MOCK_CATALOG.map((m: RawModel) => ({
           id: m.id, name: m.name, provider: m.provider, desc: m.desc || '',
           input: m.input || 0, output: m.output || 0, recommended: !!m.recommended,
           cat: m.cat || 'all', score: m.score, tier: m.tier || '',
@@ -104,10 +136,12 @@ export default function Models() {
 
       try {
         const data = await apiGetProviders(false);
-        const list = Array.isArray(data) ? data : (data as any)?.providers;
+        const list: RawProvider[] | undefined = Array.isArray(data)
+          ? (data as RawProvider[])
+          : (data as { providers?: RawProvider[] })?.providers;
         if (!cancelled && Array.isArray(list) && list.length) {
           // 合并基础信息
-          const merged = list.map((p: any) => ({
+          const merged = list.map((p) => ({
             id: p.id,
             name: p.name || p.id,
             hasKey: !!p.has_key || !!p.hasKey,
@@ -120,15 +154,17 @@ export default function Models() {
           setProviders(merged);
           if (!currentProvider && merged[0]) setCurrentProvider(merged[0].id);
         }
-      } catch (e: any) {
-        errors.push(`Provider: ${e.message}`);
+      } catch (e: unknown) {
+        errors.push(`Provider: ${e instanceof Error ? e.message : String(e)}`);
       }
 
       try {
         const data = await apiGetModels(false);
-        const list = Array.isArray(data) ? data : (data as any)?.models;
+        const list: RawModel[] | undefined = Array.isArray(data)
+          ? (data as RawModel[])
+          : (data as { models?: RawModel[] })?.models;
         if (!cancelled && Array.isArray(list) && list.length) {
-          setCatalog(list.map((m: any) => ({
+          setCatalog(list.map((m) => ({
             id: m.id,
             name: m.name || m.id,
             provider: m.provider,
@@ -141,8 +177,8 @@ export default function Models() {
             tier: m.tier || '',
           })));
         }
-      } catch (e: any) {
-        errors.push(`模型列表: ${e.message}`);
+      } catch (e: unknown) {
+        errors.push(`模型列表: ${e instanceof Error ? e.message : String(e)}`);
       }
 
       if (!cancelled) {

@@ -1,4 +1,5 @@
 """PluginRegistry 生命周期和热开关测试。"""
+
 from __future__ import annotations
 
 import pytest

@@ -44,6 +44,12 @@ include = ["app*", "conclave_core*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+# 默认启用多进程并行测试（pytest-xdist）
+# -n auto: 自动按 CPU 核心数分配 worker
+# --timeout=30: 单测超时 30s
+# --timeout-method=thread: 线程超时（兼容 asyncio）
+# 如需禁用多进程（调试单测）：pytest -p no:xdist
+addopts = "-n auto --timeout=30 --timeout-method=thread"
 
 [tool.ruff]
 target-version = "py310"
@@ -58,10 +64,12 @@ ignore = [
     "RUF001", # ambiguous-unicode-character-string (中文字符误报)
     "RUF002", # ambiguous-unicode-character-docstring
     "RUF003", # ambiguous-unicode-character-comment
+    "RUF009", # Do not perform function call in dataclass defaults (config.py 的 _env() 模式是故意的)
+    "UP038",  # Use X | Y in isinstance (该规则已在 ruff 0.7+ 移除，元组写法完全合法)
 ]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

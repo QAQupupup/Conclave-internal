@@ -43,6 +43,7 @@ pnpm-debug.log*
 *.pem
 *.key
 secrets/
+.jwt_secret
 
 # ===== Databases / Data =====
 *.sqlite
@@ -87,3 +88,4 @@ backend/data/
 # ===== Temp files =====
 Qwen*/
 docs/audits/
+.tmp/

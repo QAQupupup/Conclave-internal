@@ -49,12 +49,13 @@ def _tenant_filter_for_update():
 async def _get_host_with_access(session, host_id: int, for_write: bool = False) -> DockerHostModel:
     """获取主机并校验租户访问权限。for_write=True 时仅允许访问自己租户的主机。"""
     from sqlalchemy import and_
+
     if for_write:
         cond = and_(DockerHostModel.id == host_id, _tenant_filter_for_update())
     else:
         cond = and_(DockerHostModel.id == host_id, _tenant_filter())
     result = await session.execute(select(DockerHostModel).where(cond))
-    host = result.scalar_one_or_none()
+    host: DockerHostModel | None = result.scalar_one_or_none()
     if not host:
         raise HTTPException(404, "主机不存在或无权访问")
     return host
@@ -187,9 +188,7 @@ def _model_to_config_dict(m: DockerHostModel, secret: DockerHostSecretModel | No
 async def list_hosts() -> dict[str, Any]:
     """列出当前租户可见的 Docker 主机（含系统主机）。"""
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(DockerHostModel).where(_tenant_filter()).order_by(DockerHostModel.id)
-        )
+        result = await session.execute(select(DockerHostModel).where(_tenant_filter()).order_by(DockerHostModel.id))
         hosts = list(result.scalars().all())
     return {
         "hosts": [_model_to_response(h) for h in hosts],
@@ -358,22 +357,22 @@ async def health_check_host(host_id: int) -> dict[str, Any]:
 
     # 更新状态
     async with async_session_factory() as session:
-        host = await session.get(DockerHostModel, host_id)
-        if host:
-            host.health_status = "healthy" if health.ok else "unhealthy"
-            host.last_health_check = datetime.now(timezone.utc)
-            host.docker_version = health.docker_version
-            host.running_containers = health.running_containers
-            host.total_containers = health.total_containers
-            host.last_error = health.error
-            if health.cpu_count and not host.cpu_cores:
-                host.cpu_cores = health.cpu_count
-            if health.memory_total_gb and not host.memory_gb:
-                host.memory_gb = int(health.memory_total_gb)
+        host_refreshed: DockerHostModel | None = await session.get(DockerHostModel, host_id)
+        if host_refreshed:
+            host_refreshed.health_status = "healthy" if health.ok else "unhealthy"
+            host_refreshed.last_health_check = datetime.now(timezone.utc)
+            host_refreshed.docker_version = health.docker_version
+            host_refreshed.running_containers = health.running_containers
+            host_refreshed.total_containers = health.total_containers
+            host_refreshed.last_error = health.error
+            if health.cpu_count and not host_refreshed.cpu_cores:
+                host_refreshed.cpu_cores = health.cpu_count
+            if health.memory_total_gb and not host_refreshed.memory_gb:
+                host_refreshed.memory_gb = int(health.memory_total_gb)
             await session.commit()
-            await session.refresh(host)
+            await session.refresh(host_refreshed)
             return {
-                **_model_to_response(host),
+                **_model_to_response(host_refreshed),
                 "health_detail": {
                     "ok": health.ok,
                     "latency_ms": health.latency_ms,
@@ -423,13 +422,13 @@ async def health_check_all() -> dict[str, Any]:
     # 批量更新状态
     async with async_session_factory() as session:
         for r in results:
-            h = await session.get(DockerHostModel, r["host_id"])
-            if h:
-                h.health_status = "healthy" if r["ok"] else "unhealthy"
-                h.last_health_check = datetime.now(timezone.utc)
-                h.docker_version = r["version"]
-                h.running_containers = r["running"]
-                h.last_error = r["error"]
+            host_update: DockerHostModel | None = await session.get(DockerHostModel, r["host_id"])
+            if host_update:
+                host_update.health_status = "healthy" if r["ok"] else "unhealthy"
+                host_update.last_health_check = datetime.now(timezone.utc)
+                host_update.docker_version = str(r["version"])
+                host_update.running_containers = r["running"]  # type: ignore[assignment]
+                host_update.last_error = str(r["error"])
         await session.commit()
 
     return {"checked": len(results), "results": results}

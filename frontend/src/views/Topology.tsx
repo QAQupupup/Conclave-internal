@@ -11,6 +11,13 @@ interface HealthItem {
   message?: string;
 }
 
+/** 单个服务的健康状态信息（来自健康检查 API 或 mock） */
+interface ServiceHealth {
+  status?: 'ok' | 'error' | 'unavailable';
+  latency_ms?: number;
+  message?: string;
+}
+
 const CORE_SERVICES: Omit<HealthItem, 'latency_ms' | 'message'>[] = [
   { key: 'frontend', name: 'Frontend', sub: 'Static Assets', status: 'ok' },
   { key: 'backend', name: 'Backend', sub: 'FastAPI :8000', status: 'ok' },
@@ -24,7 +31,7 @@ const NETWORK_LAYERS = [
 
 export default function Topology() {
   const { demoMode } = useApp();
-  const [health, setHealth] = useState<Record<string, any>>({});
+  const [health, setHealth] = useState<Record<string, ServiceHealth>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,7 +40,7 @@ export default function Topology() {
       try {
         if (demoMode) {
           // 演示模式：构造模拟健康状态
-          const mock: Record<string, any> = {
+          const mock: Record<string, ServiceHealth> = {
             postgresql: { status: 'ok', latency_ms: 8 },
             qdrant: { status: 'ok', latency_ms: 12 },
             docker: { status: 'ok', latency_ms: 25 },
@@ -41,7 +48,7 @@ export default function Topology() {
           if (mounted) setHealth(mock);
         } else {
           const data = await apiGetHealth();
-          if (mounted && data) setHealth(data);
+          if (mounted && data) setHealth(data as Record<string, ServiceHealth>);
         }
       } catch {
         // 健康检查加载失败，显示基本结构
@@ -67,9 +74,9 @@ export default function Topology() {
           key,
           name: nameMap[key].name,
           sub: nameMap[key].sub,
-          status: (info as any)?.status || 'error',
-          latency_ms: (info as any)?.latency_ms,
-          message: (info as any)?.message,
+          status: info?.status || 'error',
+          latency_ms: info?.latency_ms,
+          message: info?.message,
         });
       }
     }

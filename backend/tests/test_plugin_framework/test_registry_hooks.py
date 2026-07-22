@@ -1,4 +1,5 @@
 """PluginRegistry 钩子调度测试（拦截型 + 观察型）。"""
+
 from __future__ import annotations
 
 import pytest
@@ -20,9 +21,7 @@ async def test_interceptor_override_stops_chain(empty_registry, make_interceptor
     empty_registry.register(second)
     await empty_registry.resolve_and_load(tmp_ctx)
     call_recorder.reset()
-    result = await empty_registry.fire_interceptor(
-        "on_meeting_creating", tmp_ctx, {"title": "x"}, default="DEFAULT"
-    )
+    result = await empty_registry.fire_interceptor("on_meeting_creating", tmp_ctx, {"title": "x"}, default="DEFAULT")
     assert result == "CUSTOM"
     # second 不应被调用
     assert call_recorder.names_for("on_meeting_creating") == ["first"]
@@ -35,9 +34,7 @@ async def test_interceptor_default_when_all_next(empty_registry, make_intercepto
     empty_registry.register(a)
     empty_registry.register(b)
     await empty_registry.resolve_and_load(tmp_ctx)
-    result = await empty_registry.fire_interceptor(
-        "on_meeting_creating", tmp_ctx, {}, default="DEF"
-    )
+    result = await empty_registry.fire_interceptor("on_meeting_creating", tmp_ctx, {}, default="DEF")
     assert result == "DEF"
 
 

@@ -1,4 +1,5 @@
 """插件测试公共 fixtures 和 mock 插件类。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -86,7 +87,14 @@ class _MockPluginBase:
 class _InterceptorPlugin(_MockPluginBase):
     """带拦截型钩子的 mock 插件（on_meeting_creating 语义）。"""
 
-    def __init__(self, *args: Any, hook_result: Any = None, hook_sleep: float = 0, hook_raise: Exception | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        hook_result: Any = None,
+        hook_sleep: float = 0,
+        hook_raise: Exception | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._hook_result = hook_result
         self._hook_sleep = hook_sleep
@@ -150,7 +158,9 @@ def make_mock_plugin(call_recorder: _CallRecord):
 
 @pytest.fixture
 def make_interceptor(call_recorder: _CallRecord):
-    def _make(name: str = "intercept", tier: PluginTier = PluginTier.OPTIONAL, hook_result: Any = None, **kwargs: Any) -> _InterceptorPlugin:
+    def _make(
+        name: str = "intercept", tier: PluginTier = PluginTier.OPTIONAL, hook_result: Any = None, **kwargs: Any
+    ) -> _InterceptorPlugin:
         p = _InterceptorPlugin(name=name, tier=tier, hook_result=hook_result, **kwargs)
         p.recorder = call_recorder
         return p

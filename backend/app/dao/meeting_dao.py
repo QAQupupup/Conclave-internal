@@ -65,11 +65,7 @@ async def save_meeting(
         # COALESCE: 已有值保留，无值则回填
         update_parts.append("tenant_id=COALESCE(meetings.tenant_id, excluded.tenant_id)")
     update_sql = ",\n    ".join(update_parts)
-    sql = (
-        f"INSERT INTO meetings ({col_list})\n"
-        f"VALUES ({val_list})\n"
-        f"ON CONFLICT(id) DO UPDATE SET\n    {update_sql}"
-    )
+    sql = f"INSERT INTO meetings ({col_list})\nVALUES ({val_list})\nON CONFLICT(id) DO UPDATE SET\n    {update_sql}"
     async with async_session_factory() as session:
         await session.execute(text(sql), params)
         await session.commit()

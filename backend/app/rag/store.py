@@ -1,6 +1,7 @@
 # 向量存储：StubEmbedding / SiliconFlowEmbedding（bge-m3），余弦相似度检索
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import os
@@ -53,19 +54,40 @@ class SiliconFlowEmbedding:
         self._base_url = settings.embed_base_url.rstrip("/") if settings.embed_base_url else ""
         self._model = settings.embed_model
         self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
         # bge-m3 输出 1024 维
         self.dim = 1024
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            # 不在 client 层设置 Authorization，因为租户级覆盖会切换 key
+        """返回当前 AsyncClient；如已关闭或绑定到不同/已关闭循环，则重建。
+
+        循环感知参考 app/db/engine.py::_ensure_engine()。
+        httpx.AsyncClient 内部持有 asyncio 原语，绑定到首个事件循环后，
+        跨循环调用会报 'got Future attached to a different loop'。
+        """
+        try:
+            cur_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            cur_loop = None
+        need_new = (
+            self._client is None
+            or self._client_loop is None
+            or self._client_loop.is_closed()
+            or cur_loop is None
+            or self._client_loop is not cur_loop
+        )
+        if need_new:
+            # 循环变化时直接丢弃旧 client 引用（GC 会回收，避免跨循环 aclose 报错）
             self._client = httpx.AsyncClient(timeout=30.0)
+            self._client_loop = cur_loop
+        assert self._client is not None
         return self._client
 
     def _resolve_config(self) -> tuple[str, str, str]:
         """解析当前生效的 (base_url, api_key, model)。"""
         from app.tenants.context import get_tenant_id
         from app.tenants.settings_override import resolve_embed_config
+
         tid = get_tenant_id()
         return resolve_embed_config(tid, self._base_url, self._api_key, self._model)
 
@@ -73,6 +95,7 @@ class SiliconFlowEmbedding:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+            self._client_loop = None
 
     async def embed(self, text: str) -> list[float]:
         results = await self.embed_batch([text])
@@ -165,15 +188,34 @@ class SiliconFlowReranker:
         self._base_url = settings.rerank_base_url.rstrip("/") if settings.rerank_base_url else ""
         self._model = settings.rerank_model
         self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
+        """返回当前 AsyncClient；如已关闭或绑定到不同/已关闭循环，则重建。
+
+        循环感知参照 SiliconFlowEmbedding._get_client()。
+        """
+        try:
+            cur_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            cur_loop = None
+        need_new = (
+            self._client is None
+            or self._client_loop is None
+            or self._client_loop.is_closed()
+            or cur_loop is None
+            or self._client_loop is not cur_loop
+        )
+        if need_new:
             self._client = httpx.AsyncClient(timeout=30.0)
+            self._client_loop = cur_loop
+        assert self._client is not None
         return self._client
 
     def _resolve_config(self) -> tuple[str, str, str]:
         from app.tenants.context import get_tenant_id
         from app.tenants.settings_override import resolve_rerank_config
+
         tid = get_tenant_id()
         return resolve_rerank_config(tid, self._base_url, self._api_key, self._model)
 
@@ -647,8 +689,5 @@ def get_reranker() -> Reranker:
     """获取重排序器（进程级单例）：配置了 API key 用真实 Reranker，否则用关键词 fallback。"""
     global _reranker
     if _reranker is None:
-        if settings.rerank_api_key:
-            _reranker = SiliconFlowReranker()
-        else:
-            _reranker = KeywordReranker()
+        _reranker = SiliconFlowReranker() if settings.rerank_api_key else KeywordReranker()
     return _reranker

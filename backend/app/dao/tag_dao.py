@@ -78,7 +78,7 @@ async def add_meeting_tag(meeting_id: str, tag: str) -> bool:
                 },
             )
         await session.commit()
-        return (result.rowcount or 0) > 0  # type: ignore[no-any-return]
+        return (result.rowcount or 0) > 0  # type: ignore[attr-defined]
 
 
 async def remove_meeting_tag(meeting_id: str, tag: str) -> bool:
@@ -89,4 +89,4 @@ async def remove_meeting_tag(meeting_id: str, tag: str) -> bool:
             {"meeting_id": meeting_id, "tag": tag},
         )
         await session.commit()
-        return (result.rowcount or 0) > 0  # type: ignore[no-any-return]
+        return (result.rowcount or 0) > 0  # type: ignore[attr-defined]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
@@ -200,10 +201,7 @@ class InMemoryEventBus:
                 return
 
             # 确定 Redis channel
-            if event.meeting_id == "*":
-                channel = _REDIS_SYSTEM_CHANNEL
-            else:
-                channel = f"{_REDIS_CHANNEL_PREFIX}{event.meeting_id}"
+            channel = _REDIS_SYSTEM_CHANNEL if event.meeting_id == "*" else f"{_REDIS_CHANNEL_PREFIX}{event.meeting_id}"
 
             # 消息体：instance_id + 事件 JSON（用 pydantic 原生序列化）
             payload = json.dumps(
@@ -263,9 +261,7 @@ class InMemoryEventBus:
             self._redis_pubsub = redis_client.pubsub()
             await self._redis_pubsub.psubscribe(_REDIS_CHANNEL_PATTERN)
             # 启动后台监听任务
-            self._redis_listener_task = asyncio.create_task(
-                self._redis_listener(), name="event-bus-redis-listener"
-            )
+            self._redis_listener_task = asyncio.create_task(self._redis_listener(), name="event-bus-redis-listener")
             self._loop = loop
             logger.info("事件总线 Redis Pub/Sub 桥接已启动（instance_id=%s）", self._instance_id[:8])
         except Exception as e:
@@ -295,17 +291,13 @@ class InMemoryEventBus:
         # 取消监听任务
         if self._redis_listener_task is not None:
             self._redis_listener_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._redis_listener_task
-            except (asyncio.CancelledError, Exception):
-                pass
 
         # 关闭 pubsub 连接
         if self._redis_pubsub is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await self._redis_pubsub.close()
-            except Exception:
-                pass
 
         self._detach_redis_state()
         logger.info("事件总线 Redis Pub/Sub 桥接已停止")
@@ -400,10 +392,8 @@ class InMemoryEventBus:
                     break
             finally:
                 if pubsub is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await pubsub.close()
-                    except Exception:
-                        pass
                 if self._redis_pubsub is pubsub:
                     self._redis_pubsub = None
 
@@ -438,6 +428,7 @@ class InMemoryEventBus:
         if mem_events:
             return list(mem_events)
         import asyncio as _asyncio
+
         try:
             _loop = _asyncio.get_running_loop()
         except RuntimeError:
@@ -480,12 +471,14 @@ class InMemoryEventBus:
         if events:
             return events[-1].seq
         import asyncio as _asyncio
+
         try:
             _loop = _asyncio.get_running_loop()
         except RuntimeError:
             _loop = None
         if _loop is None:
             from app.db_legacy import last_event_seq as _les
+
             return _asyncio.run(_les(meeting_id))
         return 0
 

@@ -1,4 +1,4 @@
-/* Conclave report layouts — ported from app.html */
+﻿/* Conclave report layouts — ported from app.html */
 
 import {
   REPORT_DATA,
@@ -7,12 +7,13 @@ import {
   REPORT_COMPREHENSIVE,
   REPORT_DEPLOYABLE,
 } from './reportData';
+import type { ProduceData } from '../types/meeting';
 
 /* ═══ Layout spec interfaces ═══ */
 
 export interface ReportBlock {
   type: string;
-  data: any;
+  data: Record<string, unknown>;
 }
 
 export interface ReportSection {
@@ -37,7 +38,7 @@ export interface ReportLayout {
    (REPORT_RESEARCH / REPORT_BUSINESS / ...) internally. We preserve that dispatch exactly,
    while allowing an optional `r` override. */
 
-export function getReportLayout(type: string, r?: any): ReportLayout {
+export function getReportLayout(type: string, r?: ProduceData): ReportLayout {
   const data = r ?? REPORT_DATA;
   switch (type) {
     case 'research_report': return _layoutResearch(data);
@@ -54,7 +55,7 @@ export function getReportLayout(type: string, r?: any): ReportLayout {
 
 /* ─── Demo layouts for new types ─── */
 
-export function _layoutDesignDoc(r: any): ReportLayout {
+export function _layoutDesignDoc(r: ProduceData): ReportLayout {
   return {
     type:'design_doc',
     title:'系统设计文档',subtitle:r.clarifiedTopic,
@@ -92,7 +93,7 @@ export function _layoutDesignDoc(r: any): ReportLayout {
   };
 }
 
-export function _layoutCodeAnalysis(r: any): ReportLayout {
+export function _layoutCodeAnalysis(r: ProduceData): ReportLayout {
   return {
     type:'code_analysis',
     title:'代码分析报告',subtitle:r.clarifiedTopic,
@@ -116,7 +117,7 @@ export function _layoutCodeAnalysis(r: any): ReportLayout {
   };
 }
 
-export function _layoutDataScience(r: any): ReportLayout {
+export function _layoutDataScience(r: ProduceData): ReportLayout {
   return {
     type:'data_science',
     title:'数据分析报告',subtitle:r.clarifiedTopic,
@@ -142,7 +143,7 @@ export function _layoutDataScience(r: any): ReportLayout {
   };
 }
 
-export function _layoutTestedSystem(r: any): ReportLayout {
+export function _layoutTestedSystem(r: ProduceData): ReportLayout {
   return {
     type:'tested_system',
     title:'测试系统交付',subtitle:r.clarifiedTopic,
@@ -178,7 +179,7 @@ export function _layoutTestedSystem(r: any): ReportLayout {
   };
 }
 
-export function _layoutPrd(r: any): ReportLayout {
+export function _layoutPrd(r: ProduceData): ReportLayout {
   return {
     type:'prd_openapi',
     title:r.artifact.prd.title,
@@ -192,12 +193,12 @@ export function _layoutPrd(r: any): ReportLayout {
         {type:'list',data:{items:r.keyQuestions,ordered:true}},
       ]},
       {id:'team_config',title:'团队配置',blocks:[
-        {type:'team_config',data:{items:r.teamConfig.map((m:any)=>({role:m.role,stance:m.stance}))}},
+        {type:'team_config',data:{items:r.teamConfig.map((m)=>({role:m.role,stance:m.stance}))}},
       ]},
       {id:'conflicts',title:'冲突与裁决',blocks:[
-        {type:'conflicts',data:{items:r.conflicts.map((c:any,i:number)=>({
+        {type:'conflicts',data:{items:r.conflicts.map((c,i)=>({
           summary:c.summary,sideA:c.sideA,sideB:c.sideB,verdict:c.verdict,
-          rationale:r.decisions.find((d:any)=>d.conflictId===c.id)?.rationale||c.rationale,trace:c.trace
+          rationale:r.decisions.find((d)=>d.conflictId===c.id)?.rationale||c.rationale,trace:c.trace
         }))}},
       ]},
       {id:'prd',title:'最终产出 — PRD',blocks:[
@@ -219,7 +220,7 @@ export function _layoutPrd(r: any): ReportLayout {
   };
 }
 
-export function _layoutResearch(r: any): ReportLayout {
+export function _layoutResearch(r: ProduceData): ReportLayout {
   const d=REPORT_RESEARCH;
   return {
     type:'research_report',
@@ -230,13 +231,13 @@ export function _layoutResearch(r: any): ReportLayout {
         {type:'list',data:{items:r.adoptedClaims,ordered:false}},
       ]},
       {id:'findings',title:'研究发现',blocks:[
-        {type:'findings',data:{items:d.findings.map((f:any)=>({num:f.num,topic:f.topic,detail:f.detail,trace:f.trace,sources:f.sources}))}},
+        {type:'findings',data:{items:d.findings.map((f)=>({num:f.num,topic:f.topic,detail:f.detail,trace:f.trace,sources:f.sources}))}},
       ]},
       {id:'analysis',title:'分析',blocks:[
         {type:'paragraph',data:{text:d.analysis.join('\n\n')}},
       ]},
       {id:'recommendations',title:'建议',blocks:[
-        {type:'list',data:{items:d.recommendations.map((rec:any)=>rec.text),ordered:true}},
+        {type:'list',data:{items:d.recommendations.map((rec)=>rec.text),ordered:true}},
       ]},
       {id:'attachments',title:'附件',blocks:[
         {type:'attachments',data:{items:d.attachments}},
@@ -245,7 +246,7 @@ export function _layoutResearch(r: any): ReportLayout {
   };
 }
 
-export function _layoutBusiness(r: any): ReportLayout {
+export function _layoutBusiness(r: ProduceData): ReportLayout {
   const d=REPORT_BUSINESS;
   return {
     type:'business_report',
@@ -255,16 +256,16 @@ export function _layoutBusiness(r: any): ReportLayout {
         {type:'paragraph',data:{text:d.execSummary}},
       ]},
       {id:'kpis',title:'关键指标',blocks:[
-        {type:'kpi_grid',data:{items:d.kpis.map((k:any)=>({label:k.label,value:k.value,unit:k.unit,trend:k.trend}))}},
+        {type:'kpi_grid',data:{items:d.kpis.map((k)=>({label:k.label,value:k.value,unit:k.unit,trend:k.trend}))}},
       ]},
       {id:'market',title:'市场分析',blocks:[
         {type:'paragraph',data:{text:d.marketAnalysis.join('\n\n')}},
       ]},
       {id:'risks',title:'风险评估',blocks:[
-        {type:'risks',data:{items:d.risks.map((risk:any)=>({level:risk.level,desc:risk.desc}))}},
+        {type:'risks',data:{items:d.risks.map((risk)=>({level:risk.level,desc:risk.desc}))}},
       ]},
       {id:'timeline',title:'迁移时间线',blocks:[
-        {type:'timeline',data:{items:d.timeline.map((t:any)=>({date:t.date,text:t.text}))}},
+        {type:'timeline',data:{items:d.timeline.map((t)=>({date:t.date,text:t.text}))}},
       ]},
       {id:'next_steps',title:'下一步行动',blocks:[
         {type:'list',data:{items:d.nextSteps,ordered:true}},
@@ -273,7 +274,7 @@ export function _layoutBusiness(r: any): ReportLayout {
   };
 }
 
-export function _layoutComprehensive(r: any): ReportLayout {
+export function _layoutComprehensive(r: ProduceData): ReportLayout {
   const d=REPORT_COMPREHENSIVE;
   return {
     type:'comprehensive',
@@ -283,10 +284,10 @@ export function _layoutComprehensive(r: any): ReportLayout {
         {type:'list',data:{items:d.requirements,ordered:false}},
       ]},
       {id:'system_design',title:'系统设计',blocks:[
-        {type:'team_config',data:{items:d.systemDesign.map((s:any)=>({role:s.component,stance:`${s.tech} — ${s.desc}`}))}},
+        {type:'team_config',data:{items:d.systemDesign.map((s)=>({role:s.component,stance:`${s.tech} — ${s.desc}`}))}},
       ]},
       {id:'data_model',title:'数据模型',blocks:[
-        {type:'data_model',data:{entities:d.dataModel.map((e:any)=>({entity:e.entity,fields:e.fields}))}},
+        {type:'data_model',data:{entities:d.dataModel.map((e)=>({entity:e.entity,fields:e.fields}))}},
       ]},
       {id:'api_spec',title:'API 规范',blocks:[
         {type:'code',data:{code:d.apiSpec,lang:'YAML'}},
@@ -298,7 +299,7 @@ export function _layoutComprehensive(r: any): ReportLayout {
   };
 }
 
-export function _layoutDeployable(r: any): ReportLayout {
+export function _layoutDeployable(r: ProduceData): ReportLayout {
   const d=REPORT_DEPLOYABLE;
   return {
     type:'deployable_service',
@@ -308,7 +309,7 @@ export function _layoutDeployable(r: any): ReportLayout {
         {type:'field',data:{label:'服务地址',value:d.deployUrl}},
         {type:'field',data:{label:'部署时间',value:d.deployTime}},
         {type:'field',data:{label:'沙箱审查',value:d.reviewResult}},
-        {type:'paragraph',data:{text:`测试 ${d.tests.length} 项${d.tests.every((t:any)=>t.result==='pass')?'全部通过':'有失败'}`}},
+        {type:'paragraph',data:{text:`测试 ${d.tests.length} 项${d.tests.every((t)=>t.result==='pass')?'全部通过':'有失败'}`}},
       ]},
       {id:'prd',title:'PRD',blocks:[
         {type:'field',data:{label:'title',value:d.prd.title}},
@@ -317,10 +318,10 @@ export function _layoutDeployable(r: any): ReportLayout {
         {type:'api_table',data:{endpoints:d.prd.endpoints}},
       ]},
       {id:'code_structure',title:'代码结构',blocks:[
-        {type:'file_tree',data:{items:d.fileTree.map((f:any)=>({name:f.name,type:f.type,indent:f.indent}))}},
+        {type:'file_tree',data:{items:d.fileTree.map((f)=>({name:f.name,type:f.type,indent:f.indent}))}},
       ]},
       {id:'test_results',title:'测试结果',blocks:[
-        {type:'test_groups',data:{tests:d.tests.map((t:any)=>({name:t.name,result:t.result,time:t.time}))}},
+        {type:'test_groups',data:{tests:d.tests.map((t)=>({name:t.name,result:t.result,time:t.time}))}},
       ]},
       {id:'dockerfile',title:'Dockerfile',blocks:[
         {type:'code',data:{code:d.dockerfile,lang:'DOCKER'}},
@@ -328,3 +329,5 @@ export function _layoutDeployable(r: any): ReportLayout {
     ],
   };
 }
+
+

@@ -90,7 +90,9 @@ def _check_meeting_access(user: dict, meeting_id: str) -> tuple[bool, str]:
         # 会议不存在，允许创建者连接
         return True, "create"
     # 检查 owner
-    owner = getattr(state, "owner_username", None) or (state.snapshot().get("owner_username") if hasattr(state, "snapshot") else None)
+    owner = getattr(state, "owner_username", None) or (
+        state.snapshot().get("owner_username") if hasattr(state, "snapshot") else None
+    )
     if owner and owner == username:
         return True, "owner"
     # 检查参与者列表
@@ -234,8 +236,9 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
 
     # 审计：WS 连接建立
     try:
-        from app.context import set_meeting_id, set_user_id, set_user_role, set_username, set_tenant_id
+        from app.context import set_meeting_id, set_user_id, set_user_role, set_username
         from app.observability.audit import audit
+        from app.tenants.context import set_tenant_id
 
         set_user_id(str(user.get("uid") or ""))
         set_username(user.get("username", ""))
@@ -248,8 +251,11 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         if _ws_tid is not None:
             try:
                 import asyncio as _asyncio
+
                 from app.tenants.settings_override import load_tenant_overrides as _load_ov
-                _asyncio.create_task(_load_ov(_ws_tid))
+
+                _ws_warmup_task = _asyncio.create_task(_load_ov(_ws_tid))
+                _ws_warmup_task.add_done_callback(lambda _t: None)  # 防止 GC 回收
             except Exception:
                 pass
         audit(
@@ -377,6 +383,7 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
 
                 # [P3] WS 入站消息 Pydantic 校验
                 from app.domain.ws_messages import validate_inbound
+
                 vr = validate_inbound(msg)
                 if not vr.is_valid:
                     if not inbound_limiter.check():
@@ -389,8 +396,15 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
 
                 # 控制信号路径（校验后通过 vr.message 访问结构化字段）
                 if vr.raw_type == "control.signal" and vr.message is not None:
-                    signal = vr.message.signal  # type: ignore[attr-defined]
-                    payload = vr.message.payload  # type: ignore[attr-defined]
+                    from app.domain.ws_messages import WsControlSignalMessage
+
+                    if not isinstance(vr.message, WsControlSignalMessage):
+                        await ws.send_json(
+                            {"type": "error", "meeting_id": meeting_id, "message": "控制信号消息格式错误"},
+                        )
+                        continue
+                    signal = vr.message.signal
+                    payload = vr.message.payload
                     # 二次校验：非 admin 用户发送控制信号时必须是 owner
                     current_state = get_state(meeting_id)
                     if current_state is not None and user.get("role") != "admin":
@@ -653,6 +667,7 @@ async def system_ws(ws: WebSocket) -> None:
                 # [P3] 入站校验
                 try:
                     from app.domain.ws_messages import validate_inbound as _v_in
+
                     _vr = _v_in(msg)
                     if not _vr.is_valid:
                         await _send_json(ws, {"type": "error", "message": _vr.error or "消息格式错误"})

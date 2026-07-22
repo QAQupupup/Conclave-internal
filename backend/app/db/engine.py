@@ -3,6 +3,7 @@
 仅支持 PostgreSQL 后端，由 DATABASE_URL 配置。
 支持跨事件循环自动重建引擎（测试隔离场景）。
 """
+
 from __future__ import annotations
 
 import asyncio

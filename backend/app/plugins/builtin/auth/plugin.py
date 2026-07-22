@@ -6,6 +6,7 @@
 - register_middlewares：挂载认证+CSRF 中间件
 - health_check：检查 DB 连通性
 """
+
 from __future__ import annotations
 
 import logging
@@ -76,8 +77,7 @@ class AuthPlugin(LifecycleMixin, RouterMixin, MiddlewareMixin):
                 "=" * 60 + "\n"
                 "系统未检测到任何用户，请访问 /setup 端点创建管理员。\n"
                 "Setup Token (24h 内有效，一次性使用): %s\n"
-                "也可通过环境变量 CONCLAVE_SETUP_ADMIN_PASSWORD 设置密码后重启。\n"
-                + "=" * 60,
+                "也可通过环境变量 CONCLAVE_SETUP_ADMIN_PASSWORD 设置密码后重启。\n" + "=" * 60,
                 token,
             )
 

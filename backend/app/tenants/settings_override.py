@@ -8,14 +8,13 @@
 4. 优雅降级：DB 查询失败时回退到全局配置，不阻断主流程。
 5. 同步安全：提供 sync 读缓存方法（返回空 dict 当未加载），供无法 await 的调用点使用。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
 from typing import Any
-
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ def _get_lock() -> asyncio.Lock:
     global _cache_lock
     if _cache_lock is None:
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # 为当前 loop 新建锁；跨 loop 时自动重建
             _cache_lock = asyncio.Lock()
         except RuntimeError:
@@ -143,8 +142,9 @@ async def load_tenant_overrides(tenant_id: int | None) -> dict[str, Any]:
 
 async def _fetch_from_db(tenant_id: int) -> dict[str, Any]:
     """从 DB 读取 tenants.settings。使用独立 session 以避免循环依赖。"""
-    from app.db.engine import async_session_factory
     from sqlalchemy import text
+
+    from app.db.engine import async_session_factory
 
     async with async_session_factory() as session:
         result = await session.execute(
@@ -159,7 +159,8 @@ async def _fetch_from_db(tenant_id: int) -> dict[str, Any]:
             import json
 
             try:
-                return json.loads(val)
+                parsed: dict[str, Any] = json.loads(val)
+                return parsed
             except Exception:
                 return {}
         return val or {}
@@ -200,10 +201,14 @@ def resolve_embed_config(
     model: str,
 ) -> tuple[str, str, str]:
     return (
-        ov.get("embed_base_url", base_url) or base_url,
-        ov.get("embed_api_key", api_key) or api_key,
-        ov.get("embed_model", model) or model,
-    ) if (ov := get_cached_overrides(tenant_id)) else (base_url, api_key, model)
+        (
+            ov.get("embed_base_url", base_url) or base_url,
+            ov.get("embed_api_key", api_key) or api_key,
+            ov.get("embed_model", model) or model,
+        )
+        if (ov := get_cached_overrides(tenant_id))
+        else (base_url, api_key, model)
+    )
 
 
 def resolve_rerank_config(
@@ -213,10 +218,14 @@ def resolve_rerank_config(
     model: str,
 ) -> tuple[str, str, str]:
     return (
-        ov.get("rerank_base_url", base_url) or base_url,
-        ov.get("rerank_api_key", api_key) or api_key,
-        ov.get("rerank_model", model) or model,
-    ) if (ov := get_cached_overrides(tenant_id)) else (base_url, api_key, model)
+        (
+            ov.get("rerank_base_url", base_url) or base_url,
+            ov.get("rerank_api_key", api_key) or api_key,
+            ov.get("rerank_model", model) or model,
+        )
+        if (ov := get_cached_overrides(tenant_id))
+        else (base_url, api_key, model)
+    )
 
 
 def resolve_web_search_config(
@@ -247,34 +256,34 @@ async def update_tenant_settings(tenant_id: int, patch: dict[str, Any]) -> dict[
 
     import json as _json
 
-    from app.db.engine import async_session_factory
     from sqlalchemy import text
 
-    # 读 -> merge -> 写，保证不覆盖其他系统字段（如 quota 等）
-    async with async_session_factory() as session:
-        async with session.begin():
-            result = await session.execute(
-                text("SELECT settings FROM tenants WHERE id = :tid FOR UPDATE"),
-                {"tid": tenant_id},
-            )
-            row = result.fetchone()
-            if row is None:
-                from app.core.exceptions import NotFoundError
+    from app.db.engine import async_session_factory
 
-                raise NotFoundError(f"租户 {tenant_id} 不存在")
-            current = row[0] or {}
-            if isinstance(current, str):
-                try:
-                    current = _json.loads(current)
-                except Exception:
-                    current = {}
-            if not isinstance(current, dict):
+    # 读 -> merge -> 写，保证不覆盖其他系统字段（如 quota 等）
+    async with async_session_factory() as session, session.begin():
+        result = await session.execute(
+            text("SELECT settings FROM tenants WHERE id = :tid FOR UPDATE"),
+            {"tid": tenant_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            from app.core.exceptions import NotFoundError
+
+            raise NotFoundError(f"租户 {tenant_id} 不存在")
+        current = row[0] or {}
+        if isinstance(current, str):
+            try:
+                current = _json.loads(current)
+            except Exception:
                 current = {}
-            current.update(filtered)
-            await session.execute(
-                text("UPDATE tenants SET settings = CAST(:s AS JSONB) WHERE id = :tid"),
-                {"tid": tenant_id, "s": _json.dumps(current, ensure_ascii=False)},
-            )
+        if not isinstance(current, dict):
+            current = {}
+        current.update(filtered)
+        await session.execute(
+            text("UPDATE tenants SET settings = CAST(:s AS JSONB) WHERE id = :tid"),
+            {"tid": tenant_id, "s": _json.dumps(current, ensure_ascii=False)},
+        )
 
     invalidate_cache(tenant_id)
     # 主动预热缓存

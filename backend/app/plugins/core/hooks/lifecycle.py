@@ -1,4 +1,5 @@
 """生命周期、路由、中间件 Mixin 协议。"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable

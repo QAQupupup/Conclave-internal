@@ -1,4 +1,5 @@
 """插件系统上下文工具：便捷 ContextVar 访问与 plugin_name 上下文管理器。"""
+
 from __future__ import annotations
 
 from collections.abc import Generator

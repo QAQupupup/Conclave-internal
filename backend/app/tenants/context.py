@@ -2,6 +2,7 @@
 
 用于在整个请求生命周期中传递当前 tenant_id，DAO 层自动附加过滤条件。
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator

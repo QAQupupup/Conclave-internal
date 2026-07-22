@@ -9,20 +9,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
-from typing import Optional
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 
 from app.config import settings
 
-_redis: Optional[aioredis.Redis] = None
-_redis_loop: Optional[asyncio.AbstractEventLoop] = None
+_redis: aioredis.Redis | None = None
+_redis_loop: asyncio.AbstractEventLoop | None = None
 _lock = threading.Lock()
 
 
-def _is_usable(client: Optional[aioredis.Redis], loop: Optional[asyncio.AbstractEventLoop]) -> bool:
+def _is_usable(client: aioredis.Redis | None, loop: asyncio.AbstractEventLoop | None) -> bool:
     """判断缓存的 Redis 客户端是否在当前循环下可用。"""
     if client is None or loop is None:
         return False
@@ -74,18 +74,16 @@ async def close_redis(app: FastAPI) -> None:
             _redis_loop = None
     app.state.redis = None
     if client_to_close is not None:
-        try:
+        with contextlib.suppress(Exception):
             await client_to_close.close()
-        except Exception:
-            pass
 
 
-async def get_redis(request: Request) -> Optional[aioredis.Redis]:
+async def get_redis(request: Request) -> aioredis.Redis | None:
     """FastAPI 依赖注入：获取 Redis 客户端（可能为 None，调用方需处理）。"""
     return _safe_get_client()
 
 
-def _safe_get_client() -> Optional[aioredis.Redis]:
+def _safe_get_client() -> aioredis.Redis | None:
     """循环感知地获取 Redis 客户端。
 
     若当前线程没有运行中的事件循环，或缓存的客户端绑定到不同/已关闭循环，
@@ -103,7 +101,7 @@ def _safe_get_client() -> Optional[aioredis.Redis]:
         return None
 
 
-def get_redis_client() -> Optional[aioredis.Redis]:
+def get_redis_client() -> aioredis.Redis | None:
     """获取 Redis 客户端（模块级访问，不经过 FastAPI Depends）。
 
     用于事件总线等非请求场景访问 Redis。可能返回 None（Redis 不可用或循环不匹配时），

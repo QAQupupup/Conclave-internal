@@ -1,4 +1,5 @@
 """插件异常类单元测试。"""
+
 from __future__ import annotations
 
 from app.plugins.core.exceptions import (

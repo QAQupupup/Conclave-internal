@@ -10,14 +10,18 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from sqlalchemy import delete, or_, select
 
 from app.config import settings
 from app.db.engine import async_session_factory
 from app.db.models import ApiKeyModel
+from app.llm_providers import PROVIDERS
 from app.observability.log_bus import log_bus
-from app.tenants import current_tenant_id, tenant_filter_clause, is_system_tenant
+from app.tenants import create_system_tenant_ctx, current_tenant_id
 
 logger = log_bus
 
@@ -91,8 +95,6 @@ async def save_api_key(
     is_default: bool = False,
 ) -> dict[str, Any]:
     """保存或更新 API Key（加密后存入数据库）。自动关联当前租户。"""
-    from sqlalchemy import select
-
     encrypted = encrypt_key(api_key)
     tid = current_tenant_id()
 
@@ -133,8 +135,6 @@ async def save_api_key(
             existing.encrypted_key = encrypted
             existing.base_url = base_url
             existing.is_default = is_default
-            from datetime import datetime, timezone
-
             existing.updated_at = datetime.now(timezone.utc)
         else:
             record = ApiKeyModel(
@@ -165,8 +165,6 @@ async def save_api_key(
     # 同步更新内存中的 PROVIDERS 配置（仅系统级 key 更新全局配置）
     if tid is None:
         try:
-            from app.llm_providers import PROVIDERS
-
             if provider in PROVIDERS:
                 PROVIDERS[provider].api_key = api_key
                 if base_url:
@@ -187,8 +185,6 @@ async def list_api_keys() -> list[dict[str, Any]]:
     """列出当前租户的 API Key（返回的 key 字段为脱敏形式，仅显示前4位+后4位）。
     同时返回系统级 key（tenant_id IS NULL）作为基础。
     """
-    from sqlalchemy import and_, or_, select
-
     tid = current_tenant_id()
     async with async_session_factory() as session:
         if tid is not None:
@@ -198,9 +194,7 @@ async def list_api_keys() -> list[dict[str, Any]]:
                 .order_by(ApiKeyModel.tenant_id.desc(), ApiKeyModel.provider, ApiKeyModel.name)
             )
         else:
-            result = await session.execute(
-                select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name)
-            )
+            result = await session.execute(select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name))
         records = result.scalars().all()
 
     keys = []
@@ -226,17 +220,17 @@ async def get_api_key(provider: str, name: str = "default") -> str:
     """获取指定 provider 的明文 API Key（供 LLM 调用使用）。
     优先查租户专属 key，回退系统 key。
     """
-    from sqlalchemy import or_, select
-
     tid = current_tenant_id()
     async with async_session_factory() as session:
         if tid is not None:
             result = await session.execute(
-                select(ApiKeyModel).where(
+                select(ApiKeyModel)
+                .where(
                     ApiKeyModel.provider == provider,
                     ApiKeyModel.name == name,
                     or_(ApiKeyModel.tenant_id == tid, ApiKeyModel.tenant_id.is_(None)),
-                ).order_by(ApiKeyModel.tenant_id.desc())
+                )
+                .order_by(ApiKeyModel.tenant_id.desc())
             )
         else:
             result = await session.execute(
@@ -254,21 +248,16 @@ async def get_api_key(provider: str, name: str = "default") -> str:
 
 async def delete_api_key(provider: str, name: str = "default") -> bool:
     """删除指定的 API Key（仅删除当前租户的 key，不删除系统 key）"""
-    from sqlalchemy import delete
-
     tid = current_tenant_id()
     async with async_session_factory() as session:
         q = delete(ApiKeyModel).where(
             ApiKeyModel.provider == provider,
             ApiKeyModel.name == name,
         )
-        if tid is not None:
-            q = q.where(ApiKeyModel.tenant_id == tid)
-        else:
-            q = q.where(ApiKeyModel.tenant_id.is_(None))
+        q = q.where(ApiKeyModel.tenant_id == tid) if tid is not None else q.where(ApiKeyModel.tenant_id.is_(None))
         result = await session.execute(q)
         await session.commit()
-        return result.rowcount > 0  # type: ignore[no-any-return]
+        return result.rowcount > 0  # type: ignore[attr-defined, no-any-return]
 
 
 async def load_keys_to_providers() -> int:
@@ -279,13 +268,8 @@ async def load_keys_to_providers() -> int:
     Returns:
         加载的 Key 数量
     """
-    from sqlalchemy import select
-
-    from app.llm_providers import PROVIDERS
-    from app.tenants import create_system_tenant_ctx
-
     try:
-        async with create_system_tenant_ctx():
+        with create_system_tenant_ctx():
             async with async_session_factory() as session:
                 result = await session.execute(
                     select(ApiKeyModel).where(

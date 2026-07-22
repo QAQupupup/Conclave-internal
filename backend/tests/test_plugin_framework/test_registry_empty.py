@@ -1,4 +1,5 @@
 """空注册表行为测试（Phase 0 验收：无插件时零影响）。"""
+
 from __future__ import annotations
 
 from pathlib import Path

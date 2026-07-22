@@ -10,6 +10,7 @@
  * - 4403/4429 特殊处理
  */
 import { getToken } from './auth';
+import type { WsSnapshotState } from '../types/meeting';
 
 const WS_BACKOFF_BASE = 1000;
 const WS_BACKOFF_MAX = 30000;
@@ -45,13 +46,16 @@ export const STAGE_MAP: Record<number, string> = {
 
 export interface WsMessage {
   type: string;
-  payload?: any;
-  [k: string]: any;
+  payload?: Record<string, unknown>;
+  seq?: number;
+  last_seq?: number;
+  message?: string;
+  [k: string]: unknown;
 }
 
 /** 会议 WS 事件回调集合（仅注册需要的） */
 export interface MeetingWsHandlers {
-  onSnapshot?: (state: any) => void;
+  onSnapshot?: (state: WsSnapshotState) => void;
   onAgentSpoke?: (msg: WsMessage) => void;
   onStageChanged?: (msg: WsMessage) => void;
   onRunStarted?: (msg: WsMessage) => void;
@@ -232,7 +236,7 @@ export class MeetingWsClient {
     }
     const h = this.handlers;
     switch (msg.type) {
-      case 'snapshot': h.onSnapshot?.(msg.payload || {}); break;
+      case 'snapshot': h.onSnapshot?.((msg.payload || {}) as WsSnapshotState); break;
       case 'replay.done': h.onReplayDone?.(msg.last_seq || 0); break;
       case 'agent.spoke': h.onAgentSpoke?.(msg); break;
       case 'stage.changed': h.onStageChanged?.(msg); break;

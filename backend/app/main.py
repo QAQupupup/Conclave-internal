@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
     # PostgreSQL 表结构初始化（SQLAlchemy ORM，含记忆子系统表）
     if settings.db_mode == "postgresql":
         async with async_session_factory() as session, session.bind.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(Base.metadata.create_all)  # type: ignore[union-attr]
 
     # 记忆子系统初始化（从 PG 恢复画像/特征/原始发言到内存）
     from app.memory.store import memory_store
@@ -230,7 +230,8 @@ def create_app() -> FastAPI:
 
     # 注册内置插件（Phase 1a：auth 插件接管认证）
     from app.plugins.builtin.auth import AuthPlugin
-    _registry.register(AuthPlugin())
+
+    _registry.register(AuthPlugin())  # type: ignore[arg-type]  # Protocol ClassVar 与实例变量不匹配，已知 mypy 限制
 
     # CORS：生产环境必须通过 CONCLAVE_CORS_ORIGINS 限制；开发环境默认允许常见本地端口
     _cors_origins_raw = os.environ.get("CONCLAVE_CORS_ORIGINS", "")

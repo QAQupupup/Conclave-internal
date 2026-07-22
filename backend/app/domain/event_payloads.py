@@ -10,12 +10,12 @@
 - EVENT_REGISTRY 映射 type 字符串 -> 模型类，运行时校验时查；
 - 未注册的事件类型仍按 dict 透传，不强校验（保持宽松兼容）。
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # 通用 Payload

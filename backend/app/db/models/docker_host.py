@@ -63,9 +63,7 @@ class DockerHostModel(Base, IntegerPrimaryKeyMixin, TimestampMixin, TenantScopeM
     deployed_meetings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # ["mtg-xxx", "mtg-yyy"]
 
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "name", name="uq_docker_host_tenant_name"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_docker_host_tenant_name"),)
 
 
 class DockerHostSecretModel(Base, IntegerPrimaryKeyMixin, TenantScopeMixin):

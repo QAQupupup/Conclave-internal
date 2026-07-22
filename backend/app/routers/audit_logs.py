@@ -37,7 +37,7 @@ async def query_audit_logs(
     from app.observability.audit import get_audit_logger
 
     logger = get_audit_logger()
-    logs = logger.query(
+    logs = await logger.query(
         limit=limit,
         offset=offset,
         action=action,
@@ -64,7 +64,7 @@ async def audit_stats(
     from app.observability.audit import get_audit_logger
 
     logger = get_audit_logger()
-    return logger.stats(since_minutes=since_minutes)
+    return await logger.stats(since_minutes=since_minutes)
 
 
 @router.get("/security-events")
@@ -81,9 +81,9 @@ async def security_events(
 
     logger = get_audit_logger()
     # 查询安全类别的事件
-    events = logger.query(limit=limit, category="安全")
+    events = await logger.query(limit=limit, category="安全")
     # 也包含 system.error
-    errors = logger.query(limit=limit, category="系统", status="error")
+    errors = await logger.query(limit=limit, category="系统", status="error")
     return {
         "security_events": events,
         "system_errors": errors,

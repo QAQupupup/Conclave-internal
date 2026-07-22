@@ -9,6 +9,7 @@
 全局异常处理器捕获 AppException 后返回统一 JSON 格式：
 {"error": {"code": "...", "message": "...", "details": {...}}}
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -110,6 +111,7 @@ class AppException(Exception):
 # 通用异常
 # ============================================================
 
+
 class ValidationError(AppException):
     def __init__(self, message: str = "请求参数验证失败", details: dict[str, Any] | None = None) -> None:
         super().__init__(message, code=ErrorCode.VALIDATION_ERROR, status_code=422, details=details)
@@ -139,6 +141,7 @@ class BadRequestError(AppException):
 # 认证授权异常
 # ============================================================
 
+
 class UnauthenticatedError(AppException):
     def __init__(self, message: str = "未认证，请先登录", details: dict[str, Any] | None = None) -> None:
         super().__init__(message, code=ErrorCode.UNAUTHENTICATED, status_code=401, details=details)
@@ -162,6 +165,7 @@ class QuotaExceededError(AppException):
 # ============================================================
 # 插件异常（向后兼容：继承 AppException）
 # ============================================================
+
 
 class PluginRejected(AppException):
     def __init__(self, message: str = "操作被插件拒绝", details: dict[str, Any] | None = None) -> None:

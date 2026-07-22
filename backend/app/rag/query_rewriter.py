@@ -33,9 +33,7 @@ async def rewrite_query(query: str) -> list[str]:
     from app.tenants.settings_override import resolve_llm_config
 
     _tid = get_tenant_id()
-    base_url, api_key, model = resolve_llm_config(
-        _tid, settings.llm_base_url, settings.llm_api_key, settings.llm_model
-    )
+    base_url, api_key, model = resolve_llm_config(_tid, settings.llm_base_url, settings.llm_api_key, settings.llm_model)
     if not base_url or not api_key:
         return [query]
 

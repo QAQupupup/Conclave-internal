@@ -1,4 +1,5 @@
 """插件核心类型单元测试。"""
+
 from __future__ import annotations
 
 from app.plugins.core.types import (

@@ -88,7 +88,7 @@ class MemoryStore:
 
             async with async_session_factory() as session:
                 async with session.bind.begin() as conn:
-                    await conn.run_sync(RawMemoryModel.metadata.create_all)
+                    await conn.run_sync(RawMemoryModel.metadata.create_all)  # type: ignore[union-attr]
                 await self._load_profiles(session)
                 await self._load_features(session)
                 await self._load_raw(session)

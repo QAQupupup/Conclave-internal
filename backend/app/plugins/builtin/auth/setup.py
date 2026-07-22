@@ -9,6 +9,7 @@ Setup Token 机制：
 - 速率限制：5次/10分钟/IP
 - 环境变量 CONCLAVE_SETUP_ADMIN_PASSWORD 或 CONCLAVE_ADMIN_PASSWORD 设置时，init_auth 已自动创建管理员，跳过 /setup 流程
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -82,9 +83,9 @@ async def _create_admin_user(username: str, password: str, display_name: str = "
     async with async_session_factory() as session:
         try:
             # 查询默认租户 ID（在插件 on_startup 中已创建）
-            tenant_id_row = (await session.execute(
-                text("SELECT id FROM tenants WHERE slug = 'default'")
-            )).mappings().first()
+            tenant_id_row = (
+                (await session.execute(text("SELECT id FROM tenants WHERE slug = 'default'"))).mappings().first()
+            )
             tenant_id = tenant_id_row["id"] if tenant_id_row else None
 
             await session.execute(
@@ -192,6 +193,7 @@ async def do_setup(req: SetupRequest, request: Request) -> SetupResponse:
     # 重新加载用户缓存
     try:
         from app.auth import _load_users_from_db
+
         await _load_users_from_db()
     except Exception:
         pass
@@ -201,7 +203,9 @@ async def do_setup(req: SetupRequest, request: Request) -> SetupResponse:
         "setup.admin_created",
         "success",
         {"username": req.username, "display_name": display_name},
-        ip=ip, username=req.username, user_id=str(user["id"]),
+        ip=ip,
+        username=req.username,
+        user_id=str(user["id"]),
     )
 
     return SetupResponse(

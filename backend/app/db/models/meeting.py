@@ -24,8 +24,8 @@ from app.db.base import (
     CreatedAtMixin,
     IntegerPrimaryKeyMixin,
     TenantScopeMixin,
-    UUIDPrimaryKeyMixin,
     UpdatedAtMixin,
+    UUIDPrimaryKeyMixin,
 )
 
 if TYPE_CHECKING:

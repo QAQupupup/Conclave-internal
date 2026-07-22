@@ -1,4 +1,5 @@
 """插件钩子 Mixin 协议。"""
+
 from __future__ import annotations
 
 from app.plugins.core.hooks.lifecycle import LifecycleMixin, MiddlewareMixin, RouterMixin

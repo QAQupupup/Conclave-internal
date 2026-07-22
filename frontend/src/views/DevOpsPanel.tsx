@@ -13,8 +13,31 @@ import {
   DockerHost,
   DockerHostInput,
 } from '../lib/api';
-import { useApp } from '../state/AppContext';
+import { useApp, type ConfirmOptions } from '../state/AppContext';
+import type { ContainerInfo } from '../types/meeting';
 import './DevOpsPanel.css';
+
+/** 从 catch 的 unknown 错误中提取 message */
+function getErrMessage(e: unknown, fallback: string): string {
+  if (e instanceof Error) return e.message || fallback;
+  return fallback;
+}
+
+/** Docker 主机预设配置项 */
+interface DockerPreset {
+  key: string;
+  config: {
+    label?: string;
+    description?: string;
+    connection_type?: string;
+    docker_host?: string;
+    ssh_user?: string;
+    ssh_port?: number;
+    region?: string;
+    tags?: string[];
+    tls_verify?: boolean;
+  };
+}
 
 const CONNECTION_TYPE_LABELS: Record<string, string> = {
   local: '本地 Socket',
@@ -42,19 +65,19 @@ export default function DevOpsPanel() {
   const [showAdd, setShowAdd] = useState(false);
   const [showScript, setShowScript] = useState(false);
   const [setupScript, setSetupScript] = useState('');
-  const [presets, setPresets] = useState<any[]>([]);
-  const [connectionTypes, setConnectionTypes] = useState<any[]>([]);
+  const [presets, setPresets] = useState<DockerPreset[]>([]);
+  const [connectionTypes, setConnectionTypes] = useState<string[]>([]);
   const [checkingId, setCheckingId] = useState<number | null>(null);
   const [selectedHost, setSelectedHost] = useState<DockerHost | null>(null);
-  const [hostContainers, setHostContainers] = useState<any[]>([]);
+  const [hostContainers, setHostContainers] = useState<ContainerInfo[]>([]);
   const [showContainers, setShowContainers] = useState(false);
 
   const loadHosts = useCallback(async () => {
     try {
       const data = await apiListDockerHosts();
       setHosts(data.hosts);
-    } catch (e: any) {
-      toast?.(e.message || '加载主机列表失败', 'error');
+    } catch (e: unknown) {
+      toast?.(getErrMessage(e, '加载主机列表失败'), 'error');
     } finally {
       setLoading(false);
     }
@@ -63,7 +86,7 @@ export default function DevOpsPanel() {
   useEffect(() => {
     loadHosts();
     apiGetDockerPresets().then(d => {
-      setPresets(d.presets || []);
+      setPresets((d.presets || []) as DockerPreset[]);
       setConnectionTypes(d.connection_types || []);
     }).catch(() => {});
   }, [loadHosts]);
@@ -74,8 +97,8 @@ export default function DevOpsPanel() {
       await apiHealthCheckHost(id);
       toast?.('健康检查完成', 'success');
       await loadHosts();
-    } catch (e: any) {
-      toast?.(e.message || '健康检查失败', 'error');
+    } catch (e: unknown) {
+      toast?.(getErrMessage(e, '健康检查失败'), 'error');
     } finally {
       setCheckingId(null);
     }
@@ -86,8 +109,8 @@ export default function DevOpsPanel() {
       const r = await apiHealthCheckAllHosts();
       toast?.(`已检查 ${r.checked} 台主机`, 'success');
       await loadHosts();
-    } catch (e: any) {
-      toast?.(e.message || '批量检查失败', 'error');
+    } catch (e: unknown) {
+      toast?.(getErrMessage(e, '批量检查失败'), 'error');
     }
   };
 
@@ -103,8 +126,8 @@ export default function DevOpsPanel() {
       await apiDeleteDockerHost(host.id);
       toast?.('主机已删除', 'success');
       await loadHosts();
-    } catch (e: any) {
-      toast?.(e.message || '删除失败', 'error');
+    } catch (e: unknown) {
+      toast?.(getErrMessage(e, '删除失败'), 'error');
     }
   };
 
@@ -112,8 +135,8 @@ export default function DevOpsPanel() {
     try {
       await apiUpdateDockerHost(host.id, { enabled: !host.enabled });
       await loadHosts();
-    } catch (e: any) {
-      toast?.(e.message || '更新失败', 'error');
+    } catch (e: unknown) {
+      toast?.(getErrMessage(e, '更新失败'), 'error');
     }
   };
 
@@ -123,9 +146,9 @@ export default function DevOpsPanel() {
     try {
       const r = await apiGetHostContainers(host.id);
       setHostContainers(r.containers || []);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setHostContainers([]);
-      toast?.(e.message || '获取容器列表失败', 'error');
+      toast?.(getErrMessage(e, '获取容器列表失败'), 'error');
     }
   };
 
@@ -135,8 +158,8 @@ export default function DevOpsPanel() {
       try {
         const r = await apiGetDockerSetupScript();
         setSetupScript(r.script);
-      } catch (e: any) {
-        toast?.(e.message || '加载脚本失败', 'error');
+      } catch (e: unknown) {
+        toast?.(getErrMessage(e, '加载脚本失败'), 'error');
       }
     }
   };
@@ -332,7 +355,7 @@ export default function DevOpsPanel() {
                     <tr><th>ID</th><th>名称</th><th>镜像</th><th>状态</th><th>端口</th></tr>
                   </thead>
                   <tbody>
-                    {hostContainers.map((c: any) => (
+                    {hostContainers.map((c) => (
                       <tr key={c.id}>
                         <td className="mono">{c.id}</td>
                         <td>{c.name}</td>
@@ -354,12 +377,12 @@ export default function DevOpsPanel() {
 
 /* ─── 添加主机弹窗 ─── */
 function AddHostModal({ presets, connectionTypes, onClose, onCreated, toast }: {
-  presets: any[];
-  connectionTypes: any[];
+  presets: DockerPreset[];
+  connectionTypes: string[];
   onClose: () => void;
   onCreated: () => void;
   toast?: (msg: string, kind?: ToastKind, duration?: number) => void;
-  requestConfirm?: any;
+  requestConfirm?: (opts: ConfirmOptions) => Promise<boolean>;
 }) {
   const [selectedPreset, setSelectedPreset] = useState<string>('ssh_key_root');
   const [form, setForm] = useState<DockerHostInput>({
@@ -385,7 +408,7 @@ function AddHostModal({ presets, connectionTypes, onClose, onCreated, toast }: {
 
   const applyPreset = (key: string) => {
     setSelectedPreset(key);
-    const preset = presets.find((p: any) => p.key === key);
+    const preset = presets.find((p) => p.key === key);
     if (!preset) return;
     const cfg = preset.config;
     setForm(prev => ({
@@ -405,7 +428,7 @@ function AddHostModal({ presets, connectionTypes, onClose, onCreated, toast }: {
     if (presets.length > 0) applyPreset('ssh_key_root');
   }, [presets]);
 
-  const update = (k: keyof DockerHostInput, v: any) => setForm(prev => ({ ...prev, [k]: v }));
+  const update = (k: keyof DockerHostInput, v: string | number | boolean | string[]) => setForm(prev => ({ ...prev, [k]: v }) as DockerHostInput);
 
   const addTag = () => {
     const t = tagInput.trim();
@@ -426,8 +449,8 @@ function AddHostModal({ presets, connectionTypes, onClose, onCreated, toast }: {
     try {
       await apiCreateDockerHost(form);
       onCreated();
-    } catch (e: any) {
-      toast?.(e.message || '添加失败', 'error');
+    } catch (e: unknown) {
+        toast?.(getErrMessage(e, '添加失败'), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -459,7 +482,7 @@ function AddHostModal({ presets, connectionTypes, onClose, onCreated, toast }: {
           <div className="form-section">
             <label className="form-label">选择配置模板</label>
             <div className="presets-grid">
-              {presets.map((p: any) => (
+              {presets.map((p) => (
                 <button
                   key={p.key}
                   className={`preset-card ${selectedPreset === p.key ? 'selected' : ''}`}

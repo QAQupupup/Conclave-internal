@@ -7,6 +7,7 @@
 - GET/HEAD/OPTIONS 请求不校验 CSRF
 - 公开路径（/auth/login、/setup 等）不校验 CSRF
 """
+
 from __future__ import annotations
 
 import hmac

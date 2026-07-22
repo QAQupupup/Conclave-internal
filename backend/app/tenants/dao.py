@@ -18,6 +18,7 @@ where = "owner_username = :owner AND tenant_id = :tenant_id"
 # 系统租户下 tenant_id = :tenant_id 被替换为 TRUE
 ```
 """
+
 from __future__ import annotations
 
 from typing import Any

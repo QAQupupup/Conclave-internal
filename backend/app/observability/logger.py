@@ -15,10 +15,12 @@
 - 不强制替换所有现有 logging.getLogger 调用，仅用于新代码和关键路径；
 - 审计事件（auth/权限/敏感操作）仍走 app.observability.audit，不合并到这里。
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, MutableMapping
+from collections.abc import MutableMapping
+from typing import Any
 
 # 日志 -> log_bus 的最低级别（warning 及以上自动旁路）
 _BUS_MIN_LEVEL = logging.WARNING
@@ -29,11 +31,11 @@ def _context_extras() -> dict[str, Any]:
     out: dict[str, Any] = {}
     try:
         from app.context import (
+            get_agent_role,
             get_meeting_id,
             get_request_id,
-            get_user_id,
-            get_agent_role,
             get_runner_session_id,
+            get_user_id,
         )
 
         rid = get_request_id()
@@ -69,17 +71,13 @@ class _ContextLogger(logging.LoggerAdapter):
 
     def __init__(self, logger: logging.Logger, extra: dict[str, Any]) -> None:
         super().__init__(logger, extra)
-        self.name = logger.name
 
     def process(self, msg: str, kwargs: MutableMapping[str, Any]) -> tuple[str, MutableMapping[str, Any]]:
         base_extra = dict(self.extra or {}) if self.extra else {}
         base_extra.update(_context_extras())
         existing = kwargs.get("extra")
-        if existing:
-            # kwargs.extra 优先级最高
-            merged = {**base_extra, **existing}
-        else:
-            merged = base_extra
+        # kwargs.extra 优先级最高
+        merged = {**base_extra, **existing} if existing else base_extra
         kwargs["extra"] = merged
         return msg, kwargs
 

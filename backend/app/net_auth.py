@@ -40,7 +40,8 @@ async def init_auth_table() -> None:
         for stmt in ddl_statements:
             await session.execute(text(stmt))
         # 确保 tenant_id 列存在（兼容旧表）
-        await session.execute(text("""
+        await session.execute(
+            text("""
             DO $$
             BEGIN
                 IF NOT EXISTS (
@@ -50,11 +51,14 @@ async def init_auth_table() -> None:
                     ALTER TABLE net_auth_requests ADD COLUMN tenant_id INTEGER;
                 END IF;
             END$$;
-        """))
+        """)
+        )
         # 创建 tenant_id 索引
-        await session.execute(text("""
+        await session.execute(
+            text("""
             CREATE INDEX IF NOT EXISTS idx_auth_tenant ON net_auth_requests(tenant_id)
-        """))
+        """)
+        )
         await session.commit()
 
 
@@ -256,9 +260,7 @@ async def get_pending_for_meeting(meeting_id: str) -> list[dict[str, Any]]:
             )
         else:
             result = await session.execute(
-                text(
-                    "SELECT * FROM net_auth_requests WHERE meeting_id = :meeting_id AND status = 'pending'"
-                ),
+                text("SELECT * FROM net_auth_requests WHERE meeting_id = :meeting_id AND status = 'pending'"),
                 {"meeting_id": meeting_id},
             )
         rows = result.mappings().all()
