@@ -33,6 +33,9 @@ jobs:
           python -m pip install --upgrade pip --index-url ${{ env.PIP_INDEX_URL }}
           pip install -r requirements.lock
 
+      - name: Print ruff version (debug)
+        run: ruff --version
+
       - name: Lint with ruff
         run: ruff check app conclave_core tests
 

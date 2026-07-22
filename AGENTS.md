@@ -373,6 +373,8 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 2. mypy 存在 26 个历史遗留 errors，CI 的 mypy 步骤必然失败，开发者形成"CI 红是正常的"错误习惯
 3. ruff format 未在本地执行，67 个文件格式不规范，CI 的 `ruff format --check` 必然失败
 4. CI 分支触发配置过时（引用已合并的 `refactor/v3-manager-agent-runtime` 分支）
+5. **ruff 版本漂移**：本地 ruff 版本与 CI（`requirements.lock`）不一致，格式化结果不同，本地通过但 CI 失败
+6. **依赖冲突未在本地暴露**：`requirements.lock` 中依赖版本冲突（如 `websockets==12.0` vs `uvicorn[standard]` 需 `>=13.0`），Windows pip 静默忽略，Linux CI 失败
 
 **规则（强制，违反等同违反工程规范）**：
 1. **Pre-commit hook 必须激活**。首次克隆仓库后执行 `bash scripts/install-hooks.sh`。Hook 会自动运行 ruff check + ruff format --check（后端）和 tsc + eslint（前端），任何一项失败阻止 commit。
@@ -384,14 +386,21 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 4. **CI 分支触发配置必须与当前主干分支一致**。当前主干为 `main`，CI 触发分支为 `main`。如主干分支变更，必须同步更新 `.github/workflows/ci.yml`。
 5. **`--no-verify` 跳过 hook 仅限紧急情况**（如修复 CI 本身故障），正常开发不得使用。使用后必须在后续 commit 中补回被跳过的检查。
 6. **CI 红灯必须在 24 小时内修复**。不允许 CI 长期红灯继续开发。如果 CI 红灯是历史遗留（如 mypy），应在 CI 配置中标注 `continue-on-error` 而非放任不管。
+7. **ruff 版本必须三处一致**（`requirements.lock` → `.pre-commit-config.yaml` `rev` → 本地安装版本）。修改 ruff 版本时必须同步更新这三处。Pre-commit hook 会自动校验本地版本与 `requirements.lock` 是否一致，不一致时阻止提交并提示安装正确版本。
+8. **依赖冲突必须在本地验证**。修改 `requirements.txt` / `requirements.lock` 后，必须运行 `pip install --dry-run -r requirements.lock` 验证无冲突。Pre-commit hook 已内置此检查（`requirements-lock-validate`）。
+9. **ruff 配置变更时必须全量检查**。当 `requirements.lock` 或 `pyproject.toml` 变更时，Pre-commit hook 会自动对全部文件执行 ruff check + format，而非仅检查暂存文件——因为版本/规则变更可能影响所有文件的格式。
 
 **Pre-commit hook 配置说明**：
 - Hook 文件：`.git/hooks/pre-commit`（由 `scripts/install-hooks.sh` 生成）
 - 不依赖 `pre-commit` pip 包，直接调用 `ruff` 和 `npx tsc`/`npm run lint`
 - 不运行 pytest（需要 PostgreSQL/Redis，违反 §0.5.2，由 CI 的 `backend-integration-tests` job 负责）
-- `.pre-commit-config.yaml` 保留作为 `pre-commit` 包的配置（如未来安装了 `pre-commit` 包可使用）
+- `.pre-commit-config.yaml` 保留作为 `pre-commit` 包的配置（`rev` 必须与 `requirements.lock` 中 ruff 版本一致）
+- **三层防护**：
+  1. **版本校验**：提交前校验本地 ruff 版本 == `requirements.lock` 版本，不一致直接阻止提交
+  2. **配置变更全量检查**：`requirements.lock` / `pyproject.toml` 变更时，对全部文件执行 ruff check + format
+  3. **常规暂存文件检查**：正常提交时只检查暂存文件（ruff check + format + tsc + eslint + compose 校验）
 
-**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。
+**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。后续追加修复：websockets 依赖冲突（12.0→13.0）、RUF009+UP038 规则忽略、ruff 版本对齐（0.5.0→0.15.22 三处同步）、pre-commit hook 三层防护（版本校验+全量检查+暂存检查）。
 
 ---
 
