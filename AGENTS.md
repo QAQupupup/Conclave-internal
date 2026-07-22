@@ -83,7 +83,7 @@
 ### 2.1 后端
 - [ ] `cd backend && python -m ruff check app conclave_core tests` → **0 errors**
 - [ ] `cd backend && python -m ruff format --check app conclave_core tests` → **0 files need reformatting**
-- [ ] `cd backend && python -m mypy --config-file pyproject.toml app conclave_core` → **0 新增 errors**（历史遗留 25 个 errors 已知，见 §4.18，不得新增）
+- [ ] `cd backend && python -m mypy --config-file pyproject.toml app conclave_core` → **0 新增 errors**（mypy 2.3.0 本地显示 0 errors，见 §4.18，不得新增）
 - [ ] 若改了 ORM 模型，确认 `app/dao/db_init.py` 的 DDL 与模型字段一致（尤其是新增列/默认值/JSONB）
 - [ ] 若改了 API 路由，确认所有路径都在前端 `vite.config.ts` 的 proxy 列表和 `nginx.conf` 中
 
@@ -370,7 +370,7 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 **根因**：
 1. Pre-commit hook 未安装/未激活，本地零卡点，所有问题涌入 CI
-2. mypy 存在 26 个历史遗留 errors，CI 的 mypy 步骤必然失败，开发者形成"CI 红是正常的"错误习惯
+2. mypy 存在历史遗留 errors，CI 的 mypy 步骤必然失败，开发者形成"CI 红是正常的"错误习惯（现已设为 `continue-on-error: true` + 版本对齐到 2.3.0）
 3. ruff format 未在本地执行，67 个文件格式不规范，CI 的 `ruff format --check` 必然失败
 4. CI 分支触发配置过时（引用已合并的 `refactor/v3-manager-agent-runtime` 分支）
 5. **ruff 版本漂移**：本地 ruff 版本与 CI（`requirements.lock`）不一致，格式化结果不同，本地通过但 CI 失败
@@ -381,12 +381,12 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 2. **禁止提交已知会导致 CI 红的代码**。提交前必须确认：
    - `ruff check` 通过（0 errors）
    - `ruff format --check` 通过（0 files need reformatting）
-   - `mypy` 不引入**新的** errors（历史遗留 26 个已知，CI 中 mypy 已设为 `continue-on-error`，但不得新增）
-3. **mypy 历史遗留 errors 是已知存量**（25 个，分布在 13 个文件），CI 中 mypy 步骤设为 `continue-on-error: true`，不阻塞 CI。但每次提交不得新增 mypy errors——新增的必须当场修复。
+   - `mypy` 不引入**新的** errors（CI 中 mypy 已设为 `continue-on-error` + 版本对齐到 2.3.0，不得新增）
+3. **mypy 历史遗留 errors 是已知存量**（此前约 25 个，分布在 13 个文件），CI 中 mypy 步骤已设为 `continue-on-error: true`，不阻塞 CI。mypy 版本已从 1.10.0 对齐到 2.3.0（与本地一致），本地 mypy 2.3.0 显示 0 errors。如 CI 中 mypy 2.3.0 也通过，可在后续移除 `continue-on-error`。但每次提交不得新增 mypy errors——新增的必须当场修复。
 4. **CI 分支触发配置必须与当前主干分支一致**。当前主干为 `main`，CI 触发分支为 `main`。如主干分支变更，必须同步更新 `.github/workflows/ci.yml`。
 5. **`--no-verify` 跳过 hook 仅限紧急情况**（如修复 CI 本身故障），正常开发不得使用。使用后必须在后续 commit 中补回被跳过的检查。
 6. **CI 红灯必须在 24 小时内修复**。不允许 CI 长期红灯继续开发。如果 CI 红灯是历史遗留（如 mypy），应在 CI 配置中标注 `continue-on-error` 而非放任不管。
-7. **ruff 版本必须三处一致**（`requirements.lock` → `.pre-commit-config.yaml` `rev` → 本地安装版本）。修改 ruff 版本时必须同步更新这三处。Pre-commit hook 会自动校验本地版本与 `requirements.lock` 是否一致，不一致时阻止提交并提示安装正确版本。
+7. **ruff 和 mypy 版本必须三处一致**（`requirements.lock` → `.pre-commit-config.yaml` `rev` → 本地安装版本）。修改 ruff/mypy 版本时必须同步更新这三处。Pre-commit hook 会自动校验本地 ruff 版本与 `requirements.lock` 是否一致，不一致时阻止提交并提示安装正确版本。mypy 虽不在 hook 中运行，但版本不一致同样会导致本地通过 CI 失败。
 8. **依赖冲突必须在本地验证**。修改 `requirements.txt` / `requirements.lock` 后，必须运行 `pip install --dry-run -r requirements.lock` 验证无冲突。Pre-commit hook 已内置此检查（`requirements-lock-validate`）。
 9. **ruff 配置变更时必须全量检查**。当 `requirements.lock` 或 `pyproject.toml` 变更时，Pre-commit hook 会自动对全部文件执行 ruff check + format，而非仅检查暂存文件——因为版本/规则变更可能影响所有文件的格式。
 
@@ -400,7 +400,7 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
   2. **配置变更全量检查**：`requirements.lock` / `pyproject.toml` 变更时，对全部文件执行 ruff check + format
   3. **常规暂存文件检查**：正常提交时只检查暂存文件（ruff check + format + tsc + eslint + compose 校验）
 
-**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。后续追加修复：websockets 依赖冲突（12.0→13.0）、RUF009+UP038 规则忽略、ruff 版本对齐（0.5.0→0.15.22 三处同步）、pre-commit hook 三层防护（版本校验+全量检查+暂存检查）。
+**参考修复**：本次 CI 审查修复了 5 个 ruff check errors、67 个 ruff format 文件、1 个新增 mypy error、CI 分支触发过时、pre-commit hook 未安装。后续追加修复：websockets 依赖冲突（12.0→13.0）、RUF009+UP038 规则忽略、ruff 版本对齐（0.5.0→0.15.22 三处同步）、mypy 版本对齐（1.10.0→2.3.0 + continue-on-error）、pre-commit hook 三层防护（版本校验+全量检查+暂存检查）。
 
 ---
 
@@ -514,4 +514,4 @@ seq 39->38 逆序。修复：append 后按 seq 排序。
 
 ---
 
-> 本文件最后更新：2026-07-22（§4.18 CI 稳定性纪律、§2 Pre-Flight Checklist 新增 ruff format 检查和 pre-commit hook 说明、CI workflow 修复分支触发/mypy continue-on-error/pre-commit hook 安装）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-22（§4.18 新增规则 7/8/9 版本同步纪律 + 三层防护说明、ruff 0.5.0→0.15.22 三处对齐、mypy 1.10.0→2.3.0 对齐 + continue-on-error、pre-commit hook 版本校验+全量检查、CI 添加 ruff/mypy 版本打印步骤）。若发现新的高频坑，追加到第 4 节并更新日期。
