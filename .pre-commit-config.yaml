@@ -80,3 +80,11 @@ repos:
         files: ^scripts/oss_manifest\.json$
         pass_filenames: false
         stages: [commit]
+
+      - id: requirements-lock-validate
+        name: Validate requirements.lock dependency compatibility
+        entry: bash -c 'cd backend && output=$(pip install --dry-run -r requirements.lock 2>&1); if echo "$output" | grep -q "conflicting dependencies\|has conflicting\|Cannot install.*because"; then echo "requirements.lock has dependency conflicts:"; echo "$output" | grep -A2 "ERROR"; exit 1; else echo "requirements.lock dependency check OK"; fi'
+        language: system
+        files: ^backend/requirements\.(lock|txt)$
+        pass_filenames: false
+        stages: [commit]
