@@ -64,6 +64,8 @@ ignore = [
     "RUF001", # ambiguous-unicode-character-string (中文字符误报)
     "RUF002", # ambiguous-unicode-character-docstring
     "RUF003", # ambiguous-unicode-character-comment
+    "RUF009", # Do not perform function call in dataclass defaults (config.py 的 _env() 模式是故意的)
+    "UP038",  # Use X | Y in isinstance (该规则已在 ruff 0.7+ 移除，元组写法完全合法)
 ]
 
 [tool.mypy]
