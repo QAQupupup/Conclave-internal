@@ -247,6 +247,7 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
     # ADR-010: 门禁驱动回流（supplement/re_examine）
     # 达到最大轮次时强制推进，防止无限循环
     state.gate_pending_action = None
+    nxt: Stage = Stage.PRODUCE
     if gate_round <= MAX_GATE_ROUNDS and gate_decision == "supplement" and target_roles:
         # 回流到 intra_team：仅让指定角色补充论点
         state.gate_pending_action = {
@@ -269,13 +270,14 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
         nxt = Stage.CROSS_TEAM
     else:
         # 门禁通过或达轮次上限：推进到下一阶段
-        nxt = _next_stage(Stage.CROSS_TEAM, state.flow_plan)
-        if nxt == Stage.EVIDENCE_CHECK and not conflicts and state.flow_plan == "standard":
-            nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan) or Stage.PRODUCE
+        next_s = _next_stage(Stage.CROSS_TEAM, state.flow_plan)
+        if next_s == Stage.EVIDENCE_CHECK and not conflicts and state.flow_plan == "standard":
+            next_s = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan)
+        nxt = next_s or Stage.PRODUCE
 
     await _moderator_assess_borrow(state, Stage.CROSS_TEAM)
     await _let_borrowed_agents_speak(state, Stage.CROSS_TEAM)
-    state.stage = nxt or Stage.PRODUCE
+    state.stage = nxt
     return state
 
 

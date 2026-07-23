@@ -21,8 +21,8 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
     set_current_trace(state.llm_trace)
 
     # ADR-010: 检测 re_examine 模式
-    reex_info = state.gate_pending_action
-    is_reexamine = bool(reex_info and reex_info.get("action") == "re_examine")
+    reex_info = state.gate_pending_action or {}
+    is_reexamine = reex_info.get("action") == "re_examine"
     reexamine_anchor = ""
     if is_reexamine:
         weak_dims = reex_info.get("weak_dimensions", [])

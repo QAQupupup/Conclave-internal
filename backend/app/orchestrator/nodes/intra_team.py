@@ -37,8 +37,8 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         ]
 
     # ADR-010: 检测 supplement 模式
-    supplement_info = state.gate_pending_action
-    is_supplement = bool(supplement_info and supplement_info.get("action") == "supplement")
+    supplement_info = state.gate_pending_action or {}
+    is_supplement = supplement_info.get("action") == "supplement"
     supplement_roles: set[str] = set()
     supplement_reason = ""
     if is_supplement:
