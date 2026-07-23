@@ -83,6 +83,18 @@
     {
       "src": "assets",
       "dst": "assets"
+    },
+    {
+      "src": ".github/ISSUE_TEMPLATE",
+      "dst": ".github/ISSUE_TEMPLATE"
+    },
+    {
+      "src": ".github/CONTRIBUTING.md",
+      "dst": ".github/CONTRIBUTING.md"
+    },
+    {
+      "src": ".github/PULL_REQUEST_TEMPLATE.md",
+      "dst": ".github/PULL_REQUEST_TEMPLATE.md"
     }
   ],
   "delete_patterns": [
@@ -101,7 +113,7 @@
     "PROJECT_CONVENTIONS.md",
     "AGENTS.md",
     "scripts",
-    ".github",
+    ".github/workflows",
     "backend/tests",
     "backend/.pytest_cache",
     "backend/.trash",
@@ -124,14 +136,7 @@
     "backend/conclave_core/setup.py",
     "backend/conclave_core/*.py"
   ],
-  "replacements": {
-    "README.md": [
-      [
-        ".trae/documents/v3-manager-agent-runtime-implementation-plan.md",
-        "docs/architecture.md"
-      ]
-    ]
-  },
+  "replacements": {},
   "audit_report_name": "AUDIT_REPORT.md",
   "state": {
     "backend/app/config.py": "1a6518ba34ab5a5d61c313d4179b3522c93ef2de4e6919700f70e21bced0225a",

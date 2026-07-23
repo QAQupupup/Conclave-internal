@@ -10,135 +10,140 @@
 
 **多智能体结构化决策系统** — 让 AI Agent 像开会一样产出高质量决策
 
-*Multi-Agent Structured Decision-Making System. Run AI agents through a formal meeting pipeline — clarify, debate, evidence-check, arbitrate, deliver.*
+*Multi-Agent Structured Decision-Making System. Run AI agents through a formal meeting pipeline: clarify, debate, evidence-check, arbitrate, and deliver.*
 
 </div>
 
-> 名称取自 "Conclave（闭门会议）"—— 一场有流程、有证据、有裁决、有落地交付的 AI 协作会议。每个 Agent 拥有独立人格、视角与风险偏好，通过多角色结构化辩论消除单一大模型的盲区，保障产出质量与可靠性。
+> Conclave（闭门会议）：一场有流程、有证据、有裁决、有落地交付的 AI 协作会议。每个 Agent 拥有独立视角与风险偏好，通过多角色结构化辩论消除单一大模型的盲区，保障产出质量与可靠性。
+
+---
 
 ## 界面预览
 
 <table>
   <tr>
-    <td width="50%" align="center"><img src="assets/screenshots/meeting-discussion.jpg" alt="会议讨论界面" /><br/><sub>多Agent结构化辩论</sub></td>
-    <td width="50%" align="center"><img src="assets/screenshots/topology-graph.jpg" alt="流程拓扑图" /><br/><sub>六阶段会议管线</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/meeting-discussion.jpg" alt="会议讨论界面" /><br><sub>多 Agent 结构化辩论</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/topology-graph.jpg" alt="流程拓扑图" /><br><sub>服务联通视图</sub></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><img src="assets/screenshots/produce-output.jpg" alt="产出物界面" /><br/><sub>PRD 与 OpenAPI 产出</sub></td>
-    <td width="50%" align="center"><img src="assets/screenshots/metrics-dashboard.jpg" alt="指标面板" /><br/><sub>实时日志与质量指标</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/produce-output.jpg" alt="产出物界面" /><br><sub>PRD 与 OpenAPI 产出</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/metrics-dashboard.jpg" alt="指标面板" /><br><sub>实时日志与质量指标</sub></td>
   </tr>
 </table>
 
 ---
 
-## 为什么选择 Conclave？
+## 与通用方案的差异
 
-与单模型对话和通用多 Agent 框架的核心差异：
-
-| 维度 | 单模型对话（ChatGPT/Claude） | 通用 Agent 框架（CrewAI/AutoGen） | **Conclave** |
+| 维度 | 单模型对话 | 通用 Agent 框架 | **Conclave** |
 |---|---|---|---|
-| 决策模式 | 单视角输出 | 角色分工但缺结构化流程 | **六阶段会议管线**：澄清→辩论→证据→仲裁→交付 |
-| 观点质量 | 受限于模型自身偏见 | 依赖 prompt 工程，易产生群体思维 | **多角色对抗辩论**，强制暴露冲突点 |
-| 证据诚实性 | 幻觉率高，无来源校验 | 可选工具调用，无强制校验 | **证据强制校验**：无证据时标注 `strength=none`，诚实降级置信度 |
-| 产出物 | 文本回复 | 文本回复，需自行接后续 | **直接产出可交付物**：PRD + OpenAPI spec、可部署服务、数据分析报告 |
-| 可观测性 | 黑盒 | 基础日志 | **全链路追踪**：实时日志面板、Token/成本监控、漂移检查、审计日志 |
-| 部署门槛 | SaaS 依赖 | 需要自行编排基础设施 | **Docker Compose 一键启动**，全容器化，零本地依赖 |
+| 决策模式 | 单视角输出 | 角色分工但缺流程 | **六阶段会议管线**：澄清→辩论→证据→仲裁→交付 |
+| 观点质量 | 受限于模型偏见 | 易产生群体思维 | **多角色对抗辩论**，强制暴露冲突点 |
+| 证据诚实性 | 幻觉率高 | 可选工具调用 | **证据强制校验**：无证据时诚实降级置信度 |
+| 产出物 | 文本回复 | 文本回复 | **可交付物**：PRD+OpenAPI、可部署服务、分析报告 |
+| 可观测性 | 黑盒 | 基础日志 | **全链路追踪**：日志、Token/成本、漂移检查、审计 |
+| 部署门槛 | SaaS 依赖 | 需自行编排 | **Docker Compose 一键启动**，全容器化 |
 
-**核心设计原则**：不追求 Agent 数量多，而追求决策质量高。宁可诚实标注"证据不足，低置信度"，也不编造伪引用。
+核心原则：不追求 Agent 数量多，而追求决策质量高。宁可诚实标注"证据不足"，也不编造伪引用。
 
 ---
 
 ## 核心特性
 
-### 多Agent协作系统
-- **独立人格Agent**：7种预设角色（产品架构师、工程师、安全专家、UX设计师、数据工程师、市场专家、主持人），每个角色有独立的perspective（视角）、risk_appetite（风险偏好）、evidence_preference（证据偏好）
-- **动态Agent扩缩**：支持自动借调(borrow)机制，主持人可根据议题复杂度动态申请补充专家角色
-- **六阶段会议管线**：
-  1. **clarify**（澄清）—— 主持人拆解议题、明确团队组成
-  2. **intra_team**（队内讨论）—— 各角色独立发表观点，带风险等级和证据标签
-  3. **cross_team**（跨队辩论）—— 识别冲突点，无冲突时汇总各方共识
-  4. **evidence_check**（证据校验）—— 对照证据验证论点
-  5. **arbitrate**（仲裁裁决）—— 主持人裁决争议、采纳论点
-  6. **produce**（产出交付）—— 生成最终产出物
-- **五层确定性保障**：参数约束、结论锁定、漂移检查（drift check）、全链路追踪、自动降级兜底
-
-### 数据科学与代码执行
-- **Docker沙箱隔离**：Sibling Containers架构，代码执行在独立容器中，安全隔离
-- **多主机分布式调度**：支持注册多台远程Docker主机（SSH密钥/密码/TCP+TLS/Unix Socket），内置5种调度策略（least_loaded/local_first/tag_match/manual/round_robin）
-- **运维面板**：可视化管理Docker主机集群，实时查看CPU/内存/磁盘/容器状态，一键健康检查
-- **Python数据科学环境**：预装Pandas、NumPy、Matplotlib等库
-- **自动代码修复**：代码执行失败时自动分析错误并修复（RefineLoop，默认最多5轮）
-- **Web搜索能力**：Agent可通过BrowserTool主动搜索资料支撑论点
-
-### 可部署服务交付
-- **从会议到服务**：会议结论可直接扩展为可部署的完整服务
-- **自动生成**：FastAPI后端 + React前端 + Docker配置 + docker-compose编排
-- **沙箱部署**：服务自动部署到Docker沙箱中运行
-- **直接访问**：部署完成后返回可访问URL和管理员凭证
-
-### 实时可观测性
-- **实时日志面板**：右侧可折叠面板，实时显示后端所有节点执行日志
-- **级别着色**：ERROR红色、WARNING橙色、INFO常规、DEBUG灰色
-- **进度追踪**：Produce阶段显示实时进度条（LLM生成→代码审查→沙箱部署）
-- **组件联通视图**：Topology 页面展示服务依赖关系、网络隔离层级、实时健康状态
-- **上下文面板**：议题概览、证据库、产出物、Token与成本、模型调度（ContextPanel 多 tab 切换）
-
-### 内存安全
-- 事件总线单会议历史上限1000条，自动裁剪
-- 前端日志上限500条，切换会议自动清理
-- 会议结束后自动清理RAG向量缓存、浏览器上下文、沙箱服务容器
-- 会议删除时统一清理所有关联资源（state、events、rag缓存、服务等）
-- 应用关闭时清理所有沙箱容器和HTTP连接池
+- **六阶段会议管线**：clarify（澄清）→ intra_team（队内立论）→ cross_team（跨队辩论）→ evidence_check（证据校验）→ arbitrate（仲裁裁决）→ produce（产出交付），带质量门禁与自动回流
+- **7 种独立角色**：产品架构师、工程师、安全专家、UX 设计师、数据工程师、市场专家、主持人，每个角色有独立视角、风险偏好与证据偏好
+- **动态借调机制**：主持人可根据议题复杂度动态申请补充专家角色
+- **证据诚实性保障**：论点必须标注证据来源（文档/网页/常识/假设），无证据论点自动降级置信度
+- **Docker 沙箱隔离**：代码执行在独立容器中，支持多主机分布式调度（5 种调度策略）
+- **可部署服务交付**：会议结论可直接生成 FastAPI 后端 + React 前端 + Docker 配置，自动部署到沙箱运行
+- **实时可观测性**：实时日志面板、级别着色、进度追踪、Token/成本监控、审计日志
+- **RAG 检索增强**：bge-m3 多语言 Embedding + bge-reranker-v2-m3 重排序 + HyDE 假设文档嵌入
+- **多租户隔离**：租户级数据隔离、配置覆盖与 RBAC 权限控制
+- **插件框架**：支持认证、可观测性等模块通过插件热插拔
 
 ---
 
 ## 快速开始
 
 ### 环境要求
-- Docker Desktop（Windows/macOS）或 Docker Engine + Docker Compose（Linux）
-- 无需本地Python/Node环境（全部容器化）
 
-### 一键启动（Docker Compose，推荐）
+- Docker Desktop（Windows/macOS）或 Docker Engine + Docker Compose（Linux）
+- 无需本地 Python/Node 环境（全部容器化）
+
+### 一键启动
 
 ```bash
-# 克隆项目后，在项目根目录执行：
+git clone https://github.com/QAQupupup/Conclave.git
+cd Conclave
 docker compose up -d --build
 ```
 
-服务启动后：
-- **前端界面**：http://localhost:5173
-- **后端 API 文档**：http://localhost:8000/docs
-- **WebSocket**：ws://localhost:8000/ws/{meeting_id}
-- **PostgreSQL**：localhost:5432（容器内）
-- **Redis**：localhost:6379（容器内）
-- **Qdrant向量库**：localhost:6333（容器内）
+启动后访问：
 
-> **贡献指南**：欢迎提交 Issue 和 Pull Request。请确保代码通过 lint 检查，且新增功能配有对应测试。
+| 服务 | 地址 |
+|---|---|
+| 前端界面 | http://localhost:5173 |
+| 后端 API 文档 | http://localhost:8000/docs |
+| PostgreSQL | localhost:5432（容器内） |
+| Redis | localhost:6379（容器内） |
+| Qdrant 向量库 | localhost:6333（容器内） |
 
-### 配置LLM（可选，不配置走Stub模式）
+### 配置 LLM（可选，不配置走 Stub 模式）
 
 在项目根目录创建 `.env` 文件（或复制 `.env.example`）：
 
 ```env
-# OpenAI兼容接口（支持硅基流动、DeepSeek、通义千问等）
+# OpenAI 兼容接口（支持硅基流动、DeepSeek、通义千问等）
 CONCLAVE_LLM_API_KEY=your-api-key
 CONCLAVE_LLM_BASE_URL=https://api.siliconflow.cn/v1
 CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
-
-# Qdrant向量库（可选，留空走内存向量）
-CONCLAVE_QDRANT_URL=http://qdrant:6333
 ```
 
-也可以在前端"模型中心"页面直接配置API Key。
+也可在前端"模型中心"页面直接配置。
 
 ### 使用流程
 
 1. 打开 http://localhost:5173
-2. 输入议题，选择产出物类型（PRD / 研究报告 / 可部署服务 / 数据分析等）
+2. 输入议题，选择产出物类型
 3. 点击"开始会议"，观察六阶段自动执行
-4. 会议完成后在"产出"面板查看结果，可下载或部署
+4. 会议完成后在"产出"面板查看结果
 
-会议过程中可随时查看右侧实时日志、证据库、Token 成本，也可通过"介入"功能注入指令。
+---
+
+## 架构概览
+
+```
+┌──────────────────────────────────────────────────┐
+│                Frontend (React + AntD)            │
+│  聊天面板 │ 日志面板 │ 联通图 │ 运维面板 │ 监控    │
+└─────────────────────┬────────────────────────────┘
+                      │ WebSocket / REST
+┌─────────────────────┼────────────────────────────┐
+│              Backend (FastAPI + asyncio)          │
+│  ┌──────────────────┴──────────────────┐          │
+│  │     EventBus 事件总线                │          │
+│  │  内存缓存 + PG 持久化 + Redis Pub/Sub│          │
+│  └──────────────────┬──────────────────┘          │
+│  ┌──────────────────┴──────────────────┐          │
+│  │   Runner/Manager 编排器              │          │
+│  │  clarify → intra_team → cross_team  │          │
+│  │  → evidence → arbitrate → produce   │          │
+│  └────┬──────┬──────┬──────┬───────────┘          │
+│  ┌────▼──┐┌──▼──┐┌──▼───┐┌──▼──┐                  │
+│  │Agents ││ RAG ││Sand- ││Tools│                  │
+│  │(LLM)  ││     ││box   ││     │                  │
+│  └───┬───┘└─────┘└──┬───┘└─────┘                  │
+│      │              │ Docker API                   │
+│      │         ┌────┴────┐                         │
+│      │         ▼         ▼                         │
+│      │   ┌──────────┐ ┌──────────┐                 │
+│      │   │ 本地Docker│ │RemoteHost│                │
+│      ▼   └──────────┘ └──────────┘                 │
+│  ┌─────────────────────────────┐                   │
+│  │ PostgreSQL │ Redis │ Qdrant │                   │
+│  └─────────────────────────────┘                   │
+└───────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -146,114 +151,34 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 
 | 层 | 技术选型 |
 |---|---|
-| **后端** | Python 3.12 + FastAPI + asyncio |
-| **前端** | React 18 + TypeScript + Vite + Ant Design |
-| **数据库** | PostgreSQL（主存储）+ Redis（缓存/会话） |
-| **向量检索** | Qdrant（推荐）/ 内存向量库（开发模式） |
-| **嵌入模型** | bge-m3（多语言）+ bge-reranker-v2-m3（重排序） |
-| **容器化** | Docker + Docker Compose（Sibling Containers沙箱架构） |
-| **实时通信** | WebSocket + 事件总线（内存缓存 + PostgreSQL 持久化 + Redis Pub/Sub 多副本广播 + 增量回放） |
-| **沙箱环境** | Python 3.12-slim（标准）/ 数据科学镜像（Pandas/NumPy/Matplotlib） |
-| **浏览器自动化** | Playwright + Chromium |
-| **可观测性** | 结构化日志（LogBus，JSON Lines 文件输出）+ 指标采集（MetricsStore，JSON API）+ 成本追踪（CostTracker）+ LLM 调用追踪（CallTrace）+ 审计日志（PostgreSQL `audit_logs` 表，后台线程批量写入）。未接入 Prometheus/ELK/Grafana 等外部生态 |
+| 后端 | Python 3.12 + FastAPI + asyncio + SQLAlchemy (async) |
+| 前端 | React 18 + TypeScript + Vite + Ant Design |
+| 数据库 | PostgreSQL（主存储，含 pgvector）+ Redis（缓存/会话） |
+| 向量检索 | Qdrant / 内存向量库（开发模式） |
+| 嵌入模型 | bge-m3（多语言）+ bge-reranker-v2-m3（重排序） |
+| 容器化 | Docker + Docker Compose（Sibling Containers 沙箱） |
+| 实时通信 | WebSocket + 事件总线 |
+| 浏览器自动化 | Playwright + Chromium |
 
 ---
 
-## 架构概览
+## API 概览
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend (React)                         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐ │
-│  │ 聊天面板  │ │ 日志面板  │ │ 联通图   │ │ 运维面板  │ │ 监控  │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └──┬────┘ │
-│       │            │            │             │          │      │
-│       └────────────┴────────────┴─────────────┴──────────┘      │
-│                         │ WebSocket / REST API                  │
-└─────────────────────────┼───────────────────────────────────────┘
-                          │
-┌─────────────────────────┼───────────────────────────────────────┐
-│                    Backend (FastAPI)                            │
-│                         │                                       │
-│  ┌──────────────────────┴──────────────────────┐                │
-│  │          EventBus (事件总线)                 │                │
-│  │  内存缓存(1000条上限) + PostgreSQL持久化     │                │
-│  │  + Redis Pub/Sub 多副本广播                  │                │
-│  └──────────────────────┬──────────────────────┘                │
-│                         │                                       │
-│  ┌──────────────────────┴──────────────────────┐                │
-│  │          Runner (编排器) + 调度引擎          │                │
-│  │  clarify → intra_team → cross_team →        │                │
-│  │  evidence_check → arbitrate → produce       │                │
-│  │  + 动态路由 + 崩溃恢复 + 资源清理            │                │
-│  │  + DockerHost调度(5种策略)                  │                │
-│  └───┬───────┬───────┬───────┬───────┬─────────┘                │
-│      │       │       │       │       │                          │
-│  ┌───▼──┐ ┌──▼──┐ ┌──▼──┐ ┌──▼──┐ ┌──▼───┐                     │
-│  │Agents│ │ RAG │ │Sand-│ │Tools│ │Memory│                     │
-│  │(LLM) │ │     │ │box  │ │     │ │      │                     │
-│  └───┬──┘ └─────┘ └──┬──┘ └─────┘ └──────┘                     │
-│      │               │ Docker API                               │
-│      │         ┌─────┴──────┐ SSH/TCP                           │
-│      │         │            │ ─────────────────────┐            │
-│      │         ▼            ▼                      ▼            │
-│      │  ┌──────────┐ ┌──────────────┐     ┌──────────────┐     │
-│      │  │ 本地Docker │ │ Remote Host  │ ... │ Remote Host  │     │
-│      │  │ (Socket)  │ │ (SSH Worker) │     │ (TCP+TLS)    │     │
-│      │  └──────────┘ └──────────────┘     └──────────────┘     │
-│      ▼                                                          │
-│  ┌──────────────────────────────────────────┐                  │
-│  │ PostgreSQL  Redis  Qdrant                │                  │
-│  └──────────────────────────────────────────┘                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+路由无全局 `/api` 前缀，完整列表见 `http://localhost:8000/docs`。
 
----
-
-## V3 架构（Manager + 统一 Agent 运行时）
-
-> 原 V3 重构分支（`refactor/v3-manager-agent-runtime`、`feature/v3-enhancement`）已合并到主干，以下组件已在 main 分支落地。
-
-针对市面多智能体系统对比分析中发现的结构性缺口，V3 引入了以下核心组件：
-
-### 新增核心组件
-
-| 组件 | 文件 | 职责 |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| **MeetingManager** | `backend/app/orchestrator/manager.py` | 系统级调度与治理中枢，统一交互层 |
-| **TaskGraph** | `backend/app/orchestrator/task_graph.py` | 显式 DAG 任务图，支持拓扑排序与递归子任务 |
-| **ContextManager** | `backend/app/orchestrator/context_manager.py` | 上下文治理：动态窗口（token 预算自适应）+ LLM 摘要压缩 + 优先级裁剪 |
-| **AgentRuntime** | `backend/app/agents/agent_runtime.py` | 统一 Agent 运行时，差异通过配置表达 |
-| **TaskBaseline** | `backend/app/agents/task_baseline.py` | 领域基线模板（软件系统、股票分析等） |
-
-### 解决的核心问题
-
-1. **上下文溢出**：ContextManager 显式预算 + 优先级分层 + 动态窗口（token 预算自适应 [2,20] 范围）+ LLM 摘要压缩 + 裁剪降级（M1.1 已实现）
-2. **缺少显式 DAG**：TaskGraph 把阶段/子任务建模为可拓扑排序的有向图
-3. **Agent 抽象不统一**：AgentRuntime 让所有 Agent 共享同一执行接口
-4. **组件交互混乱**：Manager 作为 Storage/EventBus/Sandbox/Agent 之间的统一协议层
-5. **领域扩展困难**：TaskBaseline 按领域定义团队角色、必需产物、质量门
-
-### 已完成
-
-- [x] Runner 统一走 MeetingManager 调度路径，移除 compatibility_mode
-- [x] clarify / intra_team / cross_team / evidence_check / arbitrate 状态写入逻辑下沉到 `stage_runners.py`
-- [x] produce 阶段收尾逻辑（锁定结论、事件发布、漂移检查、终态设置）下沉到 `stage_runners.py`
-- [x] 核心业务全量迁移到 PostgreSQL（meetings/messages/events/documents/users/api_keys/docker_hosts/agent_roles/memory/observability 均为 SQLAlchemy ORM 模型，见 `app/db/models/`）
-- [x] 事件总线持久化从 SQLite 迁移到 PostgreSQL + Redis Pub/Sub 多副本广播
-- [x] 多租户隔离（tenant_id 列 + 上下文 + 配置覆盖 + RBAC）
-- [x] 插件框架（PluginRegistry / HookSpec / PluginBase / AuthPlugin 等，见 `app/plugins/`）
-- [x] 新增基于历史数据的回归测试 `test_regression_historical.py` 与 produce 专项测试 `test_produce_stage.py`
-
-### 后续工作
-
-- [ ] MaterialHub / ArtifactRepo 统一物料与产物
-- [ ] 服务持久化（deployed_services 表 + recover_services）
-- [ ] 前端生成与挂载流水线固化
-- [ ] produce 阶段复杂产物构建（代码审查、沙箱执行、Docker 部署）完全接入 AgentRuntime 产物回写
-- [ ] gRPC Agent Worker 横向扩展（当前为 LocalAgentCompute 单进程 stub，见 `app/agents/worker.py`）
-
-详细分析见 `.trae/documents/v3-manager-agent-runtime-implementation-plan.md` 与 `.trae/documents/v3-manager-agent-runtime-completion-report.md`。
+| POST | `/meetings` | 创建会议 |
+| GET | `/meetings` | 会议列表 |
+| GET | `/meetings/{id}` | 会议详情 |
+| POST | `/meetings/{id}/run` | 启动会议（后台异步执行） |
+| POST | `/meetings/{id}/control` | 控制（pause/resume/abort/inject） |
+| POST | `/meetings/{id}/documents` | 上传参考文档 |
+| DELETE | `/meetings/{id}` | 删除会议（清理关联资源） |
+| WS | `/ws/meetings/{id}` | WebSocket 实时事件流 |
+| GET/POST | `/docker-hosts` | Docker 主机管理 |
+| POST | `/auth/login` | 登录 |
+| GET | `/auth/me` | 当前用户信息 |
 
 ---
 
@@ -263,426 +188,73 @@ CONCLAVE_QDRANT_URL=http://qdrant:6333
 Conclave/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                    # FastAPI入口 + lifespan管理
-│   │   ├── config.py                  # 环境变量配置
-│   │   ├── models.py                  # Pydantic模型 + 枚举定义
-│   │   ├── events.py                  # 事件总线（内存缓存 + PostgreSQL 持久化 + Redis Pub/Sub）
-│   │   ├── context.py                 # 异步上下文变量(request/meeting/agent)
-│   │   ├── sandbox.py                 # Docker沙箱管理（代码执行+服务部署+远程主机调度）
-│   │   ├── docker_hosts.py            # Docker主机管理（注册/健康检查/调度策略）
-│   │   ├── orchestrator/              # 编排核心
-│   │   │   ├── runner.py              # 主循环 + 崩溃恢复 + 资源清理
-│   │   │   ├── stage_runners.py       # 六阶段执行入口 + 结论锁定逻辑
-│   │   │   ├── state.py               # 阶段流转 + 控制信号
-│   │   │   ├── manager.py             # V3：MeetingManager 统一交互层
-│   │   │   ├── task_graph.py          # DAG 任务图（拓扑排序调度）
-│   │   │   ├── context_manager.py     # V3：上下文治理
-│   │   │   ├── nodes/                 # 六阶段节点实现
-│   │   │   │   ├── clarify.py         # 澄清阶段
-│   │   │   │   ├── intra_team.py      # 队内讨论
-│   │   │   │   ├── cross_team.py      # 跨队辩论
-│   │   │   │   ├── evidence_check.py  # 证据校验
-│   │   │   │   ├── arbitrate.py       # 仲裁裁决
-│   │   │   │   ├── produce.py         # 产出交付（含进度反馈）
-│   │   │   │   ├── borrow.py          # 动态借调
-│   │   │   │   └── _helpers.py        # 节点辅助函数
-│   │   │   ├── react_loop.py          # ReAct工具调用循环
-│   │   │   ├── refine_loop.py         # 代码自修复循环
-│   │   │   ├── stage_planners.py      # V3 阶段规划器
-│   │   │   ├── stage_reducers.py      # V3 阶段结果归约器
-│   │   │   ├── stage_common.py        # 阶段公共辅助函数
-│   │   │   ├── evidence_helpers.py    # 证据校验辅助
-│   │   │   ├── produce_helpers.py     # 产出辅助
-│   │   │   ├── borrow_helpers.py      # 借调辅助
-│   │   │   ├── phased_generation.py   # 分阶段生成
-│   │   │   ├── instant.py             # 即时响应
-│   │   │   └── system_prompt.py       # 系统提示词构建
-│   │   ├── agents/                    # Agent计算层
-│   │   │   ├── compute.py             # LLM调用 + 多模型路由
-│   │   │   ├── agent_runtime.py       # V3：统一 Agent 运行时
-│   │   │   ├── task_baseline.py       # V3：领域任务基线
-│   │   │   ├── prompts/               # Prompt模板
-│   │   │   └── trace.py               # LLM调用追踪
-│   │   ├── routers/                   # API路由
-│   │   │   ├── meetings.py            # 会议CRUD + 后台执行
-│   │   │   ├── docker_hosts.py        # Docker主机管理API
-│   │   │   ├── ws.py                  # WebSocket端点
-│   │   │   ├── documents.py           # 文档上传
-│   │   │   └── ...
-│   │   ├── rag/                       # 检索增强
-│   │   │   ├── store.py               # 向量存储（内存/Qdrant）+ 清理函数
-│   │   │   ├── chunker.py             # 文档分块
-│   │   │   ├── tokenize.py            # 分词器
-│   │   │   ├── query_rewriter.py      # 查询重写
-│   │   │   └── retriever.py           # 检索器
-│   │   ├── memory/                    # 三层记忆系统
-│   │   ├── observability/             # 可观测性
-│   │   │   ├── log_bus.py             # 结构化日志总线
-│   │   │   ├── sinks.py               # 日志输出(Console/File/EventBus)
-│   │   │   ├── metrics_store.py       # 指标采集(环形缓冲)
-│   │   │   └── cost_tracker.py        # 成本追踪(上限10000条)
-│   │   ├── tools/                     # 工具集
-│   │   │   ├── __init__.py            # 工具工厂 (stub/tavily/playwright/remote 四模式)
-│   │   │   ├── search_engine.py       # 多引擎搜索协议 + MultiEngineSearch
-│   │   │   ├── playwright_search.py   # Playwright 无头浏览器搜索 (Bing + 正文提取)
-│   │   │   ├── browser_tool.py        # Playwright浏览器自动化
-│   │   │   ├── domain_registry.py     # 域名可信度注册表 (S/A/B/C/D tier)
-│   │   │   ├── playwright/            # Playwright 子包
-│   │   │   │   ├── stealth_js.py      # 30项反检测指纹覆盖
-│   │   │   │   ├── captcha_js.py      # CAPTCHA 主动检测
-│   │   │   │   ├── extract_js.py      # 页面正文提取
-│   │   │   │   ├── jsonld_js.py       # JSON-LD 结构化数据提取
-│   │   │   │   ├── chunk_js.py        # Claim 粒度分块提取
-│   │   │   │   ├── session_pool.py    # SessionPool 按 session_key 复用 Context
-│   │   │   │   └── security.py        # SSRF 防护 + URL 安全校验
-│   │   │   └── engines/               # 搜索引擎实现
-│   │   │       ├── bing_engine.py     # Bing Playwright 引擎
-│   │   │       └── ddg_engine.py      # DuckDuckGo 备用引擎
-│   │   ├── skills/                    # YAML技能规范
-│   │   ├── plugins/                   # 插件系统（auth/observability 等可插拔模块）
-│   │   │   ├── core/                  # 插件框架核心（Registry/HookSpec/PluginBase）
-│   │   │   └── builtin/               # 内置插件（auth JWT/多租户 RBAC）
-│   │   ├── tenants/                   # 多租户隔离（租户管理/上下文/配置覆盖）
-│   │   ├── domain/                    # 领域模型（WS消息/事件payload Pydantic化）
-│   │   ├── observability/             # 可观测性门面（统一 logger + audit + log_bus）
-│   │   ├── services/                  # 业务服务（key_store 加密管理）
-│   │   ├── db/                        # 数据层（engine/redis/base Mixin/models 子包/qdrant_store/vector_store）
-│   │   ├── core/                      # 核心基础设施（AppException + ErrorCode 枚举）
-│   │   └── prompts/                   # Prompt模板 + Bug Pattern
-│   ├── workspace/                     # 沙箱工作目录
-│   ├── tests/                         # 测试文件
-│   ├── Dockerfile                     # 后端镜像
-│   └── requirements.txt
-│   ├── web_search_service/            # 独立 Web Search 服务
-│   │   ├── main.py                    # FastAPI 服务 (5 端点)
-│   │   ├── research_agent.py          # DeepResearchAgent (5阶段自主研究)
-│   │   ├── requirements.txt
-│   │   └── Dockerfile
+│   │   ├── main.py              # FastAPI 入口
+│   │   ├── config.py            # 环境变量配置
+│   │   ├── orchestrator/        # 编排核心（runner/manager/stage_runners/context_manager）
+│   │   ├── agents/              # Agent 计算层（LLM 调用 + 运行时）
+│   │   ├── routers/             # API 路由
+│   │   ├── rag/                 # 检索增强（HyDE/Multi-Query/Reranker）
+│   │   ├── sandbox.py           # Docker 沙箱管理
+│   │   ├── plugins/             # 插件系统
+│   │   ├── tenants/             # 多租户隔离
+│   │   ├── db/                  # 数据层（ORM 模型/引擎）
+│   │   ├── tools/               # 工具集（搜索/浏览器/域名可信度）
+│   │   ├── observability/       # 可观测性（日志/指标/成本/审计）
+│   │   └── domain/              # 领域模型与枚举
+│   ├── tests/                   # 测试文件
+│   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── views/                     # 页面组件
-│   │   │   ├── Landing.tsx            # 首页
-│   │   │   ├── Login.tsx              # 登录页
-│   │   │   ├── Board.tsx              # 会议列表看板
-│   │   │   ├── Meeting.tsx            # 会议详情（聊天流+日志+产出）
-│   │   │   ├── Models.tsx             # 模型中心（API Key 配置）
-│   │   │   ├── Topology.tsx           # 组件联通图（服务健康+网络隔离）
-│   │   │   ├── Monitor.tsx            # 监控面板
-│   │   │   ├── DevOpsPanel.tsx        # 运维面板（Docker主机管理）
-│   │   │   ├── Report.tsx             # 报告查看
-│   │   │   ├── Settings.tsx           # 设置
-│   │   │   └── NotFound.tsx           # 404
-│   │   ├── components/                # 可复用组件
-│   │   │   ├── Topbar.tsx             # 顶栏
-│   │   │   ├── NavRail.tsx            # 侧边导航
-│   │   │   ├── LogPanel.tsx           # 实时日志面板（可折叠）
-│   │   │   ├── PhasedProgress.tsx     # 阶段进度指示器
-│   │   │   ├── MeetingToolbar.tsx     # 会议工具栏
-│   │   │   ├── ContextPanel.tsx       # 上下文面板
-│   │   │   ├── ServiceViewer.tsx      # 服务查看器
-│   │   │   ├── CommandPalette.tsx     # 命令面板
-│   │   │   ├── TenantSwitcher.tsx     # 租户切换
-│   │   │   ├── Toast.tsx              # 通知
-│   │   │   ├── ConfirmModal.tsx       # 确认弹窗
-│   │   │   ├── ErrorBoundary.tsx      # 错误边界
-│   │   │   ├── RequireAuth.tsx        # 路由鉴权
-│   │   │   └── SessionExpiredModal.tsx # 会话过期
-│   │   ├── state/AppContext.tsx       # 全局状态
-│   │   ├── hooks/                     # 自定义Hook
-│   │   ├── types/                     # TypeScript类型
-│   │   ├── data/                      # 静态数据与布局配置
-│   │   └── lib/                       # 工具库（api/client 等）
-│   ├── Dockerfile                     # 前端Nginx镜像
-│   └── nginx.conf
-├── docker-compose.yml                 # 5服务编排（backend/frontend/postgres/redis/qdrant）
-├── .env.example                       # 环境变量模板
-└── docs/                              # 项目文档
-    ├── design/                        # 核心设计文档
-    ├── research/                      # 研究演进文档
-    └── audits/                        # 审计报告
+│   │   ├── views/               # 页面（Board/Meeting/Models/Topology/Monitor/DevOpsPanel）
+│   │   ├── components/          # 可复用组件
+│   │   └── lib/                 # 工具库（api/ws/auth）
+│   └── Dockerfile
+├── docker-compose.yml           # 开发环境编排
+├── docker-compose.oss.yml       # 开源版编排
+├── .env.example                 # 环境变量模板
+└── LICENSE
 ```
 
 ---
 
-## 会议六阶段详解
+## 开发
 
-### 1. Clarify（澄清）
-主持人分析议题，确定需要参与的角色团队，说明讨论框架和产出要求。
-
-### 2. Intra-team（队内讨论）
-每个角色独立发表观点，每条发言包含：
-- 核心论点（claim）
-- 论点类型（fact/assumption/preference/risk）
-- 证据标签（[doc]/[web]/[common_knowledge]/[assumption]）
-- 风险等级（high/medium/low）
-
-### 3. Cross-team（跨队辩论）
-对比各方观点，识别冲突点：
-- **有冲突**：列出争议点（事实争议/方案偏好/范围界定）
-- **无冲突**：汇总各方核心论点共识
-
-### 4. Evidence Check（证据校验）
-对争议论点进行证据检索和验证（支持RAG文档检索和Web搜索）。
-
-### 5. Arbitrate（仲裁裁决）
-主持人对争议点做出裁决（采纳A/采纳B/折中融合），并列出所有采纳的核心论点。
-
-### 6. Produce（产出交付）
-根据采纳的论点和会议类型生成最终产出物，过程中实时推送进度：
-- LLM生成 → 代码审查 → 沙箱部署（对可部署服务类型）
-- 产出类型：PRD+OpenAPI、研究报告、商业报告、设计文档、可部署服务、数据分析
-
----
-
-## 内存安全机制
-
-| 组件 | 保护措施 |
-|---|---|
-| 事件总线 `_history` | 单会议上限1000条，自动裁剪最旧事件；会议删除时清空 |
-| 事件总线 `_subs` | unsubscribe后自动清理空列表键 |
-| 前端日志 `logs` | AppContext 中上限 500 条（`.slice(0, 500)`）；切换会议重置 state |
-| RAG向量缓存 `_stores` | 会议结束/删除时调用`clear_store()`释放chunks和向量 |
-| 沙箱服务 `_running_services` | 会议结束时`stop_service()`停止容器释放端口；应用关闭时`cleanup_all_services()` |
-| 浏览器上下文 | 会议结束时`release_meeting()`释放Playwright上下文 |
-| 会议状态 `_states` | 提供`clear_state()`和`cleanup_meeting_resources()`统一清理 |
-| WebSocket | 组件卸载时正确关闭连接、清除重连定时器、取消rAF |
-| WS速率限制 | 每IP每分钟600条事件上限；过期IP键自动清理 |
-| Metrics/Cost缓冲 | deque环形缓冲，有固定上限 |
-| LLM连接池 | lifespan shutdown时调用`shutdown_compute()`关闭httpx连接池 |
-
----
-
-## API概览
-
-> 路由无全局 `/api` 前缀，直接挂载在根路径。完整列表见 `http://localhost:8000/docs`。
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| POST | `/meetings` | 创建会议 |
-| GET | `/meetings` | 会议列表 |
-| GET | `/meetings/{id}` | 会议详情 |
-| POST | `/meetings/{id}/run` | 启动会议（后台异步执行） |
-| POST | `/meetings/{id}/control` | 控制信号（pause/resume/abort/inject） |
-| POST | `/meetings/{id}/intervene` | 人机介入（注入指令） |
-| POST | `/meetings/{id}/documents` | 上传参考文档 |
-| DELETE | `/meetings/{id}?mode=soft/hard` | 删除会议（清理所有关联资源） |
-| GET | `/meetings/{id}/events` | 获取会议事件流 |
-| GET | `/meetings/{id}/trace` | 获取会议追踪记录 |
-| GET | `/meetings/{id}/stats` | 获取会议统计 |
-| GET | `/meetings/{id}/charter` | 获取会议章程 |
-| GET | `/meetings/llm/keys` | API Key 列表 |
-| POST | `/meetings/llm/keys` | 保存 API Key |
-| WS | `/ws/meetings/{id}` | WebSocket实时事件流 |
-| WS | `/ws/system` | WebSocket系统状态流 |
-| GET | `/docker-hosts` | Docker主机列表 |
-| POST | `/docker-hosts` | 添加Docker主机 |
-| PUT | `/docker-hosts/{id}` | 更新Docker主机配置 |
-| DELETE | `/docker-hosts/{id}` | 删除Docker主机 |
-| POST | `/docker-hosts/{id}/health-check` | 手动触发健康检查 |
-| POST | `/docker-hosts/health-check-all` | 批量健康检查 |
-| GET | `/docker-hosts/presets` | 获取连接预设和调度策略 |
-| GET | `/agent-roles` | Agent角色列表 |
-| POST | `/agent-roles` | 创建/更新Agent角色 |
-| POST | `/agent-roles/generate` | AI生成角色团队 |
-| POST | `/auth/login` | 登录 |
-| GET | `/auth/me` | 当前用户信息 |
-
-WebSocket事件类型：`snapshot`、`agent.spoke`、`stage.changed`、`evidence.attached`、`artifact.generated`、`produce.progress`、`log.entry`、`meeting.error`、`control.ack`等。
-
----
-
-## 开发说明
-
-### 本地开发模式（非Docker）
+### 本地开发（非 Docker）
 
 ```bash
 # 后端
 cd backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1  # Windows
+.\.venv\Scripts\Activate.ps1   # Windows
 pip install -e .
 uvicorn app.main:app --reload
 
-# 前端（另一个终端）
+# 前端（另开终端）
 cd frontend
 npm install
 npm run dev
 ```
 
-注意：本地开发需要自行启动PostgreSQL、Redis、Qdrant，或通过环境变量配置使用Docker中的服务。
+注意：本地开发需自行启动 PostgreSQL、Redis、Qdrant。
 
-### 查看日志
+### 测试与质量检查
 
-- **前端实时日志面板**：会议页面右侧蓝色箭头按钮，支持级别过滤、自动滚动、暂停、导出
-- **Docker日志**：`docker logs -f conclave-backend`（后端）、`docker logs -f conclave-frontend`（前端Nginx）
-
----
-
-## 当前状态
-
-核心功能已全部可用：
-- 多Agent六阶段会议管线 ✅
-- 独立人格角色 + 动态借调 ✅
-- Docker沙箱代码执行 ✅
-- 多主机分布式Docker调度（5种调度策略）✅
-- 运维面板（Docker主机集群管理）✅
-- 数据科学分析（Pandas/NumPy/Matplotlib）✅
-- 可部署服务自动生成和部署 ✅
-- RAG文档检索（Qdrant + bge-m3 + Reranker）✅
-- 实时日志面板 + 进度反馈 ✅
-- 内存安全机制（事件总线1000条/日志500条上限）✅
-- 核心业务全量迁移到 PostgreSQL（ORM 模型 + Redis Pub/Sub）✅
-- 多租户隔离（tenant_id + 上下文 + 配置覆盖 + RBAC）✅
-- 插件框架（PluginRegistry / HookSpec / AuthPlugin）✅
-- 用户认证（JWT + PBKDF2 600k 迭代 + CSRF 防护）✅
-- Docker Compose一键部署 ✅
-
-待完善方向（详见"已知限制与待办"章节）：
-- gRPC Agent Worker 横向扩展（当前单进程 stub）
-- 跨会议长期记忆和观点演化
-- 部署后自动化功能冒烟测试
-- 数据分析结果的前端图表渲染
-
----
-
-## 测试
-
-> **规范**：所有 lint/typecheck/test 建议在 Docker 容器内执行，避免宿主机环境差异。
-
-### 运行全量测试（Docker Compose，推荐）
+所有检查建议在 Docker 容器内执行：
 
 ```bash
-# 后端全量测试（含 ruff/mypy/pytest，多进程并行）
+# 全量测试（含 ruff/mypy/pytest）
 docker compose -f docker-compose.test.yml up --build --exit-code-from backend-test
 ```
 
-测试栈使用独立端口（PostgreSQL 5434 / Redis 6381 / Qdrant 6337），不与 dev 环境冲突。
-pytest-xdist 默认启用多进程并行（`-n auto`），每个 worker 自动使用独立 PG 库 / Redis DB / Qdrant collection。
+### 贡献
 
-### 运行指定测试
-
-```bash
-# 在测试容器内运行指定测试文件
-docker compose -f docker-compose.test.yml run --rm backend-test \
-  sh -c 'pytest tests/test_key_store_import.py -v --no-header'
-```
-
-### 运行静态检查
-
-```bash
-# ruff（lint）
-docker compose -f docker-compose.test.yml run --rm backend-test \
-  sh -c 'pip install --no-cache-dir ruff >/dev/null 2>&1; ruff check app conclave_core tests'
-
-# mypy（类型检查）
-docker compose -f docker-compose.test.yml run --rm backend-test \
-  sh -c 'pip install --no-cache-dir mypy >/dev/null 2>&1; mypy --config-file pyproject.toml app conclave_core'
-```
-
-### 避免测试调用真实 LLM
-
-如果希望完全避免真实 LLM 调用，请：
-- 不要运行 `tests/test_real_llm_e2e.py`
-- 确保未设置 `CONCLAVE_LLM_API_KEY`，或将其留空以走 StubLLM 模式
-- 新增测试已通过 monkeypatch 替换 `app.agents.compute._compute`，不依赖外部配置
+欢迎提交 Issue 和 Pull Request。提交前请确保：
+- 代码通过 lint 检查（ruff）
+- 新增功能配有对应测试
+- Commit Message 遵循 Conventional Commits
 
 ---
 
-## 已知限制与演进路线图
+## License
 
-> 本章节整合项目中所有已知技术债、未完成功能和待优化项，按优先级和依赖关系组织为可执行的演进路线图。每项均经过代码核验（见 AGENTS.md §4.16/§4.17），标注了现状、目标和验收标准。
-
-### P0（工程质量，渐进收紧）
-
-- **mypy 历史遗留类型错误**：主要为 SQLAlchemy 2.0 stub 不完整（`rowcount` 属性）、`Any` 返回值未收紧、`AsyncTransaction.run_sync` union-attr 等。分布在 13 个文件，属于渐进式严格模式的存量问题。
-  - 现状：25 errors（2026-07-22 重新跑 `mypy --config-file pyproject.toml app conclave_core` 确认，CI 中已设为 `continue-on-error` 不阻塞）
-  - 目标：mypy 0 errors（渐进式修复，每次提交不得新增）
-  - 验收：`docker compose -f docker-compose.test.yml run --rm backend-test mypy --config-file pyproject.toml app conclave_core` 退出码 0
-
----
-
-### 里程碑 M1：核心逻辑与功能缺陷修复（全部完成）
-
-> 这些缺陷直接影响会议管线的正确性、产出质量和运行稳定性，优先于可观测性生态接入。当前日志/指标/追踪已自研覆盖（LogBus + MetricsStore + CallTrace + audit），满足问题定位需求。
-
-#### M1.1 ContextManager 窗口管理（已完成）
-- **改进**：`context_manager.py` 新增 `prepare_async()` 动态窗口 + LLM 摘要压缩。动态窗口根据 token 预算自适应计算窗口大小（[2,20] 范围），替代硬编码 `[-8:]`；旧消息通过 `complete_text()` 生成摘要保留关键信息。摘要结果缓存，失败时降级为裁剪。
-- **影响范围**：`app/orchestrator/context_manager.py`、`app/orchestrator/manager.py`、`app/agents/llm.py`
-- **测试**：`tests/test_context_manager.py`（22 用例）
-
-#### M1.2 证据校验事实化（已完成）
-- **改进**：`EvidenceAssessmentItem` 新增 `fact_check_status` 字段（verified / contradicted / unverifiable / disputed）。EVIDENCE_CHECK prompt 增加事实核查判断规则，ARBITRATE prompt 增加事实核查加权规则。`_collect_evidence` 根据来源类型预分配状态（doc:* → verified，web:* → unverifiable）。
-- **影响范围**：`app/agents/schemas.py`、`app/agents/prompts.py`、`app/orchestrator/evidence_helpers.py`
-- **测试**：`tests/test_evidence_fact_check.py`（14 用例）
-
-#### M1.3 RAG 检索策略增强（已完成）
-- **改进**：新增 `app/rag/hyde.py` 实现 HyDE（Hypothetical Document Embeddings）：LLM 生成假设性技术文档，用该文档的 embedding 检索向量库，弥补 query-document 语义鸿沟。`retrieve_for_conflict` 将 HyDE 与已有 Multi-Query（`query_rewriter.py`）并行检索，结果合并去重后统一 Reranker 重排。HyDE 失败时自动降级为纯 Multi-Query。
-- **影响范围**：`app/rag/hyde.py`（新增）、`app/rag/retriever.py`
-- **测试**：`tests/test_rag_hyde.py`（18 用例）
-
-#### M1.4 提示词工程（已完成）
-- **改进**：新增 `app/orchestrator/prompt_safety.py` 实现指令注入防护（`sanitize_untrusted_content`、`wrap_untrusted`、`sanitize_rag_chunks`、`sanitize_doc_summaries`）。clarify prompt 对用户 topic/文档摘要/参考上下文进行清洗包装；evidence_helpers 对 RAG 检索结果和 Web 搜索结果应用防护。
-- **影响范围**：`app/orchestrator/prompt_safety.py`（新增）、`app/agents/compute.py`、`app/orchestrator/evidence_helpers.py`
-- **测试**：`tests/test_instruction_injection.py`（24 用例）
-
-#### M1.5 Redis Pub/Sub 可靠投递（已评估，无需迁移）
-- **评估结论**：现有 PG 持久化 + replay 机制已覆盖可靠性需求，无需迁移到 Redis Stream。
-- **依据**：
-  1. 事件持久化在 PostgreSQL（`save_event` → INSERT INTO events 表）
-  2. WS 断线重连时通过 `from_seq` 参数 + `bus.replay(meeting_id, from_seq)` 从 PG 恢复增量事件（`routers/ws.py:316`）
-  3. Pub/Sub 只是实时通知通道，丢失只影响"断线期间的实时推送延迟"，不影响数据完整性
-  4. 迁移到 Redis Stream 的成本（改协议/消费者组/ACK）远大于收益
-
-#### M1.6 Embedding 客户端循环感知（已完成）
-- **改进**：`SiliconFlowEmbedding._get_client()` 增加 asyncio 循环感知：保存创建时的 loop 引用，`get()` 时检测 `loop.is_closed()` 或 `loop is not current_loop`，如是则重建。`aclose()` 重置 loop 引用。
-- **影响范围**：`app/rag/store.py`
-- **测试**：`tests/test_embedding_loop_safety.py`（5 用例）
-
-#### M1.7 审计日志迁移到 PostgreSQL（已完成）
-- **改进**：`app/observability/audit.py` 从 SQLite 迁移到 PostgreSQL。新增 `AuditLogModel` ORM（`audit_logs` 表），后台线程批量写入（2s 刷新间隔，5000 缓冲上限）。`log()` 保持同步接口兼容性，`query()`/`stats()` 改为异步。移除 `import sqlite3`。
-- **影响范围**：`app/observability/audit.py`、`app/db/models/observability.py`、`app/routers/audit_logs.py`
-
----
-
-### P1（功能完善）
-
-- **gRPC Agent Worker 未实现**（`app/agents/worker.py`）：当前为 stub 模式，使用 `LocalAgentCompute` 单进程执行。gRPC 服务端代码已预留注释块，实现路线图见 worker.py 文件头文档。
-  - 目标：完成 protobuf 定义 + gRPC 服务端 + Manager 端客户端 + 负载均衡
-  - 验收：多主机 Agent Worker 部署后，Manager 可分发任务到远程 Worker 执行
-
-- **MeetingState 平铺字段访问**：已提供嵌套 `sections` 视图，但 orchestrator 各节点仍使用平铺字段访问，需逐步迁移。
-  - 目标：orchestrator 节点统一通过 `state.sections.xxx` 访问
-  - 验收：`grep "state\.\(topic\|claims\|conflicts\|evidence\)" backend/app/orchestrator/nodes/` 无结果
-
----
-
-### P2（可观测性生态接入，非紧迫）
-
-> 当前日志/指标/追踪已自研覆盖（LogBus JSON Lines 文件 + MetricsStore JSON API + CallTrace LLM 调用记录 + audit 审计日志），满足问题定位需求。以下为未来对接开源生态的规划，优先级低于核心逻辑缺陷修复。
-
-- **Prometheus 指标接入**：`/metrics` 端点增加 `text/plain; version=0.0.4` 格式输出，docker-compose 新增 Prometheus + Grafana。依赖 `prometheus-client`（需开 ADR）。
-- **分布式全链路追踪（OpenTelemetry）**：引入 OTel SDK，实现 `traceparent` 跨服务传播 + span 覆盖（LLM/RAG/Sandbox/Web）+ 采样策略（默认 10%，错误 100%）+ Jaeger 导出。依赖 `opentelemetry-*`（需开 ADR）。
-- **日志聚合（Loki）**：docker-compose 新增 Loki + Promtail 采集 `logs/*.jsonl`，支持按 `meeting_id` 过滤 + Trace→Log 关联。依赖 OTel trace_id。
-- **CallTrace 扩展为 Span 覆盖**：将 CallTrace 升级为通用 Span 记录，覆盖 RAG 检索/沙箱执行/Web 搜索耗时。与 OTel 协同。
-
----
-
-### P3（体验优化）
-
-- **前端图表渲染**：数据分析结果的前端图表渲染未完成。
-- **跨会议长期记忆**：记忆系统当前仅支持单会议，未实现跨会议观点演化。
-- **部署后冒烟测试**：服务部署后缺少自动化功能冒烟测试。
-
----
-
-## 贡献指南
-
-1. Fork 仓库并创建特性分支
-2. 所有 lint/typecheck/test 在 Docker 容器内执行（见测试章节）
-3. Commit Message 遵循 Conventional Commits（`feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`）
-4. P0/P1 Bug 修复必须归档修复报告到 `docs/retrospectives/`
-5. 新增功能必须配套测试；Bug 修复先加复现用例再修复
-6. 单次 PR 控制在 400 行以内（不含 lock 文件/生成代码）
-7. **文档变更必须 grep 核验**：修改 README/ADR/待办时，每一条事实性声明（文件路径、API 路径、配置默认值、类名/函数名）必须用 grep/Glob 核验与代码一致（见 AGENTS.md §4.16）。commit message 中列出核验方式。
-8. **回应评审必须逐条核验**：收到代码审查/外部评审的问题清单时，逐条 grep 核验问题是否真实存在，给出"已验证存在/不存在/部分准确"判定，禁止"声明式修复"（见 AGENTS.md §4.17）。
-9. **待办项必须有可验证的验收标准**："改进 X"不是合格待办，"实现 Y 策略，新增 test_y.py 验证"才是。
+[MIT License](LICENSE)
