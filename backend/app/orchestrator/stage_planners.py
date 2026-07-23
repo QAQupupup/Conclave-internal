@@ -34,28 +34,50 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
     优先使用 state.team_config（clarify 阶段由 LLM 生成），
     若为空则回退到 baseline.team_roles（测试/默认场景）。
 
-    Phase 3：保留原节点的混合模式——前 N-1 个角色并行独立思考，
-    最后一个角色依赖前序角色，基于其结论做反应性思考。
+    ADR-010: 支持门禁 supplement 模式——当 gate_pending_action.action == "supplement" 时，
+    仅为 target_roles 创建任务，避免全量重复发言。
     """
     team_roles = state.team_config if state.team_config else baseline.team_roles
+
+    # ADR-010: 检测 supplement 模式
+    supplement_info = state.gate_pending_action
+    is_supplement = bool(supplement_info and supplement_info.get("action") == "supplement")
+    supplement_roles: set[str] = set()
+    supplement_desc = ""
+    if is_supplement:
+        supplement_roles = set(supplement_info.get("target_roles", []))
+        reason = supplement_info.get("reason", "")
+        round_num = supplement_info.get("round", "?")
+        supplement_desc = (
+            f"[门禁补充 第{round_num}轮] 你的论点在跨队辩论中未被充分引用或反驳，"
+            f"需要补充更有力的论点或证据。原因：{reason} 请针对已有冲突点补充新论点，不要重复已有观点。"
+        )
+
     tasks: list[SubTask] = []
     task_ids: list[str] = []
     for idx, role_def in enumerate(team_roles):
         role = role_def.get("role", "agent")
+        # supplement 模式下跳过非目标角色
+        if is_supplement and role not in supplement_roles:
+            continue
         stance = role_def.get("stance", "")
         task_id = f"intra-{role}-{idx}"
         task_ids.append(task_id)
+        description = f"从 {role} 视角发表队内观点与 claims"
+        if is_supplement:
+            description = supplement_desc
         tasks.append(
             SubTask(
                 id=task_id,
                 stage="intra_team",
                 role=role,
-                description=f"从 {role} 视角发表队内观点与 claims",
+                description=description,
                 payload={"role": role, "stance": stance, "react": False},
             )
         )
 
-    if len(tasks) > 1:
+    # supplement 模式下不做反应性思考（只补充论点），且不强制最后角色依赖
+    if len(tasks) > 1 and not is_supplement:
         # 最后一个角色依赖前 N-1 个角色，做反应性思考
         last_task = tasks[-1]
         last_task.dependencies = task_ids[:-1]
@@ -77,14 +99,39 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
 
 
 def plan_cross_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPlan:
-    """cross_team 阶段：主持人识别冲突、汇总共识"""
+    """cross_team 阶段：主持人识别冲突、汇总共识
+
+    ADR-010: 支持门禁 re_examine 模式——当 gate_pending_action.action == "re_examine" 时，
+    在任务描述中注入门禁反馈，指导主持人针对 weak_dimensions 重新审视冲突。
+    """
+    # ADR-010: 检测 re_examine 模式
+    reex_info = state.gate_pending_action
+    is_reexamine = bool(reex_info and reex_info.get("action") == "re_examine")
+    description = "基于各角色 claims 识别冲突点或汇总共识"
+    if is_reexamine:
+        weak_dims = reex_info.get("weak_dimensions", [])
+        reason = reex_info.get("reason", "")
+        round_num = reex_info.get("round", "?")
+        dim_labels = {
+            "1": "条件1：每个角色的 claims 中至少有 1 条被其他角色直接反驳或质疑",
+            "2": "条件2：冲突列表覆盖了议题的核心决策点（非边缘细节）",
+            "3": "条件3：不存在某角色 claims 全部未被任何冲突引用的情况",
+        }
+        dim_texts = [dim_labels.get(str(d), str(d)) for d in weak_dims]
+        description = (
+            f"[门禁重审 第{round_num}轮] 上一轮冲突识别未通过质量门禁，需要重新审视。\n"
+            f"原因：{reason}\n"
+            f"未满足的条件：\n" + "\n".join(f"  - {dt}" for dt in dim_texts) + "\n"
+            "请重新识别冲突，确保覆盖核心争议点、每个角色的论点都被冲突引用。"
+        )
+
     return ExecutionPlan(
         tasks=[
             SubTask(
                 id="cross-moderator",
                 stage="cross_team",
                 role="moderator",
-                description="基于各角色 claims 识别冲突点或汇总共识",
+                description=description,
                 payload={"claims": [c for c in state.claims]},
             )
         ]

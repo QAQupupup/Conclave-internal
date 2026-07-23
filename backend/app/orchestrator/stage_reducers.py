@@ -59,7 +59,13 @@ async def reduce_intra_team(
 
         return await intra_team_node(state)
 
-    return await run_intra_team(state, role_results)
+    # ADR-010: supplement 模式下传递 replace_roles，让 run_intra_team 替换而非追加 claims
+    replace_roles: set[str] | None = None
+    supplement_info = state.gate_pending_action
+    if supplement_info and supplement_info.get("action") == "supplement":
+        replace_roles = set(supplement_info.get("target_roles", []))
+
+    return await run_intra_team(state, role_results, replace_roles=replace_roles)
 
 
 async def reduce_cross_team(

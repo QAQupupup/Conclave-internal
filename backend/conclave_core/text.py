@@ -51,17 +51,26 @@ def compress_decisions_to_brief(
         if text:
             core_decisions.append(text[:120])
 
-    support_counts = {"supports": 0, "refutes": 0, "neutral": 0}
+    support_a = 0
+    support_b = 0
+    neutral_count = 0
+    irrelevant_count = 0
     for es in evidence_set:
         for a in es.get("assessments", []):
             direction = a.get("supports", "neutral")
-            if direction in support_counts:
-                support_counts[direction] += 1
+            if direction == "a":
+                support_a += 1
+            elif direction == "b":
+                support_b += 1
+            elif direction == "irrelevant":
+                irrelevant_count += 1
+            else:
+                neutral_count += 1
     evidence_backing = (
         (
-            f"{support_counts['supports']} 条证据支持, "
-            f"{support_counts['refutes']} 条反驳, "
-            f"{support_counts['neutral']} 条中性"
+            f"{support_a} 条支持A方, "
+            f"{support_b} 条支持B方, "
+            f"{neutral_count} 条中立" + (f", {irrelevant_count} 条无关" if irrelevant_count else "")
         )
         if evidence_set
         else "无证据数据"

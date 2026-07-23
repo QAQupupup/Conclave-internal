@@ -215,6 +215,10 @@ class MeetingState(BaseModel):
     # ADR-010: cross_team 质量门禁决策历史
     # 每项: {"round": 1, "decision": "pass|supplement|re_examine", "reason": "...", "target_roles": [...]}
     gate_history: list[dict[str, Any]] = Field(default_factory=list)
+    # ADR-010: 门禁待执行动作（驱动回流，消费后清空）
+    # 格式: {"action": "supplement"|"re_examine", "round": int, "reason": "...",
+    #        "target_roles": [...], "weak_dimensions": [...]}
+    gate_pending_action: dict[str, Any] | None = None
     # 借调的 agent 列表（loan 信号裁决通过后追加，待发言）
     # 每项: {"role": "security_expert", "verdict": "approve_temporary",
     #        "spoken": False, "request": {...}}

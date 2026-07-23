@@ -124,8 +124,8 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
     gate = result.get("gate") or {}
     gate_decision = gate.get("decision", "pass")
     gate_reason = gate.get("reason", "")
-    target_roles = gate.get("target_roles", [])
-    weak_dimensions = gate.get("weak_dimensions", [])
+    target_roles = list(gate.get("target_roles", []))
+    weak_dimensions = list(gate.get("weak_dimensions", []))
 
     # 第二层防偏：代码层硬校验（不可被 LLM 绕过）
     # 条件3：每个角色的 claims 至少有 1 条被冲突引用
@@ -166,6 +166,7 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
 
     # 记录门禁历史
     gate_round = len(state.gate_history) + 1
+    MAX_GATE_ROUNDS = 2
     state.gate_history.append(
         {
             "round": gate_round,
@@ -243,9 +244,34 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
     if conflicts:
         state.prefetched_evidence = await _prefetch_evidence(state, conflicts)
 
-    nxt = _next_stage(Stage.CROSS_TEAM, state.flow_plan)
-    if nxt == Stage.EVIDENCE_CHECK and not conflicts and state.flow_plan == "standard":
-        nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan) or Stage.PRODUCE
+    # ADR-010: 门禁驱动回流（supplement/re_examine）
+    # 达到最大轮次时强制推进，防止无限循环
+    state.gate_pending_action = None
+    if gate_round <= MAX_GATE_ROUNDS and gate_decision == "supplement" and target_roles:
+        # 回流到 intra_team：仅让指定角色补充论点
+        state.gate_pending_action = {
+            "action": "supplement",
+            "round": gate_round,
+            "reason": gate_reason,
+            "target_roles": target_roles,
+        }
+        state.prefetched_evidence = None  # 论点更新后证据需重新检索
+        nxt = Stage.INTRA_TEAM
+    elif gate_round <= MAX_GATE_ROUNDS and gate_decision == "re_examine" and weak_dimensions:
+        # 停在 cross_team：主持人重新审视冲突
+        state.gate_pending_action = {
+            "action": "re_examine",
+            "round": gate_round,
+            "reason": gate_reason,
+            "weak_dimensions": weak_dimensions,
+        }
+        state.prefetched_evidence = None
+        nxt = Stage.CROSS_TEAM
+    else:
+        # 门禁通过或达轮次上限：推进到下一阶段
+        nxt = _next_stage(Stage.CROSS_TEAM, state.flow_plan)
+        if nxt == Stage.EVIDENCE_CHECK and not conflicts and state.flow_plan == "standard":
+            nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan) or Stage.PRODUCE
 
     await _moderator_assess_borrow(state, Stage.CROSS_TEAM)
     await _let_borrowed_agents_speak(state, Stage.CROSS_TEAM)
@@ -256,11 +282,17 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
 async def run_intra_team(
     state: MeetingState,
     role_results: list[dict[str, Any]],
+    replace_roles: set[str] | None = None,
 ) -> MeetingState:
     """IntraTeam 阶段：聚合每个角色的 claims，更新 MeetingState。
 
     role_results 每项结构：
         {"role": str, "stance": str, "claims": list[dict], "confidence": str, "react": bool}
+
+    replace_roles: ADR-010 门禁 supplement 模式下传入，指定需要替换 claims 的角色集合。
+        - None 或空集合：全量模式（首轮），追加所有角色的 claims
+        - 非空集合：替换模式，移除这些角色的旧 claims 后追加新 claims；
+          未在集合中的角色保留原有 claims 不变
     """
     import uuid
 
@@ -271,6 +303,18 @@ async def run_intra_team(
             {"role": "product_architect", "stance": "重价值与边界"},
             {"role": "engineer", "stance": "重可行性与风险"},
         ]
+
+    is_replace = bool(replace_roles)
+
+    # 替换模式：先移除旧 claims 和旧 team_conclusions
+    if is_replace:
+        replace_set = replace_roles or set()
+        # 从 state.claims 中移除被替换角色的旧 claims
+        state.claims = [c for c in state.claims if c.get("agent_role") not in replace_set]
+        # 从 team_conclusions 中移除被替换角色的旧结论
+        existing_conclusions = [c for c in state.team_conclusions if c.get("role") not in replace_set]
+    else:
+        existing_conclusions = []
 
     # 按原始顺序整理成员，未匹配角色跳过
     members: list[tuple[Role, str]] = []
@@ -285,11 +329,30 @@ async def run_intra_team(
     if not members:
         members = [(Role.PRODUCT_ARCHITECT, "重价值与边界"), (Role.ENGINEER, "重可行性与风险")]
 
-    conclusions: list[dict[str, Any]] = []
+    # 构建 role_results 的快速查找
+    rr_by_role: dict[str, dict[str, Any]] = {}
+    for rr in role_results:
+        rr_by_role[rr.get("role", "")] = rr
+
+    conclusions: list[dict[str, Any]] = list(existing_conclusions)
     worst_conf = "high"
 
-    # 保证按 members 顺序处理结果，与 role_results 顺序一致（Scheduler 拓扑层保证）
-    for (role, stance), rr in zip(members, role_results, strict=False):
+    # 全量模式：遍历所有 members；替换模式：只处理 role_results 中的角色
+    if is_replace:
+        process_members = []
+        for role, stance in members:
+            if role.value in (replace_roles or set()) and role.value in rr_by_role:
+                process_members.append((role, stance))
+        # 如果没匹配到（防御），回退处理所有 role_results
+        if not process_members:
+            for role, stance in members:
+                if role.value in rr_by_role:
+                    process_members.append((role, stance))
+    else:
+        process_members = [(r, s) for r, s in members if r.value in rr_by_role]
+
+    for role, stance in process_members:
+        rr = rr_by_role[role.value]
         conf = rr.get("confidence", "high")
         worst_conf = worst_confidence(worst_conf, conf)
         claims = rr.get("claims", [])
@@ -306,9 +369,17 @@ async def run_intra_team(
         await emit_agent_spoke(state, role, Stage.INTRA_TEAM, content, claim_refs=claim_ids)
         record_drift(state, role, Stage.INTRA_TEAM, content)
 
+    # 按 team_config 顺序重排 conclusions（替换模式下保持一致顺序）
+    role_order = [m[0].value for m in members]
+    conclusions.sort(key=lambda c: role_order.index(c["role"]) if c["role"] in role_order else 999)
+
     state.team_conclusions = conclusions
     lock_conclusion(state.conclusion_chain, "intra_team", {"claims": state.claims, "team_conclusions": conclusions})
     state.confidence_flags["intra_team"] = worst_conf
+
+    # 补充模式完成后清空门禁待执行动作，让后续 cross_team 正常执行
+    if is_replace:
+        state.gate_pending_action = None
 
     await _moderator_assess_borrow(state, Stage.INTRA_TEAM)
     await _let_borrowed_agents_speak(state, Stage.INTRA_TEAM)

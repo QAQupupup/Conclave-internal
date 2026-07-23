@@ -331,7 +331,7 @@ python -m eval.run --tier 1 --pass-k 3
 3. 对每个用例：
    a. 启动会议（POST /meetings，上传文档）
    b. 运行到完成（或超时）
-   c. 获取最终状态（GET /meetings/{id}/state）
+   c. 获取最终状态（GET /meetings/{id}）
    d. 对每个阶段运行对应 Grader
    e. 记录: 用例ID、阶段、维度、得分、token消耗、延迟
 4. 汇总统计：
