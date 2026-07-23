@@ -42,6 +42,7 @@
 | 证据诚实性 | 幻觉率高 | 可选工具调用 | **证据强制校验**：无证据时诚实降级置信度 |
 | 产出物 | 文本回复 | 文本回复 | **可交付物**：PRD+OpenAPI、可部署服务、分析报告 |
 | 可观测性 | 黑盒 | 基础日志 | **全链路追踪**：日志、Token/成本、漂移检查、审计 |
+| 企业就绪 | 无 | 需自建 | **多租户 + RBAC + JWT 认证 + 审计日志** |
 | 部署门槛 | SaaS 依赖 | 需自行编排 | **Docker Compose 一键启动**，全容器化 |
 
 核心原则：不追求 Agent 数量多，而追求决策质量高。宁可诚实标注"证据不足"，也不编造伪引用。
@@ -50,16 +51,57 @@
 
 ## 核心特性
 
+### 决策引擎
 - **六阶段会议管线**：clarify（澄清）→ intra_team（队内立论）→ cross_team（跨队辩论）→ evidence_check（证据校验）→ arbitrate（仲裁裁决）→ produce（产出交付），带质量门禁与自动回流
 - **7 种独立角色**：产品架构师、工程师、安全专家、UX 设计师、数据工程师、市场专家、主持人，每个角色有独立视角、风险偏好与证据偏好
 - **动态借调机制**：主持人可根据议题复杂度动态申请补充专家角色
 - **证据诚实性保障**：论点必须标注证据来源（文档/网页/常识/假设），无证据论点自动降级置信度
-- **Docker 沙箱隔离**：代码执行在独立容器中，支持多主机分布式调度（5 种调度策略）
+- **五层确定性保障**：参数约束、结论锁定、漂移检查、全链路追踪、自动降级兜底
+
+### 执行与交付
+- **Docker 沙箱隔离**：代码执行在独立容器中（Sibling Containers 架构），安全隔离
+- **多主机分布式调度**：支持注册多台远程 Docker 主机（SSH/TCP+TLS/Unix Socket），内置 5 种调度策略（least_loaded/local_first/tag_match/manual/round_robin）
 - **可部署服务交付**：会议结论可直接生成 FastAPI 后端 + React 前端 + Docker 配置，自动部署到沙箱运行
-- **实时可观测性**：实时日志面板、级别着色、进度追踪、Token/成本监控、审计日志
-- **RAG 检索增强**：bge-m3 多语言 Embedding + bge-reranker-v2-m3 重排序 + HyDE 假设文档嵌入
-- **多租户隔离**：租户级数据隔离、配置覆盖与 RBAC 权限控制
-- **插件框架**：支持认证、可观测性等模块通过插件热插拔
+- **代码自动修复**：代码执行失败时自动分析错误并修复（RefineLoop，默认最多 5 轮）
+- **Web 搜索能力**：Agent 可通过 Playwright 浏览器主动搜索资料支撑论点
+
+### 企业级能力
+- **多租户隔离**：租户级数据隔离（tenant_id 行级过滤）、配置覆盖、系统租户上下文
+- **JWT 认证**：HttpOnly Cookie + CSRF 防护 + Token 刷新，支持默认管理员初始化
+- **RBAC 权限控制**：基于角色的访问控制（插件化实现）
+- **审计日志**：所有关键操作写入 PostgreSQL `audit_logs` 表，后台线程批量写入
+- **成本追踪**：Token 消耗与费用实时统计，按会议/模型/角色维度聚合
+
+### 可观测性
+- **实时日志面板**：可折叠面板，实时显示后端所有节点执行日志，级别着色（ERROR/WARNING/INFO/DEBUG）
+- **组件联通视图**：Topology 页面展示服务依赖关系、网络隔离层级、实时健康状态
+- **Token 与成本监控**：实时统计 LLM 调用费用、Token 用量
+- **结构化日志**：LogBus 统一日志总线，支持多 sink（文件、EventBus、控制台）
+- **指标采集**：MetricsStore 环形缓冲区，前端可通过 API 读取
+
+### RAG 检索增强
+- **bge-m3 多语言 Embedding** + **bge-reranker-v2-m3 重排序**
+- **HyDE 假设文档嵌入**：提升模糊查询召回率
+- **Multi-Query 扩展**：自动生成多个查询变体
+- **Qdrant 向量库**（推荐）/ 内存向量库（开发模式）
+- **文档上传与分块**：支持会议关联参考文档
+
+### 基础设施
+- **实时通信**：WebSocket + 事件总线（内存缓存 + PostgreSQL 持久化 + Redis Pub/Sub 多副本广播 + 增量回放）
+- **插件框架**：基于钩子（Hook）机制的事件驱动插件系统，支持热插拔
+- **三层记忆**：Raw（原始发言）→ Feature（行为特征）→ Profile（稳定画像），画像反哺下次会议初始化
+- **内存安全**：事件历史上限裁剪、前端日志上限、会议结束自动清理资源
+
+---
+
+## 文档导航
+
+| 文档 | 面向读者 | 内容 |
+|---|---|---|
+| [README.md](README.md) | 所有人 | 项目概览、快速开始、核心特性（本文件） |
+| [backend/README.md](backend/README.md) | 后端开发者 | 后端架构、模块说明、API 概览、开发指南 |
+| [frontend/README.md](frontend/README.md) | 前端开发者 | 前端架构、页面/组件结构、开发指南 |
+| [LICENSE](LICENSE) | 所有人 | MIT 开源协议 |
 
 ---
 
@@ -130,7 +172,7 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 │  │  → evidence → arbitrate → produce   │          │
 │  └────┬──────┬──────┬──────┬───────────┘          │
 │  ┌────▼──┐┌──▼──┐┌──▼───┐┌──▼──┐                  │
-│  │Agents ││ RAG ││Sand- ││Tools│                  │
+│  │Agents ││ RAG ││Sand-││Tools│                  │
 │  │(LLM)  ││     ││box   ││     │                  │
 │  └───┬───┘└─────┘└──┬───┘└─────┘                  │
 │      │              │ Docker API                   │
@@ -138,12 +180,15 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 │      │         ▼         ▼                         │
 │      │   ┌──────────┐ ┌──────────┐                 │
 │      │   │ 本地Docker│ │RemoteHost│                │
-│      ▼   └──────────┘ └──────────┘                 │
+│      │   └──────────┘ └──────────┘                 │
+│      ▼                                             │
 │  ┌─────────────────────────────┐                   │
 │  │ PostgreSQL │ Redis │ Qdrant │                   │
 │  └─────────────────────────────┘                   │
 └───────────────────────────────────────────────────┘
 ```
+
+详细架构说明见 [backend/README.md](backend/README.md)。
 
 ---
 
@@ -153,12 +198,13 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 |---|---|
 | 后端 | Python 3.12 + FastAPI + asyncio + SQLAlchemy (async) |
 | 前端 | React 18 + TypeScript + Vite + Ant Design |
-| 数据库 | PostgreSQL（主存储，含 pgvector）+ Redis（缓存/会话） |
+| 数据库 | PostgreSQL（主存储，含 pgvector）+ Redis（缓存/会话/Pub-Sub） |
 | 向量检索 | Qdrant / 内存向量库（开发模式） |
 | 嵌入模型 | bge-m3（多语言）+ bge-reranker-v2-m3（重排序） |
 | 容器化 | Docker + Docker Compose（Sibling Containers 沙箱） |
-| 实时通信 | WebSocket + 事件总线 |
+| 实时通信 | WebSocket + 事件总线 + Redis Pub/Sub |
 | 浏览器自动化 | Playwright + Chromium |
+| 认证 | JWT + HttpOnly Cookie + CSRF（插件化） |
 
 ---
 
@@ -169,7 +215,7 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/meetings` | 创建会议 |
-| GET | `/meetings` | 会议列表 |
+| GET | `/meetings` | 会议列表（按创建时间倒序） |
 | GET | `/meetings/{id}` | 会议详情 |
 | POST | `/meetings/{id}/run` | 启动会议（后台异步执行） |
 | POST | `/meetings/{id}/control` | 控制（pause/resume/abort/inject） |
@@ -178,48 +224,17 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 | WS | `/ws/meetings/{id}` | WebSocket 实时事件流 |
 | GET/POST | `/docker-hosts` | Docker 主机管理 |
 | POST | `/auth/login` | 登录 |
+| POST | `/auth/logout` | 登出 |
 | GET | `/auth/me` | 当前用户信息 |
-
----
-
-## 项目结构
-
-```
-Conclave/
-├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI 入口
-│   │   ├── config.py            # 环境变量配置
-│   │   ├── orchestrator/        # 编排核心（runner/manager/stage_runners/context_manager）
-│   │   ├── agents/              # Agent 计算层（LLM 调用 + 运行时）
-│   │   ├── routers/             # API 路由
-│   │   ├── rag/                 # 检索增强（HyDE/Multi-Query/Reranker）
-│   │   ├── sandbox.py           # Docker 沙箱管理
-│   │   ├── plugins/             # 插件系统
-│   │   ├── tenants/             # 多租户隔离
-│   │   ├── db/                  # 数据层（ORM 模型/引擎）
-│   │   ├── tools/               # 工具集（搜索/浏览器/域名可信度）
-│   │   ├── observability/       # 可观测性（日志/指标/成本/审计）
-│   │   └── domain/              # 领域模型与枚举
-│   ├── tests/                   # 测试文件
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── views/               # 页面（Board/Meeting/Models/Topology/Monitor/DevOpsPanel）
-│   │   ├── components/          # 可复用组件
-│   │   └── lib/                 # 工具库（api/ws/auth）
-│   └── Dockerfile
-├── docker-compose.yml           # 开发环境编排
-├── docker-compose.oss.yml       # 开源版编排
-├── .env.example                 # 环境变量模板
-└── LICENSE
-```
+| POST | `/auth/refresh` | 刷新 Token |
+| GET | `/audit-logs` | 审计日志查询 |
+| GET | `/metrics` | 运行指标快照 |
 
 ---
 
 ## 开发
 
-### 本地开发（非 Docker）
+### 本地开发
 
 ```bash
 # 后端
@@ -235,11 +250,13 @@ npm install
 npm run dev
 ```
 
-注意：本地开发需自行启动 PostgreSQL、Redis、Qdrant。
+注意：本地开发需自行启动 PostgreSQL、Redis、Qdrant。推荐使用 Docker Compose 启动基础设施。
+
+详细开发指南见 [backend/README.md](backend/README.md) 和 [frontend/README.md](frontend/README.md)。
 
 ### 测试与质量检查
 
-所有检查建议在 Docker 容器内执行：
+所有检查建议在 Docker 容器内执行（避免版本漂移）：
 
 ```bash
 # 全量测试（含 ruff/mypy/pytest）

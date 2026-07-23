@@ -37,6 +37,10 @@
       "dst": "backend/Dockerfile"
     },
     {
+      "src": "backend/README.md",
+      "dst": "backend/README.md"
+    },
+    {
       "src": "backend/entrypoint.sh",
       "dst": "backend/entrypoint.sh"
     },
