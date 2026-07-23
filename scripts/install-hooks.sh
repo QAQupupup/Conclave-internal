@@ -31,6 +31,9 @@ cat > "$HOOK_FILE" << 'HOOK_EOF'
 
 set -e
 
+# 所有诊断输出重定向到 stderr（避免 PowerShell/Git Bash 下 stdout fd 问题）
+exec >&2
+
 # 获取暂存的文件
 STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep '^backend/.*\.py$' || true)
 STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep '^frontend/.*\.\(ts\|tsx\)$' || true)
@@ -171,11 +174,18 @@ cat > "$PUSH_HOOK" << 'PUSH_EOF'
 #
 # 跳过：git push --no-verify（紧急情况）
 # Docker 未运行时自动跳过（不阻塞推送，但 CI 仍会检查）
+#
+# 注意：所有诊断输出走 stderr，避免 PowerShell/Git Bash 下
+# stdout fd 被 Git 协议占用导致 "Bad file descriptor" 错误。
 
 set -e
 
+# 所有诊断输出重定向到 stderr
+exec >&2
+
 # pre-push hook 从 stdin 读取推送的 ref 信息
 # 格式: <local ref> <local sha> <remote ref> <remote sha>
+DO_DOCKER_CHECK=0
 while read local_ref local_sha remote_ref remote_sha; do
     # 只对分支推送触发检查，标签推送跳过
     if [[ "$remote_ref" == refs/heads/* ]]; then
@@ -183,7 +193,7 @@ while read local_ref local_sha remote_ref remote_sha; do
     fi
 done
 
-if [ -z "$DO_DOCKER_CHECK" ]; then
+if [ "$DO_DOCKER_CHECK" -eq 0 ]; then
     exit 0
 fi
 

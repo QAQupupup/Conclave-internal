@@ -380,6 +380,20 @@ git commit -F commit-msg.txt
 
 **参考**：commit `2348664` 的提交过程中发现并确认。
 
+### 4.20 Git Hook 在 PowerShell 下的 stdout 文件描述符问题
+
+**症状**：`git push`（或 `git commit`）时 hook 脚本报错 `echo: write error: Bad file descriptor`，导致 hook 误报失败、推送被阻止。在 Git Bash 或 Linux 下正常。
+
+**根因**：Git hooks 的 stdout 在 PowerShell/Git Bash 环境下可能被 Git 用于协议通信（尤其 pre-push hook 从 stdin 读取 ref 信息），向 stdout 写入 `echo` 时 fd 无效或被关闭，触发 `Bad file descriptor`。`set -e` 使脚本在 echo 失败时立即退出。
+
+**规则**：
+1. 所有 Git hook 脚本（pre-commit、pre-push 及其调用的子脚本）必须在开头加 `exec >&2`，将所有诊断输出重定向到 stderr。
+2. Hook 的 stdout 仅用于 Git 协议通信，诊断信息（echo、ruff/mypy 输出等）一律走 stderr。
+3. 在 Docker 容器内执行的检查命令（ruff/mypy）输出通过 docker 继承的 fd 自然流向 stderr，无需额外重定向。
+4. 编写新 hook 时遵循此规则，避免 PowerShell 用户每次 push 都要 `--no-verify`。
+
+**参考**：scripts/docker-ci-check.sh、scripts/install-hooks.sh 均已添加 `exec >&2`。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -493,4 +507,4 @@ git commit -F commit-msg.txt
 
 ---
 
-> 本文件最后更新：2026-07-22（§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-24（§4.20 Git Hook PowerShell stdout fd 问题、§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
