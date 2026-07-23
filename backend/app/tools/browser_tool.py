@@ -432,8 +432,9 @@ class BrowserPool:
                 java_script_enabled=True,
                 bypass_csp=True,  # N2: 绕过 CSP 限制
             )
-            # 在页面 JS 前注入 stealth 脚本（await 确保首个 page 也能注入）
-            await context.add_init_script(_STEALTH_JS)
+            # 在页面 JS 前注入 stealth 脚本（开源版为空时跳过）
+            if _STEALTH_JS:
+                await context.add_init_script(_STEALTH_JS)
             session = _ContextSession(context, meeting_id, self)
             self._contexts[meeting_id] = session
 

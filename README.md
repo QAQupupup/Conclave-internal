@@ -5,6 +5,19 @@
 >
 > 名称取自"Conclave（闭门会议）"——一场有流程、有证据、有裁决、有落地交付的AI协作会议。基于斯坦福AI小镇理念，每个Agent拥有独立人格、思考方式和决策偏向，通过互斥、沟通、对齐、校验的多Agent协作模式，消除单一大模型的天然缺陷，保障产出质量和可靠性。
 
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="assets/screenshots/meeting-discussion.jpg" alt="会议讨论界面" /><br/><sub>多Agent结构化辩论</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/topology-graph.jpg" alt="流程拓扑图" /><br/><sub>六阶段会议管线</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><img src="assets/screenshots/produce-output.jpg" alt="产出物界面" /><br/><sub>PRD 与 OpenAPI 产出</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/metrics-dashboard.jpg" alt="指标面板" /><br/><sub>实时日志与质量指标</sub></td>
+  </tr>
+</table>
+
 ---
 
 ## 核心特性
@@ -72,7 +85,7 @@ docker compose up -d --build
 - **Redis**：localhost:6379（容器内）
 - **Qdrant向量库**：localhost:6333（容器内）
 
-> **工程规范**：所有贡献者在操作本项目前，请先阅读 [PROJECT_CONVENTIONS.md](PROJECT_CONVENTIONS.md)，了解项目的部署、构建、提交、测试和代码保护等强制规范。
+> **贡献指南**：欢迎提交 Issue 和 Pull Request。请确保代码通过 lint 检查，且新增功能配有对应测试。
 
 ### 配置LLM（可选，不配置走Stub模式）
 
@@ -509,7 +522,7 @@ npm run dev
 
 ## 测试
 
-> **强制规范**：所有 lint/typecheck/test 必须在 Docker 容器内执行（见 [AGENTS.md](AGENTS.md) §0.5.2）。禁止在宿主机直接运行 pytest/ruff/mypy。
+> **规范**：所有 lint/typecheck/test 建议在 Docker 容器内执行，避免宿主机环境差异。
 
 ### 运行全量测试（Docker Compose，推荐）
 
@@ -639,7 +652,7 @@ docker compose -f docker-compose.test.yml run --rm backend-test \
 
 ## 贡献指南
 
-1. 提交前阅读 [AGENTS.md](AGENTS.md)（AI 助手实战纪律）和 [PROJECT_CONVENTIONS.md](PROJECT_CONVENTIONS.md)（工程规范）
+1. Fork 仓库并创建特性分支
 2. 所有 lint/typecheck/test 在 Docker 容器内执行（见测试章节）
 3. Commit Message 遵循 Conventional Commits（`feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`）
 4. P0/P1 Bug 修复必须归档修复报告到 `docs/retrospectives/`

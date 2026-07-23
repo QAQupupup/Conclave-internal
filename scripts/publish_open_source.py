@@ -506,6 +506,19 @@ def main() -> int:
         all_copied.extend(copied)
         all_replaced.extend(replaced)
 
+    # 2.5. 用 OSS 脱敏版覆盖 skills（如果存在 .oss.yaml）
+    oss_skills_dir = dev_repo / "backend" / "app" / "skills"
+    if oss_skills_dir.exists():
+        for oss_yaml in oss_skills_dir.glob("*.oss.yaml"):
+            original_name = oss_yaml.name.replace(".oss.yaml", ".yaml")
+            target = oss_repo / "backend" / "app" / "skills" / original_name
+            if target.exists() and not args.dry_run:
+                shutil.copy2(oss_yaml, target)
+                all_replaced.append(f"backend/app/skills/{original_name} (oss override)")
+                _log(f"OSS 脱敏覆盖: {original_name}")
+            elif args.dry_run:
+                _log(f"[dry-run] 将用 OSS 版覆盖: {original_name}")
+
     # 3. 复制核心扩展二进制到开源仓库
     binary_names: list[str] = []
     if core_binaries:

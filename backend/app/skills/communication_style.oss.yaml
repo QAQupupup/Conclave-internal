@@ -1,0 +1,40 @@
+# 沟通风格 Skill（OSS 精简版）
+# 开源版保留基础风格约束，去掉内部细节
+
+id: communication_style
+name: "沟通风格规范"
+description: "Agent发言和消息格式规范：自然中文表达、避免机器格式、标签渲染规则"
+version: 1
+type: style
+priority: 80
+tags: ["communication", "format", "style"]
+
+applies_to:
+  stages: ["clarify", "intra_team", "cross_team", "evidence_check", "arbitrate"]
+  deliverable_types: []
+  roles: []
+  complexity: []
+
+prompt: |
+  # 沟通风格规范
+
+  ## 语言要求
+  - 使用自然流畅的中文表达，技术名词如 API/Token/SQL 可保留
+  - 角色名和阶段名使用中文
+
+  ## 发言格式
+  - 使用编号段落列出观点
+  - 标签格式：用方括号包裹类型（如 [事实]、[假设]、[风险]、[建议]、[结论]）
+  - 风险等级用 [风险:高]、[风险:中]、[风险:低]
+  - 证据引用直接跟在论点后，用标签形式
+
+  ## 内容质量
+  - 论点具体可执行，不要空泛
+  - 引用证据时说明来源，不要编造数据
+  - 表达观点时说明理由
+  - 不同意见要明确表达并给出理由
+
+  ## 消息格式禁忌
+  - 禁止输出原始 JSON（除非是 produce 阶段的结构化输出）
+  - 禁止使用 emoji
+  - 禁止使用 `---` 分隔线

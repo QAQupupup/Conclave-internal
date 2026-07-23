@@ -3,7 +3,7 @@ import contextlib
 import logging
 from typing import Any
 
-from .stealth_js import _STEALTH_JS
+from . import _STEALTH_JS  # 开源版为空字符串，不注入反检测脚本
 
 logger = logging.getLogger("app.tools.playwright.session_pool")
 
@@ -58,7 +58,8 @@ class SessionPool:
                 return self._contexts[session_key]
 
             ctx = await browser.new_context(**ctx_kwargs)
-            await ctx.add_init_script(_STEALTH_JS)
+            if _STEALTH_JS:  # 开源版为空字符串时跳过
+                await ctx.add_init_script(_STEALTH_JS)
             self._contexts[session_key] = ctx
             logger.info("SessionPool: 创建新 Context (session_key=%s, total=%d)", session_key[:20], len(self._contexts))
             return ctx

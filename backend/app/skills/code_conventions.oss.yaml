@@ -1,0 +1,55 @@
+# 代码生成规范 Skill（OSS 精简版）
+# 开源版保留基础代码规范，去掉内部踩坑清单
+
+id: code_conventions
+name: "代码生成规范"
+description: "代码生成时必须遵守的正面规范：项目结构、错误处理、安全、测试等"
+version: 1
+type: checklist
+priority: 85
+tags: ["code", "quality", "conventions"]
+
+applies_to:
+  stages: ["produce", "review", "bugfix"]
+  deliverable_types: ["code_analysis", "tested_system", "deployable_service"]
+  roles: ["engineer"]
+  complexity: []
+
+prompt: |
+  # 代码生成规范
+
+  ## 项目结构
+  - 单文件不超过 500 行，超过时拆分为模块
+  - 文件命名：snake_case.py，组件 PascalCase.tsx
+  - 配置项通过环境变量读取，提供合理默认值
+
+  ## 错误处理
+  - 所有外部 IO（数据库、网络、文件）必须用 try/except 捕获
+  - API 错误使用 HTTPException 返回合适的状态码
+  - 不允许裸 except:，必须指定异常类型
+  - 错误信息对用户友好，不暴露堆栈/内部路径
+
+  ## 安全要求
+  - 所有用户输入必须验证（Pydantic 模型/参数校验）
+  - SQL 必须用参数化查询，禁止 f-string 拼接 SQL
+  - 密码必须哈希存储（bcrypt/passlib）
+  - JWT 设置合理过期时间
+  - 敏感配置用环境变量，不硬编码
+  - CORS 默认只允许 localhost，生产环境通过环境变量配置
+
+  ## API 设计
+  - RESTful 风格
+  - 统一响应格式：成功 {"data": ...}、错误 {"detail": "..."}
+  - 分页接口返回 total
+  - 提供 /health 健康检查端点
+
+  ## Docker/部署
+  - uvicorn 绑定 0.0.0.0
+  - Dockerfile 基于 python:3.12-slim
+  - docker-compose 包含服务、端口映射、卷挂载
+  - requirements.txt 版本固定，三处端口必须一致
+  - README 包含：功能简介、环境要求、安装步骤、配置说明、启动命令
+
+  ## 真实性要求
+  - 所有接口必须真实实现，禁止返回硬编码 mock 数据
+  - 不要承诺未实现的功能

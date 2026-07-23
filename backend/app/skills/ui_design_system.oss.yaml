@@ -1,0 +1,49 @@
+# UI 设计系统 Skill（OSS 精简版）
+# 开源版保留基础设计原则，去掉具体色值、反模式清单和内部偏好
+
+id: ui_design_system
+name: "UI设计系统"
+description: "前端设计规则和色彩体系。生成前端代码时遵守。"
+version: 2
+type: style
+priority: 90
+tags: ["design", "frontend", "css", "aesthetic"]
+
+applies_to:
+  stages: ["produce"]
+  deliverable_types: ["deployable_service", "design_doc"]
+  roles: ["engineer", "ux_designer"]
+  complexity: []
+
+prompt: |
+  # 设计系统规范
+
+  ## 核心设计哲学
+  - 反装饰，功能优先：每个视觉元素必须服务于信息传达
+  - 克制色彩，纯色为王：大面积留白 + 单一品牌色点缀，禁止多彩渐变
+  - 信息密度优先：在可读性前提下尽量提高信息密度
+  - 场景分层：不同层级信息用不同灰度区分，不依赖颜色区分层级
+
+  ## 色彩体系
+  - 背景：纯白为主，次级浅灰，三级更浅灰
+  - 品牌色：选择一个沉稳的主色调用于按钮、链接、选中态
+  - 文字：主文字冷灰（非纯黑），次级中灰，辅助浅灰
+  - 状态色：成功绿、警告橙、错误红、信息蓝
+
+  ## 排版规则
+  - 字体：系统字体栈，Inter / -apple-system / Noto Sans SC / PingFang SC
+  - 等宽字体：JetBrains Mono / SF Mono / Consolas
+  - 字号层级：标题 16-18px、正文 13-14px、辅助 11-12px
+  - 行高：正文 1.5-1.6，标题 1.3
+
+  ## 形状与间距
+  - 圆角：小元素 4px、卡片 6-8px、按钮 6px
+  - 阴影：极轻阴影，透明度 0.04-0.06，禁止重阴影
+  - 间距基准：4px 为单位
+  - 过渡：0.15s，仅用于颜色/透明度/transform，禁止动画布局属性
+
+  ## 前端反模式
+  - 禁止：大面积渐变、3D 效果、重阴影、text-shadow、!important
+  - 文本溢出保护：单行截断用 ellipsis，多行用 break-word
+  - flex 子项设 min-width: 0 防止溢出
+  - z-index 分层管理，禁止 9999
