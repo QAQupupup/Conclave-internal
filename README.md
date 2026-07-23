@@ -96,12 +96,29 @@
 
 ## 文档导航
 
+### 顶层文档
+
 | 文档 | 面向读者 | 内容 |
 |---|---|---|
 | [README.md](README.md) | 所有人 | 项目概览、快速开始、核心特性（本文件） |
-| [backend/README.md](backend/README.md) | 后端开发者 | 后端架构、模块说明、API 概览、开发指南 |
+| [backend/README.md](backend/README.md) | 后端开发者 | 后端架构总览、子系统导航、开发指南 |
 | [frontend/README.md](frontend/README.md) | 前端开发者 | 前端架构、页面/组件结构、开发指南 |
 | [LICENSE](LICENSE) | 所有人 | MIT 开源协议 |
+
+### 后端子系统文档
+
+每个核心子系统有独立 README 详述设计与扩展方式：
+
+| 子系统 | 文档 | 一句话说明 |
+|---|---|---|
+| 编排核心 | [orchestrator](backend/app/orchestrator/README.md) | 六阶段会议管线、上下文治理、质量门禁、ReactLoop/RefineLoop |
+| Agent 计算层 | [agents](backend/app/agents/README.md) | LLM 调用封装、7 种角色定义、Prompt 管理、CallTrace 全链路追踪 |
+| 检索增强 | [rag](backend/app/rag/README.md) | 混合检索（向量+关键词）、HyDE、Multi-Query、bge-m3 嵌入与重排序 |
+| 插件框架 | [plugins](backend/app/plugins/README.md) | Hook 机制、三层分级（CORE/RUNTIME/OPTIONAL）、插件间通信 |
+| 可观测性 | [observability](backend/app/observability/README.md) | LogBus 统一日志、CostTracker 成本追踪、MetricsStore、AuditLogger |
+| 数据层 | [db](backend/app/db/README.md) | 异步 SQLAlchemy 引擎、ORM 模型、Redis、向量存储抽象 |
+| 记忆系统 | [memory](backend/app/memory/README.md) | 三层记忆（Raw→Feature→Profile）、画像演化与反哺 |
+| 工具与基础设施 | [tools](backend/app/tools/README.md) | Playwright Web 搜索、浏览器自动化、Docker 沙箱、事件总线 |
 
 ---
 

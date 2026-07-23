@@ -1,6 +1,21 @@
 # Conclave Backend
 
-Python 3.12 + FastAPI + asyncio 后端服务。
+[返回项目主页](../README.md) | Python 3.12 + FastAPI + asyncio 后端服务。
+
+## 子模块文档
+
+后端按职责拆分为多个子系统，每个子系统有独立 README 详述架构与扩展方式：
+
+| 子系统 | 文档 | 核心职责 |
+|---|---|---|
+| **编排核心** | [orchestrator/README.md](app/orchestrator/README.md) | 六阶段会议管线、上下文治理、质量门禁、任务图调度 |
+| **Agent 计算层** | [agents/README.md](app/agents/README.md) | LLM 调用封装、7 种角色定义、Prompt 管理、全链路追踪 |
+| **检索增强** | [rag/README.md](app/rag/README.md) | 文档分块、混合检索（向量+关键词）、HyDE、Multi-Query、重排序 |
+| **插件框架** | [plugins/README.md](app/plugins/README.md) | Hook 机制、三层分级（CORE/RUNTIME/OPTIONAL）、PluginEventBus |
+| **可观测性** | [observability/README.md](app/observability/README.md) | 统一日志、成本追踪、指标采集、审计日志 |
+| **数据层** | [db/README.md](app/db/README.md) | 异步引擎、ORM 模型、Redis、向量存储抽象 |
+| **记忆系统** | [memory/README.md](app/memory/README.md) | 三层记忆（Raw/Feature/Profile）、画像演化 |
+| **工具与基础设施** | [tools/README.md](app/tools/README.md) | Web 搜索、浏览器自动化、Docker 沙箱、事件总线 |
 
 ## 模块结构
 

@@ -1,6 +1,6 @@
 # Conclave Frontend
 
-React 18 + TypeScript + Vite + Ant Design 前端应用。入口文件为 `app.html`（非 `index.html`）。
+[返回项目主页](../README.md) | React 18 + TypeScript + Vite + Ant Design 前端应用。入口文件为 `app.html`（非 `index.html`）。
 
 ## 页面结构
 
