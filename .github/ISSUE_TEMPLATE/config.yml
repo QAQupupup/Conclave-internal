@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用疑问
+    about: 使用问题和技术讨论请先查阅 README 和 docs/ 目录
+  - name: 安全漏洞
+    about: 请不要公开报告安全漏洞，通过邮件联系维护者
