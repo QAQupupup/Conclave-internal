@@ -45,18 +45,21 @@ Conclave 目前处于 "flying blind" 状态：
 
 | 维度 | 评分方式 | 权重 |
 |---|---|---|
-| 证据相关性 | LLM-judge: 检索到的 evidence 是否与冲突相关 (0-1) | 30% |
-| 支持方向准确性 | 精确匹配: supports (a/b/neutral/irrelevant) 标注准确率 | 25% |
-| 证据强度判断 | 精确匹配: strength (strong/weak/none) 判断准确率 | 20% |
-| 事实核查准确性 | 精确匹配: fact_check_status (verified/contradicted/unverifiable/disputed) | 25% |
+| 论点区分度 | LLM-judge: 双方论点是否真正对立，而非伪冲突 (0-1) | 15% |
+| 论点质量 | LLM-judge: 论点是否有逻辑支撑、是否切中议题核心 (0-1) | 20% |
+| 证据利用质量 | LLM-judge: 有证据时正确引用，无证据时诚实标注 (0-1) | 15% |
+| 裁决归因清晰度 | LLM-judge: arbitrate 是否说明基于哪些论点得出结论 (0-1) | 15% |
+| 置信度自评准确性 | 精确匹配: 无证据时是否主动降级 confidence 为 low | 15% |
+| 论点互补性 | LLM-judge: 双方论点是否互补而非纯粹对立，能否合并出更优解 (0-1) | 20% |
 
 ### 1.5 Arbitrate（仲裁裁决）
 
 | 维度 | 评分方式 | 权重 |
 |---|---|---|
-| 裁决合理性 | LLM-judge: verdict 是否基于证据做出合理裁决 (0-1) | 40% |
-| 理由充分性 | LLM-judge: rationale 是否引用了具体证据 (0-1) | 30% |
-| 采纳论点准确性 | LLM-judge: adopted_claims 是否是各方最有价值的论点 (0-1) | 30% |
+| 裁决合理性 | LLM-judge: verdict 是否基于证据做出合理裁决 (0-1) | 35% |
+| 理由充分性 | LLM-judge: rationale 是否引用了具体证据 (0-1) | 25% |
+| 论点综合质量 | LLM-judge: 裁决是否提取了双方最有价值的部分，而非简单判输赢 (0-1) | 25% |
+| 门禁触发信号 | 过程信号: 首轮 pass=1.0, supplement后pass=0.6, re_examine=0.3, 达上限=0.1 | 15% |
 
 ### 1.6 Produce（产出物）
 
@@ -217,8 +220,9 @@ Conclave 目前处于 "flying blind" 状态：
 ### 4.2 "通过"的定义
 
 一个测试用例"通过"的条件：
-- 所有阶段的精确匹配 Grader 全部通过
-- 所有 LLM-judge Grader 得分 >= 0.7
+- low_confidence_flagged（无证据时必须降级置信度）精确匹配必须通过
+- LLM-judge Grader 平均得分 >= 0.7（不要求所有维度全部通过，允许个别维度波动）
+- 门禁决策达上限时强制通过的情况记为"低置信度通过"
 - 无 fallback 调用（StubLLM 降级）
 - 无异常/超时
 

@@ -11,32 +11,26 @@ from app.tools import get_web_search
 
 
 def _make_common_knowledge_evidence(conflict: dict) -> list[dict]:
-    """无文档/网络证据时的降级：为每个冲突生成双方向通用工程原则证据。
+    """无文档/网络证据时的降级：明确标注无证据，不制造伪引用。
 
-    替代旧的单条中性占位符，让 evidence_check 仍有方向可判断：
-    - ev-a：呼应 side_a 立场的通用原则
-    - ev-b：呼应 side_b 立场的通用原则
-    标记 strength=weak 和 source=common_knowledge，让 LLM 知道这是弱证据。
-    M1.2: fact_check_status=unverifiable（通用知识无法验证）。
+    返回空 quote 占位，让 arbitrate 基于 side_a/side_b 论点本身质量裁决。
+    strength=none 触发 prompts.py 的"无外部证据，低置信度裁决"路径。
     """
-    side_a = conflict.get("side_a", "")
-    side_b = conflict.get("side_b", "")
-    summary = conflict.get("summary", str(conflict))
     return [
         {
-            "evidence_id": "ev-a",
-            "quote": f"（通用工程实践 · 倾向 A 方）{side_a or summary}。此原则基于行业常识，非具体文档证据，需用户验证。",
-            "source": "common_knowledge:side_a",
+            "evidence_id": "none-a",
+            "quote": "",
+            "source": "common_knowledge:none",
             "char_range": [0, 0],
-            "strength": "weak",
+            "strength": "none",
             "fact_check_status": "unverifiable",
         },
         {
-            "evidence_id": "ev-b",
-            "quote": f"（通用工程实践 · 倾向 B 方）{side_b or summary}。此原则基于行业常识，非具体文档证据，需用户验证。",
-            "source": "common_knowledge:side_b",
+            "evidence_id": "none-b",
+            "quote": "",
+            "source": "common_knowledge:none",
             "char_range": [0, 0],
-            "strength": "weak",
+            "strength": "none",
             "fact_check_status": "unverifiable",
         },
     ]

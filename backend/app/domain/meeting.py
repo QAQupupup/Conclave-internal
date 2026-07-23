@@ -212,6 +212,9 @@ class MeetingState(BaseModel):
     llm_trace: CallTrace = Field(default_factory=CallTrace)
     # 第5层：置信度标记（stage -> "high"|"low"|"fallback"）
     confidence_flags: dict[str, str] = Field(default_factory=dict)
+    # ADR-010: cross_team 质量门禁决策历史
+    # 每项: {"round": 1, "decision": "pass|supplement|re_examine", "reason": "...", "target_roles": [...]}
+    gate_history: list[dict[str, Any]] = Field(default_factory=list)
     # 借调的 agent 列表（loan 信号裁决通过后追加，待发言）
     # 每项: {"role": "security_expert", "verdict": "approve_temporary",
     #        "spoken": False, "request": {...}}

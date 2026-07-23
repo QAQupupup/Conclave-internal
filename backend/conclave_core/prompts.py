@@ -55,7 +55,17 @@ CROSS_TEAM = """[阶段: CrossTeam]
 各方队内结论：{team_conclusions}
 任务：找出结论间的冲突点。冲突类型分为 factual（事实矛盾）、preference（取舍分歧）、scope（边界争议）。
 
-输出 JSON: {{"conflicts": [{{"id": "...", "type": "factual|preference|scope", "summary": "...", "side_a": "...", "side_b": "..."}}]}}"""
+然后进行质量门禁判断。默认决议为 NOT_PASS，你必须举证以下三个条件全部满足才能判 PASS：
+1. 每个角色的 claims 中至少有 1 条被其他角色直接反驳或质疑
+2. 冲突列表覆盖了议题的核心决策点（非边缘细节）
+3. 不存在"某角色 claims 全部未被任何冲突引用"的情况
+
+若以上任一条件不满足，判 NOT_PASS 并指定回退方式：
+- supplement: 指定需要补充论点的角色（target_roles）
+- re_examine: 指定需要深挖的冲突维度
+
+输出 JSON:
+{{"conflicts": [{{"id": "...", "type": "factual|preference|scope", "summary": "...", "side_a": "...", "side_b": "...", "claim_refs": ["claim_id_1", ...]}}], "gate": {{"decision": "pass|supplement|re_examine", "reason": "举证说明（若判 pass 必须逐条论证三个条件如何满足）", "weak_dimensions": ["未满足的条件编号"], "target_roles": ["supplement时需补充的角色"]}}}}"""
 
 # ---------- 2.5 证据对照阶段 ----------
 EVIDENCE_CHECK = """[阶段: EvidenceCheck]

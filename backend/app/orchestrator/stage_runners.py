@@ -108,7 +108,7 @@ async def run_arbitrate(state: MeetingState, result: dict[str, Any], confidence:
 
 
 async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence: str = "high") -> MeetingState:
-    """CrossTeam 阶段：把 LLM 返回结果写回 MeetingState"""
+    """CrossTeam 阶段：把 LLM 返回结果写回 MeetingState（含 ADR-010 质量门禁）"""
     from app.orchestrator.borrow_helpers import _let_borrowed_agents_speak, _moderator_assess_borrow
     from app.orchestrator.evidence_helpers import _prefetch_evidence
 
@@ -119,6 +119,62 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
     state.conflicts = conflicts
     lock_conclusion(state.conclusion_chain, "cross_team", {"conflicts": conflicts})
     state.confidence_flags["cross_team"] = confidence
+
+    # ADR-010: 质量门禁 — 解析主持人门禁判断 + 代码层硬校验
+    gate = result.get("gate") or {}
+    gate_decision = gate.get("decision", "pass")
+    gate_reason = gate.get("reason", "")
+    target_roles = gate.get("target_roles", [])
+    weak_dimensions = gate.get("weak_dimensions", [])
+
+    # 第二层防偏：代码层硬校验（不可被 LLM 绕过）
+    # 条件3：每个角色的 claims 至少有 1 条被冲突引用
+    if gate_decision == "pass" and conflicts and state.team_conclusions:
+        referenced_claims: set[str] = set()
+        for conflict in conflicts:
+            refs = conflict.get("claim_refs", [])
+            if isinstance(refs, list):
+                referenced_claims.update(str(r) for r in refs)
+
+        # 如果冲突没有 claim_refs，回退到 side_a/side_b 文本匹配
+        if not referenced_claims:
+            all_claim_texts: list[str] = []
+            for conclusion in state.team_conclusions:
+                for c in conclusion.get("claims", []):
+                    all_claim_texts.append(c.get("claim", c.get("text", "")))
+            for conflict in conflicts:
+                for field in ("side_a", "side_b", "summary"):
+                    text = conflict.get(field, "")
+                    if text:
+                        for ct in all_claim_texts:
+                            if ct and text[:20] in ct:
+                                referenced_claims.add(ct)
+                                break
+
+        unreferenced_roles: list[str] = []
+        for conclusion in state.team_conclusions:
+            role = conclusion.get("role", "")
+            role_claim_ids = {c.get("id", c.get("claim", c.get("text", ""))) for c in conclusion.get("claims", [])}
+            if role_claim_ids and not (role_claim_ids & referenced_claims):
+                unreferenced_roles.append(role)
+
+        if unreferenced_roles:
+            gate_decision = "supplement"
+            target_roles = unreferenced_roles
+            weak_dimensions.append("3")
+            gate_reason = f"代码层校验：以下角色的 claims 未被任何冲突引用: {unreferenced_roles}"
+
+    # 记录门禁历史
+    gate_round = len(state.gate_history) + 1
+    state.gate_history.append(
+        {
+            "round": gate_round,
+            "decision": gate_decision,
+            "reason": gate_reason,
+            "weak_dimensions": weak_dimensions,
+            "target_roles": target_roles,
+        }
+    )
 
     if conflicts:
         conflict_lines = [f"跨队辩论结束，识别出 {len(conflicts)} 个争议点："]
@@ -172,6 +228,14 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
                         claim_text = claim_text[:67] + "…"
                     consensus_lines.append(f"  • [{role_name}] {claim_text}")
         content = "\n".join(consensus_lines)
+
+    # ADR-010: 主持人发言追加门禁决策
+    gate_label = {"pass": "通过", "supplement": "需补充", "re_examine": "需深挖"}.get(gate_decision, gate_decision)
+    content += f"\n\n[门禁] 第{gate_round}轮: {gate_label}"
+    if gate_reason:
+        content += f" — {gate_reason[:100]}"
+    if target_roles and gate_decision == "supplement":
+        content += f"（待补充: {', '.join(target_roles)}）"
 
     await emit_agent_spoke(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
     record_drift(state, Role.MODERATOR, Stage.CROSS_TEAM, content)
