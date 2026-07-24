@@ -394,6 +394,37 @@ git commit -F commit-msg.txt
 
 **参考**：scripts/docker-ci-check.sh、scripts/install-hooks.sh 均已添加 `exec >&2`。
 
+### 4.21 cross_team 门禁 claim_refs 不能信任 LLM 返回的 ID
+
+**症状**：cross_team 阶段门禁硬校验误判"所有角色 claims 未被冲突引用"，导致管线无限回流 intra_team，无法进入 evidence_check。
+
+**根因**：LLM（含 StubLLM）返回的 `conflicts[].sides[].claim_id` 是它编造的字符串（如 `claim-1`），而 `run_intra_team` 在运行时给 claims 分配的是 UUID（`claim-{uuid4().hex[:8]}`），两者永远对不上。代码直接 `referenced_claims.update(refs)` 把这些假 ID 加进集合，后续按真实 claim ID/文本匹配时交集为空。
+
+**规则**：
+1. 处理 LLM 返回的 `claim_refs` 时，**必须先过滤掉不在 team_conclusions 中的 ID**，不能直接信任。
+2. ID 匹配零命中时，**必须回退到 side_a/side_b/summary 文本双向子串匹配**（`text[:20] in ct` 或 `ct[:20] in text`）。
+3. 测试用的 StubCompute 如果 intra_team 和 cross_team 由不同分支返回 claims，**必须保证两边文本有子串重叠**，否则硬校验会判定未引用。
+4. sides[] 数组格式要规范化为 side_a/side_b 字段，再从 sides[].text 提取文本、从 sides[].claim_id 提取 claim_refs。
+
+### 4.22 plan_intra_team 必须对角色名做规范化
+
+**症状**：中文角色名（如"安全专家""后端工程师"）传入 plan_intra_team 时，去重集合 `seen_normalized_roles` 和门禁 `target_roles` 匹配失效，导致同一规范角色被重复创建任务、supplement 模式漏处理目标角色。
+
+**根因**：`state.team_config` 由 LLM 生成，可能包含中文/英文/混合写法的角色名；而 run_intra_team 内部用 Role 枚举值（`product_architect`/`engineer` 等）作为 key。planner 直接用原始字符串做去重和集合判断，两边 key 空间不一致。
+
+**规则**：plan_intra_team/plan_cross_team 遍历 role_def 时，**必须调用 `match_role(raw_role)` 映射到规范枚举值**，用规范值做去重、supplement 过滤、任务角色字段。无匹配时再 fallback 到原始值。
+
+### 4.23 测试断言必须 grep 核验代码真实返回值
+
+**症状**：`test_common_knowledge_has_strength_weak` 断言 `strength=="weak"`，但 `_make_common_knowledge_evidence()` 实际返回 `"none"`，CI 红。属于"测试本身写错了"，不是代码 bug。
+
+**根因**：写/改测试时凭印象填断言值，未运行代码确认实际返回值，属于 §5.2 Anti-Vibe-Coding 在测试领域的具体表现。
+
+**规则**：
+1. 新增/修改测试断言前，**必须读被测函数源码确认返回值**，或先跑一次看实际输出，禁止凭"应该是 weak 吧"填值。
+2. 测试名必须与断言一致（函数叫 `test_xxx_has_strength_weak` 却断言 `"none"` 属于自相矛盾）。
+3. 修复 CI 失败时，先判断是"代码错"还是"测试错"：grep 被测函数实际返回值，不要一律改代码去迎合错误的测试。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -507,4 +538,4 @@ git commit -F commit-msg.txt
 
 ---
 
-> 本文件最后更新：2026-07-24（§4.20 Git Hook PowerShell stdout fd 问题、§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-24（§4.23 测试断言核验、§4.22 角色名规范化、§4.21 cross_team claim_refs 防 LLM 编造、§4.20 Git Hook PowerShell stdout fd 问题、§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
