@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12+-green.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](https://docs.docker.com/compose/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-teal.svg)](https://fastapi.tiangolo.com/)
@@ -104,7 +104,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 架构师/技术负责人 | 技术选型对比：每个维度选了什么、淘汰了什么、为什么 |
 | [backend/README.md](backend/README.md) | 后端开发者 | 后端架构总览、子系统导航、开发指南 |
 | [frontend/README.md](frontend/README.md) | 前端开发者 | 前端架构、页面/组件结构、开发指南 |
-| [LICENSE](LICENSE) | 所有人 | MIT 开源协议 |
+| [LICENSE](LICENSE) | 所有人 | GNU AGPL v3 开源协议（使用/修改/商用均可，但必须开源，SaaS 部署也需公开源代码） |
 
 ### 后端子系统文档
 
@@ -292,4 +292,12 @@ docker compose -f docker-compose.test.yml up --build --exit-code-from backend-te
 
 ## License
 
-[MIT License](LICENSE)
+[GNU Affero General Public License v3.0](LICENSE)
+
+本项目采用 AGPL v3 开源协议：
+
+- **允许**：自由使用、修改、分发、商用（包括公司内部使用和集成到商业产品）
+- **唯一要求**：任何基于本项目的修改或衍生作品，**必须以相同协议开源全部源代码**
+- **SaaS 条款**（AGPL 独有）：即使不分发二进制，只要通过网络为用户提供服务（如云托管/SaaS），也必须向服务用户公开修改后的完整源代码
+
+这意味着：你可以用 Conclave 赚钱，可以部署给客户使用，但不能把它闭源改造成专有软件卖，也不能偷偷改了代码做云服务却不公开。所有改进都必须回馈开源社区。
