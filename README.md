@@ -101,6 +101,7 @@
 | 文档 | 面向读者 | 内容 |
 |---|---|---|
 | [README.md](README.md) | 所有人 | 项目概览、快速开始、核心特性（本文件） |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构师/技术负责人 | 技术选型对比：每个维度选了什么、淘汰了什么、为什么 |
 | [backend/README.md](backend/README.md) | 后端开发者 | 后端架构总览、子系统导航、开发指南 |
 | [frontend/README.md](frontend/README.md) | 前端开发者 | 前端架构、页面/组件结构、开发指南 |
 | [LICENSE](LICENSE) | 所有人 | MIT 开源协议 |
@@ -173,7 +174,7 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                Frontend (React + AntD)            │
+│              Frontend (React + Custom CSS)        │
 │  聊天面板 │ 日志面板 │ 联通图 │ 运维面板 │ 监控    │
 └─────────────────────┬────────────────────────────┘
                       │ WebSocket / REST
@@ -214,7 +215,7 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 | 层 | 技术选型 |
 |---|---|
 | 后端 | Python 3.12 + FastAPI + asyncio + SQLAlchemy (async) |
-| 前端 | React 18 + TypeScript + Vite + Ant Design |
+| 前端 | React 18 + TypeScript + Vite（自定义 CSS 组件库） |
 | 数据库 | PostgreSQL（主存储，含 pgvector）+ Redis（缓存/会话/Pub-Sub） |
 | 向量检索 | Qdrant / 内存向量库（开发模式） |
 | 嵌入模型 | bge-m3（多语言）+ bge-reranker-v2-m3（重排序） |

@@ -81,6 +81,10 @@
       "dst": "README.md"
     },
     {
+      "src": "ARCHITECTURE.md",
+      "dst": "ARCHITECTURE.md"
+    },
+    {
       "src": "LICENSE",
       "dst": "LICENSE"
     },
