@@ -169,38 +169,28 @@ cat > "$PUSH_HOOK" << 'PUSH_EOF'
 # Conclave pre-push hook — Docker CI parity check
 # 在 Docker 中运行与 CI 完全相同的检查，确保推送前 CI 必过
 #
-# 原理：用同一个 requirements.lock 在 Linux 容器中安装 ruff/mypy，
-# 运行与 CI 相同的命令。版本/环境 100% 一致。
-#
-# 跳过：git push --no-verify（紧急情况）
-# Docker 未运行时自动跳过（不阻塞推送，但 CI 仍会检查）
-#
-# 注意：所有诊断输出走 stderr，避免 PowerShell/Git Bash 下
-# stdout fd 被 Git 协议占用导致 "Bad file descriptor" 错误。
+# 所有诊断输出走 stderr（Git hook stdout 是协议通道）。
+# 读完 stdin 后关闭，防止子进程意外读取 git 协议数据。
 
-set -e
+set -u
 
-# 所有诊断输出重定向到 stderr
-exec >&2
-
-# pre-push hook 从 stdin 读取推送的 ref 信息
-# 格式: <local ref> <local sha> <remote ref> <remote sha>
 DO_DOCKER_CHECK=0
 while read local_ref local_sha remote_ref remote_sha; do
-    # 只对分支推送触发检查，标签推送跳过
     if [[ "$remote_ref" == refs/heads/* ]]; then
         DO_DOCKER_CHECK=1
     fi
 done
 
+# 读完 stdin 后关闭，防止后续命令/docker 读取 git 协议管道
+exec </dev/null
+
 if [ "$DO_DOCKER_CHECK" -eq 0 ]; then
     exit 0
 fi
 
-# 获取仓库根目录
-REPO_ROOT=$(git rev-parse --show-toplevel)
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 
-# 调用 Docker CI 检查脚本
+# 调用 Docker CI 检查脚本（脚本内部已处理 fd 重定向）
 bash "$REPO_ROOT/scripts/docker-ci-check.sh"
 PUSH_EOF
 
