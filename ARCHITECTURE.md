@@ -40,18 +40,21 @@
 
 ## 后端框架
 
-**选型：FastAPI + Starlette + Uvicorn**
+**选型：FastAPI + Starlette + Uvicorn（Python 生态）**
+
+> 项目从一开始就锁定 Python 技术栈：LLM/AI 生态（openai SDK、qdrant-client、playwright、jieba、sentence-transformers 等）以 Python 为第一优先级，非 Python 方案直接不纳入候选。
 
 | 候选方案 | 优势 | 劣势 | 结论 |
 |---|---|---|---|
 | **FastAPI** | 原生 async/await、Pydantic 数据校验、自动 OpenAPI 文档、性能接近 Starlette 原生、生态成熟 | 相对 Django"裸"一些，需自行组装 ORM/认证/迁移 | ✅ 选用 |
 | Django + Django REST Framework | 一站式（ORM/Admin/认证/迁移全有）、成熟稳定 | WSGI 同步模型，async 支持是后加的，对 asyncio 原生不友好；强约定难定制 Agent 编排逻辑 | ❌ 淘汰（asyncio 是硬需求） |
 | Flask + Quart | 轻量灵活 | Flask 本身同步；Quart 生态小，缺少 Pydantic 校验和自动文档 | ❌ 淘汰（生态不足） |
-| Spring Boot (Java/Kotlin) | 企业级成熟、强类型 | 启动慢、内存占用高、容器镜像大、与 AI/ML 生态（Python 主导）脱节 | ❌ 淘汰（与 AI 生态脱节） |
-| Go (Gin/Echo) | 高性能、单二进制部署 | 缺乏 AI/LLM 生态（Python SDK 最全）、开发效率低于 Python | ❌ 淘汰（AI 生态弱） |
-| Node.js (NestJS/Express) | 前后端同语言、async 原生 | LLM SDK 质量不如 Python、数值计算/RAG 生态弱 | ❌ 淘汰（AI 生态弱） |
 
-**决策理由**：Conclave 本质是 AI 应用，必须站在 Python AI 生态的肩膀上（openai SDK、qdrant-client、playwright、jieba 等全是 Python 优先）。FastAPI 在 Python Web 框架中 asyncio 原生度最高，Pydantic 模型可直接复用于 LLM 输出校验，自动生成的 OpenAPI 文档也降低了前后端联调成本。
+**不纳入候选的方案**：
+- Java/Spring Boot：体系偏重、语法繁琐、启动慢内存大，与项目"轻量本地部署"理念不符
+- Node.js：团队对 Node.js 后端生态熟练度不足，且 AI/LLM SDK 质量以 Python 为优
+
+**决策理由**：Conclave 本质是 AI 应用，必须站在 Python AI 生态的肩膀上。FastAPI 在 Python Web 框架中 asyncio 原生度最高，Pydantic 模型可直接复用于 LLM 输出校验，自动生成的 OpenAPI 文档也降低了前后端联调成本。
 
 ---
 
@@ -75,17 +78,21 @@
 
 ## 数据库与存储
 
-**选型：PostgreSQL 15+（含 pgvector）**
+**选型：PostgreSQL 15+（含 pgvector，当前过渡方案）**
 
 | 候选方案 | 优势 | 劣势 | 结论 |
 |---|---|---|---|
-| **PostgreSQL** | 成熟可靠、JSONB 支持灵活扩展（ADR-002）、pgvector 可直接存向量、事务强一致、Docker 镜像小 | 单点写入瓶颈（对 Conclave 场景足够） | ✅ 选用 |
-| MySQL | 普及度高、云服务多 | JSONB 功能弱于 PG、pgvector 无原生对应（MySQL 8.4 才加向量且不成熟）、async 生态不如 asyncpg | ❌ 淘汰（JSONB + 向量是硬需求） |
-| MongoDB | 文档模型灵活、Schema-free | 无事务（早期版本）、无向量能力、聚合管道复杂、数据一致性弱 | ❌ 淘汰（需要事务+向量） |
-| SQLite | 零配置、嵌入式 | 无并发写入能力、不适合多用户 Web 服务、无 JSONB 高级查询 | ❌ 淘汰（只适合单用户桌面） |
-| CockroachDB / TiDB | 分布式、水平扩展 | 运维复杂度高、容器化部署重、对本项目规模杀鸡用牛刀 | ❌ 淘汰（过度设计） |
+| **PostgreSQL** | 成熟可靠、JSONB 支持灵活扩展（ADR-002）、pgvector 可直接存向量、事务强一致、Docker 镜像小、开源生态活跃 | 单点写入瓶颈（对 Conclave 场景足够）；JSONB 查询性能不如原生列 | ✅ 现阶段选用 |
+| MySQL | 普及度高、云服务多 | MySQL 已非真正开源（Oracle 控制下的双许可，社区版功能受限）；JSONB 功能弱于 PG；向量支持不成熟；生态走向不确定性高 | ❌ 淘汰（非真正开源 + 向量/JSON 弱） |
+| MongoDB | 文档模型灵活、Schema-free | 无强事务、无向量能力、聚合管道复杂、数据一致性弱 | ❌ 淘汰（需要事务+向量） |
+| SQLite | 零配置、嵌入式 | 无并发写入能力、不适合多用户 Web 服务 | ❌ 淘汰（只适合单用户桌面） |
+| OceanBase（MySQL 兼容） | 国产开源、金融级高可用、原生分布式、HTAP、MySQL 兼容 | 目前 Docker 部署仍偏重、生态成熟度待观察 | 📋 未来候选 |
+| OceanBase SequoiaDB（Seek DB） | OceanBase 向量数据库、与 OceanBase 生态一体化 | 尚未正式发布稳定版、生态待验证 | 📋 未来候选 |
 
-**决策理由**：PostgreSQL 的 JSONB 完美匹配"非核心字段走 metadata"的扩展策略（ADR-002），pgvector 也提供了"向量和元数据存在一个库里"的便利（虽然生产环境我们仍用 Qdrant 做向量检索，但 pgvector 为开发模式和测试提供了 fallback）。强事务对会议状态机（PAUSED/RUNNING/COMPLETED）至关重要。
+**决策理由**：
+- **为什么不是 MySQL**：MySQL 在 Oracle 旗下已非真正开源方案，社区版受许可限制越来越多，长期看不是可靠的开源选择。
+- **为什么选 PostgreSQL（过渡）**：PostgreSQL 的 JSONB 完美匹配"非核心字段走 metadata"的扩展策略（ADR-002），pgvector 提供向量 fallback，强事务对会议状态机至关重要，且生态最活跃、开箱即用。
+- **未来规划**：OceanBase 开源生态持续成熟（MySQL 兼容版 + SequoiaDB 向量能力）后，可考虑从 PostgreSQL 迁移至 OceanBase 体系，统一关系存储与向量检索能力。
 
 参考 [db/README.md](backend/app/db/README.md) 和 `docs/design/adr/002-jsonb-metadata.md`。
 
@@ -102,10 +109,10 @@
 | Weaviate | 模块化（内置嵌入模型/重排序/问答）、GraphQL API | 模块捆绑导致灵活性差、JVM 启动慢内存大、定制嵌入模型麻烦 | ❌ 淘汰（JVM 重，捆绑模型） |
 | Chroma | Python 原生、轻量、开发友好 | 性能不适合生产、单机存储、并发能力弱 | ❌ 淘汰（仅适合 notebook 原型） |
 | Pinecone / Weaviate Cloud | 托管服务、零运维 | SaaS 依赖、数据出私域、成本随规模上涨、违反"本地可部署"原则 | ❌ 淘汰（SaaS 依赖红线） |
-| pgvector | 与 PG 一体、无额外服务 | 向量性能不如专用库、过滤检索能力弱、HNSW 参数调优不灵活 | ❌ 淘汰（作为 fallback 保留，不作为主存储） |
+| pgvector | 与 PG 一体、无额外服务、部署最简 | 向量性能不如专用库、过滤检索能力弱、HNSW 参数调优不灵活；更关键的是 pgvector 与数据库版本/扩展绑定较紧，embedding 维度变更、索引重建等运维操作与业务数据耦合，嵌入方案切换成本高（换 embedding 模型要重建整个 PG 扩展索引） | ❌ 淘汰（作为开发 fallback 保留，不作为主存储） |
 | **内存向量库** | 零依赖、启动快 | 数据不持久、重启丢失、性能有限 | ✅ 选用（开发模式 fallback） |
 
-**决策理由**：Qdrant 是当前开源向量数据库中"轻量 + 高性能 + 功能完整"的最佳平衡点。Docker 镜像仅 80MB，一个容器启动 3 秒可用，HNSW 索引性能完全覆盖 Conclave 的文档规模（千级到万级 chunk）。内存向量库作为开发模式 fallback，让开发者不需要 Qdrant 也能跑基本流程。
+**决策理由**：Qdrant 是当前开源向量数据库中"轻量 + 高性能 + 功能完整"的最佳平衡点。Docker 镜像仅 80MB，一个容器启动 3 秒可用，HNSW 索引性能完全覆盖 Conclave 的文档规模（千级到万级 chunk）。更重要的是，独立向量库将 embedding 维度、索引策略、数据生命周期与业务数据库解耦，切换 embedding 模型（如从 bge-m3 换到未来新模型）时只需重建向量集合，不影响 PG 业务数据。内存向量库作为开发模式 fallback，让开发者不需要 Qdrant 也能跑基本流程。
 
 参考 [rag/README.md](backend/app/rag/README.md)。
 
@@ -113,19 +120,19 @@
 
 ## 嵌入与重排序模型
 
-**选型：bge-m3（嵌入）+ bge-reranker-v2-m3（重排序），通过 SiliconFlow/OpenAI 兼容 API 调用**
+**选型：bge-m3（嵌入）+ bge-reranker-v2-m3（重排序），通过 SiliconFlow 等 OpenAI 兼容 API 调用**
 
 | 候选方案 | 优势 | 劣势 | 结论 |
 |---|---|---|---|
-| **bge-m3** | 多语言（中英及 100+ 语言）、1024 维、支持稠密+稀疏+多向量三种检索模式、开源权重可本地部署、MTEB 中文榜前列 | 模型较大（~2GB FP16） | ✅ 选用 |
-| text-embedding-ada-002 / text-embedding-3-large (OpenAI) | API 稳定、文档丰富、无需 GPU | 英文主导、中文效果一般、SaaS 依赖、成本 | ❌ 淘汰（中文效果 + SaaS 依赖） |
-| m3e / m3e-large | 中文专门优化、轻量 | 多语言支持弱、MTEB 整体不如 bge-m3、社区活跃度低 | ❌ 淘汰（通用性弱） |
-| e5-large-v2 / e5-mistral | 英文效果好 | 中文弱、需要指令前缀、多语言版本（e5-mistral）为大模型推理成本高 | ❌ 淘汰（中文弱） |
-| **bge-reranker-v2-m3** | 跨语言重排序、LLM 级精度但为 cross-encoder 小模型、与 bge-m3 配套 | 推理比向量检索慢（批量重排序 top-50 约 100-200ms） | ✅ 选用 |
-| cohere rerank | API 质量高 | SaaS 依赖、中文效果一般、付费 | ❌ 淘汰（SaaS 依赖） |
-| bge-reranker-v2-gemma / bge-reranker-large | LLM-based rerank 精度更高 | 模型太大（7B+）推理慢、需 GPU | ❌ 淘汰（CPU 推理太慢） |
+| **bge-m3** | 多语言（中英及 100+ 语言）、1024 维、支持稠密+稀疏+多向量三种检索模式、开源权重可本地部署、MTEB 中文榜前列；**在硅基流动（SiliconFlow）上免费调用** | 模型较大（~2GB FP16，本地部署时） | ✅ 选用 |
+| text-embedding-ada-002 / text-embedding-3-large (OpenAI) | API 稳定、文档丰富、无需 GPU | 英文主导、中文效果一般、SaaS 依赖、付费、成本随规模涨 | ❌ 淘汰（中文效果 + 付费 SaaS） |
+| m3e / m3e-large | 中文专门优化、轻量 | 多语言支持弱、MTEB 整体不如 bge-m3、社区活跃度低、无大规模免费 API 可用 | ❌ 淘汰（通用性弱 + 无免费 API） |
+| e5-large-v2 / e5-mistral | 英文效果好 | 中文弱、需要指令前缀、多语言版本推理成本高 | ❌ 淘汰（中文弱） |
+| **bge-reranker-v2-m3** | 跨语言重排序、LLM 级精度但为 cross-encoder 小模型、与 bge-m3 配套；**在硅基流动上免费调用** | 推理比向量检索慢（批量重排序 top-50 约 100-200ms） | ✅ 选用 |
+| cohere rerank | API 质量高 | SaaS 依赖、中文效果一般、付费 | ❌ 淘汰（SaaS 依赖 + 付费） |
+| bge-reranker-v2-gemma / bge-reranker-large | LLM-based rerank 精度更高 | 模型太大（7B+）推理慢、需 GPU、无免费 API | ❌ 淘汰（推理成本高） |
 
-**决策理由**：BAAI（智源）的 bge 系列是当前中英双语场景的最佳开源选择，bge-m3 同时支持稠密/稀疏/ColBERT 三种检索模式，为后续混合检索升级留足空间。通过 OpenAI 兼容 API（SiliconFlow 等）调用，避免了本地 GPU 依赖。StubEmbedding + KeywordReranker 作为无 API Key 时的开发 fallback。
+**决策理由**：BAAI（智源）的 bge 系列是当前中英双语场景的最佳开源选择，bge-m3 同时支持稠密/稀疏/ColBERT 三种检索模式，为后续混合检索升级留足空间。**关键加分项**：bge-m3 和 bge-reranker-v2-m3 在硅基流动（SiliconFlow）平台上提供免费 API 调用，零成本即可启动 RAG 能力，完美匹配"一条命令本地启动"的理念。同时模型权重开源，未来如需本地部署可无缝切换。StubEmbedding + KeywordReranker 作为无 API Key 时的开发 fallback。
 
 ---
 
@@ -209,7 +216,7 @@
 
 ## 认证与多租户
 
-**选型：JWT + HttpOnly Cookie + CSRF（自研插件，CORE tier）**
+**选型：JWT + HttpOnly Cookie + CSRF（CORE 插件，已实现行级多租户隔离）**
 
 | 候选方案 | 优势 | 劣势 | 结论 |
 |---|---|---|---|
@@ -218,7 +225,7 @@
 | OAuth2 / OIDC（Auth0/Keycloak） | 标准协议、支持第三方登录 | Keycloak 运维重（需额外容器+数据库）、Auth0 是 SaaS 违反本地部署原则 | ❌ 淘汰（过度设计 + SaaS 依赖） |
 | API Key | 最简单 | 无用户概念、无法做 RBAC、不适合 Web 界面 | ❌ 淘汰（功能不足） |
 
-**多租户**：所有业务表带 `tenant_id` 列（行级隔离），DAO 层自动追加 WHERE 条件，租户上下文通过 `ContextVar` 传递。外键统一 `ON DELETE SET NULL`。
+**多租户（已实现）**：所有业务表带 `tenant_id` 列（行级隔离），通过 `TenantScopeMixin` 自动注入；DAO 层通过 `_BUSINESS_TABLES` 注册后由 `ensure_business_tables_tenant_id()` 自动迁移加列；租户上下文通过 `ContextVar`（`current_tenant_id()`）传递，系统操作用 `create_system_tenant_ctx()` 包裹。外键统一 `ON DELETE SET NULL` 避免级联删除风险。参考 AGENTS.md §4.13 多租户 Checklist。
 
 参考 [plugins/README.md](backend/app/plugins/README.md) 中 auth 插件章节。
 
