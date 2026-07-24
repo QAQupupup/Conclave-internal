@@ -115,6 +115,14 @@ class Settings:
     # Tavily API key（仅 tavily 模式需要）
     web_search_api_key: str = _env("CONCLAVE_WEB_SEARCH_API_KEY", "")
 
+    # Cookie 安全配置：HTTPS 环境下必须为 True
+    # 默认规则：APP_ENV=production 时为 True，其余环境（dev/test/oss）为 False
+    # 可通过 CONCLAVE_COOKIE_SECURE=1/0 显式覆盖
+    cookie_secure: bool = _env(
+        "CONCLAVE_COOKIE_SECURE",
+        "1" if os.environ.get("APP_ENV", "") == "production" else "0",
+    ) not in ("0", "false", "False", "")
+
     @property
     def use_real_llm(self) -> bool:
         return bool(self.llm_api_key)

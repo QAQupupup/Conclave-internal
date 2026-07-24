@@ -36,12 +36,17 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
 
     ADR-010: 支持门禁 supplement 模式——当 gate_pending_action.action == "supplement" 时，
     仅为 target_roles 创建任务，避免全量重复发言。
+
+    角色名规范化：LLM 可能返回中文/英文/混合角色名（如"安全专家"、"Security Engineer"），
+    通过 match_role() 统一映射到规范 Role 枚举值，确保 reducer 和 runner 的 role key 一致。
     """
+    from conclave_core.roles import match_role
+
     team_roles = state.team_config if state.team_config else baseline.team_roles
 
     # ADR-010: 检测 supplement 模式
-    supplement_info = state.gate_pending_action
-    is_supplement = bool(supplement_info and supplement_info.get("action") == "supplement")
+    supplement_info = state.gate_pending_action or {}
+    is_supplement = bool(supplement_info.get("action") == "supplement")
     supplement_roles: set[str] = set()
     supplement_desc = ""
     if is_supplement:
@@ -55,9 +60,17 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
 
     tasks: list[SubTask] = []
     task_ids: list[str] = []
+    seen_normalized_roles: set[str] = set()
     for idx, role_def in enumerate(team_roles):
-        role = role_def.get("role", "agent")
-        # supplement 模式下跳过非目标角色
+        raw_role = role_def.get("role", "agent")
+        # 角色名规范化：中文/英文/混合 → 规范枚举值
+        matched = match_role(raw_role)
+        role = matched.value if matched else raw_role
+        # 去重：同一规范角色只创建一个任务（如"产品经理"和"后端架构师"都映射到 product_architect）
+        if role in seen_normalized_roles:
+            continue
+        seen_normalized_roles.add(role)
+        # supplement 模式下跳过非目标角色（target_roles 中已使用规范角色名）
         if is_supplement and role not in supplement_roles:
             continue
         stance = role_def.get("stance", "")
@@ -105,8 +118,8 @@ def plan_cross_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
     在任务描述中注入门禁反馈，指导主持人针对 weak_dimensions 重新审视冲突。
     """
     # ADR-010: 检测 re_examine 模式
-    reex_info = state.gate_pending_action
-    is_reexamine = bool(reex_info and reex_info.get("action") == "re_examine")
+    reex_info = state.gate_pending_action or {}
+    is_reexamine = bool(reex_info.get("action") == "re_examine")
     description = "基于各角色 claims 识别冲突点或汇总共识"
     if is_reexamine:
         weak_dims = reex_info.get("weak_dimensions", [])

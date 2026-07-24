@@ -23,6 +23,7 @@ from app.auth import (
     create_refresh_token,
     verify_jwt,
 )
+from app.config import settings
 from app.context import (
     get_user_id,
     get_user_role,
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 # Cookie 配置
-COOKIE_SECURE = False  # TODO: 生产环境从 settings 读取（HTTPS 时为 True）
+COOKIE_SECURE: bool = settings.cookie_secure
 COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
 COOKIE_PATH = "/"
 

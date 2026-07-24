@@ -133,12 +133,12 @@ class TestCommonKnowledgeEvidence:
             assert "fact_check_status" in ev
             assert ev["fact_check_status"] == "unverifiable"
 
-    def test_common_knowledge_has_strength_weak(self):
-        """通用知识证据 strength=weak。"""
+    def test_common_knowledge_has_strength_none(self):
+        """通用知识证据 strength=none（无外部证据，低置信度裁决路径）。"""
         conflict = {"summary": "测试", "side_a": "A", "side_b": "B"}
         evidence = _make_common_knowledge_evidence(conflict)
         for ev in evidence:
-            assert ev["strength"] == "weak"
+            assert ev["strength"] == "none"
 
 
 # ── StubLLM 测试 ──────────────────────────────────────────

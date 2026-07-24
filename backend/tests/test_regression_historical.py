@@ -139,9 +139,23 @@ async def test_regression_wiki_full_meeting_historical(monkeypatch):
 
 
 class ConflictStubCompute(HistoricalStubCompute):
-    """在 cross_team 阶段产生冲突，触发 evidence_check 阶段"""
+    """在 cross_team 阶段产生冲突，触发 evidence_check 阶段
+
+    注意：intra_team claims 文本必须与 cross_team 冲突的 side 文本有重叠，
+    否则门禁代码层硬校验会判定"论点未被引用"而回流到 intra_team。
+    """
 
     async def think(self, req: ThinkRequest) -> ThinkResponse:
+        if req.stage == "intra_team":
+            return ThinkResponse(
+                success=True,
+                result={
+                    "claims": [
+                        {"claim": "应该使用 React 作为前端框架", "confidence": 0.85, "evidence": "生态成熟"},
+                        {"claim": "应该使用 Vue 作为前端框架", "confidence": 0.80, "evidence": "上手简单"},
+                    ],
+                },
+            )
         if req.stage == "cross_team":
             return ThinkResponse(
                 success=True,
@@ -150,10 +164,10 @@ class ConflictStubCompute(HistoricalStubCompute):
                         {
                             "id": "conflict-1",
                             "type": "preference",
-                            "summary": "前端框架选择：React vs Vue",
+                            "summary": "前端框架选择：应该使用 React 还是 Vue",
                             "sides": [
-                                {"claim_id": "claim-1", "text": "使用 React", "role": "product_architect"},
-                                {"claim_id": "claim-2", "text": "使用 Vue", "role": "engineer"},
+                                {"claim_id": "claim-1", "text": "应该使用 React", "role": "product_architect"},
+                                {"claim_id": "claim-2", "text": "应该使用 Vue", "role": "engineer"},
                             ],
                         }
                     ],

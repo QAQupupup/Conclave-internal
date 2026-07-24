@@ -116,6 +116,17 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
     for c in conflicts:
         if "conflict_type" not in c and "type" in c:
             c["conflict_type"] = c.pop("type")
+        # 规范化 sides[] 数组格式 → side_a/side_b（兼容 LLM 返回的两种格式）
+        if "sides" in c and isinstance(c["sides"], list) and len(c["sides"]) >= 2:
+            sides = c["sides"]
+            if not c.get("side_a"):
+                c["side_a"] = sides[0].get("text", sides[0].get("claim", ""))
+            if not c.get("side_b"):
+                c["side_b"] = sides[1].get("text", sides[1].get("claim", ""))
+            # 从 sides[].claim_id 收集 claim_refs（门禁校验用）
+            side_claim_refs = [s.get("claim_id") for s in sides if isinstance(s, dict) and s.get("claim_id")]
+            if side_claim_refs and not c.get("claim_refs"):
+                c["claim_refs"] = side_claim_refs
     state.conflicts = conflicts
     lock_conclusion(state.conclusion_chain, "cross_team", {"conflicts": conflicts})
     state.confidence_flags["cross_team"] = confidence
@@ -130,32 +141,58 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
     # 第二层防偏：代码层硬校验（不可被 LLM 绕过）
     # 条件3：每个角色的 claims 至少有 1 条被冲突引用
     if gate_decision == "pass" and conflicts and state.team_conclusions:
+        # 先收集所有 team_conclusions 中 claims 的标识（id 集合 + 文本集合）
+        all_claim_ids: set[str] = set()
+        all_claim_texts: list[str] = []
+        for conclusion in state.team_conclusions:
+            for c in conclusion.get("claims", []):
+                cid = c.get("id")
+                if cid:
+                    all_claim_ids.add(str(cid))
+                ctext = c.get("claim", c.get("text", ""))
+                if ctext:
+                    all_claim_texts.append(ctext)
+
         referenced_claims: set[str] = set()
+        used_id_matching = False
+
         for conflict in conflicts:
             refs = conflict.get("claim_refs", [])
             if isinstance(refs, list):
-                referenced_claims.update(str(r) for r in refs)
+                valid_refs = [str(r) for r in refs if str(r) in all_claim_ids]
+                if valid_refs:
+                    used_id_matching = True
+                    referenced_claims.update(valid_refs)
 
-        # 如果冲突没有 claim_refs，回退到 side_a/side_b 文本匹配
-        if not referenced_claims:
-            all_claim_texts: list[str] = []
-            for conclusion in state.team_conclusions:
-                for c in conclusion.get("claims", []):
-                    all_claim_texts.append(c.get("claim", c.get("text", "")))
+        # 如果 ID 匹配没有命中任何 claim（LLM 返回了不存在的 claim_id），
+        # 回退到 side_a/side_b 文本匹配
+        # （注意：sides[] 格式已在函数开头规范化为 side_a/side_b）
+        if not used_id_matching:
             for conflict in conflicts:
                 for field in ("side_a", "side_b", "summary"):
                     text = conflict.get(field, "")
-                    if text:
-                        for ct in all_claim_texts:
-                            if ct and text[:20] in ct:
-                                referenced_claims.add(ct)
-                                break
+                    if not text:
+                        continue
+                    text_norm = text.strip()[:20]
+                    for ct in all_claim_texts:
+                        ct_norm = ct.strip()
+                        if ct_norm and (text_norm in ct_norm or ct_norm[:20] in text_norm):
+                            referenced_claims.add(ct)
+                            break
 
         unreferenced_roles: list[str] = []
         for conclusion in state.team_conclusions:
             role = conclusion.get("role", "")
-            role_claim_ids = {c.get("id", c.get("claim", c.get("text", ""))) for c in conclusion.get("claims", [])}
-            if role_claim_ids and not (role_claim_ids & referenced_claims):
+            # 收集该角色所有 claim 的标识（id + claim文本），兼容 ID 引用和文本匹配两种路径
+            role_claim_keys: set[str] = set()
+            for c in conclusion.get("claims", []):
+                cid = c.get("id")
+                if cid:
+                    role_claim_keys.add(str(cid))
+                ctext = c.get("claim", c.get("text", ""))
+                if ctext:
+                    role_claim_keys.add(ctext)
+            if role_claim_keys and not (role_claim_keys & referenced_claims):
                 unreferenced_roles.append(role)
 
         if unreferenced_roles:
