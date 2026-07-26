@@ -425,6 +425,42 @@ git commit -F commit-msg.txt
 2. 测试名必须与断言一致（函数叫 `test_xxx_has_strength_weak` 却断言 `"none"` 属于自相矛盾）。
 3. 修复 CI 失败时，先判断是"代码错"还是"测试错"：grep 被测函数实际返回值，不要一律改代码去迎合错误的测试。
 
+### 4.24 质量门禁终态设置时序
+
+**症状**：自我迭代 Loop 失效，`Runner.run()` 的 `while not is_terminal(state)` 循环在 produce 阶段后就退出，质量门禁评估永远不执行。同时 `auto_iterate=False` 时 while 循环无限重跑 produce 导致死循环。
+
+**根因**：`stage_runners.py::run_produce()` 在 produce 阶段结束时就设置 `state.status = MeetingStatus.DONE`，导致 `is_terminal(state)` 返回 True，Runner 主循环退出。质量门禁代码在 `is_terminal()` 检查之后，永远不会被执行。
+
+**规则**：
+1. **终态 DONE 只能在质量门禁评估后设置**。阶段 runner（`run_clarify`/`run_intra_team`/`run_produce` 等）不应设置 DONE，只设置 `state.stage` 标识当前阶段已完成。
+2. **Runner.run() 负责所有终态转换**：质量门禁通过 → DONE；质量未达标但 `auto_iterate=False` → DONE（需人工确认）；质量未达标且达到迭代上限 → DONE；节点异常 → FAILED。
+3. **auto_iterate=False 时必须设置终态退出循环**，否则 `should_iterate=True` 会导致 while 循环无限重跑 produce。
+4. **测试断言同步更新**：直接调用 `produce_node()` / `run_produce()` 的测试应断言 `status == RUNNING`（非 DONE），DONE 由 Runner 设置。
+
+### 4.25 ORM 模型导出与 Alembic 一致性
+
+**症状**：`alembic upgrade head` 不创建 `audit_logs` 表，因为 `AuditLogModel` 未在 `app/db/models/__init__.py` 中导出，Alembic 无法注册到 `Base.metadata`。
+
+**根因**：新增 ORM 模型后只在定义文件中创建了类，忘记在 `__init__.py` 的 `__all__` 和 import 中添加。Alembic 通过 `from app.db.models import *` 注册模型到 metadata，未导出的模型不会被注册。
+
+**规则**：
+1. **新增 ORM 模型后，必须在 `app/db/models/__init__.py` 中同时添加 import 和 `__all__` 条目**。
+2. **同步更新 `alembic/env.py` 的显式导入列表**（env.py 使用 `from app.db.models import (...)` 而非 `import *`，需要逐个列出）。
+3. **验证方式**：`grep -n "class.*Model.*Base" app/db/models/*.py` 列出所有模型类，与 `__init__.py` 的 `__all__` 和 `alembic/env.py` 的导入列表交叉比对。
+4. **raw SQL 创建的表不建 ORM 模型**（见 §4.12），只有通过 `Base.metadata.create_all()` / Alembic 管理的表才需要。
+
+### 4.26 db_legacy shim 迁移纪律
+
+**症状**：`from app.db_legacy import xxx` 的调用链中多了一层无意义的 re-export，增加代码导航成本和 IDE 跳转层级。
+
+**根因**：`db_legacy.py` 原本是直接实现数据库操作的模块，后来所有函数迁移到 `app.dao.*` 子模块，`db_legacy.py` 变成纯 shim。但调用方未同步更新 import 路径。
+
+**规则**：
+1. **新代码禁止 `from app.db_legacy import`**，直接使用 `from app.dao.xxx import yyy`。
+2. **迁移 shim 时按 dao 子模块分组 import**：`meeting_dao`、`meeting_aux_dao`、`message_dao`、`event_dao`、`agent_role_dao`、`preference_dao`、`tag_dao`、`db_init`。
+3. **函数内 import 保持原位置**：如果原来是函数内 import（避免循环依赖），迁移后仍然是函数内 import。
+4. **shim 文件保留不删除**：可能有外部代码或插件引用，后续单独清理。
+
 ---
 
 ## 5. 防止工程失控（工程纪律）
@@ -538,4 +574,4 @@ git commit -F commit-msg.txt
 
 ---
 
-> 本文件最后更新：2026-07-24（§4.23 测试断言核验、§4.22 角色名规范化、§4.21 cross_team claim_refs 防 LLM 编造、§4.20 Git Hook PowerShell stdout fd 问题、§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
+> 本文件最后更新：2026-07-27（§4.26 db_legacy shim 迁移纪律、§4.25 ORM 模型导出与 Alembic 一致性、§4.24 质量门禁终态设置时序、§4.23 测试断言核验、§4.22 角色名规范化、§4.21 cross_team claim_refs 防 LLM 编造、§4.20 Git Hook PowerShell stdout fd 问题、§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
