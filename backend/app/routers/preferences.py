@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.db_legacy import (
+from app.dao.preference_dao import (
     delete_preference,
     get_all_preferences,
     get_preference,

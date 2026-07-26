@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from app.db_legacy import (
+from app.dao.agent_role_dao import (
     delete_agent_role,
     get_agent_role,
     list_agent_roles,

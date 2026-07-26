@@ -9,7 +9,8 @@ import time
 from datetime import datetime, timezone
 
 from app.config import settings
-from app.db_legacy import save_meeting, save_message
+from app.dao.meeting_dao import save_meeting
+from app.dao.message_dao import save_message
 from app.events import bus, make_event
 from app.lazy_asyncio import LazyLock
 from app.logging_config import get_logger
@@ -932,7 +933,7 @@ class Runner:
         db_legacy 已迁移到 SQLAlchemy async，直接 await 即可，
         不再需要 asyncio.to_thread 线程隔离。
         """
-        from app.db_legacy import save_meeting_aux
+        from app.dao.meeting_aux_dao import save_meeting_aux
 
         aux = state.extract_aux()
         try:
@@ -1151,7 +1152,8 @@ async def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] |
     if existing is not None:
         return existing
     # 尝试从 PostgreSQL 恢复
-    from app.db_legacy import get_meeting, get_meeting_aux
+    from app.dao.meeting_aux_dao import get_meeting_aux
+    from app.dao.meeting_dao import get_meeting
 
     record = await get_meeting(meeting_id)
     if record is not None:
@@ -1183,7 +1185,8 @@ async def recover_crashed_meetings() -> list[str]:
     重启后把它们标记为 paused，用户可以手动 resume 继续。
     返回被恢复的会议 ID 列表。
     """
-    from app.db_legacy import get_meeting_aux, recover_running_meetings, save_meeting_aux
+    from app.dao.meeting_aux_dao import get_meeting_aux, save_meeting_aux
+    from app.dao.meeting_dao import recover_running_meetings
     from app.models import MeetingStatus
     from app.observability.log_bus import log_bus
     from app.tenants import create_system_tenant_ctx

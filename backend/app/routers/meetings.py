@@ -11,24 +11,25 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 
-from app.db.engine import async_session_factory
-from app.db.models import CostRecordModel
-from app.db_legacy import (
-    add_meeting_tag,
+from app.dao.agent_role_dao import get_agent_roles_by_ids, list_agent_roles
+from app.dao.meeting_dao import (
     batch_delete_meetings,
-    get_agent_roles_by_ids,
     get_meeting,
-    get_meeting_tags,
     get_meetings_by_ids,
     hard_delete_meeting,
-    list_agent_roles,
-    list_all_tags,
     query_meetings,
-    remove_meeting_tag,
     restore_meeting,
     save_meeting,
     soft_delete_meeting,
 )
+from app.dao.tag_dao import (
+    add_meeting_tag,
+    get_meeting_tags,
+    list_all_tags,
+    remove_meeting_tag,
+)
+from app.db.engine import async_session_factory
+from app.db.models import CostRecordModel
 from app.events import bus, make_event
 from app.lazy_asyncio import LazyLock, LazySemaphore
 from app.models import MeetingStatus

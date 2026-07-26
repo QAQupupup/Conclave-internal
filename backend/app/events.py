@@ -98,7 +98,7 @@ class InMemoryEventBus:
 
     async def publish(self, event: DomainEvent) -> None:
         """发布事件：写入 PostgreSQL + 内存缓存，广播给订阅者，并通过 Redis 跨实例广播"""
-        from app.db_legacy import save_event
+        from app.dao.event_dao import save_event
 
         ts_str = event.ts.isoformat() if hasattr(event.ts, "isoformat") else str(event.ts)
         try:
@@ -461,7 +461,7 @@ class InMemoryEventBus:
         if events:
             return events[-1].seq
         # 内存无缓存，从 PostgreSQL 取
-        from app.db_legacy import last_event_seq
+        from app.dao.event_dao import last_event_seq
 
         return await last_event_seq(meeting_id)
 
@@ -477,7 +477,7 @@ class InMemoryEventBus:
         except RuntimeError:
             _loop = None
         if _loop is None:
-            from app.db_legacy import last_event_seq as _les
+            from app.dao.event_dao import last_event_seq as _les
 
             return _asyncio.run(_les(meeting_id))
         return 0
@@ -488,7 +488,7 @@ class InMemoryEventBus:
 
     async def _restore_from_db(self, meeting_id: str) -> list[DomainEvent]:
         """从 PostgreSQL 恢复事件到内存缓存（限制最近 _MAX_HISTORY_PER_MEETING 条）"""
-        from app.db_legacy import load_events
+        from app.dao.event_dao import load_events
 
         rows = await load_events(meeting_id, from_seq=0, limit=self._MAX_HISTORY_PER_MEETING)
         events = []

@@ -16,10 +16,10 @@ from sqlalchemy import text
 
 from app.auth import init_auth as init_jwt_auth  # noqa: F401  # 保留供外部引用，实际初始化由 auth 插件完成
 from app.core.exceptions import AppException
+from app.dao.db_init import init_db
 from app.db.base import Base
 from app.db.engine import async_session_factory
 from app.db.redis import close_redis, init_redis
-from app.db_legacy import init_db
 from app.events import start_event_bus, stop_event_bus
 from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware

@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.db_legacy import save_meeting
+from app.dao.meeting_dao import save_meeting
 from app.events import DomainEvent, bus, make_event
 from app.lazy_asyncio import LazyLock
 from app.middleware import _check_rate_limit, verify_ws_token
