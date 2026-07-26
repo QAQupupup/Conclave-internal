@@ -13,7 +13,7 @@ from typing import Any
 
 from app.events import bus, make_event
 from app.logging_config import get_logger
-from app.models import MeetingState, MeetingStatus, Role, Stage
+from app.models import MeetingState, Role, Stage
 from conclave_core.charter import build_charter_from_clarify
 from conclave_core.conclusion_logic import lock_conclusion
 from conclave_core.confidence import worst_confidence
@@ -568,13 +568,12 @@ async def run_produce(
     artifact_text = json.dumps(state.artifact, ensure_ascii=False, default=str)
     record_drift(state, Role.MODERATOR, Stage.PRODUCE, artifact_text)
 
-    # 终态
-    from datetime import datetime, timezone
-
+    # [P0-2 修复] 终态 DONE 不再在此处设置。
+    # Runner.run() 会在质量门禁评估通过后统一设置 DONE，
+    # 避免质量门禁被 is_terminal() 跳过导致自我迭代 Loop 失效。
+    # 参见 runner.py:436 的质量门禁逻辑。
+    # 注意：stage 仍需设置为 PRODUCE，标识当前阶段已完成。
     state.stage = Stage.PRODUCE
-    state.status = MeetingStatus.DONE
-    state.completed_at = datetime.now(timezone.utc)
-    _logger.info("produce: 状态已设为 DONE")
 
     # LLM 降级检测
     fallback_stages = [s for s, flag in state.confidence_flags.items() if flag == "fallback"]

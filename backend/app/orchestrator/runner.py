@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from app.config import settings
 from app.db_legacy import save_meeting, save_message
 from app.events import bus, make_event
+from app.lazy_asyncio import LazyLock
 from app.logging_config import get_logger
 from app.models import MeetingState, MeetingStatus, Stage
 from app.observability.log_bus import log_bus
@@ -46,7 +47,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
     对于每条 signal=intervene 且未处理的 injected_message，
     调用 LLM 生成主持人的简短回复，追加到 intervention_messages 中。
 
-    [CON-15 修复] 增加 per-meeting asyncio.Lock 防止并发处理同一会议时：
+    [CON-15 修复] 增加 per-meeting LazyLock 防止并发处理同一会议时：
     - 同一介入消息被处理两次（重复回复）
     - intervention_messages 列表被并发修改
     [CON-22 修复] 用户内容在喂给 LLM 前做 prompt 注入检测与隔离包装
@@ -65,7 +66,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
 
     # [CON-15] per-meeting 锁，作用域为本次 _process_interventions 调用
     # 嵌套 acquire 需 RLock。同一会议并发触发时只让一个先进入处理循环。
-    lock = _intervention_locks.setdefault(state.meeting_id, asyncio.Lock())
+    lock = _intervention_locks.setdefault(state.meeting_id, LazyLock())
     async with lock:
         # 重新过滤一次：等待锁期间其他协程可能已经处理
         unprocessed = [
@@ -175,7 +176,7 @@ async def _process_interventions(state: MeetingState) -> MeetingState:
 
 
 # [CON-15] per-meeting 介入处理锁
-_intervention_locks: dict[str, asyncio.Lock] = {}
+_intervention_locks: dict[str, LazyLock] = {}
 
 
 class Runner:
@@ -494,6 +495,8 @@ class Runner:
                         continue  # 重新执行produce阶段
                     elif should_iterate and not state.auto_iterate:
                         # 用户未开启auto_iterate，标记为需要人工确认
+                        # [P0-2 修复] 仍需设置终态 DONE，否则 while 循环会无限重跑 produce
+                        # 前端通过 quality.needs_review 事件提示用户可手动触发迭代
                         await bus.publish(
                             make_event(
                                 "quality.needs_review",
@@ -504,6 +507,25 @@ class Runner:
                                     "can_iterate": state.iteration_count < state.max_iterations,
                                 },
                             )
+                        )
+                        state.status = MeetingStatus.DONE
+                        state.completed_at = datetime.now(timezone.utc)
+                        log_bus.info(
+                            f"质量未达标但 auto_iterate=False，设置终态 DONE（需人工确认）: "
+                            f"score={state.quality_score}, iterations={state.iteration_count}",
+                            logger="orchestrator.runner",
+                        )
+                    else:
+                        # [P0-2 修复] 质量门禁通过或达到迭代上限：设置终态
+                        # 覆盖两种情况：
+                        #   1. should_iterate=False（质量达标）
+                        #   2. should_iterate=True but iteration_count >= max_iterations（迭代上限）
+                        state.status = MeetingStatus.DONE
+                        state.completed_at = datetime.now(timezone.utc)
+                        log_bus.info(
+                            f"质量门禁通过/迭代结束，设置终态 DONE: "
+                            f"score={state.quality_score}, iterations={state.iteration_count}",
+                            logger="orchestrator.runner",
                         )
 
                 # 终止判断
@@ -1028,7 +1050,7 @@ def clear_state(meeting_id: str) -> bool:
 
     同时清理：
     - _states 中的 MeetingState 对象
-    - _intervention_locks 中的 asyncio.Lock 对象
+    - _intervention_locks 中的 LazyLock 对象
 
     Returns:
         bool: 是否真的有状态被删除（True=删除成功，False=会议本就不在内存中）。

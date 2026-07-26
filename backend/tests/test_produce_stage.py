@@ -2,7 +2,7 @@
 
 覆盖：
 - produce_node 在关键字段为空时降级 confidence
-- run_produce 正确设置终态、扫描附件、发布降级事件
+- run_produce 正确收尾状态（不设 DONE，由 Runner 质量门禁后设置）、扫描附件、发布降级事件
 
 所有测试使用 monkeypatch 替换 compute / 事件总线，避免真实 LLM 与数据库依赖。
 """
@@ -52,7 +52,7 @@ async def test_produce_node_downgrades_confidence_when_prd_openapi_empty(monkeyp
     )
     state = await produce_node(state)
 
-    assert state.status == MeetingStatus.DONE
+    assert state.status == MeetingStatus.RUNNING  # [P0-2] DONE 由 Runner 质量门禁后设置
     assert state.stage == Stage.PRODUCE
     assert state.confidence_flags.get("produce") == "low"
     assert state.artifact is not None
@@ -62,7 +62,7 @@ async def test_produce_node_downgrades_confidence_when_prd_openapi_empty(monkeyp
 
 @pytest.mark.asyncio
 async def test_run_produce_finalizes_state_and_scans_attachments(monkeypatch, tmp_path):
-    """run_produce 设置 DONE、扫描代码附件，并保持 artifact 结构完整。"""
+    """run_produce 收尾状态（不设 DONE，由 Runner 质量门禁后设置）、扫描代码附件，并保持 artifact 结构完整。"""
     import app.config as config_mod
 
     monkeypatch.setattr(
@@ -91,7 +91,7 @@ async def test_run_produce_finalizes_state_and_scans_attachments(monkeypatch, tm
 
     final_state = await run_produce(state, confidence="high")
 
-    assert final_state.status == MeetingStatus.DONE
+    assert final_state.status == MeetingStatus.RUNNING  # [P0-2] DONE 由 Runner 质量门禁后设置
     assert final_state.stage == Stage.PRODUCE
     assert final_state.confidence_flags.get("produce") == "high"
 

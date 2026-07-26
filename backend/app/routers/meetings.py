@@ -30,7 +30,7 @@ from app.db_legacy import (
     soft_delete_meeting,
 )
 from app.events import bus, make_event
-from app.lazy_asyncio import LazySemaphore
+from app.lazy_asyncio import LazyLock, LazySemaphore
 from app.models import MeetingStatus
 from app.orchestrator.runner import (
     Runner,
@@ -62,7 +62,7 @@ router = APIRouter(prefix="/meetings", tags=["meetings"])
 # 维护引用防止被 GC 回收，并用于 409 冲突检测
 _running_tasks: dict[str, asyncio.Task] = {}
 # [SECURITY-FIX] 每会议一把锁，防止 run 端点的 TOCTOU 竞态（双重启动）
-_run_locks: dict[str, asyncio.Lock] = {}
+_run_locks: dict[str, LazyLock] = {}
 
 # 最大并行会议数（防止资源耗尽），可通过环境变量 CONCLAVE_MAX_CONCURRENT 配置
 MAX_CONCURRENT_MEETINGS = int(os.environ.get("CONCLAVE_MAX_CONCURRENT", "5"))
@@ -716,7 +716,7 @@ async def run_meeting(meeting_id: str, request: Request) -> dict[str, Any]:
 
     # 409：已有后台任务在运行（防止重复启动）
     # [SECURITY-FIX] 使用锁防止 TOCTOU 竞态：锁覆盖"检查→创建任务→注册"整个临界区
-    run_lock = _run_locks.setdefault(meeting_id, asyncio.Lock())
+    run_lock = _run_locks.setdefault(meeting_id, LazyLock())
     async with run_lock:
         existing_task = _running_tasks.get(meeting_id)
         if existing_task is not None and not existing_task.done():

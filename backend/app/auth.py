@@ -53,6 +53,49 @@ JWT_AUDIENCE = os.environ.get("CONCLAVE_JWT_AUDIENCE", "conclave-api")
 DEFAULT_ADMIN_USERNAME = os.environ.get("CONCLAVE_ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_PASSWORD = os.environ.get("CONCLAVE_ADMIN_PASSWORD", "admin123")
 
+# [P0-4 修复] 生产环境安全基线
+JWT_SECRET_MIN_LENGTH = 32  # HMAC-SHA256 密钥最低 256 bit = 32 byte
+_WEAK_DEFAULT_PASSWORDS = {"admin123", "password", "123456", "admin", ""}
+
+
+def _check_production_security() -> None:
+    """生产环境 fail-fast 安全检查。
+
+    在 APP_ENV=production 下，以下情况直接 raise RuntimeError 拒绝启动：
+    1. CONCLAVE_JWT_SECRET 未设置或长度 < 32 字节（HMAC-SHA256 安全基线）
+    2. CONCLAVE_ADMIN_PASSWORD 未设置或使用弱默认密码
+
+    非生产环境（dev/test/oss）跳过检查，保持原有自动生成行为。
+    """
+    if os.environ.get("APP_ENV", "") != "production":
+        return
+
+    errors: list[str] = []
+
+    # 检查 JWT_SECRET
+    jwt_secret = os.environ.get("CONCLAVE_JWT_SECRET", "")
+    if not jwt_secret:
+        errors.append("CONCLAVE_JWT_SECRET 未设置。生产环境必须显式提供 JWT 密钥，不允许自动生成临时密钥。")
+    elif len(jwt_secret) < JWT_SECRET_MIN_LENGTH:
+        errors.append(
+            f"CONCLAVE_JWT_SECRET 长度不足（{len(jwt_secret)} < {JWT_SECRET_MIN_LENGTH} 字节），"
+            f"不满足 HMAC-SHA256 安全基线。"
+        )
+
+    # 检查管理员密码
+    admin_password = os.environ.get("CONCLAVE_ADMIN_PASSWORD", "")
+    if not admin_password or admin_password in _WEAK_DEFAULT_PASSWORDS:
+        errors.append("CONCLAVE_ADMIN_PASSWORD 未设置或使用弱默认密码。生产环境必须通过环境变量设置强密码。")
+
+    if errors:
+        msg = "\n".join(f"  [{i + 1}] {e}" for i, e in enumerate(errors))
+        raise RuntimeError(
+            f"生产环境安全检查失败，拒绝启动：\n{msg}\n"
+            f"请设置以下环境变量后重试：\n"
+            f"  - CONCLAVE_JWT_SECRET=<至少{JWT_SECRET_MIN_LENGTH}字符的随机串>\n"
+            f"  - CONCLAVE_ADMIN_PASSWORD=<强密码>"
+        )
+
 
 def _ensure_jwt_secret() -> str:
     """确保 JWT_SECRET 存在：若未通过环境变量设置，则生成并持久化到 .jwt_secret 文件"""
@@ -380,7 +423,9 @@ async def init_auth() -> None:
     """初始化认证系统：建表、加载用户、创建默认管理员
 
     [H-04 修复] 记录默认管理员密码配置状态，如果使用默认密码则输出警告。
+    [P0-4 修复] 生产环境 fail-fast：JWT_SECRET / 弱密码不达标时拒绝启动。
     """
+    _check_production_security()
     await _init_users_table()
     await _load_users_from_db()
     _ensure_jwt_secret()
