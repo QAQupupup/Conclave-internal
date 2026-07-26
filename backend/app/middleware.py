@@ -341,7 +341,8 @@ def setup_auth_middleware(app: FastAPI) -> None:
             from app.auth import decode_token
 
             auth_user = decode_token(token)
-        except Exception:
+        except Exception as e:
+            logger.debug("JWT token 解码失败，降级到 dev token: %s", e)
             auth_user = None
 
         if auth_user:
@@ -386,8 +387,8 @@ def setup_auth_middleware(app: FastAPI) -> None:
                     },
                     ip=client_ip_str,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("记录速率限制审计日志失败: %s", e)
             return JSONResponse(
                 status_code=429,
                 content={"detail": f"认证失败过多：{_reason2}"},
@@ -407,8 +408,8 @@ def setup_auth_middleware(app: FastAPI) -> None:
                 },
                 ip=client_ip_str,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("记录未授权访问审计日志失败: %s", e)
         return JSONResponse(
             status_code=401,
             content={"detail": "认证失败：token 无效或已过期"},
@@ -481,8 +482,8 @@ def setup_trace_middleware(app: FastAPI) -> None:
             from app.observability.metrics_store import get_metrics_store
 
             get_metrics_store().record_request(elapsed)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("记录请求指标失败: %s", e)
 
         if status >= 500:
             logger.error(
@@ -507,8 +508,8 @@ def setup_trace_middleware(app: FastAPI) -> None:
                     },
                     duration_ms=int(elapsed),
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("记录 5xx 错误审计日志失败: %s", e)
         elif status >= 400:
             logger.warning(
                 "request_id=%s %s %s %d %.0fms",
@@ -554,8 +555,8 @@ def setup_trace_middleware(app: FastAPI) -> None:
                         duration_ms=int(elapsed),
                         ip=_client_ip(request),
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("记录写操作审计日志失败: %s", e)
 
         response.headers["X-Request-Id"] = rid
         return response
@@ -642,8 +643,8 @@ def reset_auth_failures(ip: str) -> None:
         with _rate_lock:
             _fail_log.pop(ip or "unknown", None)
             _blocked_ips.pop(ip or "unknown", None)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("清除认证失败记录异常: %s", e)
 
 
 def verify_ws_token(token: str) -> dict | None:
@@ -660,8 +661,8 @@ def verify_ws_token(token: str) -> dict | None:
         user = decode_token(token)
         if user:
             return user
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("WebSocket JWT token 解码失败: %s", e)
     # Dev token
     if hmac.compare_digest(token.encode("utf-8"), _DEV_TOKEN.encode("utf-8")):
         return {"username": "dev", "role": "admin", "uid": None}

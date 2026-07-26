@@ -133,8 +133,8 @@ class InMemoryEventBus:
                         "error": str(e)[:300],
                     },
                 )
-            except Exception:
-                pass
+            except Exception as audit_err:
+                logger.debug("记录事件总线审计日志失败: %s", audit_err)
             fallback = self._history.get(event.meeting_id, [])
             event.seq = (fallback[-1].seq + 1) if fallback else 0
 

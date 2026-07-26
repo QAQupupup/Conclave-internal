@@ -27,6 +27,8 @@ from app.agents.role_templates import ROLE_LIBRARY
 from app.logging_config import get_logger
 from app.models import Role
 
+logger = get_logger("agents.compute")
+
 # IntraTeam 阶段的角色 → 模板注册表（Registry 模式）
 # 消除 build_intra_prompt / build_intra_react_prompt 中的 if/elif 硬编码分派
 # 新增角色只需在此注册，无需改业务逻辑（开闭原则）
@@ -268,8 +270,9 @@ class GRPCAgentCompute:
 
             # 当前降级到本地
             return await self._fallback.think(req)
-        except Exception:
+        except Exception as e:
             # gRPC 调用失败，降级到本地
+            logger.debug("gRPC think 调用失败，降级到本地计算: %s", e)
             return await self._fallback.think(req)
 
     async def think_batch(self, requests: list[ThinkRequest]) -> list[ThinkResponse]:
@@ -277,7 +280,8 @@ class GRPCAgentCompute:
             # TODO: 使用 gRPC 双向流批量发送
             # 当前降级到本地并行
             return await self._fallback.think_batch(requests)
-        except Exception:
+        except Exception as e:
+            logger.debug("gRPC think_batch 调用失败，降级到本地计算: %s", e)
             return await self._fallback.think_batch(requests)
 
 
@@ -298,7 +302,8 @@ def _inject_profile(prompt: str, agent_role: str) -> str:
         from app.memory.profile import inject_profile
 
         return inject_profile(prompt, agent_role)
-    except Exception:
+    except Exception as e:
+        logger.debug("注入角色画像失败，返回原始 prompt: %s", e)
         return prompt
 
 
@@ -348,8 +353,8 @@ def _inject_skills(prompt: str, stage: str, deliverable_type: str = "", role: st
         )
         if skills_text:
             return f"{prompt}\n\n{skills_text}"
-    except Exception:
-        pass  # Skill加载失败不影响主流程
+    except Exception as e:
+        logger.debug("Skill 加载失败，不影响主流程: %s", e)
     return prompt
 
 

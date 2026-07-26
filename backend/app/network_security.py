@@ -218,8 +218,8 @@ async def safe_fetch(
                         "reason": reason,
                     },
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("记录 SSRF 阻断审计日志失败: %s", e)
             return False, f"SSRF 检查失败（第{hop + 1}跳）: {reason}"
 
         # 防止循环重定向

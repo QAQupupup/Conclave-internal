@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import sys
 import threading
 from typing import Any, ClassVar, TextIO
+
+logger = logging.getLogger(__name__)
 
 
 class ConsoleSink:
@@ -36,8 +39,8 @@ class ConsoleSink:
             with self._lock:
                 self._stream.write(line)
                 self._stream.flush()
-        except Exception:
-            pass  # sink 异常不影响主流程
+        except Exception as e:
+            logger.debug("ConsoleSink 写入失败: %s", e)
 
 
 class JSONFileSink:
@@ -59,8 +62,8 @@ class JSONFileSink:
             with self._lock:
                 self._file.write(line)
                 self._file.flush()
-        except Exception:
-            pass  # sink 异常不影响主流程
+        except Exception as e:
+            logger.debug("JSONFileSink 写入失败: %s", e)
 
     def close(self) -> None:
         with contextlib.suppress(Exception):
@@ -92,8 +95,8 @@ class RemoteGRPCSink:
                 self._buffer.append(event)
                 if len(self._buffer) >= self._batch_size:
                     self._flush()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("RemoteGRPCSink 写入失败: %s", e)
 
     def _flush(self) -> None:
         """将缓冲区的日志批量发送到远程服务（stub：清空缓冲区）"""
@@ -165,5 +168,5 @@ class EventBusSink:
                 # 没有运行中的事件循环，无法推送
                 return
             loop.call_soon_threadsafe(lambda: asyncio.ensure_future(bus.publish(make_event("log.entry", mid, payload))))
-        except Exception:
-            pass  # sink 异常不影响主流程
+        except Exception as e:
+            logger.debug("EventBusSink 写入失败: %s", e)

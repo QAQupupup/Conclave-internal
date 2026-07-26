@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # 缓冲区大小：360 点 × 10 秒 = 60 分钟
 _BUFFER_SIZE = int(os.environ.get("METRICS_BUFFER_SIZE", "360"))
@@ -111,8 +114,8 @@ class MetricsStore:
                     s = get_cost_tracker().summary()
                     total_tokens = s.get("total_tokens", 0)
                     total_cost_usd = s.get("total_cost_usd", 0.0)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("采集 Token 成本指标失败: %s", e)
 
                 # 活跃会议数
                 active_meetings = 0
@@ -129,8 +132,8 @@ class MetricsStore:
                     if row:
                         # RowMapping，用 key 访问
                         active_meetings = row.get("cnt", row.get("count", 0))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("采集活跃会议数指标失败: %s", e)
 
                 # 浏览器上下文数
                 browser_contexts = 0
@@ -138,8 +141,8 @@ class MetricsStore:
                     from app.tools.browser_tool import get_browser_pool
 
                     browser_contexts = get_browser_pool().context_count
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("采集浏览器上下文数指标失败: %s", e)
 
                 # 请求吞吐量
                 requests_per_minute = (
@@ -164,8 +167,8 @@ class MetricsStore:
                 )
                 self._buffer.append(point)
 
-            except Exception:
-                pass  # 采集失败不影响主流程
+            except Exception as e:
+                logger.debug("指标采集失败，不影响主流程: %s", e)
 
             await asyncio.sleep(_COLLECTION_INTERVAL)
 

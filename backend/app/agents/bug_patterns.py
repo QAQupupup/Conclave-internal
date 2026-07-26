@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 _PATTERNS_FILE = Path(__file__).resolve().parent.parent / "prompts" / "bug_patterns.yaml"
 
@@ -86,6 +89,6 @@ def append_bug_pattern(category: str, pattern: dict[str, Any]) -> None:
         try:
             with open(_PATTERNS_FILE, "w", encoding="utf-8") as f:
                 yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        except Exception:
-            pass  # 文件写入失败不影响主流程
+        except Exception as e:
+            logger.debug("bug_patterns.yaml 文件写入失败，不影响主流程: %s", e)
     load_bug_patterns.cache_clear()

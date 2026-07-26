@@ -37,7 +37,8 @@ def create_supervised_task(
             exc = t.exception()
         except asyncio.CancelledError:
             return
-        except Exception:
+        except Exception as e:
+            log.debug("获取任务异常失败: %s", e)
             return
         if exc is not None:
             log.error(

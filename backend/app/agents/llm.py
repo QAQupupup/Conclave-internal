@@ -509,8 +509,8 @@ class CircuitBreaker:
                         "recovery_timeout_s": self.recovery_timeout,
                     },
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("记录熔断器审计日志失败: %s", e)
 
 
 # 进程级单例熔断器
@@ -577,8 +577,8 @@ class RealLLM:
                 base_url, api_key, model, _pid = get_meeting_llm_config(mid)
                 if base_url and api_key and model:
                     return base_url, api_key, model
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("解析会议级 LLM 配置失败，降级到租户级: %s", e)
         # 租户级覆盖
         try:
             from app.tenants.context import get_tenant_id
@@ -589,8 +589,8 @@ class RealLLM:
                 t_base, t_key, t_model = resolve_llm_config(tid, self.base_url, self.api_key, self.model)
                 if t_base and t_key and t_model:
                     return t_base, t_key, t_model
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("解析租户级 LLM 配置失败，降级到全局默认: %s", e)
         return self.base_url, self.api_key, self.model
 
     def _supports_json(self, base_url: str, model: str) -> bool:
@@ -1025,8 +1025,8 @@ class RealLLM:
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("记录 LLM 调用成本失败: %s", e)
         return content  # type: ignore[no-any-return]
 
     @staticmethod
@@ -1034,7 +1034,8 @@ class RealLLM:
         """粗判 400 是否由 response_format 引起"""
         try:
             text = e.response.text.lower()
-        except Exception:
+        except Exception as exc:
+            logger.debug("读取 HTTP 错误响应文本失败: %s", exc)
             return False
         return any(kw in text for kw in ("response_format", "json_object", "json_schema", "not support"))
 

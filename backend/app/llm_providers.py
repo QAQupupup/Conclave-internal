@@ -176,8 +176,8 @@ def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str
                     chain.append((_t_base, _t_key, model, "tenant"))
                     seen_urls.add(_t_base.rstrip("/"))
                     _used_tenant_override = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("解析会议/租户级 LLM 配置失败，降级到全局默认: %s", e)
 
     # 如果主配置未设置，用全局默认
     if not chain and settings.llm_base_url and settings.llm_api_key:

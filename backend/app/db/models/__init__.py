@@ -13,12 +13,13 @@ from app.db.models.event import EventModel
 from app.db.models.meeting import MeetingAuxModel, MeetingModel, MeetingTagModel
 from app.db.models.memory import FeatureMemoryModel, ProfileMemoryModel, RawMemoryModel
 from app.db.models.message import MessageModel
-from app.db.models.observability import CostRecordModel
+from app.db.models.observability import AuditLogModel, CostRecordModel
 from app.db.models.user import ApiKeyModel, UserPreferenceModel
 
 __all__ = [
     "AgentRoleModel",
     "ApiKeyModel",
+    "AuditLogModel",
     "CostRecordModel",
     "DockerHostModel",
     "DockerHostSecretModel",

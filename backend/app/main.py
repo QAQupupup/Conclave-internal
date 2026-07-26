@@ -170,6 +170,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # ===== 关闭阶段（逆序：先业务资源，后基础设施）=====
     # 关闭插件系统（逆序 shutdown，在基础设施关闭之前）
     try:
         await app.state.plugin_registry.shutdown_all()
@@ -179,39 +180,63 @@ async def lifespan(app: FastAPI):
     stop_rate_limit_cleanup()
     # 停止后台指标采集
     if os.environ.get("CONCLAVE_DISABLE_METRICS") != "1":
-        await get_metrics_store().stop()
+        try:
+            await get_metrics_store().stop()
+        except Exception as e:
+            logger.warning("指标采集停止异常（非致命）: %s", e)
     # 停止事件总线 Redis Pub/Sub 桥接（必须在 close_redis 之前）
-    await stop_event_bus()
+    try:
+        await stop_event_bus()
+    except Exception as e:
+        logger.warning("事件总线停止异常（非致命）: %s", e)
     # 关闭 Redis
-    await close_redis(app)
+    try:
+        await close_redis(app)
+    except Exception as e:
+        logger.warning("Redis 关闭异常（非致命）: %s", e)
     # 清理所有沙箱服务容器
     try:
         from app.sandbox import cleanup_all_services
 
         await cleanup_all_services()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("沙箱清理异常（非致命）: %s", e)
     # 关闭 LLM 底层 httpx 连接池
     try:
         from app.agents.compute import shutdown_compute
 
         await shutdown_compute()
-    except Exception:
-        pass
-    # 关闭 Playwright 浏览器
+    except Exception as e:
+        logger.warning("LLM 连接池关闭异常（非致命）: %s", e)
+    # 关闭 Playwright 浏览器（browser_tool + playwright_search）
     try:
         from app.tools.browser_tool import close_browser_tool
 
         await close_browser_tool()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("browser_tool 关闭异常（非致命）: %s", e)
+    try:
+        from app.tools.playwright_search import close_playwright_search
+
+        await close_playwright_search()
+    except Exception as e:
+        logger.warning("playwright_search 关闭异常（非致命）: %s", e)
     # 关闭 network_security 的异步 httpx 连接池
     try:
         from app.network_security import shutdown_async_client
 
         await shutdown_async_client()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("network_security 连接池关闭异常（非致命）: %s", e)
+    # 关闭数据库引擎连接池（释放 PG 连接）
+    try:
+        from app.db.engine import get_engine
+
+        engine = await get_engine()
+        await engine.dispose()
+        logger.info("数据库引擎连接池已释放")
+    except Exception as e:
+        logger.warning("数据库引擎释放异常（非致命）: %s", e)
 
 
 def create_app() -> FastAPI:
@@ -373,22 +398,6 @@ def create_app() -> FastAPI:
         _healthy_vals = {"ok", "closed", "half_open", "disabled"}
         all_ok = all(v in _healthy_vals for v in checks.values())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
-
-    @app.on_event("shutdown")
-    async def _shutdown_event() -> None:
-        """应用关闭时清理资源"""
-        try:
-            from app.tools.playwright_search import close_playwright_search
-
-            await close_playwright_search()
-        except Exception:
-            pass
-        try:
-            from app.tools.browser_tool import close_browser_tool
-
-            await close_browser_tool()
-        except Exception:
-            pass
 
     _app_env = os.environ.get("APP_ENV", "dev").lower()
     if _app_env != "production":
