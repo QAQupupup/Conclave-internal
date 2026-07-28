@@ -84,7 +84,7 @@ def _make_mock_detail(case: dict) -> dict:
                 "claim_id": f"claim-{i:04d}",
                 "role": "engineer",
                 "text": f"Claim {i}: 这是一个技术主张",
-                "evidence_ref": {"type": expected_claim_types[i % len(expected_claim_types)]},
+                "type": expected_claim_types[i % len(expected_claim_types)],
             }
         )
 
@@ -115,24 +115,49 @@ def _make_mock_detail(case: dict) -> dict:
             }
         )
 
-    # 构造 artifact
-    must_have = produce_exp.get("must_have_prd_fields", ["title", "goal", "scope"])
-    prd = {field: f"值_{field}" for field in must_have}
-    prd["api_endpoints"] = [
-        {"method": "GET", "path": "/api/users"},
-        {"method": "POST", "path": "/api/users"},
-    ] * max(1, produce_exp.get("min_api_endpoints", 2) // 2 + 1)
-    openapi_str = "openapi: 3.0.0\n" + "x" * max(100, produce_exp.get("min_openapi_length", 100))
+    # 构造 artifact — 根据 deliverable_type 构造不同产出
+    cfg = case.get("config") or {}
+    deliverable_type = cfg.get("deliverable_type", "prd_openapi")
 
     # 构造 team_config
     expected_roles = clarify_exp.get("expected_roles", ["product_architect", "engineer", "security_expert"])
     team_config = [{"role": r, "stance": "neutral"} for r in expected_roles]
+
+    artifact: dict = {"meeting_id": "mtg-mock-0000", "deliverable_type": deliverable_type}
+
+    if deliverable_type in ("design_doc", "comprehensive", "research_report", "business_report"):
+        # 文档类产出
+        must_have_doc = produce_exp.get("must_have_doc_fields", ["title", "summary"])
+        doc_content: dict = {}
+        for field in must_have_doc:
+            if field in ("findings", "recommendations", "requirements", "api_endpoints"):
+                doc_content[field] = [f"{field} 项 {i + 1}: 详细内容描述" for i in range(3)]
+            else:
+                doc_content[field] = f"{field} 的详细内容描述，长度超过五十个字符以确保内容深度评估通过"
+        # 补充额外字段确保内容深度
+        for extra in ["overview", "analysis", "architecture", "tech_stack"]:
+            if extra not in doc_content:
+                doc_content[extra] = f"额外字段 {extra} 的详细描述内容，用于补充文档完整性"
+        artifact[deliverable_type] = doc_content
+    else:
+        # prd_openapi 及其他类型
+        must_have = produce_exp.get("must_have_prd_fields", ["title", "goal", "scope"])
+        prd = {field: f"值_{field}" for field in must_have}
+        prd["api_endpoints"] = [
+            {"method": "GET", "path": "/api/users"},
+            {"method": "POST", "path": "/api/users"},
+        ] * max(1, produce_exp.get("min_api_endpoints", 2) // 2 + 1)
+        openapi_str = "openapi: 3.0.0\n" + "x" * max(100, produce_exp.get("min_openapi_length", 100))
+        artifact["prd"] = prd
+        artifact["openapi"] = openapi_str
 
     return {
         "meeting_id": "mtg-mock-0000",
         "topic": case.get("topic", ""),
         "stage": "produce",
         "status": "done",
+        "deliverable_type": deliverable_type,
+        "config": cfg,
         "clarified_topic": "这是一个已澄清的议题描述，长度大于十个字符",
         "key_questions": [f"问题 {i + 1}" for i in range(max(2, clarify_exp.get("min_key_questions", 2)))],
         "team_config": team_config,
@@ -140,7 +165,7 @@ def _make_mock_detail(case: dict) -> dict:
         "conflicts": conflicts,
         "evidence_set": [{"assessments": [{"claim_id": "claim-0000", "verdict": "supported"}]}],
         "decision_record": {"decisions": decisions},
-        "artifact": {"prd": prd, "openapi": openapi_str},
+        "artifact": artifact,
         "messages": [{"role": "moderator", "text": f"消息 {i}"} for i in range(10)],
         "llm_trace": {"total_tokens": 5000, "fallback_calls": 0, "invalid_calls": 0},
         "confidence_flags": {"clarify": "high", "intra_team": "medium", "cross_team": "high"},

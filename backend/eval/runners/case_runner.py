@@ -62,6 +62,7 @@ class CaseRunner:
 
         try:
             meeting_id = await self._create_meeting(case)
+            await self._upload_docs(meeting_id, case)
             await self._start_meeting(meeting_id)
             detail = await self._wait_and_fetch(meeting_id, case)
             total_tokens = self._extract_tokens(detail)
@@ -107,6 +108,27 @@ class CaseRunner:
         async with httpx.AsyncClient(timeout=30.0, headers=self.headers, trust_env=False) as client:
             resp = await client.post(f"{self.base_url}/meetings/{meeting_id}/run")
             resp.raise_for_status()
+
+    async def _upload_docs(self, meeting_id: str, case: dict) -> None:
+        """上传测试用例中的文档（multipart form data）。
+
+        在会议创建后、启动前调用，模拟用户上传参考资料的场景。
+        """
+        docs = case.get("uploaded_docs") or []
+        if not docs:
+            return
+        upload_headers = dict(self.headers)
+        upload_headers.pop("Content-Type", None)
+        async with httpx.AsyncClient(timeout=30.0, headers=upload_headers, trust_env=False) as client:
+            for doc in docs:
+                filename = doc.get("filename", "doc.md")
+                content = doc.get("content", "")
+                files = {"file": (filename, content.encode("utf-8"), "text/markdown")}
+                resp = await client.post(
+                    f"{self.base_url}/meetings/{meeting_id}/documents",
+                    files=files,
+                )
+                resp.raise_for_status()
 
     async def _wait_and_fetch(self, meeting_id: str, case: dict) -> dict:
         timeout = float(case.get("timeout", DEFAULT_TIMEOUT))
@@ -233,8 +255,7 @@ class CaseRunner:
         if expected_types:
             actual_types: list[str] = []
             for c in claims:
-                ref = c.get("evidence_ref") or {}
-                t = ref.get("type")
+                t = c.get("type")
                 if t:
                     actual_types.append(t)
             res = self._exact.grade(expected_types, actual_types)
@@ -285,24 +306,48 @@ class CaseRunner:
 
     async def _grade_produce(self, criteria: dict, detail: dict, checks: list[tuple[str, bool]]) -> None:
         artifact = detail.get("artifact") or {}
-        prd = artifact.get("prd") if isinstance(artifact.get("prd"), dict) else {}
-        must_have = criteria.get("must_have_prd_fields")
-        if must_have:
-            res = self._field.grade(prd, must_have)
-            checks.append(("must_have_prd_fields", res.passed))
-        min_api = criteria.get("min_api_endpoints")
-        if min_api is not None:
-            endpoints = prd.get("api_endpoints") or []
-            checks.append(("min_api_endpoints", len(endpoints) >= min_api))
-        min_openapi = criteria.get("min_openapi_length")
-        if min_openapi is not None:
-            openapi = artifact.get("openapi") or ""
-            checks.append(("min_openapi_length", len(str(openapi)) >= min_openapi))
+        deliverable_type = detail.get("deliverable_type") or (detail.get("config") or {}).get(
+            "deliverable_type", "prd_openapi"
+        )
+
+        # 按产出类型分派检查逻辑
+        if deliverable_type in ("design_doc", "comprehensive", "research_report", "business_report"):
+            doc = artifact.get(deliverable_type) if isinstance(artifact.get(deliverable_type), dict) else {}
+            must_have = criteria.get("must_have_doc_fields")
+            if must_have:
+                res = self._field.grade(doc, must_have)
+                checks.append(("must_have_doc_fields", res.passed))
+            min_len = criteria.get("min_doc_length")
+            if min_len is not None:
+                doc_text = str(doc)
+                checks.append(("min_doc_length", len(doc_text) >= min_len))
+        else:
+            # prd_openapi 及其他类型：保持原有 PRD 字段检查
+            prd = artifact.get("prd") if isinstance(artifact.get("prd"), dict) else {}
+            must_have = criteria.get("must_have_prd_fields")
+            if must_have:
+                res = self._field.grade(prd, must_have)
+                checks.append(("must_have_prd_fields", res.passed))
+            min_api = criteria.get("min_api_endpoints")
+            if min_api is not None:
+                endpoints = prd.get("api_endpoints") or []
+                checks.append(("min_api_endpoints", len(endpoints) >= min_api))
+            min_openapi = criteria.get("min_openapi_length")
+            if min_openapi is not None:
+                openapi = artifact.get("openapi") or ""
+                checks.append(("min_openapi_length", len(str(openapi)) >= min_openapi))
+
         # 可选：LLM-as-Judge 整体质量评分（仅当用例显式请求且 judge 已配置时）
         if criteria.get("use_judge") and self._judge is not None:
             topic = detail.get("topic", "")
-            actual = str(prd) if prd else str(artifact)
-            expected_text = criteria.get("judge_expected", "complete and coherent PRD with clear scope and API design")
+            # 根据产出类型选择待评估内容
+            if deliverable_type in ("design_doc", "comprehensive", "research_report", "business_report"):
+                actual = str(artifact.get(deliverable_type, ""))
+            else:
+                actual = str(artifact.get("prd", "")) if artifact.get("prd") else str(artifact)
+            expected_text = criteria.get(
+                "judge_expected", "complete and coherent deliverable with clear structure and actionable content"
+            )
             dimension = criteria.get("judge_dimension", "completeness")
             res = await self._judge.grade(topic, expected_text, actual, dimension)
             checks.append(("llm_judge_quality", res.score >= PASS_THRESHOLD))

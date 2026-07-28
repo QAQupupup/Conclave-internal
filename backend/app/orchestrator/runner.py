@@ -662,7 +662,49 @@ class Runner:
         return state
 
     async def _evaluate_quality(self, state: MeetingState) -> dict:
-        """质量门禁评估：多维度评估产出物质量，决定是否需要迭代改进。
+        """质量门禁评估：按 deliverable_type 分派到对应评估方法。"""
+        dt = state.deliverable_type
+        if dt == "deployable_service":
+            return await self._evaluate_quality_deployable(state)
+        elif dt == "prd_openapi":
+            return await self._evaluate_quality_prd(state)
+        elif dt in ("design_doc", "comprehensive", "research_report", "business_report"):
+            return await self._evaluate_quality_document(state, dt)
+        elif dt in ("code_analysis", "data_science", "tested_system"):
+            return await self._evaluate_quality_code(state, dt)
+        else:
+            return await self._evaluate_quality_prd(state)
+
+    @staticmethod
+    def _build_quality_result(
+        score: int,
+        feedback_parts: list[str],
+        hard_failures: list[str],
+        should_iterate: bool,
+        metrics: dict | None = None,
+    ) -> dict:
+        """构建质量评估结果 dict（统一格式）。"""
+        all_feedback: list[str] = []
+        if hard_failures:
+            all_feedback.append("【必须修复】")
+            all_feedback.extend(f"- {h}" for h in hard_failures)
+        if feedback_parts:
+            all_feedback.append("【建议改进】")
+            all_feedback.extend(f"- {f}" for f in feedback_parts)
+        if not all_feedback and score >= 80:
+            all_feedback.append("质量评估通过，产出达到商用标准")
+        result: dict = {
+            "score": max(0, min(100, score)),
+            "feedback": "\n".join(all_feedback),
+            "should_iterate": should_iterate,
+            "hard_failures": hard_failures,
+        }
+        if metrics:
+            result["metrics"] = metrics
+        return result
+
+    async def _evaluate_quality_deployable(self, state: MeetingState) -> dict:
+        """质量门禁评估（deployable_service）：多维度评估产出物质量，决定是否需要迭代改进。
 
         评估维度（权重）：
         1. 部署成功（硬门槛）：部署失败直接不通过
@@ -927,6 +969,248 @@ class Runner:
             "scale_score": scale_score,
             "is_demo_suspected": total_files < 5 or total_lines < 200 or demo_hits >= 3,
         }
+
+    # ── 占位符检测（多类型共用）──
+    _PLACEHOLDER_PATTERNS = ("TODO", "placeholder", "示例", "stub", "待补充", "占位")
+
+    def _count_placeholders(self, text: str) -> int:
+        """扫描文本中的占位符数量。"""
+        return sum(1 for p in self._PLACEHOLDER_PATTERNS if p in text)
+
+    async def _evaluate_quality_prd(self, state: MeetingState) -> dict:
+        """评估 prd_openapi 类型产出质量（总分 100）。"""
+        artifact = state.artifact or {}
+        prd = artifact.get("prd") if isinstance(artifact.get("prd"), dict) else {}
+        openapi = artifact.get("openapi") or ""
+
+        score = 0
+        feedback_parts: list[str] = []
+        hard_failures: list[str] = []
+
+        # 1. PRD 存在性（硬门槛 10 分）
+        if not isinstance(prd, dict) or not prd:
+            hard_failures.append("PRD 内容为空或格式错误")
+        else:
+            score += 10
+
+            # 2. PRD 字段完整性（35 分）
+            required_fields = {
+                "title": 5,
+                "goal": 5,
+                "scope": 5,
+                "api_endpoints": 5,
+                "constraints": 5,
+                "assumptions": 5,
+                "open_questions": 5,
+            }
+            field_score = 0
+            missing_fields: list[str] = []
+            for field, weight in required_fields.items():
+                val = prd.get(field)
+                if val:
+                    field_score += weight
+                else:
+                    missing_fields.append(field)
+            score += field_score
+            if missing_fields:
+                feedback_parts.append(f"PRD 缺少字段: {', '.join(missing_fields)}")
+
+        # 3. OpenAPI 规范质量（25 分）
+        if not openapi:
+            hard_failures.append("OpenAPI 规范为空")
+        else:
+            score += 10  # 非空基础分
+            if len(openapi) >= 100:
+                score += 5
+            if "paths:" in openapi:
+                score += 5
+            if "openapi:" in openapi:
+                score += 5
+
+        # 4. API 端点设计（20 分）
+        endpoints = prd.get("api_endpoints") or [] if isinstance(prd, dict) else []
+        valid_endpoints = [e for e in endpoints if isinstance(e, dict) and e.get("method") and e.get("path")]
+        score += min(len(valid_endpoints) * 5, 20)
+        if endpoints and not valid_endpoints:
+            feedback_parts.append("API 端点定义格式不正确（缺少 method/path）")
+
+        # 5. 内容真实性（10 分）
+        content = str(prd) + str(openapi)
+        placeholder_count = self._count_placeholders(content)
+        score -= placeholder_count * 3
+        if placeholder_count > 0:
+            feedback_parts.append(f"检测到 {placeholder_count} 处占位符内容")
+
+        score = max(0, min(100, score))
+        should_iterate = bool(hard_failures) or score < 60
+        return self._build_quality_result(
+            score=score,
+            feedback_parts=feedback_parts,
+            hard_failures=hard_failures,
+            should_iterate=should_iterate,
+            metrics={
+                "prd_fields": len(prd.keys()) if isinstance(prd, dict) else 0,
+                "openapi_length": len(openapi),
+                "valid_endpoints": len(valid_endpoints),
+                "placeholder_count": placeholder_count,
+            },
+        )
+
+    async def _evaluate_quality_document(self, state: MeetingState, dt: str) -> dict:
+        """评估文档类产出质量（design_doc/research_report/business_report/comprehensive，总分 100）。"""
+        artifact = state.artifact or {}
+        doc = artifact.get(dt) if isinstance(artifact.get(dt), dict) else {}
+
+        score = 0
+        feedback_parts: list[str] = []
+        hard_failures: list[str] = []
+
+        # 1. 文档存在性（硬门槛 10 分）
+        if not isinstance(doc, dict) or not doc:
+            hard_failures.append(f"{dt} 文档内容为空或格式错误")
+        else:
+            score += 10
+
+            # 2. 必需字段完整性（40 分）
+            required_fields_map = {
+                "design_doc": ["title", "overview", "architecture", "tech_stack", "data_model", "api_design"],
+                "research_report": ["title", "summary", "findings", "analysis", "recommendations"],
+                "business_report": [
+                    "title",
+                    "executive_summary",
+                    "market_analysis",
+                    "financial_projection",
+                    "risk_assessment",
+                ],
+                "comprehensive": ["title", "requirements", "system_design", "api_design", "data_model"],
+            }
+            required = required_fields_map.get(dt, ["title", "summary"])
+            present = [f for f in required if doc.get(f)]
+            field_score = int(len(present) / len(required) * 40)
+            score += field_score
+            missing = [f for f in required if not doc.get(f)]
+            if missing:
+                feedback_parts.append(f"文档缺少字段: {', '.join(missing)}")
+
+            # 3. 内容深度（25 分）：各文本字段平均长度
+            text_fields = [str(v) for v in doc.values() if isinstance(v, str) and len(v) > 10]
+            if text_fields:
+                avg_len = sum(len(t) for t in text_fields) / len(text_fields)
+                depth_score = min(int(avg_len / 50 * 25), 25)
+                score += depth_score
+                if avg_len < 50:
+                    feedback_parts.append(f"文档内容偏短（平均 {avg_len:.0f} 字符/字段）")
+            else:
+                feedback_parts.append("文档缺少有深度的文本字段")
+
+            # 4. 结构完整性（15 分）：列表类字段有元素
+            list_fields = [v for v in doc.values() if isinstance(v, list)]
+            if list_fields:
+                non_empty_lists = sum(1 for lst in list_fields if len(lst) >= 1)
+                score += min(int(non_empty_lists / len(list_fields) * 15), 15)
+            else:
+                feedback_parts.append("文档缺少列表类结构化字段")
+
+        # 5. 内容真实性（10 分）
+        content = str(doc)
+        placeholder_count = self._count_placeholders(content)
+        score -= placeholder_count * 3
+        if placeholder_count > 0:
+            feedback_parts.append(f"检测到 {placeholder_count} 处占位符内容")
+
+        score = max(0, min(100, score))
+        should_iterate = bool(hard_failures) or score < 60
+        return self._build_quality_result(
+            score=score,
+            feedback_parts=feedback_parts,
+            hard_failures=hard_failures,
+            should_iterate=should_iterate,
+            metrics={
+                "doc_type": dt,
+                "doc_fields": len(doc.keys()) if isinstance(doc, dict) else 0,
+                "placeholder_count": placeholder_count,
+            },
+        )
+
+    async def _evaluate_quality_code(self, state: MeetingState, dt: str) -> dict:
+        """评估代码类产出质量（code_analysis/data_science/tested_system，总分 100）。"""
+        artifact = state.artifact or {}
+        code_data = artifact.get(dt) if isinstance(artifact.get(dt), dict) else {}
+        execution = artifact.get("execution") or {}
+
+        score = 0
+        feedback_parts: list[str] = []
+        hard_failures: list[str] = []
+
+        # 1. 代码存在性（硬门槛 10 分）
+        if not code_data:
+            hard_failures.append(f"{dt} 产出为空")
+        else:
+            score += 10
+
+            # 2. 代码完整性（30 分）
+            if dt == "tested_system":
+                main_code = code_data.get("main_code") or ""
+                test_code = code_data.get("test_code") or ""
+                if main_code:
+                    score += 15
+                if test_code:
+                    score += 15
+                if not main_code and not test_code:
+                    hard_failures.append("tested_system 缺少 main_code 和 test_code")
+            else:
+                code = code_data.get("code") or ""
+                if code:
+                    score += 30
+                else:
+                    hard_failures.append(f"{dt} 缺少 code 字段")
+
+            # 3. 执行结果（30 分）
+            exit_code = execution.get("exit_code")
+            if exit_code == 0:
+                score += 30
+                feedback_parts.append("代码执行成功")
+            elif execution.get("error"):
+                score += 10
+                feedback_parts.append(f"代码执行异常: {execution.get('error', '')[:80]}")
+            else:
+                feedback_parts.append("未检测到代码执行结果")
+
+            # 4. 代码规模（20 分）
+            all_code = ""
+            if dt == "tested_system":
+                all_code = (code_data.get("main_code") or "") + (code_data.get("test_code") or "")
+            else:
+                all_code = code_data.get("code") or ""
+            if len(all_code) >= 200:
+                score += 20
+            elif len(all_code) >= 100:
+                score += 10
+                feedback_parts.append(f"代码偏短（{len(all_code)} 字符）")
+            else:
+                feedback_parts.append(f"代码过短（{len(all_code)} 字符），疑似 stub")
+
+        # 5. 内容真实性（10 分）
+        content = str(code_data) + str(execution)
+        placeholder_count = self._count_placeholders(content)
+        score -= placeholder_count * 3
+        if placeholder_count > 0:
+            feedback_parts.append(f"检测到 {placeholder_count} 处占位符内容")
+
+        score = max(0, min(100, score))
+        should_iterate = bool(hard_failures) or score < 60
+        return self._build_quality_result(
+            score=score,
+            feedback_parts=feedback_parts,
+            hard_failures=hard_failures,
+            should_iterate=should_iterate,
+            metrics={
+                "code_type": dt,
+                "code_length": len(all_code) if code_data else 0,
+                "exit_code": execution.get("exit_code"),
+                "placeholder_count": placeholder_count,
+            },
+        )
 
     async def _persist(self, state: MeetingState) -> None:
         """持久化会议状态与发言到 PostgreSQL
