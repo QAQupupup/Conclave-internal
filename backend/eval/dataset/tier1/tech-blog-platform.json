@@ -1,0 +1,61 @@
+{
+  "case_id": "tier1-tech-blog-platform",
+  "tier": 1,
+  "category": "standard",
+  "topic": "开发一个技术博客平台，支持 Markdown 编辑、标签分类、全文搜索",
+  "uploaded_docs": [],
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "full",
+    "debate_depth": "standard"
+  },
+  "expected": {
+    "clarify": {
+      "complexity": "full",
+      "min_key_questions": 2,
+      "expected_roles": [
+        "product_architect",
+        "engineer"
+      ]
+    },
+    "intra_team": {
+      "min_claims": 2,
+      "expected_claim_types": [
+        "fact",
+        "assumption",
+        "constraint"
+      ]
+    },
+    "cross_team": {
+      "min_conflicts": 1,
+      "max_conflicts": 3,
+      "expected_conflict_types": [
+        "preference",
+        "scope"
+      ]
+    },
+    "evidence_check": {
+      "min_evidence_assessments": 0,
+      "expect_confidence_degradation": false
+    },
+    "arbitrate": {
+      "all_conflicts_resolved": true,
+      "min_decisions": 1,
+      "min_rationale_length": 20
+    },
+    "produce": {
+      "must_have_prd_fields": [
+        "title",
+        "goal",
+        "scope"
+      ],
+      "min_api_endpoints": 2,
+      "min_openapi_length": 100
+    }
+  },
+  "terminal_state": {
+    "status": "done",
+    "stage": "produce"
+  },
+  "notes": "标准技术选型冲突：Elasticsearch vs 替代方案（预算约束）"
+}

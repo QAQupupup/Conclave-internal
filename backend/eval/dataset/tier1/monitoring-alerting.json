@@ -1,0 +1,61 @@
+{
+  "case_id": "tier1-monitoring-alerting",
+  "tier": 1,
+  "category": "standard",
+  "topic": "设计监控告警系统，支持指标采集、阈值告警、告警收敛",
+  "uploaded_docs": [],
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "full",
+    "debate_depth": "standard"
+  },
+  "expected": {
+    "clarify": {
+      "complexity": "full",
+      "min_key_questions": 2,
+      "expected_roles": [
+        "engineer",
+        "data_engineer"
+      ]
+    },
+    "intra_team": {
+      "min_claims": 2,
+      "expected_claim_types": [
+        "fact",
+        "assumption",
+        "constraint"
+      ]
+    },
+    "cross_team": {
+      "min_conflicts": 1,
+      "max_conflicts": 3,
+      "expected_conflict_types": [
+        "preference",
+        "scope"
+      ]
+    },
+    "evidence_check": {
+      "min_evidence_assessments": 0,
+      "expect_confidence_degradation": false
+    },
+    "arbitrate": {
+      "all_conflicts_resolved": true,
+      "min_decisions": 1,
+      "min_rationale_length": 20
+    },
+    "produce": {
+      "must_have_prd_fields": [
+        "title",
+        "goal",
+        "scope"
+      ],
+      "min_api_endpoints": 2,
+      "min_openapi_length": 100
+    }
+  },
+  "terminal_state": {
+    "status": "done",
+    "stage": "produce"
+  },
+  "notes": "监控方案选型：自建监控的定制化 vs Prometheus 生态的成熟度与社区支持"
+}

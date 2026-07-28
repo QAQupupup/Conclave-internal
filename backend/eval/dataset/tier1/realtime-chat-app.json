@@ -1,0 +1,61 @@
+{
+  "case_id": "tier1-realtime-chat-app",
+  "tier": 1,
+  "category": "standard",
+  "topic": "开发实时聊天应用，支持群聊、文件传输、消息已读",
+  "uploaded_docs": [],
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "full",
+    "debate_depth": "standard"
+  },
+  "expected": {
+    "clarify": {
+      "complexity": "full",
+      "min_key_questions": 2,
+      "expected_roles": [
+        "product_architect",
+        "engineer"
+      ]
+    },
+    "intra_team": {
+      "min_claims": 2,
+      "expected_claim_types": [
+        "fact",
+        "assumption",
+        "constraint"
+      ]
+    },
+    "cross_team": {
+      "min_conflicts": 1,
+      "max_conflicts": 3,
+      "expected_conflict_types": [
+        "preference",
+        "scope"
+      ]
+    },
+    "evidence_check": {
+      "min_evidence_assessments": 0,
+      "expect_confidence_degradation": false
+    },
+    "arbitrate": {
+      "all_conflicts_resolved": true,
+      "min_decisions": 1,
+      "min_rationale_length": 20
+    },
+    "produce": {
+      "must_have_prd_fields": [
+        "title",
+        "goal",
+        "scope"
+      ],
+      "min_api_endpoints": 2,
+      "min_openapi_length": 100
+    }
+  },
+  "terminal_state": {
+    "status": "done",
+    "stage": "produce"
+  },
+  "notes": "实时通信技术选型：WebSocket vs SSE 在双向通信与实现复杂度上的权衡"
+}

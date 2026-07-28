@@ -1,0 +1,45 @@
+# Obsidian MCP Server — 会话上下文持久化（独立组件）
+#
+# 这个 MCP Server 是独立组件，不隶属于 Conclave 项目仓库。
+# vault 存储在 D 盘，不进 Git，不推 GitHub。
+#
+# 存储位置：D:\conclave-knowledge-vault\
+# 部署：docker compose -f docker-compose.obsidian-mcp.yml up -d
+# 验证：curl http://localhost:3010/health
+# 连接：Trae 设置 → MCP → SSE 端点 http://localhost:3010/sse
+
+services:
+  obsidian-mcp:
+    image: ghcr.io/smith-and-web/obsidian-mcp-server:latest
+    container_name: conclave-obsidian-mcp
+    restart: unless-stopped
+    volumes:
+      # vault 挂载到 D 盘独立目录，完全脱离项目仓库
+      # 这是个人 AI 记忆，不进 Git，不推 GitHub
+      - D:/conclave-knowledge-vault:/vault:rw
+    ports:
+      # 端口 3010 避免与 Conclave 其他服务冲突
+      # dev: 5173(前端) 8000(后端) 5432(PG) 6379(Redis) 6333(Qdrant)
+      # oss: 5174 8001 5433 6380 6335
+      # test: 5434 6381 6337
+      # obsidian-mcp: 3010
+      - "3010:3000"
+    environment:
+      - VAULT_PATH=/vault
+      - COMPACT_RESPONSES=true
+      # 生产环境务必设置 API_KEY（至少 32 字符随机串）
+      # 开发环境可留空，仅 localhost 可访问
+      # - API_KEY=change-me-to-a-strong-random-key
+    healthcheck:
+      # 容器内无 curl，使用 wget（busybox 自带）
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - conclave-obsidian-net
+
+networks:
+  conclave-obsidian-net:
+    driver: bridge

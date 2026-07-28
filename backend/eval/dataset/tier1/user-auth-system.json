@@ -1,0 +1,62 @@
+{
+  "case_id": "tier1-user-auth-system",
+  "tier": 1,
+  "category": "standard",
+  "topic": "设计用户认证系统，支持 JWT + OAuth2 + 角色权限",
+  "uploaded_docs": [],
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "full",
+    "debate_depth": "standard"
+  },
+  "expected": {
+    "clarify": {
+      "complexity": "full",
+      "min_key_questions": 2,
+      "expected_roles": [
+        "product_architect",
+        "engineer",
+        "security_expert"
+      ]
+    },
+    "intra_team": {
+      "min_claims": 2,
+      "expected_claim_types": [
+        "fact",
+        "assumption",
+        "constraint"
+      ]
+    },
+    "cross_team": {
+      "min_conflicts": 1,
+      "max_conflicts": 3,
+      "expected_conflict_types": [
+        "preference",
+        "factual"
+      ]
+    },
+    "evidence_check": {
+      "min_evidence_assessments": 0,
+      "expect_confidence_degradation": false
+    },
+    "arbitrate": {
+      "all_conflicts_resolved": true,
+      "min_decisions": 1,
+      "min_rationale_length": 20
+    },
+    "produce": {
+      "must_have_prd_fields": [
+        "title",
+        "goal",
+        "scope"
+      ],
+      "min_api_endpoints": 2,
+      "min_openapi_length": 100
+    }
+  },
+  "terminal_state": {
+    "status": "done",
+    "stage": "produce"
+  },
+  "notes": "安全与体验的典型权衡：OAuth2 复杂度带来的安全强度与用户体验冲突"
+}

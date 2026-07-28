@@ -1,0 +1,62 @@
+{
+  "case_id": "tier1-content-moderation-system",
+  "tier": 1,
+  "category": "standard",
+  "topic": "设计内容审核系统，支持文本、图片、视频多模态审核",
+  "uploaded_docs": [],
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "full",
+    "debate_depth": "standard"
+  },
+  "expected": {
+    "clarify": {
+      "complexity": "full",
+      "min_key_questions": 2,
+      "expected_roles": [
+        "product_architect",
+        "security_expert",
+        "engineer"
+      ]
+    },
+    "intra_team": {
+      "min_claims": 2,
+      "expected_claim_types": [
+        "fact",
+        "assumption",
+        "constraint"
+      ]
+    },
+    "cross_team": {
+      "min_conflicts": 1,
+      "max_conflicts": 3,
+      "expected_conflict_types": [
+        "preference",
+        "scope"
+      ]
+    },
+    "evidence_check": {
+      "min_evidence_assessments": 0,
+      "expect_confidence_degradation": false
+    },
+    "arbitrate": {
+      "all_conflicts_resolved": true,
+      "min_decisions": 1,
+      "min_rationale_length": 20
+    },
+    "produce": {
+      "must_have_prd_fields": [
+        "title",
+        "goal",
+        "scope"
+      ],
+      "min_api_endpoints": 2,
+      "min_openapi_length": 100
+    }
+  },
+  "terminal_state": {
+    "status": "done",
+    "stage": "produce"
+  },
+  "notes": "AI 与人工审核的边界：自动化覆盖率与审核准确率、成本的权衡"
+}

@@ -16,6 +16,7 @@
 6. 开始编码前，用 `git status` 确认工作区干净，避免无关文件混入提交。
 7. **如果要写/改文档（README/ADR/待办）**，必须先读 §4.16（文档真实性核查）。每一条事实性声明必须 grep 核验，禁止凭记忆写文档。
 8. **如果要回应代码审查/外部评审**，必须先读 §4.17（问题评估与绕过检查）。逐条 grep 核验问题是否真实存在，禁止"声明式修复"。
+9. **新会话恢复上下文**：如果用户说"继续"/"恢复"/"上次说到哪了"，先读 `D:\conclave-knowledge-vault\project-context\current-status.md` 获取最新检查点指针，再读检查点文件恢复上下文（见 §9）。
 
 ---
 
@@ -574,4 +575,110 @@ git commit -F commit-msg.txt
 
 ---
 
-> 本文件最后更新：2026-07-27（§4.26 db_legacy shim 迁移纪律、§4.25 ORM 模型导出与 Alembic 一致性、§4.24 质量门禁终态设置时序、§4.23 测试断言核验、§4.22 角色名规范化、§4.21 cross_team claim_refs 防 LLM 编造、§4.20 Git Hook PowerShell stdout fd 问题、§4.19 PowerShell 中文 commit message 编码问题、§4 篇幅纪律元规则、§4.18 精简拆分到 `docs/ci-stability-guide.md`、§3.1 引用 PROJECT_CONVENTIONS.md 消除重复、§2/§6 交叉引用更新、PROJECT_CONVENTIONS.md §8 修正过时描述）。若发现新的高频坑，追加到第 4 节并更新日期。
+## 9. 会话持久化与跨窗口连续性
+
+> 本节定义会话检查点机制，确保跨窗口（IDE → Work → CLI）切换时上下文不丢失。
+> 完整流程见 `.trae/skills/session-checkpoint/SKILL.md`。
+
+### 9.1 组件定位
+
+Obsidian MCP Server 是**独立组件**，不隶属于 Conclave 项目仓库：
+
+- **存储位置**：`D:\conclave-knowledge-vault\`（D 盘独立目录，不在项目内）
+- **不进 Git**：会话内容包含个人沟通和团队协作细节，**禁止推到 GitHub**
+- **跨项目复用**：vault 是个人 AI 记忆，未来可被多个项目共享，不绑定单一项目
+- **Docker 部署**：`docker-compose.obsidian-mcp.yml` 在项目内，但 volume 挂载到 D 盘
+
+### 9.2 检查点触发时机
+
+**必须存档的场景**：
+- 用户说"存档" / "保存进度" / "checkpoint"
+- 用户说"切换窗口" / "先到这里" / "明天继续"
+- 完成了一个阶段性任务（如"P0 修复完成"）
+- 对话超过 20 轮，上下文可能开始压缩
+
+**必须恢复的场景**：
+- 用户说"继续" / "恢复" / "上次说到哪了" / "resume"
+- 新会话第一条消息包含"继续"关键词
+
+### 9.3 存储结构（Index+Raw 2 层架构，ADR-012）
+
+vault 根目录：`D:\conclave-knowledge-vault\`
+
+```
+D:\conclave-knowledge-vault\
+├── sessions/                          # 会话检查点（按月分目录）
+│   ├── 2026-07/                       # 2026年7月的检查点
+│   │   ├── index.md                   # 月度索引（当月会话时序目录）
+│   │   ├── YYYYMMDD-HHMM-topic.md     # 索引层（AI 默认读，~2-5KB）
+│   │   └── YYYYMMDD-HHMM-topic.raw.md # 原文层（按需读，~50-500KB）
+│   ├── 2026-08/
+│   └── archive/                       # 归档（超过3个月的整月目录移入）
+├── decisions/                         # 跨会话决策记录（被多个检查点引用）
+├── project-context/                   # 项目上下文快照
+│   └── current-status.md              # 会话恢复入口点（最新检查点指针）
+└── templates/                         # 模板
+    ├── index-layer-template.md        # 索引层模板
+    ├── raw-layer-template.md          # 原文层模板
+    ├── decision-template.md           # 决策记录模板
+    └── archive/                       # 已归档的旧模板
+```
+
+**2 层架构说明**（详见 ADR-012）：
+
+| 层 | 文件后缀 | 大小 | 内容 | AI 读取策略 |
+|---|---|---|---|---|
+| 索引层 | `.md` | ~2-5KB | 简摘+关键决策+待办全集+代码变更+锚点+引用关系 | 默认读 |
+| 原文层 | `.raw.md` | ~50-500KB | 完整对话记录，创建后不可修改 | 按需读（MCP search-vault） |
+| 月度索引 | `index.md` | ~1KB | 当月所有索引层文件的时序目录 | 恢复时读一次 |
+
+**按月分目录的原因**：
+- 单目录文件数可控（每月 10-30 个检查点 × 2 文件 + 1 索引）
+- 长期使用（月/年级别）不会导致单目录膨胀
+- 归档策略简单：超过 3 个月的整月目录移到 `sessions/archive/`
+- MCP Server 的 `search-vault` 工具可跨目录搜索，不影响检索
+
+### 9.4 Obsidian MCP Server
+
+- Docker 配置：`docker-compose.obsidian-mcp.yml`（在项目内，volume 挂载到 D 盘）
+- 镜像：`ghcr.io/smith-and-web/obsidian-mcp-server:latest`（端口 3010）
+- 启动：`docker compose -f docker-compose.obsidian-mcp.yml up -d`
+- 验证：`curl http://localhost:3010/health`
+- 连接：Trae 设置 → MCP → SSE 端点 `http://localhost:3010/sse`
+
+### 9.5 存档规则（5 步，2 层架构）
+
+每次存档必须完成以下步骤（缺一不可）：
+
+1. **生成索引层** `.md`：写入 `D:\conclave-knowledge-vault\sessions\YYYY-MM\YYYYMMDD-HHMM-topic.md`（简摘+关键决策+待办全集+代码变更+锚点+引用关系，~2-5KB）
+2. **生成原文层** `.raw.md`：写入同目录 `YYYYMMDD-HHMM-topic.raw.md`（完整对话记录，创建后不可修改）
+3. **更新月度索引** `index.md`：写入同目录 `index.md`（追加当次会话记录到会话列表表格）
+4. **更新状态指针**：更新 `D:\conclave-knowledge-vault\project-context\current-status.md` 的最新检查点指针（指向索引层 `.md`）
+5. **更新 Trae 指针**：更新 `project_memory.md` 顶部指针（仅索引层路径+时间+一句话任务，不含会话内容）
+
+**禁止**：
+- 禁止把检查点文件写入项目仓库内的 `docs/sessions/`（会推到 GitHub）
+- 禁止把会话内容写入 `project_memory.md`（只留指针，不留内容）
+- 禁止修改已创建的原文层 `.raw.md`（保证历史可追溯性）
+
+### 9.6 恢复规则（3 步，2 层架构）
+
+1. 读取 `D:\conclave-knowledge-vault\project-context\current-status.md` 获取最新索引层路径
+2. 读取索引层 `.md`（~2-5KB，获取完整当前状态）+ 读取"必读"锚点中列出的关键文件
+3. 输出恢复摘要，等待用户确认后再开始工作
+
+**深度恢复**（按需）：用 MCP `search-vault` 或 `Grep` 搜索原文层 `.raw.md` 追溯历史决策细节。
+
+### 9.7 隐私边界
+
+| 内容 | 可以进 Git？ | 存储位置 |
+|---|---|---|
+| 代码变更摘要（文件路径 + 变更类型） | 可以 | 索引层 `.md` 中 |
+| 关键决策（选择 A 而非 B 的理由） | **不可以** | 索引层 + 原文层（vault only） |
+| 团队沟通内容 | **不可以** | 原文层 `.raw.md` only |
+| 待办事项 | **不可以** | 索引层（vault only） |
+| `project_memory.md` 中的指针 | 可以（仅路径+时间，无内容） | Trae memory |
+
+---
+
+> 本文件最后更新：2026-07-27（§9 更新为 Index+Raw 2 层架构：ADR-012 落地/目录树/存档5步/恢复3步/隐私边界、§9.3 存储结构改为 2 层、§9.5 存档规则 4→5 步、§9.6 恢复规则 4→3 步、§9.7 隐私边界区分索引层/原文层。其余变更见前次更新记录）。若发现新的高频坑，追加到第 4 节并更新日期。

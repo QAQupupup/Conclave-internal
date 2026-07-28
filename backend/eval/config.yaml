@@ -1,0 +1,37 @@
+# Conclave evaluation framework configuration
+# 评估框架配置：被测系统、评分器、执行、统计、服务连接
+
+# 被测系统（System Under Test）配置
+target:
+  llm_model: "deepseek-v3.2"
+  base_url: "http://localhost:8000"
+  embedding_model: "bge-m3"
+  reranker_model: "bge-reranker-v2-m3"
+
+# LLM-as-Judge 评分器配置
+judge:
+  model: "deepseek-v3.2"
+  base_url: "http://localhost:8000"
+  api_key_env: "JUDGE_API_KEY"        # 从该环境变量读取 API key
+  judge_runs: 3                        # 每个维度重复评分次数，取中位数
+  unreliable_threshold: 0.2            # 标准差超过该值则标记 unreliable
+
+# 执行配置
+execution:
+  pass_k: 3                            # 每个用例重复运行次数
+  max_concurrent: 3                    # 最大并发用例数
+  per_case_timeout: 300                # 单用例超时（秒）
+  retry_on_timeout: true               # 超时后是否重试
+
+# 统计配置
+stats:
+  confidence_level: 0.95               # 置信区间置信水平
+  regression_pass1_threshold: 0.05     # Pass@1 下降超过该值判定为回归
+  regression_score_threshold: 0.1      # 阶段通过率/平均分下降超过该值判定为回归
+
+# 被测服务连接配置
+service:
+  base_url: "http://localhost:8000"
+  frontend_url: "http://localhost:5173"
+  admin_username: "admin"
+  admin_password: "admin123"
