@@ -538,7 +538,7 @@ git commit -F commit-msg.txt
 | `PROJECT_CONVENTIONS.md` | **唯一权威工程规范**（部署/构建/镜像源/提交/卡点） |
 | `AGENTS.md` | 本文件，AI 助手实战纪律（就是你正在读的） |
 | `docs/design/design-principles.md` | 11 条固化设计原则（RAG五原则、借调三问法、MVP三问等） |
-| `docs/design/adr/001-009` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移等） |
+| `docs/design/adr/001-013` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移/论点提纯/会话检查点/状态机契约等） |
 | `docs/RETROSPECTIVE_CONVENTIONS.md` | 修复报告归档规范（HTML 格式、commit 区间、13 种错误模式） |
 | `docs/ci-stability-guide.md` | CI 稳定性详细指南（双层 Hook 体系、历史修复记录，§4.18 的补充） |
 | `docs/conclave-sandbox-directory-standard.md` | 沙箱目录规范 |
