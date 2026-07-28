@@ -221,7 +221,7 @@ def test_causation_chain_end_to_end(client):
     assert create_rid.startswith("req-")
 
     # 2. 运行会议
-    from app.models import MeetingStatus
+    from app.models import MeetingStatus, Stage
     from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
@@ -229,6 +229,10 @@ def test_causation_chain_end_to_end(client):
     state.status = MeetingStatus.RUNNING
     state = asyncio.run(Runner().run(state))
     runner_mod.set_state(state)
+
+    # [ADR-013] Runner.run() 完成后应处于终态 DONE + PRODUCE
+    assert state.status == MeetingStatus.DONE, f"Runner.run 后状态应为 DONE，实际: {state.status}"
+    assert state.stage == Stage.PRODUCE, f"Runner.run 后阶段应为 PRODUCE，实际: {state.stage}"
 
     # 3. 验证事件都有 trace_id（关联到 request_id 或 runner 分配的 request_id）
     from app.events import bus

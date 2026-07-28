@@ -193,6 +193,10 @@ def test_e2e_confidence_flags_all_stages(client):
     state = asyncio.run(Runner().run(state))
     runner_mod.set_state(state)
 
+    # [ADR-013] Runner.run() 完成后应处于终态 DONE + PRODUCE
+    assert state.status.value == "done", f"Runner.run 后状态应为 done，实际: {state.status.value}"
+    assert state.stage.value == "produce", f"Runner.run 后阶段应为 produce，实际: {state.stage.value}"
+
     flags = state.confidence_flags
     for stage in ["clarify", "intra_team", "cross_team", "evidence_check", "arbitrate", "produce"]:
         assert stage in flags, f"阶段 {stage} 缺少置信度标记"
@@ -212,6 +216,10 @@ def test_e2e_drift_log_complete(client):
     state.status = MeetingStatus.RUNNING
     state = asyncio.run(Runner().run(state))
     runner_mod.set_state(state)
+
+    # [ADR-013] Runner.run() 完成后应处于终态 DONE + PRODUCE
+    assert state.status.value == "done", f"Runner.run 后状态应为 done，实际: {state.status.value}"
+    assert state.stage.value == "produce", f"Runner.run 后阶段应为 produce，实际: {state.stage.value}"
 
     # 漂移日志应覆盖主要阶段（stub 模式下不一定每条发言都产生记录，但核心阶段均需检查）
     assert len(state.drift_log) > 0, "应产生漂移检查记录"

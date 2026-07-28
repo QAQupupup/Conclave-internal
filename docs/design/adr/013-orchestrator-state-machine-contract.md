@@ -111,6 +111,41 @@ Runner 主循环读取 `state.stage` 执行对应节点，不自行决定阶段�
 3. `auto_iterate=False` 分支新增 `state.status = MeetingStatus.DONE`
 4. 相关测试断言已更新
 
+### 4. 测试断言契约验证（2026-07-28 补充）
+
+对全部 20 处 `Runner.run()` 调用点逐条核验，确保符合 §5 契约。
+
+**通过 `_run_to_done` helper 统一断言的文件**（helper 内部添加 `DONE` + `PRODUCE` 双断言，所有调用方自动继承）：
+
+| 文件 | helper 位置 | 调用方数量 |
+|---|---|---|
+| `tests/test_smoke.py` | L23-34 | 7 处 |
+| `tests/test_determinism.py` | L18-29 | 11 处 |
+| `tests/test_event_replay.py` | L16-27 | 4 处 |
+
+**直接调用 `Runner.run()` 后添加断言的文件**：
+
+| 文件 | 修改位置 | 添加的断言 |
+|---|---|---|
+| `tests/test_core_flow.py` | L211 (`test_deliverable_type_selection`) | `stage == "produce"` |
+| `tests/test_e2e.py` | L193, L217, L66 | 各添加 `status == "done"` + `stage == "produce"` |
+| `tests/test_observability.py` | L230 | `status == DONE` + `stage == PRODUCE` |
+| `tests/test_role_matching.py` | L129, L164 | 各添加 `status == DONE` + `stage == PRODUCE` |
+| `tests/test_stats.py` | L26, L79, L141 | 各添加 `status == DONE` + `stage == PRODUCE` |
+| `tests/test_trace_id.py` | L154, L178 | 各添加 `status == DONE` + `stage == PRODUCE` |
+
+**已有合规断言、无需修改的文件**：
+
+| 文件 | 位置 | 状态 |
+|---|---|---|
+| `tests/test_core_flow.py` | L173 (`test_full_six_stage_flow`) | 已有 `stage == "produce"` + `status == "done"` |
+| `tests/test_regression_historical.py` | L126 | 已有 `status == DONE` + `stage == PRODUCE` |
+| `tests/test_real_llm_e2e.py` | L68 | 已有 `status == DONE` + `stage == PRODUCE` |
+
+**例外**：`tests/test_stats.py:116`（`test_mock_llm_records_trace`）使用 `try/except` 包裹 `Runner.run()`，故意测试 MockLLM 返回不匹配 schema 时的异常行为，不添加终态断言——符合契约（异常路径由 Runner 设置 `FAILED`）。
+
+**验证结果**：Docker 容器内 `pytest` + `ruff check` 全部通过（exit code 0）。
+
 ## 验证方式
 
 ```bash
@@ -122,9 +157,20 @@ grep -n "MeetingStatus\.\(DONE\|FAILED\|ABORTED\)" backend/app/orchestrator/stag
 grep -n "state\.status = MeetingStatus\.\(DONE\|FAILED\)" backend/app/orchestrator/runner.py
 # 预期：3+ 匹配（质量达标/迭代上限/需人工确认/异常）
 
-# 3. 确认测试断言一致
-grep -n "status.*DONE\|status.*RUNNING" backend/tests/test_smoke.py backend/tests/test_determinism.py
-# 预期：通过 Runner.run 的测试断言 DONE，直接调节点的测试断言 RUNNING
+# 3. 确认测试断言一致（全量扫描所有 Runner.run 调用点）
+grep -rn "Runner().run\|runner.run(" backend/tests/ | grep -v "__pycache__"
+# 预期：20 处调用，每处后跟 [ADR-013] 断言注释（try/except 例外）
+
+# 4. 确认 _run_to_done helper 包含终态断言
+grep -A5 "ADR-013" backend/tests/test_smoke.py backend/tests/test_determinism.py backend/tests/test_event_replay.py
+# 预期：3 个 helper 各包含 status == DONE + stage == PRODUCE 断言
+
+# 5. Docker 内运行验证
+docker compose -f docker-compose.test.yml run --rm backend-test \
+  sh -c "pytest tests/test_smoke.py tests/test_determinism.py tests/test_event_replay.py \
+  tests/test_core_flow.py tests/test_e2e.py tests/test_observability.py \
+  tests/test_role_matching.py tests/test_stats.py tests/test_trace_id.py -q --tb=short"
+# 预期：全部通过
 ```
 
 ## 参考

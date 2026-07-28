@@ -25,6 +25,9 @@ def _run_to_done(meeting_id: str):
     runner = Runner()
     state = asyncio.run(runner.run(state))
     runner_mod.set_state(state)
+    # [ADR-013] Runner.run() 完成后应处于终态 DONE + PRODUCE
+    assert state.status == MeetingStatus.DONE, f"Runner.run 后状态应为 DONE，实际: {state.status}"
+    assert state.stage == Stage.PRODUCE, f"Runner.run 后阶段应为 PRODUCE，实际: {state.stage}"
     return state
 
 

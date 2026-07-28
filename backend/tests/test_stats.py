@@ -13,18 +13,22 @@ def test_stats_endpoint(client):
     meeting_id = resp.json()["meeting_id"]
 
     # 运行会议
-    from app.models import MeetingStatus
+    from app.models import MeetingStatus, Stage
     from app.orchestrator import runner as runner_mod
+    from app.orchestrator.runner import Runner
 
     state = runner_mod.get_state(meeting_id)
     assert state is not None
     if state.status == MeetingStatus.PAUSED:
         state.status = MeetingStatus.RUNNING
         state.paused_snapshot = None
-    from app.orchestrator.runner import Runner
 
     state = asyncio.run(Runner().run(state))
     runner_mod.set_state(state)
+
+    # [ADR-013] Runner.run() 完成后应处于终态 DONE + PRODUCE
+    assert state.status == MeetingStatus.DONE, f"Runner.run 后状态应为 DONE，实际: {state.status}"
+    assert state.stage == Stage.PRODUCE, f"Runner.run 后阶段应为 PRODUCE，实际: {state.stage}"
 
     # 获取统计
     resp = client.get(f"/meetings/{meeting_id}/stats")
@@ -66,7 +70,7 @@ def test_stats_evidence_source_distribution(client):
     meeting_id = resp.json()["meeting_id"]
 
     # 运行会议
-    from app.models import MeetingStatus
+    from app.models import MeetingStatus, Stage
     from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
@@ -74,6 +78,10 @@ def test_stats_evidence_source_distribution(client):
     state.status = MeetingStatus.RUNNING
     state = asyncio.run(Runner().run(state))
     runner_mod.set_state(state)
+
+    # [ADR-013] Runner.run() 完成后应处于终态 DONE + PRODUCE
+    assert state.status == MeetingStatus.DONE, f"Runner.run 后状态应为 DONE，实际: {state.status}"
+    assert state.stage == Stage.PRODUCE, f"Runner.run 后阶段应为 PRODUCE，实际: {state.stage}"
 
     resp = client.get(f"/meetings/{meeting_id}/stats")
     data = resp.json()
@@ -124,7 +132,7 @@ def test_stats_endpoint_fields_complete(client):
     resp = client.post("/meetings", json={"topic": "字段完整性测试"})
     meeting_id = resp.json()["meeting_id"]
 
-    from app.models import MeetingStatus
+    from app.models import MeetingStatus, Stage
     from app.orchestrator import runner as runner_mod
     from app.orchestrator.runner import Runner
 
@@ -132,6 +140,10 @@ def test_stats_endpoint_fields_complete(client):
     state.status = MeetingStatus.RUNNING
     state = asyncio.run(Runner().run(state))
     runner_mod.set_state(state)
+
+    # [ADR-013] Runner.run() 完成后应处于终态 DONE + PRODUCE
+    assert state.status == MeetingStatus.DONE, f"Runner.run 后状态应为 DONE，实际: {state.status}"
+    assert state.stage == Stage.PRODUCE, f"Runner.run 后阶段应为 PRODUCE，实际: {state.stage}"
 
     resp = client.get(f"/meetings/{meeting_id}/stats")
     data = resp.json()

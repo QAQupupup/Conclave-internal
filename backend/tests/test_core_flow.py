@@ -209,6 +209,7 @@ def test_deliverable_type_selection(client):
         state = asyncio.run(Runner().run(state))
 
         assert state.status.value == "done", f"{deliverable_type} 应完成"
+        assert state.stage.value == "produce", f"{deliverable_type} 最终阶段应为 produce"
         assert state.artifact is not None, f"{deliverable_type} 应有产出"
 
         # 验证产出类型
