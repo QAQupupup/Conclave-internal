@@ -340,9 +340,19 @@ async def produce_node(state: MeetingState) -> MeetingState:
     if state.reference_meeting_ids and state.deliverable_type == "deployable_service":
         try:
             from app.config import settings as _settings
+            from app.dao.meeting_dao import get_meeting
 
             baseline_projects: list[dict[str, Any]] = []
             for ref_id in state.reference_meeting_ids[-1:]:  # 只取最近一个引用作为baseline，避免prompt过大
+                # [Wave 2] 租户安全校验：通过 DAO 验证引用会议属于当前租户，
+                # 防止通过 reference_meeting_ids 跨租户读取文件系统
+                ref_meeting = await get_meeting(ref_id)
+                if ref_meeting is None:
+                    _lb.warning(
+                        f"produce: 跳过引用会议 {ref_id} — 不存在或不属于当前租户",
+                        logger="orchestrator.nodes.produce",
+                    )
+                    continue
                 ref_ws = Path(_settings.workspace_root) / ref_id
                 if not ref_ws.exists():
                     continue

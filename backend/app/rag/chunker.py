@@ -32,6 +32,8 @@ class Chunk:
     metadata: dict[str, Any] = field(default_factory=dict)
     claims: list[str] = field(default_factory=list)
     relations: list[dict[str, str]] = field(default_factory=list)
+    # [Wave 1] 多租户隔离：chunk 所属租户 ID，用于 Qdrant payload 过滤
+    tenant_id: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -47,6 +49,7 @@ class Chunk:
             "metadata": self.metadata,
             "claims": self.claims,
             "relations": self.relations,
+            "tenant_id": self.tenant_id,
         }
 
     def summary(self, max_len: int = 200) -> str:

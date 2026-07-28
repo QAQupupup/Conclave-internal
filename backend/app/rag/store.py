@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import math
 import os
@@ -335,6 +336,12 @@ class InMemoryVectorStore:
         """切块入库并计算向量（批量嵌入提升效率）"""
         if not chunks:
             return
+        # [Wave 1] 注入租户 ID（用于 Qdrant payload 过滤和内存关键词检索过滤）
+        from app.tenants.context import get_tenant_id
+
+        _tid = get_tenant_id()
+        for chunk in chunks:
+            chunk.tenant_id = _tid
         texts = [c.text for c in chunks]
         vecs = await self._embedding.embed_batch(texts)
         for chunk, vec in zip(chunks, vecs, strict=False):
@@ -423,19 +430,35 @@ class InMemoryVectorStore:
 
         RRF（Reciprocal Rank Fusion）：score = 1/(K + rank)
         两路各取 top_k*2 个候选，RRF 融合后截取 top_k。
+
+        [Wave 1] 多租户隔离：仅检索当前租户的 chunk，系统租户可检索全部。
         """
         if not self._store:
             return []
 
+        # [Wave 1] 租户过滤：仅检索当前租户的数据
+        from app.tenants.context import get_tenant_id, is_system_tenant
+
+        if is_system_tenant():
+            visible_chunks = list(self._store.values())
+        else:
+            _tid = get_tenant_id()
+            if _tid is None:
+                # fail-closed：未设置租户上下文时返回空，防止数据泄露
+                return []
+            visible_chunks = [(chunk, vec) for chunk, vec in self._store.values() if chunk.tenant_id == _tid]
+            if not visible_chunks:
+                return []
+
         # 1. 向量检索
         qvec = await self._embedding.embed(query)
-        vec_scored = [(chunk, cosine_similarity(qvec, vec)) for chunk, vec in self._store.values()]
+        vec_scored = [(chunk, cosine_similarity(qvec, vec)) for chunk, vec in visible_chunks]
         vec_scored.sort(key=lambda x: x[1], reverse=True)
         vec_candidates = vec_scored[: top_k * 2]
 
         # 2. 关键词检索（TF-IDF 简化版）
         query_terms = _tokenize_query(query)
-        kw_scored = [(chunk, _keyword_score(chunk.text, query_terms)) for chunk, _ in self._store.values()]
+        kw_scored = [(chunk, _keyword_score(chunk.text, query_terms)) for chunk, _ in visible_chunks]
         kw_scored.sort(key=lambda x: x[1], reverse=True)
         kw_candidates = kw_scored[: top_k * 2]
 
@@ -503,7 +526,7 @@ class QdrantVectorStore(InMemoryVectorStore):
 
     async def ensure_collection(self) -> None:
         """确保 collection 存在，不存在则创建"""
-        from qdrant_client.models import Distance, VectorParams
+        from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
 
         client = self._get_client()
         collections = client.get_collections().collections
@@ -515,6 +538,14 @@ class QdrantVectorStore(InMemoryVectorStore):
                 collection_name=self._collection,
                 vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
             )
+        # [Wave 1] 为 tenant_id 创建 payload index，加速检索过滤
+        with contextlib.suppress(Exception):
+            # index 可能已存在，忽略
+            client.create_payload_index(
+                collection_name=self._collection,
+                field_name="tenant_id",
+                field_schema=PayloadSchemaType.INTEGER,
+            )
 
     async def add_chunks(self, chunks: list[Chunk]) -> None:
         """入库：计算向量 + 写 Qdrant"""
@@ -523,6 +554,12 @@ class QdrantVectorStore(InMemoryVectorStore):
         await self._ensure_initialized()
         from qdrant_client.models import PointStruct
 
+        # [Wave 1] 注入租户 ID 到 chunk，写入 Qdrant payload 用于检索过滤
+        from app.tenants.context import get_tenant_id
+
+        _tid = get_tenant_id()
+        for chunk in chunks:
+            chunk.tenant_id = _tid
         texts = [c.text for c in chunks]
         vecs = await self._embedding.embed_batch(texts)
         client = self._get_client()
@@ -546,16 +583,49 @@ class QdrantVectorStore(InMemoryVectorStore):
         """混合检索：Qdrant 向量检索 + 内存关键词检索 → RRF 融合
 
         失败时回退到父类 hybrid_search（纯内存混合检索）。
+
+        [Wave 1] 多租户隔离：向量检索加 tenant_id payload 过滤，
+        关键词检索仅遍历当前租户的内存 chunk。
         """
         try:
             await self._ensure_initialized()
             client = self._get_client()
             qvec = await self._embedding.embed(query)
 
+            # [Wave 1] 构建租户过滤条件
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+            from app.tenants.context import get_tenant_id, is_system_tenant
+
+            if is_system_tenant():
+                query_filter = None  # 系统租户可检索全部
+            else:
+                _tid = get_tenant_id()
+                if _tid is not None:
+                    query_filter = Filter(
+                        must=[
+                            FieldCondition(
+                                key="tenant_id",
+                                match=MatchValue(value=_tid),
+                            )
+                        ]
+                    )
+                else:
+                    # fail-closed：未设置租户上下文，用不可能匹配的值
+                    query_filter = Filter(
+                        must=[
+                            FieldCondition(
+                                key="tenant_id",
+                                match=MatchValue(value=-1),
+                            )
+                        ]
+                    )
+
             # 1. Qdrant 向量检索
             results = client.search(
                 collection_name=self._collection,
                 query_vector=qvec,
+                query_filter=query_filter,
                 limit=top_k * 2,
             )
             vec_candidates: list[tuple[Chunk, float]] = []
@@ -571,6 +641,7 @@ class QdrantVectorStore(InMemoryVectorStore):
                     source=payload.get("source", ""),
                     prev_id=payload.get("prev_id", ""),
                     next_id=payload.get("next_id", ""),
+                    tenant_id=payload.get("tenant_id"),
                 )
                 vec_candidates.append((chunk, r.score or 0.0))
 
@@ -578,9 +649,16 @@ class QdrantVectorStore(InMemoryVectorStore):
             # 注意：关键词检索遍历内存缓存 self._store，Qdrant 可能有更多 chunk
             # 不在内存中（内存只缓存 add_chunks 时写入的 chunk）。
             # 如果内存覆盖率不足，关键词召回会漏数据，日志会警告。
+            # [Wave 1] 关键词检索同样需要租户过滤
             query_terms = _tokenize_query(query)
-            mem_chunk_count = len(self._store)
-            kw_scored = [(chunk, _keyword_score(chunk.text, query_terms)) for chunk, _ in self._store.values()]
+            if is_system_tenant():
+                visible_mem = list(self._store.values())
+            elif _tid is not None:
+                visible_mem = [(c, v) for c, v in self._store.values() if c.tenant_id == _tid]
+            else:
+                visible_mem = []
+            mem_chunk_count = len(visible_mem)
+            kw_scored = [(chunk, _keyword_score(chunk.text, query_terms)) for chunk, _ in visible_mem]
             kw_scored.sort(key=lambda x: x[1], reverse=True)
             kw_candidates = kw_scored[: top_k * 2]
 

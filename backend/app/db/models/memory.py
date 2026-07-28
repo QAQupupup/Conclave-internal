@@ -1,4 +1,10 @@
-"""记忆子系统 ORM 模型：raw_memories / feature_memories / profile_memories。"""
+"""记忆子系统 ORM 模型：raw_memories / feature_memories / profile_memories。
+
+[Wave 5] 多租户隔离：
+- 三张表均添加 tenant_id 列（TenantScopeMixin）
+- ProfileMemoryModel 主键从 agent_role 改为 UUID id（支持同角色名跨租户）
+- 迁移逻辑见 MemoryStore.init()：旧表无 id 列时 DROP + CREATE
+"""
 
 from __future__ import annotations
 
@@ -14,13 +20,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, CreatedAtMixin, UpdatedAtMixin, UUIDPrimaryKeyMixin
+from app.db.base import Base, CreatedAtMixin, TenantScopeMixin, UpdatedAtMixin, UUIDPrimaryKeyMixin
 
 
 # ============================================================
 # raw_memories — Agent 原始发言记忆（三层记忆子系统）
 # ============================================================
-class RawMemoryModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
+class RawMemoryModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     __tablename__ = "raw_memories"
 
     agent_role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
@@ -40,7 +46,7 @@ class RawMemoryModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
 # ============================================================
 # feature_memories — Agent 行为特征记忆
 # ============================================================
-class FeatureMemoryModel(Base, UUIDPrimaryKeyMixin):
+class FeatureMemoryModel(Base, UUIDPrimaryKeyMixin, TenantScopeMixin):
     __tablename__ = "feature_memories"
 
     agent_role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
@@ -61,10 +67,12 @@ class FeatureMemoryModel(Base, UUIDPrimaryKeyMixin):
 # ============================================================
 # profile_memories — Agent 稳定画像
 # ============================================================
-class ProfileMemoryModel(Base, UpdatedAtMixin):
+# [Wave 5] 主键从 agent_role 改为 UUID id，支持同角色名跨租户隔离
+# agent_role 降级为普通索引列，tenant_id 用于多租户过滤
+class ProfileMemoryModel(Base, UUIDPrimaryKeyMixin, UpdatedAtMixin, TenantScopeMixin):
     __tablename__ = "profile_memories"
 
-    agent_role: Mapped[str] = mapped_column(String(50), primary_key=True)
+    agent_role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     default_stance_style: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

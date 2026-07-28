@@ -65,6 +65,45 @@ def _resolve_path(rel_path: str, meeting_id: str | None = None) -> Path:
     return target
 
 
+async def _validate_tenant_path_access(rel_path: str) -> None:
+    """[Wave 2] 验证文件路径对应的会议属于当前租户。
+
+    从路径中提取第一段作为 meeting_id（如 "mtg-xxx/app.py" → "mtg-xxx"），
+    通过 DAO 验证该会议属于当前租户。系统租户跳过验证。
+
+    - 空路径（根目录列表）：系统租户允许，普通租户允许（后续 list_files 会过滤）
+    - 路径首段为 meeting_id：验证归属
+    - 会议不存在或不属于当前租户：403
+    """
+    from app.tenants.context import is_system_tenant
+
+    if is_system_tenant():
+        return
+
+    if not rel_path:
+        return  # 根目录列表，后续在 list_files 中过滤
+
+    # 提取第一段作为 meeting_id
+    clean = rel_path.lstrip("/\\")
+    parts = clean.split("/", 1)
+    if "\\" in parts[0]:
+        parts = parts[0].split("\\", 1) + parts[1:]
+    meeting_id = parts[0]
+
+    # 如果不是 meeting_id 格式（不以 mtg- 开头），跳过验证（可能是其他用途的文件）
+    if not meeting_id.startswith("mtg-"):
+        return
+
+    from app.dao.meeting_dao import get_meeting
+
+    meeting = await get_meeting(meeting_id)
+    if meeting is None:
+        raise HTTPException(
+            status_code=403,
+            detail="无权访问该会议的工作区文件",
+        )
+
+
 def _truncate(data: str) -> str:
     """截断超长输出"""
     if len(data.encode("utf-8")) > MAX_OUTPUT:
@@ -78,6 +117,7 @@ def _truncate(data: str) -> str:
 @router.get("/files")
 async def list_files(path: str = "") -> dict[str, Any]:
     """列出工作区内指定目录的文件和子目录"""
+    await _validate_tenant_path_access(path)
     target = _resolve_path(path)
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"路径不存在: {path}")
@@ -105,9 +145,22 @@ async def list_files(path: str = "") -> dict[str, Any]:
         }
 
     items = []
+    # [Wave 2] 根目录列表：非系统租户只显示属于自己的会议目录
+    from app.tenants.context import is_system_tenant
+
+    _is_root_listing = target == WORKSPACE_ROOT
+    _tenant_meeting_ids: set[str] | None = None
+    if _is_root_listing and not is_system_tenant():
+        from app.dao.meeting_dao import list_meetings
+
+        _tenant_meeting_ids = {m["id"] for m in await list_meetings()}
+
     for child in sorted(target.iterdir()):
         # 跳过隐藏文件和 __pycache__
         if child.name.startswith(".") or child.name == "__pycache__":
+            continue
+        # [Wave 2] 根目录列表过滤：跳过不属于当前租户的会议目录
+        if _tenant_meeting_ids is not None and child.is_dir() and child.name not in _tenant_meeting_ids:
             continue
         try:
             stat = child.stat()
@@ -143,6 +196,7 @@ async def list_files(path: str = "") -> dict[str, Any]:
 @router.get("/files/{file_path:path}")
 async def read_file(file_path: str) -> dict[str, Any]:
     """读取工作区内文件内容"""
+    await _validate_tenant_path_access(file_path)
     target = _resolve_path(file_path)
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"文件不存在: {file_path}")
@@ -167,6 +221,7 @@ async def read_file(file_path: str) -> dict[str, Any]:
 @router.post("/files")
 async def write_file(req: FileWriteRequest) -> dict[str, Any]:
     """写入文件（自动创建父目录）"""
+    await _validate_tenant_path_access(req.path)
     target = _resolve_path(req.path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -191,6 +246,7 @@ async def write_file(req: FileWriteRequest) -> dict[str, Any]:
 @router.delete("/files/{file_path:path}")
 async def delete_file(file_path: str) -> dict[str, Any]:
     """删除文件或空目录"""
+    await _validate_tenant_path_access(file_path)
     target = _resolve_path(file_path)
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"路径不存在: {file_path}")

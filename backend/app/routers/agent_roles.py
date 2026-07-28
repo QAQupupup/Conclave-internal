@@ -234,9 +234,13 @@ async def generate_roles(req: GenerateRolesRequest) -> GenerateRolesResponse:
         )
 
     # 构建 prompt：要求 LLM 生成 2-3 个角色
+    # [Wave 6] 用户议题清洗 + 分隔符包裹，防止指令注入
+    from app.orchestrator.prompt_safety import sanitize_and_wrap
+
+    safe_topic = sanitize_and_wrap(req.topic, label="用户议题")
     prompt = f"""根据以下议题，生成 2-3 个专业角色来参与辩论。每个角色应覆盖不同的专业视角。
 
-议题：{req.topic}
+{safe_topic}
 
 要求：
 1. 默认包含 2 个核心角色：product_architect（产品架构师）和 engineer（工程师）

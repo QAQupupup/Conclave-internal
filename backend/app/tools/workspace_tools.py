@@ -52,6 +52,25 @@ def _resolve_path(rel_path: str, meeting_id: str | None = None) -> Path:
     return target
 
 
+async def _validate_meeting_ownership(meeting_id: str | None) -> None:
+    """[Wave 3] 验证 meeting_id 属于当前租户（纵深防御）
+
+    ReAct 循环已强制覆盖 meeting_id，此处作为第二层防线：
+    确保即使从其他入口调用，也校验会议归属。
+    """
+    if not meeting_id:
+        return
+    from app.tenants.context import is_system_tenant
+
+    if is_system_tenant():
+        return
+    from app.dao.meeting_dao import get_meeting
+
+    meeting = await get_meeting(meeting_id)
+    if meeting is None:
+        raise ValueError(f"无权访问会议 {meeting_id} 的工作区（不存在或不属于当前租户）")
+
+
 def _truncate(data: str, max_len: int = MAX_OUTPUT) -> str:
     if len(data.encode("utf-8")) > max_len:
         return data[:max_len] + "\n... [输出已截断]"
@@ -66,6 +85,7 @@ async def tool_list_files(args: dict[str, Any]) -> dict[str, Any]:
     path = str(args.get("path", ""))
     meeting_id = args.get("meeting_id")
     try:
+        await _validate_meeting_ownership(meeting_id)
         target = _resolve_path(path, meeting_id)
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -120,6 +140,7 @@ async def tool_read_file(args: dict[str, Any]) -> dict[str, Any]:
         return {"success": False, "error": "缺少 path 参数"}
 
     try:
+        await _validate_meeting_ownership(meeting_id)
         target = _resolve_path(path, meeting_id)
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -158,6 +179,7 @@ async def tool_write_file(args: dict[str, Any]) -> dict[str, Any]:
         return {"success": False, "error": "缺少 path 参数"}
 
     try:
+        await _validate_meeting_ownership(meeting_id)
         target = _resolve_path(path, meeting_id)
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -204,6 +226,12 @@ async def tool_run_command(args: dict[str, Any]) -> dict[str, Any]:
             "error": "命令被安全策略阻止：检测到危险命令模式（如 rm -rf /、mkfs、dd 等）",
         }
 
+    # [Wave 3] 验证会议归属
+    try:
+        await _validate_meeting_ownership(meeting_id)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
     # 确定工作目录（会议隔离）
     if meeting_id:
         work_dir = _resolve_path(cwd, meeting_id) if cwd else _resolve_path("", meeting_id)
@@ -247,6 +275,12 @@ async def tool_run_python(args: dict[str, Any]) -> dict[str, Any]:
 
     if not code:
         return {"success": False, "error": "缺少 code 参数"}
+
+    # [Wave 3] 验证会议归属
+    try:
+        await _validate_meeting_ownership(meeting_id)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
 
     work_dir = _resolve_path("", meeting_id) if meeting_id else WORKSPACE_ROOT
 

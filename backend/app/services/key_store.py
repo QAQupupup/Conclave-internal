@@ -22,6 +22,7 @@ from app.db.models import ApiKeyModel
 from app.llm_providers import PROVIDERS
 from app.observability.log_bus import log_bus
 from app.tenants import create_system_tenant_ctx, current_tenant_id
+from app.tenants.context import is_system_tenant
 
 logger = log_bus
 
@@ -94,9 +95,16 @@ async def save_api_key(
     base_url: str = "",
     is_default: bool = False,
 ) -> dict[str, Any]:
-    """保存或更新 API Key（加密后存入数据库）。自动关联当前租户。"""
+    """保存或更新 API Key（加密后存入数据库）。自动关联当前租户。
+
+    [Wave 5] fail-closed：无租户上下文且非系统租户时拒绝操作，防止跨租户覆盖。
+    """
     encrypted = encrypt_key(api_key)
     tid = current_tenant_id()
+
+    # [Wave 5] fail-closed：无租户上下文且非系统租户时拒绝
+    if tid is None and not is_system_tenant():
+        raise RuntimeError("save_api_key 需要租户上下文或系统租户模式")
 
     async with async_session_factory() as session:
         # 查找是否已存在：优先找租户专属 key，其次系统 key
@@ -123,10 +131,12 @@ async def save_api_key(
                     # 系统 key 不直接修改，创建租户专属副本
                     existing = None
         else:
+            # 系统租户：仅查询系统级 key（tenant_id IS NULL）
             result = await session.execute(
                 select(ApiKeyModel).where(
                     ApiKeyModel.provider == provider,
                     ApiKeyModel.name == name,
+                    ApiKeyModel.tenant_id.is_(None),
                 )
             )
             existing = result.scalar_one_or_none()
@@ -184,8 +194,16 @@ async def save_api_key(
 async def list_api_keys() -> list[dict[str, Any]]:
     """列出当前租户的 API Key（返回的 key 字段为脱敏形式，仅显示前4位+后4位）。
     同时返回系统级 key（tenant_id IS NULL）作为基础。
+
+    [Wave 5] fail-closed：无租户上下文且非系统租户时返回空列表。
     """
     tid = current_tenant_id()
+
+    # [Wave 5] fail-closed：无租户上下文且非系统租户时返回空
+    if tid is None and not is_system_tenant():
+        logger.warning("list_api_keys 拒绝无租户上下文的查询")
+        return []
+
     async with async_session_factory() as session:
         if tid is not None:
             result = await session.execute(
@@ -194,6 +212,7 @@ async def list_api_keys() -> list[dict[str, Any]]:
                 .order_by(ApiKeyModel.tenant_id.desc(), ApiKeyModel.provider, ApiKeyModel.name)
             )
         else:
+            # 系统租户：可查看全部
             result = await session.execute(select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name))
         records = result.scalars().all()
 
@@ -219,8 +238,17 @@ async def list_api_keys() -> list[dict[str, Any]]:
 async def get_api_key(provider: str, name: str = "default") -> str:
     """获取指定 provider 的明文 API Key（供 LLM 调用使用）。
     优先查租户专属 key，回退系统 key。
+
+    [Wave 5] fail-closed：无租户上下文且非系统租户时返回空字符串，
+    防止通过缺少中间件的入口跨租户读取 API Key。
     """
     tid = current_tenant_id()
+
+    # [Wave 5] fail-closed：无租户上下文且非系统租户时返回空
+    if tid is None and not is_system_tenant():
+        logger.warning("get_api_key 拒绝无租户上下文的查询: provider=%s", provider)
+        return ""
+
     async with async_session_factory() as session:
         if tid is not None:
             result = await session.execute(
@@ -233,10 +261,12 @@ async def get_api_key(provider: str, name: str = "default") -> str:
                 .order_by(ApiKeyModel.tenant_id.desc())
             )
         else:
+            # 系统租户：仅查询系统级 key（tenant_id IS NULL）
             result = await session.execute(
                 select(ApiKeyModel).where(
                     ApiKeyModel.provider == provider,
                     ApiKeyModel.name == name,
+                    ApiKeyModel.tenant_id.is_(None),
                 )
             )
         record = result.scalar_one_or_none()
@@ -247,8 +277,17 @@ async def get_api_key(provider: str, name: str = "default") -> str:
 
 
 async def delete_api_key(provider: str, name: str = "default") -> bool:
-    """删除指定的 API Key（仅删除当前租户的 key，不删除系统 key）"""
+    """删除指定的 API Key（仅删除当前租户的 key，不删除系统 key）
+
+    [Wave 5] fail-closed：无租户上下文且非系统租户时拒绝操作。
+    """
     tid = current_tenant_id()
+
+    # [Wave 5] fail-closed：无租户上下文且非系统租户时拒绝
+    if tid is None and not is_system_tenant():
+        logger.warning("delete_api_key 拒绝无租户上下文的操作: provider=%s", provider)
+        return False
+
     async with async_session_factory() as session:
         q = delete(ApiKeyModel).where(
             ApiKeyModel.provider == provider,

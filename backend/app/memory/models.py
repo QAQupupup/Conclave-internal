@@ -19,6 +19,7 @@ class RawMemory(BaseModel):
     """原始发言记录：迭代一已有 SQLite 留底，此处正式建模
 
     会议结束后从 state.messages 提取，作为特征提炼的原料。
+    [Wave 5] tenant_id 用于多租户隔离，None 表示系统级/历史数据。
     """
 
     id: str
@@ -30,12 +31,14 @@ class RawMemory(BaseModel):
     adopted: bool = False  # 是否被裁决采纳
     corrected_by: str | None = None  # 是否被后续纠正
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    tenant_id: int | None = None
 
 
 class FeatureMemory(BaseModel):
     """行为特征：从多次原始发言中 LLM 提炼
 
     feature_type 取值：stance_style | evidence_dependency | risk_appetite | collaboration
+    [Wave 5] tenant_id 用于多租户隔离。
     """
 
     id: str
@@ -46,6 +49,7 @@ class FeatureMemory(BaseModel):
     sample_count: int  # 提炼自多少条原始记录
     source_meeting_ids: list[str] = Field(default_factory=list)
     extracted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    tenant_id: int | None = None
 
 
 class ProfileMemory(BaseModel):
@@ -53,6 +57,7 @@ class ProfileMemory(BaseModel):
 
     默认值对齐迭代一行为（balanced / medium / collaborative），
     仅在历史特征沉淀后才注入 agent prompt。
+    [Wave 5] tenant_id 用于多租户隔离，同角色名在不同租户下有独立画像。
     """
 
     agent_role: str
@@ -63,3 +68,4 @@ class ProfileMemory(BaseModel):
     escalation_threshold: float = 0.6  # 0-1，何时倾向升级/借调
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: int = 1  # 乐观锁，version=1 表示默认未更新
+    tenant_id: int | None = None
