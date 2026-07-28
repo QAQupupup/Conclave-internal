@@ -1204,7 +1204,15 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
         "conflict_count": len(state.conflicts),
         "evidence_count": sum(len(es.get("assessments", [])) for es in state.evidence_set),
         "borrowed_agents": len(state.borrowed_agents) if state.borrowed_agents else 0,
+        "borrowed_agents_detail": list(state.borrowed_agents) if state.borrowed_agents else [],
         "conclusion_chain_length": len(state.conclusion_chain.conclusions),
+        "quality_score": state.quality_score,
+        "quality_feedback": state.quality_feedback,
+        "quality_evaluation": state.quality_evaluation,
+        "iteration_history": list(state.iteration_history),
+        "auto_iterate": state.auto_iterate,
+        "max_iterations": state.max_iterations,
+        "iteration_count": state.iteration_count,
         "drift": {
             "total_checks": len(state.drift_log),
             "drift_detected": drift_count,
@@ -1233,6 +1241,12 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
             "inconsistent_calls": trace_summary.get("inconsistent_calls", 0),
             "avg_latency_ms": trace_summary.get("avg_latency_ms", 0),
             "total_cost_usd": round(sum(r.get("cost_usd", 0.0) for r in cost_records if "cost_usd" in r), 6),
+            # 质量门禁摘要
+            "quality_score": state.quality_score,
+            "quality_should_iterate": (state.quality_evaluation or {}).get("should_iterate", False),
+            "quality_hard_failures": (state.quality_evaluation or {}).get("hard_failures", []),
+            "iteration_count": state.iteration_count,
+            "borrowed_agents_count": len(state.borrowed_agents) if state.borrowed_agents else 0,
         },
     }
 

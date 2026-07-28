@@ -782,6 +782,8 @@ class RealLLM:
             validation_status="fallback_stub",
             attempt=self.MAX_ATTEMPTS,
             latency_ms=0,
+            http_request_body=None,
+            http_response_text="",
         )
         stub = StubLLM()
         return await stub.complete(prompt, schema_hint=schema_hint)
@@ -935,6 +937,8 @@ class RealLLM:
                         agent_role=agent_role,
                         provider_id=provider_id,
                         error_detail=f"HTTPStatusError after json_mode fallback: {e2.response.status_code} {e2.response.text[:300]}",
+                        http_request_body=body,
+                        http_response_text=e2.response.text[:2000],
                     )
                     raise
             else:
@@ -955,6 +959,8 @@ class RealLLM:
                     agent_role=agent_role,
                     provider_id=provider_id,
                     error_detail=f"HTTPStatusError: {e.response.status_code} {e.response.text[:300]}",
+                    http_request_body=body,
+                    http_response_text=e.response.text[:2000],
                 )
                 raise
         except (
@@ -985,6 +991,7 @@ class RealLLM:
                 agent_role=agent_role,
                 provider_id=provider_id,
                 error_detail=f"{type(e).__name__}: {str(e)[:300]}",
+                http_request_body=body,
             )
             raise
 
@@ -1012,6 +1019,8 @@ class RealLLM:
             total_tokens=total_tokens,
             agent_role=agent_role,
             provider_id=provider_id,
+            http_request_body=body,
+            http_response_text=resp.text,
         )
         # 成本可观测性：记录 LLM 调用成本到 CostTracker
         # （estimate_llm_cost 内部会优先查 llm_providers 的多厂商定价表）

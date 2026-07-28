@@ -121,6 +121,9 @@ class MeetingIterationSection(BaseModel):
     max_iterations: int = 2
     quality_score: float | None = None
     quality_feedback: str | None = None
+    # 完整质量评估结果（8 维评分明细 + hard_failures + deploy_ok 等）
+    # 与 quality_score/quality_feedback 的关系：后两者是从此 dict 中提取的标量摘要
+    quality_evaluation: dict[str, Any] | None = None
     iteration_history: list[dict[str, Any]] = Field(default_factory=list)
     auto_iterate: bool = False
     checkpoint: dict[str, Any] | None = None
@@ -270,6 +273,8 @@ class MeetingState(BaseModel):
     # quality_score: 产出质量评分（0-100），由质量门禁评估
     quality_score: float | None = None
     quality_feedback: str | None = None  # 质量门禁的反馈意见（用于下一轮迭代）
+    # 完整质量评估结果（8 维评分明细 + hard_failures + deploy_ok 等）
+    quality_evaluation: dict[str, Any] | None = None
     # iteration_history: 历次迭代记录 [{iteration, quality_score, feedback, changes}]
     iteration_history: list[dict[str, Any]] = Field(default_factory=list)
     # auto_iterate: 是否自动迭代直到质量达标（用户可设置）
@@ -418,6 +423,7 @@ class MeetingState(BaseModel):
                 max_iterations=self.max_iterations,
                 quality_score=self.quality_score,
                 quality_feedback=self.quality_feedback,
+                quality_evaluation=self.quality_evaluation,
                 iteration_history=self.iteration_history,
                 auto_iterate=self.auto_iterate,
                 checkpoint=self.checkpoint,

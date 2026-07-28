@@ -57,6 +57,8 @@ class CaseRunner:
         stage_scores: dict[str, float] = {}
         start = time.monotonic()
         total_tokens = 0
+        meeting_id = ""
+        audit_data: dict[str, Any] = {}
 
         try:
             meeting_id = await self._create_meeting(case)
@@ -65,6 +67,9 @@ class CaseRunner:
             total_tokens = self._extract_tokens(detail)
             stage_scores = await self._grade_all_stages(case, detail)
             self._check_terminal_state(case, detail, errors)
+            # 获取完整审计数据（best-effort，失败不影响评分）
+            if not errors:
+                audit_data = await self._fetch_audit(meeting_id)
         except TimeoutError:
             errors.append("case timed out waiting for meeting to finish")
         except httpx.HTTPStatusError as exc:
@@ -89,6 +94,8 @@ class CaseRunner:
             latency_ms=latency,
             errors=errors,
             run_index=int(case.get("run_index", 0)),
+            meeting_id=meeting_id,
+            audit_data=audit_data,
         )
 
     # ---------- HTTP 流程 ----------
@@ -156,6 +163,20 @@ class CaseRunner:
             return int(trace.get("total_tokens", 0))
         except (TypeError, ValueError):
             return 0
+
+    async def _fetch_audit(self, meeting_id: str) -> dict[str, Any]:
+        """获取会议完整审计数据（best-effort，失败返回空 dict）。
+
+        调用 GET /meetings/{id}/audit 端点，获取 trace、events、cost_records、
+        质量门禁详情等完整数据，用于 Vault 导出和历史对比。
+        """
+        try:
+            async with httpx.AsyncClient(timeout=30.0, headers=self.headers, trust_env=False) as client:
+                resp = await client.get(f"{self.base_url}/meetings/{meeting_id}/audit")
+                resp.raise_for_status()
+                return resp.json()
+        except Exception:
+            return {}
 
     def _check_terminal_state(self, case: dict, detail: dict, errors: list[str]) -> None:
         terminal = case.get("terminal_state") or {}

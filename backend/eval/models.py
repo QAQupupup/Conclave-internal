@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from eval.graders.base import GraderResult  # 重新导出，统一返回类型入口
 
@@ -20,6 +21,10 @@ class CaseResult:
     latency_ms: float = 0.0
     errors: list[str] = field(default_factory=list)
     run_index: int = 0
+    # 关联的会议 ID（用于回溯审计数据）
+    meeting_id: str = ""
+    # 完整审计数据（来自 GET /meetings/{id}/audit）
+    audit_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

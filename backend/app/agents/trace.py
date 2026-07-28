@@ -35,6 +35,8 @@ class LLMCallRecord(BaseModel):
     request_id: str = ""  # 关联的 HTTP 请求 ID（全链路追踪）
     meeting_id: str = ""  # 关联的会议 ID（全链路追踪）
     runner_session_id: str = ""  # 关联的 Runner 执行会话 ID（因果链）
+    http_request_body: dict[str, Any] | None = None  # 完整 HTTP 请求体（model, messages, temperature 等）
+    http_response_text: str = ""  # 完整 HTTP 响应文本（原始 JSON，含 usage/model/id 等元数据）
 
 
 class CallTrace(BaseModel):
@@ -165,6 +167,8 @@ def record_call(
     agent_role: str = "",
     provider_id: str = "",
     error_detail: str = "",
+    http_request_body: dict[str, Any] | None = None,
+    http_response_text: str = "",
 ) -> None:
     """记录一次 LLM 调用到当前 trace（仅 RealLLM._call_api 调用）
 
@@ -208,6 +212,8 @@ def record_call(
         request_id=get_request_id(),
         meeting_id=trace.meeting_id or meeting_id,
         runner_session_id=get_runner_session_id(),
+        http_request_body=http_request_body,
+        http_response_text=http_response_text,
     )
     trace.add_call(record)
 

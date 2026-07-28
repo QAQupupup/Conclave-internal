@@ -439,6 +439,7 @@ class Runner:
                     quality_result = await self._evaluate_quality(state)
                     state.quality_score = quality_result.get("score", 0)
                     state.quality_feedback = quality_result.get("feedback", "")
+                    state.quality_evaluation = quality_result  # 完整 8 维评分明细
                     should_iterate = quality_result.get("should_iterate", False)
                     log_bus.info(
                         f"质量门禁评估: score={state.quality_score}, should_iterate={should_iterate}, "
