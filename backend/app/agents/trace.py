@@ -10,6 +10,23 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class TraceEvent(BaseModel):
+    """系统级追踪事件（非 LLM 调用，但影响 LLM 调用链路）
+
+    用于记录 provider 切换、熔断器状态变化等系统级事件，
+    补充 LLMCallRecord 无法表达的过程信息。
+    """
+
+    event_id: str
+    timestamp: str
+    event_type: str  # "provider_switch" | "circuit_breaker" | "stub_fallback"
+    stage: str = ""  # 关联的阶段名
+    detail: dict[str, Any] = Field(default_factory=dict)
+    # provider_switch: {from_provider, to_provider, reason, error}
+    # circuit_breaker: {action: "trip"|"half_open"|"recover", failure_count}
+    # stub_fallback: {stage, reason}
+
+
 class LLMCallRecord(BaseModel):
     """单次 LLM 调用记录"""
 
@@ -44,10 +61,15 @@ class CallTrace(BaseModel):
 
     meeting_id: str = ""
     calls: list[LLMCallRecord] = Field(default_factory=list)
+    trace_events: list[TraceEvent] = Field(default_factory=list)
 
     def add_call(self, record: LLMCallRecord) -> None:
         """追加一条调用记录"""
         self.calls.append(record)
+
+    def add_event(self, event: TraceEvent) -> None:
+        """追加一条系统级追踪事件"""
+        self.trace_events.append(event)
 
     def summary(self) -> dict[str, Any]:
         """返回追踪摘要：总调用数、成功率、降级数、不一致数、延迟分布、token 统计"""
@@ -101,6 +123,10 @@ class CallTrace(BaseModel):
                 s["avg_latency_ms"] = sum(lats) / len(lats) if lats else 0
         # 收集所有错误详情
         errors = [c.error_detail for c in self.calls if c.error_detail]
+        # 系统级事件统计
+        provider_switches = [e for e in self.trace_events if e.event_type == "provider_switch"]
+        circuit_events = [e for e in self.trace_events if e.event_type == "circuit_breaker"]
+        stub_fallbacks = [e for e in self.trace_events if e.event_type == "stub_fallback"]
         return {
             "total_calls": total,
             "valid_calls": valid,
@@ -117,6 +143,11 @@ class CallTrace(BaseModel):
             "stage_stats": stage_stats,
             "role_stats": role_stats,
             "errors": errors[:10],  # 最多返回前 10 条错误
+            # 系统级事件统计
+            "provider_switch_count": len(provider_switches),
+            "circuit_breaker_events": len(circuit_events),
+            "stub_fallback_count": len(stub_fallbacks),
+            "trace_events": [e.model_dump(mode="json") for e in self.trace_events],
         }
 
 
@@ -231,3 +262,32 @@ def update_last_record(**kwargs: Any) -> None:
     last = trace.calls[-1]
     for key, value in kwargs.items():
         setattr(last, key, value)
+
+
+def record_trace_event(event_type: str, stage: str = "", **detail: Any) -> None:
+    """记录一条系统级追踪事件到当前 trace
+
+    用于记录 provider 切换、熔断器状态变化等非 LLM 调用事件。
+    如果当前没有活跃的 trace，静默跳过。
+
+    Args:
+        event_type: 事件类型 ("provider_switch" | "circuit_breaker" | "stub_fallback")
+        stage: 关联的阶段名
+        **detail: 事件详情（随 event_type 不同而不同）
+    """
+    trace = _current_trace.get()
+    if trace is None:
+        from app.context import get_meeting_id
+
+        meeting_id = get_meeting_id()
+        trace = _get_trace_fallback(meeting_id)
+    if trace is None:
+        return
+    event = TraceEvent(
+        event_id=f"evt-{uuid.uuid4().hex[:12]}",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        event_type=event_type,
+        stage=stage,
+        detail=detail,
+    )
+    trace.add_event(event)

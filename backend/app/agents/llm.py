@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.agents.schemas import SCHEMA_MAP
-from app.agents.trace import record_call, update_last_record
+from app.agents.trace import record_call, record_trace_event, update_last_record
 from app.config import settings
 from app.logging_config import get_logger
 
@@ -475,6 +475,7 @@ class CircuitBreaker:
             if time.monotonic() - self._opened_at >= self.recovery_timeout:
                 self._state = "half_open"
                 logger.info("熔断器进入 half_open 状态，尝试恢复")
+                record_trace_event("circuit_breaker", action="half_open", failure_count=self._failure_count)
                 return True
             return False
         return True
@@ -483,6 +484,7 @@ class CircuitBreaker:
         self._failure_count = 0
         if self._state != "closed":
             logger.info("熔断器恢复到 closed 状态")
+            record_trace_event("circuit_breaker", action="recover", failure_count=0)
         self._state = "closed"
 
     def record_failure(self) -> None:
@@ -496,6 +498,12 @@ class CircuitBreaker:
                 "熔断器打开：连续失败 %d 次，%gs 内拒绝所有 LLM 调用",
                 self._failure_count,
                 self.recovery_timeout,
+            )
+            record_trace_event(
+                "circuit_breaker",
+                action="trip",
+                failure_count=self._failure_count,
+                recovery_timeout_s=self.recovery_timeout,
             )
             # 审计：熔断器跳闸
             try:
@@ -737,6 +745,20 @@ class RealLLM:
                         logger="agents.llm",
                         extra={"stage": stage, "provider": _p_id, "error": last_error[:300]},
                     )
+                    # 记录 provider 切换事件到 trace
+                    next_provider_id = (
+                        fallback_chain[provider_idx + 1][3]
+                        if provider_idx + 1 < len(fallback_chain)
+                        else "stub"
+                    )
+                    record_trace_event(
+                        "provider_switch",
+                        stage=stage,
+                        from_provider=_p_id,
+                        to_provider=next_provider_id,
+                        reason=type(conn_err).__name__,
+                        error=str(conn_err)[:300],
+                    )
                     break  # 跳出重试循环，尝试下一个 provider
                 except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
                     error_detail = ""
@@ -768,6 +790,20 @@ class RealLLM:
                 "last_error": last_error[:500],
                 "action": "fallback_stub",
             },
+        )
+        # 记录 stub 降级事件和熔断器状态到 trace
+        record_trace_event(
+            "stub_fallback",
+            stage=stage,
+            reason="all_providers_failed",
+            last_error=last_error[:500],
+        )
+        record_trace_event(
+            "circuit_breaker",
+            stage=stage,
+            action="record_failure",
+            failure_count=_circuit_breaker._failure_count,
+            state=_circuit_breaker.state,
         )
         # 记录降级到 trace
         _fb_base, _fb_key, _fb_model = self._resolve_config()

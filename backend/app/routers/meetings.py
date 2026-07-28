@@ -1147,6 +1147,7 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
 
     # 1. LLM trace
     trace_calls = [c.model_dump(mode="json") for c in state.llm_trace.calls]
+    trace_events = [e.model_dump(mode="json") for e in state.llm_trace.trace_events]
 
     # 2. 事件历史
     events = await bus.replay(meeting_id, from_seq=0)
@@ -1227,6 +1228,7 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
         "trace": {
             "summary": trace_summary,
             "calls": trace_calls,
+            "trace_events": trace_events,
         },
         "events": {
             "total": len(event_dicts),
