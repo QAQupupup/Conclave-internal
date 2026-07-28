@@ -6,7 +6,7 @@ from typing import Any
 
 from eval.graders.base import GraderResult  # 重新导出，统一返回类型入口
 
-__all__ = ["GraderResult", "CaseResult", "SuiteResult", "RegressionResult"]
+__all__ = ["GraderResult", "CaseResult", "SuiteResult", "RegressionResult", "CaseRegression"]
 
 
 @dataclass
@@ -47,9 +47,34 @@ class SuiteResult:
 
 
 @dataclass
+class CaseRegression:
+    """单用例回归对比结果。"""
+
+    case_id: str
+    is_regression: bool
+    reasons: list[str] = field(default_factory=list)
+    # 对比维度详情
+    passed_changed: bool = False  # passed 状态是否变化
+    score_delta: float = 0.0  # 分数变化（新 - 旧）
+    token_delta: int = 0  # token 变化
+    latency_delta: float = 0.0  # 延迟变化（ms）
+    # 审计数据对比
+    old_quality_score: float | None = None
+    new_quality_score: float | None = None
+    old_iteration_count: int = 0
+    new_iteration_count: int = 0
+    old_provider_switches: int = 0
+    new_provider_switches: int = 0
+    old_stub_fallbacks: int = 0
+    new_stub_fallbacks: int = 0
+
+
+@dataclass
 class RegressionResult:
     """回归判定结果。"""
 
     is_regression: bool
     reasons: list[str] = field(default_factory=list)
     severity: str = "none"  # none | low | medium | high
+    # per-case 详细对比（新增）
+    case_regressions: list[CaseRegression] = field(default_factory=list)

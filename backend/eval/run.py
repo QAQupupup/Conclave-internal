@@ -160,7 +160,114 @@ async def run_eval(args: argparse.Namespace) -> int:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
     print_summary(report, out_path)
+
+    # Vault 导出
+    vault_run_dir: Path | None = None
+    if args.vault_export:
+        from eval.vault_export import export_to_vault
+
+        vault_run_dir = export_to_vault(report, config, run_label=args.run_label)
+        print(f"\nVault export: {vault_run_dir}")
+
+    # 回归对比
+    if args.compare:
+        await run_regression_compare(args.compare, report, config, vault_run_dir, args.tier)
+
     return 0
+
+
+async def run_regression_compare(
+    compare_path: str,
+    new_report: dict,
+    config: dict,
+    vault_run_dir: Path | None,
+    tier: int,
+) -> None:
+    """执行回归对比：加载旧报告，与当前报告对比
+
+    compare_path 可以是：
+    - "latest"：自动查找 vault 中同 tier 的最新运行
+    - "vault"：同 "latest"
+    - 文件路径：加载指定 JSON 报告文件
+    - vault 运行目录路径：加载 summary.json
+    """
+    from eval.stats.regression import RegressionJudge
+    from eval.vault_export import find_latest_vault_run, load_vault_run
+
+    old_report: dict | None = None
+
+    if compare_path in ("latest", "vault"):
+        old_run_dir = find_latest_vault_run(tier=tier)
+        if old_run_dir is None:
+            print("\n[Regression] No previous vault run found for comparison")
+            return
+        if vault_run_dir and old_run_dir == vault_run_dir:
+            # 当前运行刚写入 vault，取倒数第二条
+            from eval.vault_export import _get_eval_runs_dir, _get_vault_root
+
+            index_path = _get_eval_runs_dir() / "index.json"
+            if index_path.exists():
+                with open(index_path, encoding="utf-8") as f:
+                    index_data = json.load(f)
+                runs = [r for r in index_data.get("runs", []) if r.get("tier") == tier]
+                if len(runs) >= 2:
+                    prev = runs[-2]
+                    old_run_dir = _get_vault_root() / prev["run_dir"]
+                else:
+                    print("\n[Regression] Only one run in vault, no previous to compare")
+                    return
+        print(f"\n[Regression] Comparing with vault run: {old_run_dir}")
+        old_data = load_vault_run(old_run_dir)
+        old_report = old_data.get("report", {})
+    elif Path(compare_path).is_dir():
+        # vault 运行目录
+        old_data = load_vault_run(Path(compare_path))
+        old_report = old_data.get("report", {})
+    else:
+        # JSON 文件路径
+        old_path = Path(compare_path)
+        if not old_path.exists():
+            print(f"\n[Regression] Compare file not found: {old_path}")
+            return
+        with open(old_path, encoding="utf-8") as f:
+            old_report = json.load(f)
+
+    if not old_report:
+        print("\n[Regression] Old report is empty, cannot compare")
+        return
+
+    judge = RegressionJudge()
+    reg_result = judge.judge(old_report, new_report, config)
+
+    print("\n" + "=" * 60)
+    print("Regression Analysis")
+    print("=" * 60)
+    print(f"Is regression: {reg_result.is_regression}")
+    print(f"Severity:      {reg_result.severity}")
+    if reg_result.reasons:
+        print("Reasons:")
+        for r in reg_result.reasons:
+            print(f"  - {r}")
+    else:
+        print("No regression detected.")
+    print("=" * 60)
+
+    # 如果有 vault 导出，将回归结果写入运行目录
+    if vault_run_dir:
+        reg_path = vault_run_dir / "regression.json"
+        with open(reg_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "is_regression": reg_result.is_regression,
+                    "reasons": reg_result.reasons,
+                    "severity": reg_result.severity,
+                    "compared_with": str(old_run_dir) if compare_path in ("latest", "vault") else compare_path,
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+        print(f"Regression result saved to: {reg_path}")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -176,6 +283,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--service-check",
         action="store_true",
         help="run service readiness check only (health/auth/docs)",
+    )
+    parser.add_argument(
+        "--vault-export",
+        action="store_true",
+        help="export results to Obsidian knowledge vault (D:\\conclave-knowledge-vault\\eval-runs\\)",
+    )
+    parser.add_argument(
+        "--run-label",
+        type=str,
+        default="",
+        help="label for this run (e.g. 'baseline', 'after-refactor')",
+    )
+    parser.add_argument(
+        "--compare",
+        type=str,
+        default="",
+        help="regression comparison: 'latest' to auto-find previous vault run, "
+        "or path to old report JSON / vault run directory",
     )
     return parser.parse_args(argv)
 
