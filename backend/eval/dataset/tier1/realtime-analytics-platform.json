@@ -1,17 +1,19 @@
 {
-  "case_id": "tier1-task-scheduler-design",
+  "case_id": "tier1-realtime-analytics-platform",
   "tier": 1,
   "category": "standard",
-  "topic": "设计分布式任务调度系统，支持 Cron、依赖编排、失败重试",
+  "topic": "实时数据分析平台设计，支持百万级事件/秒接入、亚秒级查询响应",
   "uploaded_docs": [],
   "config": {
     "deliverable_type": "prd_openapi",
-    "flow_plan": "full",
-    "debate_depth": "standard"
+    "flow_plan": "standard",
+    "debate_depth": "standard",
+    "auto_iterate": true,
+    "max_iterations": 2
   },
   "expected": {
     "clarify": {
-      "complexity": "full",
+      "complexity": "standard",
       "min_key_questions": 2,
       "expected_roles": [
         "product_architect",
@@ -22,7 +24,6 @@
       "min_claims": 2,
       "expected_claim_types": [
         "fact",
-        "assumption",
         "constraint"
       ]
     },
@@ -50,12 +51,15 @@
         "scope"
       ],
       "min_api_endpoints": 2,
-      "min_openapi_length": 100
+      "min_openapi_length": 100,
+      "use_judge": true,
+      "judge_dimension": "completeness",
+      "judge_expected": "complete PRD with clear performance requirements, scalable API design, and detailed OpenAPI specification"
     }
   },
   "terminal_state": {
     "status": "done",
     "stage": "produce"
   },
-  "notes": "调度架构模式之争：集中式调度的强一致性 vs 去中心化调度的可扩展性"
+  "notes": "auto_iterate=True + use_judge：验证质量门禁迭代机制和 LLM-as-Judge 评分"
 }

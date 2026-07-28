@@ -1,17 +1,17 @@
 {
-  "case_id": "tier1-realtime-chat-app",
+  "case_id": "tier1-saas-pricing-strategy",
   "tier": 1,
-  "category": "standard",
-  "topic": "开发实时聊天应用，支持群聊、文件传输、消息已读",
+  "category": "business",
+  "topic": "SaaS 产品定价策略设计，需对比订阅制、按量计费、分层定价的优劣",
   "uploaded_docs": [],
   "config": {
-    "deliverable_type": "prd_openapi",
-    "flow_plan": "full",
+    "deliverable_type": "business_report",
+    "flow_plan": "standard",
     "debate_depth": "standard"
   },
   "expected": {
     "clarify": {
-      "complexity": "full",
+      "complexity": "standard",
       "min_key_questions": 2,
       "expected_roles": [
         "product_architect",
@@ -22,8 +22,7 @@
       "min_claims": 2,
       "expected_claim_types": [
         "fact",
-        "assumption",
-        "constraint"
+        "assumption"
       ]
     },
     "cross_team": {
@@ -31,7 +30,7 @@
       "max_conflicts": 3,
       "expected_conflict_types": [
         "preference",
-        "scope"
+        "factual"
       ]
     },
     "evidence_check": {
@@ -44,18 +43,19 @@
       "min_rationale_length": 20
     },
     "produce": {
-      "must_have_prd_fields": [
+      "must_have_doc_fields": [
         "title",
-        "goal",
-        "scope"
+        "executive_summary",
+        "market_analysis",
+        "financial_projection",
+        "risk_assessment"
       ],
-      "min_api_endpoints": 2,
-      "min_openapi_length": 100
+      "min_doc_length": 300
     }
   },
   "terminal_state": {
     "status": "done",
     "stage": "produce"
   },
-  "notes": "实时通信技术选型：WebSocket vs SSE 在双向通信与实现复杂度上的权衡"
+  "notes": "商业决策场景：定价策略影响收入模型，需平衡用户增长与盈利能力"
 }

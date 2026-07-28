@@ -1,0 +1,74 @@
+{
+  "case_id": "tier1-ecommerce-platform-design",
+  "tier": 1,
+  "category": "comprehensive",
+  "topic": "电商平台系统设计，需覆盖商品管理、订单流程、支付网关、库存同步全链路",
+  "uploaded_docs": [],
+  "config": {
+    "deliverable_type": "comprehensive",
+    "flow_plan": "standard",
+    "debate_depth": "standard",
+    "role_ids": [
+      "product_architect",
+      "engineer",
+      "security_expert",
+      "data_engineer"
+    ]
+  },
+  "expected": {
+    "clarify": {
+      "complexity": "standard",
+      "min_key_questions": 3,
+      "expected_roles": [
+        "product_architect",
+        "engineer",
+        "security_expert",
+        "data_engineer"
+      ]
+    },
+    "intra_team": {
+      "min_claims": 3,
+      "expected_claim_types": [
+        "fact",
+        "assumption",
+        "constraint"
+      ]
+    },
+    "cross_team": {
+      "min_conflicts": 2,
+      "max_conflicts": 5,
+      "expected_conflict_types": [
+        "preference",
+        "factual",
+        "scope"
+      ]
+    },
+    "evidence_check": {
+      "min_evidence_assessments": 1,
+      "expect_confidence_degradation": false
+    },
+    "arbitrate": {
+      "all_conflicts_resolved": true,
+      "min_decisions": 2,
+      "min_rationale_length": 20
+    },
+    "produce": {
+      "must_have_doc_fields": [
+        "title",
+        "requirements",
+        "system_design",
+        "api_design",
+        "data_model"
+      ],
+      "min_doc_length": 400,
+      "use_judge": true,
+      "judge_dimension": "completeness",
+      "judge_expected": "comprehensive system design covering requirements, architecture, API design, data model, and security considerations for an e-commerce platform"
+    }
+  },
+  "terminal_state": {
+    "status": "done",
+    "stage": "produce"
+  },
+  "notes": "comprehensive + 4 角色 + use_judge + evidence_check min=1：最复杂的测试用例，覆盖全维度"
+}

@@ -6,12 +6,12 @@
   "uploaded_docs": [],
   "config": {
     "deliverable_type": "prd_openapi",
-    "flow_plan": "full",
+    "flow_plan": "standard",
     "debate_depth": "standard"
   },
   "expected": {
     "clarify": {
-      "complexity": "full",
+      "complexity": "standard",
       "min_key_questions": 2,
       "expected_roles": [
         "product_architect",

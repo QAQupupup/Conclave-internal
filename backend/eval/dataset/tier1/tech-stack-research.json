@@ -1,0 +1,68 @@
+{
+  "case_id": "tier1-tech-stack-research",
+  "tier": 1,
+  "category": "rag",
+  "topic": "调研2026年主流后端技术栈选型，对比性能与生态成熟度",
+  "uploaded_docs": [
+    {
+      "filename": "tech-survey.md",
+      "content": "# 2026后端技术栈调研报告\n\n## Python 生态\nFastAPI 已成为 Python 异步 Web 框架首选，性能优于 Django/Flask，原生支持 async/await。\nPydantic v2 重写后性能提升 5-10 倍，类型安全验证更加完善。\n\n## Rust 生态\nAxum 在高性能场景中表现优异， Tokio 运行时生态成熟。\nRust 的所有权模型天然防止内存泄漏，适合系统级编程。\n\n## Go 生态\nGin 框架在微服务场景中广泛使用，编译速度快，部署简单。\nGo 的 goroutine 模型适合高并发场景，但泛型支持较晚。\n\n## 对比维度\n- 性能：Rust > Go > Python\n- 开发效率：Python > Go > Rust\n- 生态成熟度：Python > Go > Rust\n- 类型安全：Rust > Python(Pydantic) > Go"
+    }
+  ],
+  "config": {
+    "deliverable_type": "research_report",
+    "flow_plan": "standard",
+    "debate_depth": "deep"
+  },
+  "expected": {
+    "clarify": {
+      "complexity": "standard",
+      "min_key_questions": 2,
+      "expected_roles": [
+        "product_architect",
+        "engineer"
+      ]
+    },
+    "intra_team": {
+      "min_claims": 2,
+      "expected_claim_types": [
+        "fact",
+        "assumption"
+      ]
+    },
+    "cross_team": {
+      "min_conflicts": 1,
+      "max_conflicts": 3,
+      "expected_conflict_types": [
+        "preference"
+      ]
+    },
+    "evidence_check": {
+      "min_evidence_assessments": 1,
+      "expect_confidence_degradation": false
+    },
+    "arbitrate": {
+      "all_conflicts_resolved": true,
+      "min_decisions": 1,
+      "min_rationale_length": 20
+    },
+    "produce": {
+      "must_have_doc_fields": [
+        "title",
+        "summary",
+        "findings",
+        "analysis",
+        "recommendations"
+      ],
+      "min_doc_length": 300,
+      "use_judge": true,
+      "judge_dimension": "completeness",
+      "judge_expected": "complete research report with findings from uploaded document, analysis, and actionable recommendations"
+    }
+  },
+  "terminal_state": {
+    "status": "done",
+    "stage": "produce"
+  },
+  "notes": "RAG 文档上传场景：验证系统能读取上传文档并在产出中引用其内容"
+}

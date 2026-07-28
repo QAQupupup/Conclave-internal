@@ -1,26 +1,26 @@
 {
-  "case_id": "tier1-content-moderation-system",
+  "case_id": "tier1-data-warehouse-architecture",
   "tier": 1,
-  "category": "standard",
-  "topic": "设计内容审核系统，支持文本、图片、视频多模态审核",
+  "category": "architecture",
+  "topic": "数据仓库架构设计，需支持实时数仓与离线数仓混合模式，涵盖 ETL/ELT 管线",
   "uploaded_docs": [],
   "config": {
-    "deliverable_type": "prd_openapi",
-    "flow_plan": "full",
-    "debate_depth": "standard"
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "debate_depth": "deep"
   },
   "expected": {
     "clarify": {
-      "complexity": "full",
+      "complexity": "standard",
       "min_key_questions": 2,
       "expected_roles": [
         "product_architect",
-        "security_expert",
-        "engineer"
+        "engineer",
+        "data_engineer"
       ]
     },
     "intra_team": {
-      "min_claims": 2,
+      "min_claims": 3,
       "expected_claim_types": [
         "fact",
         "assumption",
@@ -29,14 +29,15 @@
     },
     "cross_team": {
       "min_conflicts": 1,
-      "max_conflicts": 3,
+      "max_conflicts": 4,
       "expected_conflict_types": [
         "preference",
+        "factual",
         "scope"
       ]
     },
     "evidence_check": {
-      "min_evidence_assessments": 0,
+      "min_evidence_assessments": 1,
       "expect_confidence_degradation": false
     },
     "arbitrate": {
@@ -45,18 +46,20 @@
       "min_rationale_length": 20
     },
     "produce": {
-      "must_have_prd_fields": [
+      "must_have_doc_fields": [
         "title",
-        "goal",
-        "scope"
+        "overview",
+        "architecture",
+        "tech_stack",
+        "data_model",
+        "api_design"
       ],
-      "min_api_endpoints": 2,
-      "min_openapi_length": 100
+      "min_doc_length": 400
     }
   },
   "terminal_state": {
     "status": "done",
     "stage": "produce"
   },
-  "notes": "AI 与人工审核的边界：自动化覆盖率与审核准确率、成本的权衡"
+  "notes": "deep 辩论 + evidence_check min=1：Lambda vs Kappa 架构之争，批流一体 vs 批流分离"
 }
