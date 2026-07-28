@@ -747,9 +747,7 @@ class RealLLM:
                     )
                     # 记录 provider 切换事件到 trace
                     next_provider_id = (
-                        fallback_chain[provider_idx + 1][3]
-                        if provider_idx + 1 < len(fallback_chain)
-                        else "stub"
+                        fallback_chain[provider_idx + 1][3] if provider_idx + 1 < len(fallback_chain) else "stub"
                     )
                     record_trace_event(
                         "provider_switch",

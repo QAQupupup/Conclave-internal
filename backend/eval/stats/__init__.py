@@ -12,12 +12,12 @@ from eval.stats.metrics import (
 from eval.stats.regression import RegressionJudge
 
 __all__ = [
-    "calculate_pass_at_k",
-    "calculate_stage_pass_rate",
-    "calculate_avg_score",
-    "calculate_score_std",
-    "calculate_percentile",
-    "wilson_ci",
-    "is_regression",
     "RegressionJudge",
+    "calculate_avg_score",
+    "calculate_pass_at_k",
+    "calculate_percentile",
+    "calculate_score_std",
+    "calculate_stage_pass_rate",
+    "is_regression",
+    "wilson_ci",
 ]

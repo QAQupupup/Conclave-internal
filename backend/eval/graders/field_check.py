@@ -40,6 +40,4 @@ class FieldCheckGrader:
             return False
         if isinstance(value, str) and value.strip() == "":
             return False
-        if isinstance(value, (list, dict)) and len(value) == 0:
-            return False
-        return True
+        return not (isinstance(value, (list, dict)) and len(value) == 0)

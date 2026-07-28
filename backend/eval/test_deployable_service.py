@@ -30,6 +30,7 @@
   CONCLAVE_ADMIN_PASSWORD: 管理员密码（默认 admin123）
   CONCLAVE_EVAL_REAL_LLM: 设为 1 启用真实 LLM 会议测试
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,10 +52,10 @@ ADMIN_PASSWORD = os.environ.get("CONCLAVE_ADMIN_PASSWORD", "admin123")
 EVAL_REAL_LLM = os.environ.get("CONCLAVE_EVAL_REAL_LLM") == "1"
 
 # 超时常量
-HTTP_TIMEOUT = 15.0       # 普通请求超时（秒）
-POLL_INTERVAL = 5         # 会议轮询间隔（秒）
-MEETING_TIMEOUT = 600     # 会议运行超时（秒）
-MAX_RETRIES = 3           # 429 重试次数
+HTTP_TIMEOUT = 15.0  # 普通请求超时（秒）
+POLL_INTERVAL = 5  # 会议轮询间隔（秒）
+MEETING_TIMEOUT = 600  # 会议运行超时（秒）
+MAX_RETRIES = 3  # 429 重试次数
 
 # 六阶段枚举
 ALL_STAGES = ("clarify", "intra_team", "cross_team", "evidence_check", "arbitrate", "produce")
@@ -104,11 +105,9 @@ class EvalClient:
     """httpx 封装，自动处理 429 限流重试"""
 
     def __init__(self, timeout: float = HTTP_TIMEOUT):
-        self._client = httpx.AsyncClient(
-            timeout=timeout, follow_redirects=True, trust_env=False
-        )
+        self._client = httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=False)
 
-    async def __aenter__(self) -> "EvalClient":
+    async def __aenter__(self) -> EvalClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -116,7 +115,7 @@ class EvalClient:
 
     async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         last_resp = None
-        for attempt in range(MAX_RETRIES + 1):
+        for _attempt in range(MAX_RETRIES + 1):
             resp = await self._client.request(method, url, **kwargs)
             if resp.status_code != 429:
                 return resp
@@ -166,9 +165,7 @@ async def auth_headers(auth_token: str) -> dict[str, str]:
 # ========================================================================
 
 
-async def _create_meeting(
-    client: EvalClient, headers: dict[str, str], topic: str = "评估测试会议"
-) -> str:
+async def _create_meeting(client: EvalClient, headers: dict[str, str], topic: str = "评估测试会议") -> str:
     """创建会议，返回 meeting_id"""
     resp = await client.post(
         f"{BASE_URL}/meetings",
@@ -202,9 +199,7 @@ async def _create_and_run_meeting_to_done(
     terminal = False
     last_status = "unknown"
     while time.time() < deadline:
-        resp = await client.get(
-            f"{BASE_URL}/meetings/{meeting_id}/progress", headers=headers
-        )
+        resp = await client.get(f"{BASE_URL}/meetings/{meeting_id}/progress", headers=headers)
         if resp.status_code == 200:
             progress = resp.json()
             last_status = progress.get("status", "unknown")
@@ -214,9 +209,7 @@ async def _create_and_run_meeting_to_done(
         await asyncio.sleep(POLL_INTERVAL)
 
     if not terminal:
-        raise AssertionError(
-            f"会议 {meeting_id} 在 {timeout}s 内未到达终态，最后状态: {last_status}"
-        )
+        raise AssertionError(f"会议 {meeting_id} 在 {timeout}s 内未到达终态，最后状态: {last_status}")
 
     # 获取完整详情
     resp = await client.get(f"{BASE_URL}/meetings/{meeting_id}", headers=headers)
@@ -455,9 +448,7 @@ class TestMeetingWorkflow:
     async def test_get_meeting_summary(self, client: EvalClient, auth_headers):
         """GET /meetings/{id}/summary 返回摘要"""
         meeting_id = await _create_meeting(client, auth_headers, topic="部署评估-摘要测试")
-        resp = await client.get(
-            f"{BASE_URL}/meetings/{meeting_id}/summary", headers=auth_headers
-        )
+        resp = await client.get(f"{BASE_URL}/meetings/{meeting_id}/summary", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["meeting_id"] == meeting_id
@@ -468,9 +459,7 @@ class TestMeetingWorkflow:
     async def test_get_report_layout(self, client: EvalClient, auth_headers):
         """GET /meetings/{id}/report-layout 返回布局 spec（含 sections）"""
         meeting_id = await _create_meeting(client, auth_headers, topic="部署评估-报告布局测试")
-        resp = await client.get(
-            f"{BASE_URL}/meetings/{meeting_id}/report-layout", headers=auth_headers
-        )
+        resp = await client.get(f"{BASE_URL}/meetings/{meeting_id}/report-layout", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, dict)
@@ -671,9 +660,7 @@ class TestRealMeetingE2E:
         """会议产出 decisions（arbitrate 阶段成功）"""
         detail = await _create_and_run_meeting_to_done(client, auth_headers)
         decision_record = detail.get("decision_record", {})
-        decisions = (
-            decision_record.get("decisions", []) if isinstance(decision_record, dict) else []
-        )
+        decisions = decision_record.get("decisions", []) if isinstance(decision_record, dict) else []
         assert len(decisions) > 0, f"会议未产出决策，decision_record={decision_record}"
 
     @pytest.mark.asyncio

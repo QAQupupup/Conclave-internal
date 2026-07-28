@@ -70,7 +70,7 @@ async def service_check(config: dict) -> int:
             print(f"GET  /health       -> {resp.status_code}")
             if resp.status_code >= 400:
                 ok = False
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"GET  /health       -> ERROR: {exc}")
             ok = False
 
@@ -86,7 +86,7 @@ async def service_check(config: dict) -> int:
             else:
                 token = resp.json().get("access_token", "")
                 print(f"     token acquired: {bool(token)}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"POST /auth/login   -> ERROR: {exc}")
             ok = False
 
@@ -96,7 +96,7 @@ async def service_check(config: dict) -> int:
             print(f"GET  /docs         -> {resp.status_code}")
             if resp.status_code >= 400:
                 ok = False
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"GET  /docs         -> ERROR: {exc}")
             ok = False
 
@@ -142,10 +142,7 @@ async def run_eval(args: argparse.Namespace) -> int:
 
     cases = load_cases(args.tier)
     if not cases:
-        print(
-            f"No cases found for tier {args.tier} "
-            f"in {DATASET_DIR / f'tier{args.tier}'}"
-        )
+        print(f"No cases found for tier {args.tier} in {DATASET_DIR / f'tier{args.tier}'}")
         return 1
 
     print(f"Loaded {len(cases)} cases for tier {args.tier} (pass_k={args.pass_k})")

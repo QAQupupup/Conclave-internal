@@ -76,15 +76,11 @@ class CaseRunner:
             code = exc.response.status_code if exc.response is not None else "?"
             body = exc.response.text[:200] if exc.response is not None else ""
             errors.append(f"http {code}: {body}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"{type(exc).__name__}: {exc}")
 
         latency = (time.monotonic() - start) * 1000.0
-        passed = (
-            not errors
-            and bool(stage_scores)
-            and all(v >= PASS_THRESHOLD for v in stage_scores.values())
-        )
+        passed = not errors and bool(stage_scores) and all(v >= PASS_THRESHOLD for v in stage_scores.values())
         return CaseResult(
             case_id=case_id,
             tier=tier,
@@ -183,13 +179,9 @@ class CaseRunner:
         expected_status = terminal.get("status")
         expected_stage = terminal.get("stage")
         if expected_status and detail.get("status") != expected_status:
-            errors.append(
-                f"terminal status mismatch: expected {expected_status}, got {detail.get('status')}"
-            )
+            errors.append(f"terminal status mismatch: expected {expected_status}, got {detail.get('status')}")
         if expected_stage and detail.get("stage") != expected_stage:
-            errors.append(
-                f"terminal stage mismatch: expected {expected_stage}, got {detail.get('stage')}"
-            )
+            errors.append(f"terminal stage mismatch: expected {expected_stage}, got {detail.get('stage')}")
 
     # ---------- 阶段评分 ----------
 
@@ -217,9 +209,7 @@ class CaseRunner:
         detail_str = f"{passed_count}/{len(checks)} passed"
         if failed:
             detail_str += f"; failed: {', '.join(failed)}"
-        return GraderResult(
-            score=score, passed=passed_count == len(checks), detail=detail_str
-        )
+        return GraderResult(score=score, passed=passed_count == len(checks), detail=detail_str)
 
     async def _grade_clarify(self, criteria: dict, detail: dict, checks: list[tuple[str, bool]]) -> None:
         key_questions = detail.get("key_questions") or []
@@ -264,9 +254,7 @@ class CaseRunner:
             res = self._exact.grade(expected_types, actual_types)
             checks.append(("expected_conflict_types", res.passed))
 
-    async def _grade_evidence_check(
-        self, criteria: dict, detail: dict, checks: list[tuple[str, bool]]
-    ) -> None:
+    async def _grade_evidence_check(self, criteria: dict, detail: dict, checks: list[tuple[str, bool]]) -> None:
         evidence_set = detail.get("evidence_set") or []
         total_assessments = sum(len(es.get("assessments") or []) for es in evidence_set)
         min_assessments = criteria.get("min_evidence_assessments")
@@ -314,9 +302,7 @@ class CaseRunner:
         if criteria.get("use_judge") and self._judge is not None:
             topic = detail.get("topic", "")
             actual = str(prd) if prd else str(artifact)
-            expected_text = criteria.get(
-                "judge_expected", "complete and coherent PRD with clear scope and API design"
-            )
+            expected_text = criteria.get("judge_expected", "complete and coherent PRD with clear scope and API design")
             dimension = criteria.get("judge_dimension", "completeness")
             res = await self._judge.grade(topic, expected_text, actual, dimension)
             checks.append(("llm_judge_quality", res.score >= PASS_THRESHOLD))

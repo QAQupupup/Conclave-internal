@@ -75,7 +75,7 @@ class SuiteRunner:
                 )
                 resp.raise_for_status()
                 return resp.json().get("access_token")
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     def _configure_judge(self, runner: CaseRunner) -> None:
@@ -103,9 +103,7 @@ class SuiteRunner:
             )
         )
 
-    def _build_suite_result(
-        self, results: list[CaseResult], cases: list[dict], k: int
-    ) -> SuiteResult:
+    def _build_suite_result(self, results: list[CaseResult], cases: list[dict], k: int) -> SuiteResult:
         total_cases = len(cases)
 
         # Pass@1：仅取每个用例的第 0 次运行
@@ -115,10 +113,7 @@ class SuiteRunner:
 
         # Pass@3：若运行次数足够则按 3 分组，否则退化为 pass1
         all_flags = [r.passed for r in results]
-        if k >= 3:
-            pass3 = calculate_pass_at_k(all_flags, 3)
-        else:
-            pass3 = pass1
+        pass3 = calculate_pass_at_k(all_flags, 3) if k >= 3 else pass1
 
         avg_score = calculate_avg_score(results)
 

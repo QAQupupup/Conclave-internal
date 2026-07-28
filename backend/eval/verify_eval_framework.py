@@ -3,10 +3,10 @@
 不依赖真实 LLM，使用 mock 会议详情数据模拟 StubLLM 产出。
 运行方式：cd backend && python -m eval.verify_eval_framework
 """
+
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -15,10 +15,10 @@ EVAL_ROOT = Path(__file__).resolve().parent
 DATASET_DIR = EVAL_ROOT / "dataset"
 sys.path.insert(0, str(EVAL_ROOT.parent))
 
-from eval.runners.case_runner import CaseRunner
-from eval.runners.suite_runner import SuiteRunner
-from eval.models import CaseResult
-from eval.run import load_cases
+from eval.models import CaseResult  # noqa: E402
+from eval.run import load_cases  # noqa: E402
+from eval.runners.case_runner import CaseRunner  # noqa: E402
+from eval.runners.suite_runner import SuiteRunner  # noqa: E402
 
 
 def test_case_loading():
@@ -41,7 +41,7 @@ def test_case_loading():
         assert ts["status"] == "done", f"用例 {case['case_id']} 终态 status 非 done"
         assert ts["stage"] == "produce", f"用例 {case['case_id']} 终态 stage 非 produce"
 
-    print(f"  所有用例结构验证通过（case_id / topic / config / expected / terminal_state）")
+    print("  所有用例结构验证通过（case_id / topic / config / expected / terminal_state）")
     return cases
 
 
@@ -57,9 +57,11 @@ def test_param_building(cases):
         assert "deliverable_type" in params
         assert "flow_plan" in params
         assert "debate_depth" in params
-        print(f"  {case['case_id']}: topic={params['topic'][:30]}... "
-              f"deliverable={params['deliverable_type']} flow={params['flow_plan']}")
-    print(f"  所有用例参数构建验证通过")
+        print(
+            f"  {case['case_id']}: topic={params['topic'][:30]}... "
+            f"deliverable={params['deliverable_type']} flow={params['flow_plan']}"
+        )
+    print("  所有用例参数构建验证通过")
     return runner
 
 
@@ -77,12 +79,14 @@ def _make_mock_detail(case: dict) -> dict:
     num_claims = max(len(expected_claim_types), intra_exp.get("min_claims", 2))
     claims = []
     for i in range(num_claims):
-        claims.append({
-            "claim_id": f"claim-{i:04d}",
-            "role": "engineer",
-            "text": f"Claim {i}: 这是一个技术主张",
-            "evidence_ref": {"type": expected_claim_types[i % len(expected_claim_types)]},
-        })
+        claims.append(
+            {
+                "claim_id": f"claim-{i:04d}",
+                "role": "engineer",
+                "text": f"Claim {i}: 这是一个技术主张",
+                "evidence_ref": {"type": expected_claim_types[i % len(expected_claim_types)]},
+            }
+        )
 
     # 构造 conflicts — 覆盖所有 expected_conflict_types
     expected_conflict_types = cross_exp.get("expected_conflict_types", ["preference"])
@@ -91,21 +95,25 @@ def _make_mock_detail(case: dict) -> dict:
     num_conflicts = min(num_conflicts, max_conflicts)
     conflicts = []
     for i in range(num_conflicts):
-        conflicts.append({
-            "conflict_id": f"conf-{i:04d}",
-            "type": expected_conflict_types[i % len(expected_conflict_types)],
-            "summary": f"Conflict {i}: 角色间观点冲突",
-        })
+        conflicts.append(
+            {
+                "conflict_id": f"conf-{i:04d}",
+                "type": expected_conflict_types[i % len(expected_conflict_types)],
+                "summary": f"Conflict {i}: 角色间观点冲突",
+            }
+        )
 
     # 构造 decisions — 数量 >= conflicts 数量
     num_decisions = max(len(conflicts), arbitrate_exp.get("min_decisions", 1))
     decisions = []
     for i in range(num_decisions):
-        decisions.append({
-            "conflict_id": f"conf-{i:04d}",
-            "decision": "采纳方案 A",
-            "rationale": "x" * max(20, arbitrate_exp.get("min_rationale_length", 20)),
-        })
+        decisions.append(
+            {
+                "conflict_id": f"conf-{i:04d}",
+                "decision": "采纳方案 A",
+                "rationale": "x" * max(20, arbitrate_exp.get("min_rationale_length", 20)),
+            }
+        )
 
     # 构造 artifact
     must_have = produce_exp.get("must_have_prd_fields", ["title", "goal", "scope"])
@@ -126,7 +134,7 @@ def _make_mock_detail(case: dict) -> dict:
         "stage": "produce",
         "status": "done",
         "clarified_topic": "这是一个已澄清的议题描述，长度大于十个字符",
-        "key_questions": [f"问题 {i+1}" for i in range(max(2, clarify_exp.get("min_key_questions", 2)))],
+        "key_questions": [f"问题 {i + 1}" for i in range(max(2, clarify_exp.get("min_key_questions", 2)))],
         "team_config": team_config,
         "claims": claims,
         "conflicts": conflicts,
@@ -153,11 +161,7 @@ async def test_grading(cases, runner: CaseRunner):
         errors: list[str] = []
         runner._check_terminal_state(case, mock_detail, errors)
 
-        case_passed = (
-            not errors
-            and bool(stage_scores)
-            and all(v >= 0.6 for v in stage_scores.values())
-        )
+        case_passed = not errors and bool(stage_scores) and all(v >= 0.6 for v in stage_scores.values())
         status = "PASS" if case_passed else "FAIL"
         if not case_passed:
             all_passed = False
@@ -171,7 +175,7 @@ async def test_grading(cases, runner: CaseRunner):
             assert stage in stage_scores, f"用例 {case['case_id']} 阶段 {stage} 未评分"
 
     assert all_passed, "部分用例评分未通过"
-    print(f"\n  所有用例评分验证通过（6 阶段全覆盖，分数 >= 0.6）")
+    print("\n  所有用例评分验证通过（6 阶段全覆盖，分数 >= 0.6）")
 
 
 def test_suite_result_building(cases):
@@ -184,17 +188,25 @@ def test_suite_result_building(cases):
     mock_results: list[CaseResult] = []
     for case in cases:
         for run_idx in range(2):  # pass_k=2
-            mock_results.append(CaseResult(
-                case_id=case["case_id"],
-                tier=1,
-                passed=True,
-                stage_scores={"clarify": 1.0, "intra_team": 1.0, "cross_team": 1.0,
-                              "evidence_check": 1.0, "arbitrate": 1.0, "produce": 1.0},
-                total_tokens=5000,
-                latency_ms=30000.0,
-                errors=[],
-                run_index=run_idx,
-            ))
+            mock_results.append(
+                CaseResult(
+                    case_id=case["case_id"],
+                    tier=1,
+                    passed=True,
+                    stage_scores={
+                        "clarify": 1.0,
+                        "intra_team": 1.0,
+                        "cross_team": 1.0,
+                        "evidence_check": 1.0,
+                        "arbitrate": 1.0,
+                        "produce": 1.0,
+                    },
+                    total_tokens=5000,
+                    latency_ms=30000.0,
+                    errors=[],
+                    run_index=run_idx,
+                )
+            )
 
     # 使用 SuiteRunner 的 _build_suite_result
     config = {
@@ -213,14 +225,14 @@ def test_suite_result_building(cases):
     print(f"  p50_latency:  {result.p50_latency_ms:.0f}ms")
     print(f"  p95_latency:  {result.p95_latency_ms:.0f}ms")
     print(f"  unstable:     {result.unstable_cases}")
-    print(f"  stage_breakdown:")
+    print("  stage_breakdown:")
     for stage, rate in sorted(result.stage_breakdown.items()):
         print(f"    {stage:<16} {rate:.3f}")
 
     assert result.total_cases == len(cases), f"total_cases 不匹配: {result.total_cases} != {len(cases)}"
     assert result.pass1 == 1.0, f"pass1 应为 1.0: {result.pass1}"
     assert result.total_tokens == 5000 * len(cases) * 2
-    print(f"\n  SuiteResult 汇总验证通过")
+    print("\n  SuiteResult 汇总验证通过")
 
 
 async def main():

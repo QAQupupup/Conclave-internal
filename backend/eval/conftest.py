@@ -12,13 +12,11 @@
 运行方式（宿主机，需服务已启动）：
   cd backend && python -m pytest eval/test_deployable_service.py -v --confcutdir=eval
 """
+
 from __future__ import annotations
+
 
 # 仅注册 marker，不做任何数据库 / app 初始化
 def pytest_configure(config):
-    config.addinivalue_line(
-        "markers", "real_llm: 需要真实 LLM 的测试（设置 CONCLAVE_EVAL_REAL_LLM=1 启用）"
-    )
-    config.addinivalue_line(
-        "markers", "slow: 耗时较长的测试（默认运行，可用 -k 'not slow' 跳过）"
-    )
+    config.addinivalue_line("markers", "real_llm: 需要真实 LLM 的测试（设置 CONCLAVE_EVAL_REAL_LLM=1 启用）")
+    config.addinivalue_line("markers", "slow: 耗时较长的测试（默认运行，可用 -k 'not slow' 跳过）")

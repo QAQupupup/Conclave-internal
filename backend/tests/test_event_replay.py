@@ -5,7 +5,7 @@ import asyncio
 import json
 
 from app.events import bus, make_event
-from app.models import MeetingStatus
+from app.models import MeetingStatus, Stage
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
 

@@ -38,17 +38,13 @@ def calculate_pass_at_k(results: list, k: int) -> float:
     return passed_cases / total_cases if total_cases else 0.0
 
 
-def calculate_stage_pass_rate(
-    results: list, stage: str, threshold: float = STAGE_PASS_THRESHOLD
-) -> float:
+def calculate_stage_pass_rate(results: list, stage: str, threshold: float = STAGE_PASS_THRESHOLD) -> float:
     """计算指定阶段的通过率。
 
     results 为 CaseResult 列表，取每个结果的 ``stage_scores[stage]``，
     得分 >= threshold 视为该阶段通过。
     """
-    relevant = [
-        r for r in results if hasattr(r, "stage_scores") and stage in r.stage_scores
-    ]
+    relevant = [r for r in results if hasattr(r, "stage_scores") and stage in r.stage_scores]
     if not relevant:
         return 0.0
     passed = sum(1 for r in relevant if r.stage_scores[stage] >= threshold)

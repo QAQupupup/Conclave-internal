@@ -33,16 +33,14 @@ class RegressionJudge:
         new_pass1 = float(new_report.get("pass1", 0.0))
         if (old_pass1 - new_pass1) > pass1_threshold:
             reasons.append(
-                f"Pass@1 dropped from {old_pass1:.3f} to {new_pass1:.3f}"
-                f" (delta={old_pass1 - new_pass1:+.3f})"
+                f"Pass@1 dropped from {old_pass1:.3f} to {new_pass1:.3f} (delta={old_pass1 - new_pass1:+.3f})"
             )
 
         old_pass3 = float(old_report.get("pass3", 0.0))
         new_pass3 = float(new_report.get("pass3", 0.0))
         if (old_pass3 - new_pass3) > pass1_threshold:
             reasons.append(
-                f"Pass@3 dropped from {old_pass3:.3f} to {new_pass3:.3f}"
-                f" (delta={old_pass3 - new_pass3:+.3f})"
+                f"Pass@3 dropped from {old_pass3:.3f} to {new_pass3:.3f} (delta={old_pass3 - new_pass3:+.3f})"
             )
 
         # 阶段通过率下降
@@ -52,17 +50,13 @@ class RegressionJudge:
             new_val = float(new_stages.get(stage, 0.0))
             old_val_f = float(old_val)
             if (old_val_f - new_val) > score_threshold:
-                reasons.append(
-                    f"Stage '{stage}' pass rate dropped from {old_val_f:.3f} to {new_val:.3f}"
-                )
+                reasons.append(f"Stage '{stage}' pass rate dropped from {old_val_f:.3f} to {new_val:.3f}")
 
         # === 2. 质量分维度 ===
         old_avg = float(old_report.get("avg_score", 0.0))
         new_avg = float(new_report.get("avg_score", 0.0))
         if (old_avg - new_avg) > score_threshold:
-            reasons.append(
-                f"Average score dropped from {old_avg:.3f} to {new_avg:.3f}"
-            )
+            reasons.append(f"Average score dropped from {old_avg:.3f} to {new_avg:.3f}")
 
         # === 3. 效率维度 ===
         old_tokens = int(old_report.get("total_tokens", 0) or 0)
@@ -77,33 +71,28 @@ class RegressionJudge:
         new_p50 = float(new_report.get("p50_latency_ms", 0.0))
         if old_p50 > 0 and new_p50 > old_p50 * 1.5:
             reasons.append(
-                f"P50 latency increased from {old_p50:.0f}ms to {new_p50:.0f}ms"
-                f" (+{(new_p50 / old_p50 - 1) * 100:.0f}%)"
+                f"P50 latency increased from {old_p50:.0f}ms to {new_p50:.0f}ms (+{(new_p50 / old_p50 - 1) * 100:.0f}%)"
             )
 
         old_p95 = float(old_report.get("p95_latency_ms", 0.0))
         new_p95 = float(new_report.get("p95_latency_ms", 0.0))
         if old_p95 > 0 and new_p95 > old_p95 * 1.5:
             reasons.append(
-                f"P95 latency increased from {old_p95:.0f}ms to {new_p95:.0f}ms"
-                f" (+{(new_p95 / old_p95 - 1) * 100:.0f}%)"
+                f"P95 latency increased from {old_p95:.0f}ms to {new_p95:.0f}ms (+{(new_p95 / old_p95 - 1) * 100:.0f}%)"
             )
 
         # === 4. 稳定性维度 ===
         old_unstable = len(old_report.get("unstable_cases", []))
         new_unstable = len(new_report.get("unstable_cases", []))
         if new_unstable > old_unstable and new_unstable > 0:
-            reasons.append(
-                f"Unstable cases increased from {old_unstable} to {new_unstable}"
-            )
+            reasons.append(f"Unstable cases increased from {old_unstable} to {new_unstable}")
 
         # === 5. per-case 详细对比 ===
         case_regressions = self._compare_cases(old_report, new_report, score_threshold)
         regressed_cases = [c for c in case_regressions if c.is_regression]
         if regressed_cases:
             reasons.append(
-                f"{len(regressed_cases)} case(s) regressed: "
-                + ", ".join(c.case_id for c in regressed_cases[:5])
+                f"{len(regressed_cases)} case(s) regressed: " + ", ".join(c.case_id for c in regressed_cases[:5])
             )
 
         # === 6. Suite 级 trace 事件对比（稳定性） ===
@@ -112,15 +101,11 @@ class RegressionJudge:
         old_switches = sum(1 for e in old_trace_events if e.get("event_type") == "provider_switch")
         new_switches = sum(1 for e in new_trace_events if e.get("event_type") == "provider_switch")
         if new_switches > old_switches:
-            reasons.append(
-                f"Provider switches increased from {old_switches} to {new_switches}"
-            )
+            reasons.append(f"Provider switches increased from {old_switches} to {new_switches}")
         old_stubs = sum(1 for e in old_trace_events if e.get("event_type") == "stub_fallback")
         new_stubs = sum(1 for e in new_trace_events if e.get("event_type") == "stub_fallback")
         if new_stubs > old_stubs:
-            reasons.append(
-                f"Stub fallbacks increased from {old_stubs} to {new_stubs}"
-            )
+            reasons.append(f"Stub fallbacks increased from {old_stubs} to {new_stubs}")
 
         is_reg = len(reasons) > 0
         if not is_reg:
@@ -138,9 +123,7 @@ class RegressionJudge:
             case_regressions=case_regressions,
         )
 
-    def _compare_cases(
-        self, old_report: dict, new_report: dict, score_threshold: float
-    ) -> list[CaseRegression]:
+    def _compare_cases(self, old_report: dict, new_report: dict, score_threshold: float) -> list[CaseRegression]:
         """逐用例对比新旧结果
 
         对比维度：
@@ -164,7 +147,7 @@ class RegressionJudge:
             new_passed = bool(new_c.get("passed", False))
             passed_changed = old_passed != new_passed
             if old_passed and not new_passed:
-                reasons.append(f"Case flipped from PASS to FAIL")
+                reasons.append("Case flipped from PASS to FAIL")
 
             # 分数变化
             old_scores = old_c.get("stage_scores", {})
@@ -192,9 +175,8 @@ class RegressionJudge:
             new_audit = new_c.get("audit_data", {})
             old_quality = self._extract_quality_score(old_audit)
             new_quality = self._extract_quality_score(new_audit)
-            if old_quality is not None and new_quality is not None:
-                if new_quality < old_quality - 5:
-                    reasons.append(f"Quality score dropped: {old_quality} -> {new_quality}")
+            if old_quality is not None and new_quality is not None and new_quality < old_quality - 5:
+                reasons.append(f"Quality score dropped: {old_quality} -> {new_quality}")
 
             old_iters = self._extract_iteration_count(old_audit)
             new_iters = self._extract_iteration_count(new_audit)
@@ -218,7 +200,9 @@ class RegressionJudge:
                     is_regression=is_reg,
                     reasons=reasons,
                     passed_changed=passed_changed,
-                    score_delta=sum(new_scores.values()) - sum(old_scores.values()) if old_scores or new_scores else 0.0,
+                    score_delta=sum(new_scores.values()) - sum(old_scores.values())
+                    if old_scores or new_scores
+                    else 0.0,
                     token_delta=new_t - old_t,
                     latency_delta=new_lat - old_lat,
                     old_quality_score=old_quality,

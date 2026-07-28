@@ -6,7 +6,7 @@ from typing import Any
 
 from eval.graders.base import GraderResult  # 重新导出，统一返回类型入口
 
-__all__ = ["GraderResult", "CaseResult", "SuiteResult", "RegressionResult", "CaseRegression"]
+__all__ = ["CaseRegression", "CaseResult", "GraderResult", "RegressionResult", "SuiteResult"]
 
 
 @dataclass
