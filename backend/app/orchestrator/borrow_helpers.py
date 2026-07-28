@@ -57,7 +57,10 @@ async def _let_borrowed_agents_speak(state: MeetingState, stage: Stage) -> None:
     """
     if not state.borrowed_agents:
         return
-    topic = state.clarified_topic or state.topic
+    # [Wave 6] 议题清洗，防止指令注入
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    topic = sanitize_untrusted_content(state.clarified_topic or state.topic)
     for agent_info in state.borrowed_agents:
         if agent_info.get("spoken"):
             continue
@@ -210,7 +213,10 @@ async def _moderator_assess_borrow(state: MeetingState, stage: Stage) -> None:
     recent_msgs = state.messages[-20:] if len(state.messages) > 20 else state.messages
     recent_text = "\n".join(f"[{m.get('agent_role', '?')}] {m.get('content', '')[:200]}" for m in recent_msgs)
 
-    topic = state.clarified_topic or state.topic
+    # [Wave 6] 议题清洗，防止指令注入
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    topic = sanitize_untrusted_content(state.clarified_topic or state.topic)
     current_role_names = ", ".join(tc.get("role", "") for tc in state.team_config)
     available_role_desc = "\n".join(f"- {r['id']}({r['name']}): {r['desc']}" for r in available_roles)
 

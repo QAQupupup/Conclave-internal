@@ -63,11 +63,19 @@ def _inc_loop_count(state: MeetingState, stage: Stage) -> None:
 
 
 def _build_state_summary(state: MeetingState) -> str:
-    """构建当前状态摘要，供元认知 Agent 决策"""
+    """构建当前状态摘要，供元认知 Agent 决策
+
+    [Wave 6] 议题文本经过 sanitize_untrusted_content 清洗，
+    防止用户通过 topic 注入指令劫持元认知路由决策。
+    """
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    raw_topic = state.clarified_topic or state.topic
+    safe_topic = sanitize_untrusted_content(raw_topic)
     parts = [
         f"当前阶段: {state.stage.value}",
         f"辩论深度: {state.debate_depth}",
-        f"议题: {state.clarified_topic or state.topic}",
+        f"议题: {safe_topic}",
     ]
     if state.key_questions:
         parts.append(f"关键问题: {', '.join(state.key_questions[:3])}")

@@ -21,6 +21,8 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
+from app.lazy_asyncio import LazyLock
+
 from .playwright_search import _STEALTH_JS, _USER_AGENT
 
 logger = logging.getLogger("app.tools.browser_tool")
@@ -359,7 +361,7 @@ class BrowserPool:
         # C-1: NavigationSkill 排他锁（按 meeting_id 隔离）
         # 当 NavigationSkill 执行时，锁住整个 meeting 的浏览器操作，
         # 防止 web_search 等并发操作干扰页面状态
-        self._exclusive_locks: dict[str, asyncio.Lock] = {}
+        self._exclusive_locks: dict[str, LazyLock] = {}
 
     async def _ensure_browser(self) -> None:
         """延迟初始化 Chromium"""
@@ -465,11 +467,13 @@ class BrowserPool:
             extra={"meeting_id": meeting_id, "remaining_contexts": len(self._contexts)},
         )
 
-    def get_exclusive_lock(self, meeting_id: str) -> asyncio.Lock:
+    def get_exclusive_lock(self, meeting_id: str) -> LazyLock:
         """获取指定 meeting 的排他锁（NavigationSkill 使用）
 
         NavigationSkill 执行期间持有此锁，阻塞同 meeting 的其他浏览器操作。
         这是 blocking 模式：NavigationSkill 首次实现不共享浏览器上下文。
+
+        [P1-14 修复] 使用 setdefault + LazyLock 避免 TOCTOU 竞态和事件循环绑定问题。
 
         用法：
             lock = pool.get_exclusive_lock(meeting_id)
@@ -477,9 +481,7 @@ class BrowserPool:
                 # 执行 NavigationSkill 步骤
                 ...
         """
-        if meeting_id not in self._exclusive_locks:
-            self._exclusive_locks[meeting_id] = asyncio.Lock()
-        return self._exclusive_locks[meeting_id]
+        return self._exclusive_locks.setdefault(meeting_id, LazyLock())
 
     async def _reclaim_oldest_idle(self) -> None:
         """回收最空闲的 Context"""
@@ -1110,7 +1112,18 @@ class BrowserTool:
     # ================================================================
 
     async def evaluate(self, meeting_id: str, expression: str, arg: Any = None, page_index: int = 0) -> Any:
-        """在页面执行 JS（10s 超时 + 1MB 截断）"""
+        """在页面执行 JS（10s 超时 + 1MB 截断）
+
+        [Wave 8] defense-in-depth: 表达式安全验证（上游 react_loop 已验证，
+        此处再次验证防止直接调用绕过）
+        """
+        # [Wave 8] 安全验证：阻断危险 JS 模式
+        from app.orchestrator.prompt_safety import validate_js_expression
+
+        is_safe, reason = validate_js_expression(expression)
+        if not is_safe:
+            return {"status": "blocked", "reason": reason, "expression": expression[:200]}
+
         ps = await self._get_page(meeting_id, page_index)
 
         async def _do(page):
@@ -1138,7 +1151,17 @@ class BrowserTool:
         arg: Any = None,
         page_index: int = 0,
     ) -> Any:
-        """在匹配元素上执行 JS"""
+        """在匹配元素上执行 JS
+
+        [Wave 8] defense-in-depth: 表达式安全验证
+        """
+        # [Wave 8] 安全验证：阻断危险 JS 模式
+        from app.orchestrator.prompt_safety import validate_js_expression
+
+        is_safe, reason = validate_js_expression(expression)
+        if not is_safe:
+            return {"status": "blocked", "reason": reason, "expression": expression[:200]}
+
         ps = await self._get_page(meeting_id, page_index)
 
         async def _do(page):

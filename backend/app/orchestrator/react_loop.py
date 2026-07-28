@@ -85,11 +85,15 @@ class ToolRegistry:
             )
         try:
             result = await tool["fn"](arguments)
+            # [Wave 7] 工具返回值清洗：外部内容（网页、搜索结果）可能含指令注入
+            from app.orchestrator.prompt_safety import sanitize_tool_result
+
+            sanitized_result = sanitize_tool_result(result)
             return ToolResult(
                 tool_name=tool_name,
                 arguments=arguments,
                 success=True,
-                result=result,
+                result=sanitized_result,
                 latency_ms=int((time.monotonic() - t0) * 1000),
             )
         except Exception as e:
@@ -327,11 +331,11 @@ class ReactLoop:
 
             # 4. Act: 执行工具调用
             for call in response.tool_calls:
-                # 注入 meeting_id（浏览器工具和工作区工具都需要）
+                # [Wave 3] 安全：强制覆盖 meeting_id，防止 LLM 通过工具参数注入其他会议 ID
+                # 旧代码用 setdefault 允许 LLM 覆盖 meeting_id，存在跨租户数据泄露风险
                 args = dict(call.arguments)
                 if self._meeting_id:
-                    # 所有工具都可能需要 meeting_id（用于文件隔离、浏览器上下文等）
-                    args.setdefault("meeting_id", self._meeting_id)
+                    args["meeting_id"] = self._meeting_id  # 强制覆盖，不接受 LLM 提供的值
                 # 记录工具调用成本
                 time.monotonic()
                 result = await self._tools.execute(call.tool_name, args)
@@ -517,6 +521,17 @@ def create_default_tool_registry() -> ToolRegistry:
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         expression = str(args.get("expression", "document.title"))
+        # [Wave 8] JS 表达式安全验证：阻断危险模式（fetch/cookie/eval 等）
+        from app.orchestrator.prompt_safety import validate_js_expression
+
+        is_safe, reason = validate_js_expression(expression)
+        if not is_safe:
+            log_bus.warning(
+                f"browser.evaluate 被安全策略阻断: {reason}",
+                logger="orchestrator.react_loop",
+                extra={"expression_preview": expression[:100], "reason": reason},
+            )
+            return {"status": "blocked", "reason": reason, "expression": expression[:200]}
         return await tool.evaluate(meeting_id, expression)
 
     registry.register(

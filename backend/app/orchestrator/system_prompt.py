@@ -106,16 +106,23 @@ def build_classification_prompt(
 
     将系统提示词和用户提示词明确分离，不混合。
 
+    [Wave 6] 用户输入经过指令注入防护：sanitize_and_wrap 清洗 + 分隔符包裹，
+    防止用户通过 topic 注入 "忽略之前的指令" 等攻击载荷劫持意图分类。
+
     Args:
-        user_query: 用户原始请求（不修改、不截断）
+        user_query: 用户原始请求（经清洗后注入 prompt）
         override_mode: API 显式指定的 flow_plan（如 "fast"），为空时无覆盖
 
     Returns:
         (system_prompt, user_prompt) 元组——两者明确分离，不拼接
     """
+    from app.orchestrator.prompt_safety import sanitize_and_wrap
+
     system_prompt = render_system_prompt()
 
-    user_prompt = f"请分析以下用户请求，返回最适合的执行模式：\n\n用户请求：{user_query}"
+    # [Wave 6] 清洗用户输入并包裹在分隔符中，防止指令注入
+    safe_query = sanitize_and_wrap(user_query, label="用户请求")
+    user_prompt = f"请分析以下用户请求，返回最适合的执行模式：\n\n{safe_query}"
 
     if override_mode:
         # API 显式覆盖：追加到用户提示词末尾，但标记为系统覆盖

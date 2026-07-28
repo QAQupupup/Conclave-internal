@@ -395,10 +395,18 @@ def build_clarify_prompt(
 
 
 def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: str = "") -> ThinkRequest:
-    """构造 intra_team 阶段的思考请求"""
+    """构造 intra_team 阶段的思考请求
+
+    [Wave 7] clarified_topic 来自 LLM 产出（clarify 阶段），经过 sanitize_untrusted_content
+    清洗以防止注入模式传播到 intra_team 阶段。使用 strip_injection_patterns=True 移除
+    角色标记和指令劫持短语，但不加包裹标签（因为是模板变量，非原始用户输入）。
+    """
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    safe_topic = sanitize_untrusted_content(clarified_topic)
     template = _get_intra_template(role)
     persona = _get_role_persona(role.value)
-    prompt = render(template, role_persona=persona, clarified_topic=clarified_topic, stance=stance)
+    prompt = render(template, role_persona=persona, clarified_topic=safe_topic, stance=stance)
     prompt = _inject_profile(prompt, role.value)
     prompt = _inject_skills(prompt, stage="intra_team", role=role.value)
     if anchor:
@@ -424,7 +432,12 @@ def build_intra_react_prompt(
     让当前角色可以看到其他人的观点并做出反应，提升辩论质量。
 
     prior_conclusions: 前序角色的结论列表 [{"role": "...", "stance": "...", "claims": [...]}]
+
+    [Wave 7] clarified_topic 和 prior_conclusions 均来自 LLM 产出，经过清洗防止注入传播。
     """
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    safe_topic = sanitize_untrusted_content(clarified_topic)
     template = _get_intra_template(role)
     # 构造前序结论摘要
     prior_summary = ""
@@ -437,12 +450,10 @@ def build_intra_react_prompt(
         prior_summary = (
             "\n\n【前序发言参考】\n"
             "以下是其他角色已发表的论点，请在你的分析中参考并考虑是否认同或反驳：\n"
-            + "\n".join(parts)
+            + sanitize_untrusted_content("\n".join(parts))
             + "\n\n请基于上述参考，结合你的专业视角发表论点。"
         )
-    prompt = render(
-        template, role_persona=_get_role_persona(role.value), clarified_topic=clarified_topic, stance=stance
-    )
+    prompt = render(template, role_persona=_get_role_persona(role.value), clarified_topic=safe_topic, stance=stance)
     # 在模板渲染后注入前序结论
     if prior_summary:
         prompt = prompt + prior_summary
@@ -459,7 +470,11 @@ def build_intra_react_prompt(
 
 
 def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> ThinkRequest:
-    prompt = render(CROSS_TEAM, team_conclusions=str(team_conclusions))
+    """[Wave 7] team_conclusions 来自 LLM 产出，经 sanitize_untrusted_content 清洗"""
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    safe_conclusions = sanitize_untrusted_content(str(team_conclusions))
+    prompt = render(CROSS_TEAM, team_conclusions=safe_conclusions)
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     prompt = _inject_skills(prompt, stage="cross_team", role=Role.MODERATOR.value)
     if anchor:
@@ -475,7 +490,13 @@ def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> T
 def build_evidence_prompt(
     conflict: dict, evidence_chunks: list[dict], anchor: str = "", available_tools: list[dict[str, Any]] | None = None
 ) -> ThinkRequest:
-    prompt = render(EVIDENCE_CHECK, conflict=str(conflict), evidence_chunks=str(evidence_chunks))
+    """[Wave 7] conflict 来自 LLM 产出，经 sanitize_untrusted_content 清洗。
+    evidence_chunks 已在 _collect_evidence 上游清洗，此处 defense-in-depth 再次清洗。"""
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    safe_conflict = sanitize_untrusted_content(str(conflict))
+    safe_chunks = str(evidence_chunks)  # 已在上游清洗
+    prompt = render(EVIDENCE_CHECK, conflict=safe_conflict, evidence_chunks=safe_chunks)
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     prompt = _inject_skills(prompt, stage="evidence_check", role=Role.MODERATOR.value)
     if available_tools:
@@ -492,7 +513,11 @@ def build_evidence_prompt(
 
 
 def build_arbitrate_prompt(evidence_set: list[dict], anchor: str = "") -> ThinkRequest:
-    prompt = render(ARBITRATE, evidence_set=str(evidence_set))
+    """[Wave 7] evidence_set 来自 LLM 产出，经 sanitize_untrusted_content 清洗"""
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    safe_evidence = sanitize_untrusted_content(str(evidence_set))
+    prompt = render(ARBITRATE, evidence_set=safe_evidence)
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     prompt = _inject_skills(prompt, stage="arbitrate", role=Role.MODERATOR.value)
     if anchor:
@@ -522,9 +547,13 @@ def build_produce_prompt(
     evidence_context = ""
     if evidence_summary and deliverable_type in ("data_science", "code_analysis", "tested_system"):
         evidence_context = _format_evidence_for_code_gen(evidence_summary)
+    # [Wave 7] decision_record 来自 LLM 产出（仲裁阶段），经清洗防止注入传播
+    from app.orchestrator.prompt_safety import sanitize_untrusted_content
+
+    safe_decision = sanitize_untrusted_content(str(decision_record))
     prompt = render(
         template,
-        decision_record=str(decision_record),
+        decision_record=safe_decision,
         bug_patterns=bug_patterns,
         evidence_context=evidence_context,
     )

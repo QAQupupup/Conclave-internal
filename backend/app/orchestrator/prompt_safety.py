@@ -151,3 +151,122 @@ def sanitize_rag_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def sanitize_doc_summaries(summaries: list[str]) -> list[str]:
     """批量清洗文档摘要列表。"""
     return [sanitize_untrusted_content(s) for s in summaries if s]
+
+
+def sanitize_tool_result(result: Any) -> Any:
+    """清洗工具调用的返回值，防止外部内容中的指令注入。
+
+    [Wave 7] 工具返回值（web_search、web_fetch、browser 等）来自外部源，
+    可能包含恶意指令。本函数递归清洗所有字符串字段：
+    - 移除角色标记（<|system|> 等）
+    - 移除伪造的分隔符
+    - 移除控制字符
+    - 移除指令注入模式（strip_injection_patterns=True）
+
+    对于非字符串类型（int/float/bool/list/dict），递归处理子元素。
+    """
+    if isinstance(result, str):
+        return sanitize_untrusted_content(result)
+    if isinstance(result, list):
+        return [sanitize_tool_result(item) for item in result]
+    if isinstance(result, dict):
+        return {k: sanitize_tool_result(v) for k, v in result.items()}
+    # int/float/bool/None 等原始类型不需要清洗
+    return result
+
+
+# ── [Wave 8] browser.evaluate 表达式安全验证 ──────────────
+
+# 危险 JS 模式黑名单：这些模式可被用于数据窃取、SSRF、或执行任意代码
+# 每条 (pattern, reason) 用于日志和错误信息
+_DANGEROUS_JS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # 网络请求（数据外泄 / SSRF）
+    (re.compile(r"\bfetch\s*\(", re.IGNORECASE), "fetch() 网络请求"),
+    (re.compile(r"\bXMLHttpRequest\b", re.IGNORECASE), "XMLHttpRequest 网络请求"),
+    (re.compile(r"\bnavigator\s*\.\s*sendBeacon\b", re.IGNORECASE), "sendBeacon 数据外泄"),
+    (re.compile(r"\bWebSocket\s*\(", re.IGNORECASE), "WebSocket 连接"),
+    (re.compile(r"\bEventSource\s*\(", re.IGNORECASE), "EventSource 连接"),
+    # 敏感数据访问（cookies / 存储 / 表单）
+    (re.compile(r"\bdocument\s*\.\s*cookie\b", re.IGNORECASE), "document.cookie 访问"),
+    (re.compile(r"\blocalStorage\b", re.IGNORECASE), "localStorage 访问"),
+    (re.compile(r"\bsessionStorage\b", re.IGNORECASE), "sessionStorage 访问"),
+    (re.compile(r"\bindexedDB\b", re.IGNORECASE), "indexedDB 访问"),
+    # 代码执行
+    (re.compile(r"\beval\s*\(", re.IGNORECASE), "eval() 代码执行"),
+    (re.compile(r"\bFunction\s*\(", re.IGNORECASE), "Function() 代码执行"),
+    (re.compile(r"\bsetTimeout\s*\(\s*['\"]", re.IGNORECASE), "setTimeout 字符串执行"),
+    (re.compile(r"\bsetInterval\s*\(\s*['\"]", re.IGNORECASE), "setInterval 字符串执行"),
+    (re.compile(r"\bimport\s*\(", re.IGNORECASE), "动态 import()"),
+    (re.compile(r"\brequire\s*\(", re.IGNORECASE), "require() 调用"),
+    # DOM 篡改
+    (re.compile(r"\bdocument\s*\.\s*write\s*\(", re.IGNORECASE), "document.write() DOM 篡改"),
+    (re.compile(r"\bdocument\s*\.\s*writeln\s*\(", re.IGNORECASE), "document.writeln() DOM 篡改"),
+    (re.compile(r"\.innerHTML\s*=", re.IGNORECASE), "innerHTML 赋值（XSS 风险）"),
+    (re.compile(r"\.outerHTML\s*=", re.IGNORECASE), "outerHTML 赋值（XSS 风险）"),
+    (re.compile(r"\binsertAdjacentHTML\s*\(", re.IGNORECASE), "insertAdjacentHTML（XSS 风险）"),
+    # 窗口/位置操控
+    (re.compile(r"\bwindow\s*\.\s*location\s*=", re.IGNORECASE), "window.location 重定向"),
+    (re.compile(r"\bwindow\s*\.\s*open\s*\(", re.IGNORECASE), "window.open 弹窗"),
+    (re.compile(r"\blocation\s*\.\s*href\s*=", re.IGNORECASE), "location.href 重定向"),
+    (re.compile(r"\blocation\s*\.\s*assign\s*\(", re.IGNORECASE), "location.assign 重定向"),
+    (re.compile(r"\blocation\s*\.\s*replace\s*\(", re.IGNORECASE), "location.replace 重定向"),
+    # 密码/凭证字段
+    (re.compile(r"type\s*=\s*['\"]?password", re.IGNORECASE), "密码字段访问"),
+    (re.compile(r"\bcredential\b", re.IGNORECASE), "凭证访问"),
+    # postMessage 跨域通信
+    (re.compile(r"\bpostMessage\s*\(", re.IGNORECASE), "postMessage 跨域通信"),
+]
+
+# 安全的白名单模式：这些是只读 DOM 查询，允许执行
+# 如果表达式匹配白名单且不匹配黑名单，直接放行
+# 如果不匹配白名单但也不匹配黑名单，记录警告但允许（向后兼容）
+_SAFE_JS_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^\s*\(?\s*\(\)\s*=>\s*document\s*\.\s*(title|URL|domain|referrer|readyState|contentType)\s*$"),
+    re.compile(r"^\s*\(?\s*\(\)\s*=>\s*document\s*\.\s*querySelector"),
+    re.compile(r"^\s*\(?\s*\(\)\s*=>\s*document\s*\.\s*querySelectorAll"),
+    re.compile(r"^\s*\(?\s*\(\)\s*=>\s*document\s*\.\s*getElementById"),
+    re.compile(r"^\s*\(?\s*\(\)\s*=>\s*document\s*\.\s*getElementsBy"),
+    re.compile(r"^\s*\(?\s*\(\)\s*=>\s*performance\s*\.\s*getEntriesByType"),
+    re.compile(r"^\s*\(?\s*\(\)\s*=>\s*window\s*\.\s*scroll"),
+    re.compile(r"^\s*document\s*\.\s*(title|URL|domain|referrer)\s*$"),
+    re.compile(r"^\s*document\s*\.\s*querySelector"),
+]
+
+
+def validate_js_expression(expression: str) -> tuple[bool, str]:
+    """验证 JavaScript 表达式是否安全执行。
+
+    [Wave 8] 防止 LLM 通过 prompt 注入诱导执行恶意 JS：
+    - 数据窃取（document.cookie、localStorage）
+    - 网络请求（fetch、XMLHttpRequest）导致 SSRF 或数据外泄
+    - 代码执行（eval、Function）
+    - DOM 篡改（innerHTML 赋值、document.write）
+
+    Args:
+        expression: 待执行的 JS 表达式
+
+    Returns:
+        (is_safe, reason):
+        - (True, "") 表示安全，可以执行
+        - (False, "阻断原因") 表示危险，不应执行
+    """
+    if not expression or not expression.strip():
+        return False, "空表达式"
+
+    # 1. 黑名单检查：匹配危险模式直接拒绝
+    for pattern, reason in _DANGEROUS_JS_PATTERNS:
+        if pattern.search(expression):
+            return False, f"阻断: {reason}"
+
+    # 2. 检查表达式长度（防止超长表达式绕过正则）
+    if len(expression) > 5000:
+        return False, "表达式过长（>5000字符）"
+
+    # 3. 白名单检查（信息性，不阻断）
+    is_known_safe = any(p.search(expression) for p in _SAFE_JS_PATTERNS)
+    if not is_known_safe:
+        # 不在白名单但也不在黑名单：记录但不阻断（向后兼容）
+        # 生产环境可考虑改为白名单模式（更严格）
+        pass
+
+    return True, ""

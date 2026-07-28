@@ -89,3 +89,22 @@ backend/data/
 Qwen*/
 docs/audits/
 .tmp/
+
+# ===== Audit / Analysis artifacts（本地审计产物，不提交仓库）=====
+arch-debt-audit/
+conlave-audit-master-prompt/
+cross-audit-analysis/
+dual-audit-meta-review/
+meta-meta-review/
+quality-trace-proposal-audit/
+quality-trace-proposal/
+docs/retrospectives/vault-2layer-audit/
+ms.md
+
+# ===== Obsidian Vault (独立组件，存储在 D 盘，不进 Git) =====
+# vault 实际存储在 D:\conclave-knowledge-vault\，通过 Docker volume 挂载
+# 项目内的 obsidian-vault/ 目录仅用于开发时临时映射，不提交
+obsidian-vault/
+# 会话检查点文件包含个人沟通内容，禁止推到 GitHub
+# 检查点存储在 D:\conclave-knowledge-vault\sessions\，不在此处
+docs/sessions/checkpoint-*.md
