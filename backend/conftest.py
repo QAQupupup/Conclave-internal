@@ -24,6 +24,7 @@ def _apply_xdist_isolation() -> None:
         # 将路径部分的数据库名替换为带后缀的版本
         # postgresql+asyncpg://user:pass@host:port/dbname -> .../dbname_gw0
         from urllib.parse import urlparse, urlunparse
+
         parsed = urlparse(db_url)
         old_db = parsed.path.lstrip("/")
         if old_db and not old_db.endswith(f"_{_XDIST_WORKER}"):
@@ -35,6 +36,7 @@ def _apply_xdist_isolation() -> None:
     redis_url = os.environ.get("REDIS_URL", "")
     if redis_url:
         from urllib.parse import urlparse, urlunparse
+
         parsed = urlparse(redis_url)
         new_parsed = parsed._replace(path=f"/{gw_num % 16}")
         os.environ["REDIS_URL"] = urlunparse(new_parsed)
@@ -67,9 +69,10 @@ os.environ.setdefault("CONCLAVE_QDRANT_COLLECTION", "conclave_chunks")
 def _ensure_test_database() -> None:
     """在导入 app 前确保测试数据库存在（连到默认 postgres 库创建）。
     xdist 模式下为每个 worker 创建独立数据库。"""
-    import psycopg2
-    from psycopg2.sql import Identifier, SQL
     from urllib.parse import urlparse
+
+    import psycopg2
+    from psycopg2.sql import SQL, Identifier
 
     raw_url = os.environ.get("DATABASE_URL", "")
     # asyncpg 风格的 URL 需要转换成 psycopg2 可识别的形式
@@ -85,8 +88,7 @@ def _ensure_test_database() -> None:
         cur = conn.cursor()
         # 终止其他连接到该数据库的会话（避免残留连接阻塞 CREATE DATABASE）
         cur.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = %s AND pid <> pg_backend_pid()",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
             (dbname,),
         )
         cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
@@ -129,14 +131,15 @@ os.environ.setdefault("CONCLAVE_DISABLE_KEY_LOADER", "1")
 os.environ.setdefault("CONCLAVE_DISABLE_METRICS", "1")
 
 
-import asyncio
-import pytest
-from fastapi.testclient import TestClient
+import asyncio  # noqa: E402
 
-from app.events import bus
-from app.main import create_app
-from app.orchestrator import runner as runner_mod
-from app.routers import meetings as meetings_mod
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.events import bus  # noqa: E402
+from app.main import create_app  # noqa: E402
+from app.orchestrator import runner as runner_mod  # noqa: E402
+from app.routers import meetings as meetings_mod  # noqa: E402
 
 
 # 每个测试前清空事件表并重置序列，保证事件 seq 从 0 开始
@@ -144,6 +147,7 @@ from app.routers import meetings as meetings_mod
 def _reset_event_bus():
     try:
         import psycopg2
+
         raw_url = os.environ.get("DATABASE_URL", "")
         # asyncpg 风格的 URL 需要转换成 psycopg2 可识别的形式
         pg_url = raw_url.replace("postgresql+asyncpg://", "postgresql://", 1)
@@ -181,19 +185,25 @@ def _ensure_db_initialized():
     不使用 client fixture 的测试（如直接调用 Runner.run()）也需要表存在。"""
     import asyncio as _asyncio
     import contextlib as _contextlib
-    from app.db.engine import _ensure_engine, dispose_async_engine
-    from app.dao.db_init import init_db as _init_db
+
     from sqlalchemy import text as _text
+
+    from app.dao.db_init import init_db as _init_db
+    from app.db.engine import _ensure_engine, dispose_async_engine
 
     async def _do_init():
         # _ensure_engine 是同步函数，直接调用（它处理循环检测与重建）
         _ensure_engine()
         await _init_db()
-        # 确保 users 表存在（与 app/auth.py 中 _init_users_table 保持一致）
-        from app.db.engine import async_session_factory
+
         from app.auth import hash_password as _hash_pw
+        from app.db.base import Base
+        from app.db.engine import async_session_factory
+
+        # 1. 确保 users 表存在（ensure_tenants_table 依赖 users 表添加 tenant_id 列）
         async with async_session_factory() as session:
-            await session.execute(_text("""
+            await session.execute(
+                _text("""
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
                     username VARCHAR(64) UNIQUE NOT NULL,
@@ -205,26 +215,63 @@ def _ensure_db_initialized():
                     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                     last_login_at TIMESTAMP
                 )
-            """))
+            """)
+            )
             await session.execute(_text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
+            await session.commit()
+
+        # 2. 创建 ORM 管理的表（记忆子系统 raw_memories/feature_memories/profile_memories、
+        #    审计日志 audit_logs/cost_records、文档 documents 等）
+        #    与 app/main.py lifespan 保持一致：Base.metadata.create_all()
+        async with async_session_factory() as session, session.bind.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)  # type: ignore[union-attr]
+
+        # 3. 创建 tenants 表 + users.tenant_id 列 + 外键 + 业务表 tenant_id 列
+        #    与 app/plugins/builtin/auth/plugin.py on_startup 保持一致
+        from app.tenants.service import (
+            ensure_business_tables_tenant_id,
+            ensure_tenants_table,
+        )
+
+        await ensure_tenants_table()
+        await ensure_business_tables_tenant_id()
+
+        # 4. TRUNCATE 所有表 + 插入测试数据
+        async with async_session_factory() as session:
             # 查询所有用户表（排除 alembic_version），然后 TRUNCATE CASCADE
-            result = await session.execute(_text(
-                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
-                "AND tablename NOT IN ('alembic_version')"
-            ))
+            result = await session.execute(
+                _text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                    "AND tablename NOT IN ('alembic_version')"
+                )
+            )
             tables = [row[0] for row in result.fetchall()]
             if tables:
-                await session.execute(_text(
-                    f"TRUNCATE TABLE {', '.join(tables)} RESTART IDENTITY CASCADE"
-                ))
+                await session.execute(_text(f"TRUNCATE TABLE {', '.join(tables)} RESTART IDENTITY CASCADE"))
             # 插入测试管理员用户（id=1，与测试模式 middleware 中 set_user_id("1") 对应）
-            # lifespan 启动时 create_default_tenant_for_existing_users 会自动将其关联到默认租户
-            await session.execute(_text(
-                "INSERT INTO users(id, username, password_hash, role, display_name, is_active) "
-                "VALUES(1, 'admin', :pw, 'admin', 'Administrator', TRUE)"
-            ), {"pw": _hash_pw("Admin123!@#")})
+            await session.execute(
+                _text(
+                    "INSERT INTO users(id, username, password_hash, role, display_name, is_active) "
+                    "VALUES(1, 'admin', :pw, 'admin', 'Administrator', TRUE)"
+                ),
+                {"pw": _hash_pw("Admin123!@#")},
+            )
             # 重置 sequences 以确保 id 从 2 开始（避免后续插入冲突）
             await session.execute(_text("ALTER SEQUENCE users_id_seq RESTART WITH 2"))
+
+            # 创建默认租户并关联 admin 用户
+            # 不使用 client fixture 的测试不会触发 lifespan 中的
+            # create_default_tenant_for_existing_users()，需要在此显式创建
+            await session.execute(
+                _text(
+                    "INSERT INTO tenants(id, name, slug, plan, owner_id, settings) "
+                    "VALUES(1, '默认组织', 'default', 'free', 1, '{}'::jsonb) "
+                    "ON CONFLICT (id) DO NOTHING"
+                )
+            )
+            await session.execute(_text("ALTER SEQUENCE tenants_id_seq RESTART WITH 2"))
+            await session.execute(_text("UPDATE users SET tenant_id = 1 WHERE id = 1"))
+
             await session.commit()
 
     loop = _asyncio.new_event_loop()
@@ -263,12 +310,23 @@ def _reset_state():
     - store_mod._stores：RAG 向量库
     - memory_store：三层记忆
     - 异步/同步数据库连接池
+    - 租户上下文 ContextVar
 
     xdist 并行模式下，每个 worker 是独立进程，模块级状态天然隔离；
     此 fixture 负责同一 worker 内测试间的状态清理。
     """
     import contextlib
+
     from app.db.engine import dispose_async_engine
+
+    # 设置系统租户上下文（与 middleware 测试模式一致）
+    # 不使用 client fixture 的测试（直接调 Runner/DAO/Store）也需要租户上下文，
+    # 否则 tenant_filter() 返回 {"tenant_id": -1} 导致数据不可见
+    # 注意：不使用 token reset，因为 asyncio.run() 会创建新上下文，导致 token 跨上下文重置失败
+    from app.tenants.context import set_system_tenant, set_tenant_id
+
+    set_tenant_id(None)
+    set_system_tenant(True)
     runner_mod._states.clear()
     meetings_mod._running_tasks.clear()
     meetings_mod._run_locks.clear()
@@ -276,16 +334,20 @@ def _reset_state():
     bus._history.clear()
     # 清理 RAG 向量库
     from app.rag import store as store_mod
+
     store_mod._stores.clear()
     # 清理角色单例缓存（确保 get_agent 每次测试新建）
     from app.agents import roles as roles_mod
+
     roles_mod._agents.clear()
     # 清理 Agent 计算单例（确保 get_compute 每次测试重建，避免 mock/配置泄漏）
     from app.agents.compute import reset_compute
+
     reset_compute()
     # 清理三层记忆（内存 + PG 表）
     # 注意：必须先 dispose 旧 engine，避免旧 engine 绑定到已关闭的事件循环导致 "different loop" 错误
     from app.memory.store import memory_store
+
     with contextlib.suppress(Exception):
         dispose_async_engine()
     with contextlib.suppress(Exception):
@@ -298,32 +360,39 @@ def _reset_state():
     # 清理浏览器/Playwright 单例（避免 Lock 绑定到旧循环）
     with contextlib.suppress(Exception):
         from app.tools import playwright_search as pw_mod
+
         pw_mod._instance = None
     with contextlib.suppress(Exception):
         from app.tools import browser_tool as bt_mod
+
         bt_mod._pool_instance = None
         bt_mod._tool_instance = None
     # 清理 network_security 的 httpx 客户端（绑定到旧循环）
     with contextlib.suppress(Exception):
         from app import network_security as ns_mod
+
         ns_mod._async_client = None
     # 清理 captcha_guard 单例
     with contextlib.suppress(Exception):
         from app.tools import captcha_guard as cg_mod
+
         cg_mod._guard_instance = None
     # 清理 ws 模块的事件日志
     with contextlib.suppress(Exception):
         from app.routers import ws as ws_mod
+
         ws_mod._ws_event_log.clear()
     # 清理 pricing_fetcher 动态缓存
     with contextlib.suppress(Exception):
         from app import pricing_fetcher as pf_mod
+
         pf_mod._dynamic_pricing.clear()
         pf_mod._last_fetch_time = 0
         pf_mod._fetch_started = False
     # 清理 sandbox 服务状态
     with contextlib.suppress(Exception):
         from app import sandbox as sb_mod
+
         sb_mod._allocated_ports.clear()
         sb_mod._running_services.clear()
         sb_mod._docker_available = None
@@ -332,6 +401,7 @@ def _reset_state():
     # 清理 web_search 单例（避免 Playwright 实例跨测试泄漏）
     with contextlib.suppress(Exception):
         from app import tools as tools_mod
+
         tools_mod._instance = None
     yield
     runner_mod._states.clear()
@@ -344,7 +414,9 @@ def _reset_state():
     # 关闭 RealLLM 的 httpx 连接池（如有），防止事件循环挂起
     try:
         import inspect
+
         from app.agents.compute import _compute
+
         if _compute is not None and hasattr(_compute, "aclose"):
             loop = asyncio.new_event_loop()
             try:
@@ -358,6 +430,11 @@ def _reset_state():
     # 释放异步引擎，避免跨测试连接泄漏
     with contextlib.suppress(Exception):
         dispose_async_engine()
+    # 重置租户上下文到默认值（不使用 token reset，避免跨上下文问题）
+    from app.tenants.context import set_system_tenant, set_tenant_id
+
+    set_tenant_id(None)
+    set_system_tenant(False)
 
 
 # ---------- 公共 fixture：同步运行会议到完成 ----------
@@ -424,9 +501,11 @@ def mock_llm(monkeypatch):
     mock = MockLLM()
     # monkeypatch get_llm 返回 mock
     from app.agents import llm as llm_mod
+
     monkeypatch.setattr(llm_mod, "get_llm", lambda: mock)
     # 同时替换 roles.py 中已创建的 Agent 的 llm
     from app.agents import roles as roles_mod
+
     original_get_agent = roles_mod.get_agent
 
     def patched_get_agent(role):

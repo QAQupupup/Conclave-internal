@@ -34,6 +34,11 @@ def set_system_tenant(b: bool = True) -> Token:
     return _system_tenant_ctx.set(b)
 
 
+def reset_system_tenant_ctx(token: Token) -> None:
+    """重置系统租户标记。"""
+    _system_tenant_ctx.reset(token)
+
+
 def is_system_tenant() -> bool:
     return _system_tenant_ctx.get()
 

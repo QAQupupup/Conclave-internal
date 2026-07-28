@@ -98,11 +98,15 @@ async def init_db() -> None:
             prompt_template TEXT NOT NULL DEFAULT '',
             is_builtin INTEGER NOT NULL DEFAULT 0,
             is_active INTEGER NOT NULL DEFAULT 1,
+            tenant_id INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active)",
+        # 兼容旧数据库：agent_roles 表可能已在旧版本中创建（无 tenant_id 列）
+        "ALTER TABLE agent_roles ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS idx_agent_roles_tenant_id ON agent_roles(tenant_id)",
         """
         CREATE TABLE IF NOT EXISTS meeting_aux (
             meeting_id TEXT NOT NULL,

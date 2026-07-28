@@ -6,41 +6,13 @@ import asyncio
 import itertools
 import re
 
-import pytest
-from fastapi.testclient import TestClient
-
 from app.events import bus
-from app.main import create_app
 from app.models import MeetingStatus, Stage
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
-from app.routers import meetings as meetings_mod
 
 # ---------- fixtures ----------
-
-
-@pytest.fixture()
-def client():
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture(autouse=True)
-def _reset_state():
-    runner_mod._states.clear()
-    meetings_mod._running_tasks.clear()
-    bus._subs.clear()
-    bus._history.clear()
-    from app.rag import store as store_mod
-
-    store_mod._stores.clear()
-    yield
-    runner_mod._states.clear()
-    meetings_mod._running_tasks.clear()
-    bus._subs.clear()
-    bus._history.clear()
-    store_mod._stores.clear()
+# 注意：client 和 _reset_state fixture 由 conftest.py 提供，此处不再重复定义
 
 
 def _run_to_done(meeting_id: str):

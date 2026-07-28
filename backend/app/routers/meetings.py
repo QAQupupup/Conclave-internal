@@ -622,6 +622,7 @@ async def delete_meeting(meeting_id: str, mode: str = "soft", request: Request =
         from app.orchestrator.runner import cleanup_meeting_resources
 
         cleanup_meeting_resources(meeting_id)
+        _run_locks.pop(meeting_id, None)
         return {"meeting_id": meeting_id, "deleted": True, "mode": "soft"}
 
     elif mode == "hard":
@@ -637,6 +638,7 @@ async def delete_meeting(meeting_id: str, mode: str = "soft", request: Request =
         from app.orchestrator.runner import cleanup_meeting_resources
 
         cleanup_meeting_resources(meeting_id)
+        _run_locks.pop(meeting_id, None)
         return {"meeting_id": meeting_id, "deleted": True, "mode": "hard"}
 
     elif mode == "restore":
@@ -832,6 +834,9 @@ async def _run_meeting_bg(meeting_id: str) -> None:
             )
         finally:
             _running_tasks.pop(meeting_id, None)
+            # [P1-17 修复] 清理 _run_locks 防止内存泄漏。
+            # 必须在第一个 await 之前同步执行，避免与新请求的 setdefault 竞态。
+            _run_locks.pop(meeting_id, None)
             # 会议结束后立即清理资源密集型对象（不影响用户查看消息/报告）：
             # - RAG 向量缓存（chunks和向量占用大量内存）
             # - 浏览器上下文

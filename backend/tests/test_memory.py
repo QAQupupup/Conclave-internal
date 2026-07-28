@@ -12,9 +12,26 @@ from app.memory.store import memory_store
 @pytest.fixture(autouse=True)
 async def _clear_memory():
     """每个测试前清空进程级记忆单例，保证隔离"""
+    # Wave 5 多租户隔离后，memory_store 的 _read_key() 在无租户上下文时
+    # fail-closed 返回 None，导致 get_raw/get_features/get_profile 返回空。
+    # 测试需设置租户上下文（默认租户 id=1，由 conftest _ensure_db_initialized 创建）。
+    # 注意：_reset_state fixture 设置了 system_tenant=True（与 middleware 测试模式一致），
+    # 但 memory 测试需要具体 tenant_id=1 来验证租户隔离逻辑，
+    # 因此需要关闭 system_tenant 并设置具体 tenant_id。
+    # 不使用 token reset，因为 asyncio.run() 会创建新上下文，导致 token 跨上下文重置失败。
+    from app.tenants.context import set_system_tenant, set_tenant_id
+
+    set_system_tenant(False)
+    set_tenant_id(1)
+    # _reset_state fixture 会将 _initialized 设为 False，但不用 client fixture 的测试
+    # 不会触发 lifespan 重新 init()，需要显式初始化
+    await memory_store.init()
     await memory_store.clear()
     yield
     await memory_store.clear()
+    # 重置到默认值
+    set_tenant_id(None)
+    set_system_tenant(False)
 
 
 def _enable_memory():

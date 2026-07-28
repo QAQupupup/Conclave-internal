@@ -5,10 +5,8 @@ import asyncio
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.events import bus
-from app.main import create_app
 from app.models import MeetingStatus, Stage
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.nodes import clarify_node
@@ -18,32 +16,8 @@ from app.rag.store import InMemoryVectorStore, StubEmbedding, cosine_similarity
 from app.routers import meetings as meetings_mod
 
 # ---------- fixtures ----------
-
-
-@pytest.fixture()
-def client():
-    """构造测试客户端"""
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture(autouse=True)
-def _reset_state():
-    """每个测试前清理进程级单例状态，保证隔离"""
-    runner_mod._states.clear()
-    meetings_mod._running_tasks.clear()
-    bus._subs.clear()
-    bus._history.clear()
-    from app.rag import store as store_mod
-
-    store_mod._stores.clear()
-    yield
-    runner_mod._states.clear()
-    meetings_mod._running_tasks.clear()
-    bus._subs.clear()
-    bus._history.clear()
-    store_mod._stores.clear()
+# 注意：client 和 _reset_state fixture 由 conftest.py 提供，此处不再重复定义
+# test_smoke.py 曾有局部 _reset_state 覆盖了 conftest 的版本，导致租户上下文未设置
 
 
 def _run_to_done(meeting_id: str):

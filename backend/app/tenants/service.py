@@ -273,6 +273,11 @@ _BUSINESS_TABLES = [
     "cost_records",
     "docker_hosts",
     "docker_host_secrets",
+    "agent_roles",  # [Wave 4] 多租户隔离：自定义角色按租户隔离，内置角色 tenant_id=NULL
+    # [Wave 5] 记忆子系统多租户隔离
+    "raw_memories",
+    "feature_memories",
+    "profile_memories",
 ]
 
 
@@ -280,6 +285,7 @@ async def ensure_business_tables_tenant_id() -> None:
     """为所有核心业务表添加 tenant_id 列（如不存在）。
 
     幂等：可重复调用。添加列后回填默认租户 ID（对于 tenant_id IS NULL 的历史数据）。
+    [Wave 5] 增加 table 存在性检查，防止 ORM 表尚未 create_all 时 ALTER TABLE 报错。
     """
     default_tenant = await get_default_tenant()
     default_tid = default_tenant.id if default_tenant else None
@@ -291,7 +297,9 @@ async def ensure_business_tables_tenant_id() -> None:
                     f"""
                 DO $$
                 BEGIN
-                    IF NOT EXISTS (
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables WHERE table_name = '{table}'
+                    ) AND NOT EXISTS (
                         SELECT 1 FROM information_schema.columns
                         WHERE table_name = '{table}' AND column_name = 'tenant_id'
                     ) THEN
@@ -304,24 +312,51 @@ async def ensure_business_tables_tenant_id() -> None:
 
         await session.commit()
 
-        # 回填默认租户 ID
+        # 回填默认租户 ID（仅对已存在的表）
+        # 注意：不能在 UPDATE 语句的 WHERE 中用 EXISTS 检查表是否存在，
+        # 因为 PostgreSQL 在解析阶段就需要表存在，WHERE EXISTS 无法阻止解析错误。
+        # 必须先查询哪些表存在，再只对存在的表执行 UPDATE。
         if default_tid is not None:
-            for table in _BUSINESS_TABLES:
+            result = await session.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = ANY(:tables)"
+                ),
+                {"tables": list(_BUSINESS_TABLES)},
+            )
+            existing_tables = [row[0] for row in result.fetchall()]
+            for table in existing_tables:
                 await session.execute(
-                    text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL"), {"tid": default_tid}
+                    text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL"),
+                    {"tid": default_tid},
                 )
             await session.commit()
             logger.info("已为核心业务表回填默认租户 id=%d", default_tid)
 
-        # 添加索引和外键
+        # 添加索引和外键（仅对已存在的表）
         for table in _BUSINESS_TABLES:
-            await session.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{table}_tenant_id ON {table}(tenant_id)"))
             await session.execute(
                 text(
                     f"""
                 DO $$
                 BEGIN
-                    IF NOT EXISTS (
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables WHERE table_name = '{table}'
+                    ) THEN
+                        CREATE INDEX IF NOT EXISTS idx_{table}_tenant_id ON {table}(tenant_id);
+                    END IF;
+                END $$;
+                """
+                )
+            )
+            await session.execute(
+                text(
+                    f"""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables WHERE table_name = '{table}'
+                    ) AND NOT EXISTS (
                         SELECT 1 FROM information_schema.table_constraints
                         WHERE constraint_name = 'fk_{table}_tenant' AND table_name = '{table}'
                     ) THEN

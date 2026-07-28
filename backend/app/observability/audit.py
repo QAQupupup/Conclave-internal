@@ -172,10 +172,7 @@ class AuditLogger:
                 from sqlalchemy import text
 
                 await session.execute(
-                    text(
-                        "DELETE FROM audit_logs WHERE id IN "
-                        "(SELECT id FROM audit_logs ORDER BY id DESC LIMIT -1 OFFSET :max)"
-                    ),
+                    text("DELETE FROM audit_logs WHERE id IN (SELECT id FROM audit_logs ORDER BY id DESC OFFSET :max)"),
                     {"max": self._max_records},
                 )
                 await session.commit()

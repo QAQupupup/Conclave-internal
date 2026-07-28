@@ -4,39 +4,13 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
-from fastapi.testclient import TestClient
-
 from app.events import bus, make_event
-from app.main import create_app
 from app.models import MeetingStatus
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
-from app.routers import meetings as meetings_mod
 
 # ---------- fixtures ----------
-
-
-@pytest.fixture()
-def client():
-    """构造测试客户端"""
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture(autouse=True)
-def _reset_state():
-    """每个测试前清理进程级单例状态，保证隔离"""
-    runner_mod._states.clear()
-    meetings_mod._running_tasks.clear()
-    bus._subs.clear()
-    bus._history.clear()
-    yield
-    runner_mod._states.clear()
-    meetings_mod._running_tasks.clear()
-    bus._subs.clear()
-    bus._history.clear()
+# 注意：client 和 _reset_state fixture 由 conftest.py 提供，此处不再重复定义
 
 
 def _run_to_done(meeting_id: str):
