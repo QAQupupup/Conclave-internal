@@ -735,10 +735,10 @@ async def run_meeting(meeting_id: str, request: Request) -> dict[str, Any]:
         if state.status == MeetingStatus.ABORTED:
             raise HTTPException(status_code=400, detail="会议已终止")
 
-        # resume：从暂停态恢复
-        if state.status == MeetingStatus.PAUSED:
-            state.status = MeetingStatus.RUNNING
-            state.paused_snapshot = None
+        # resume：从暂停态/失败态恢复（统一走 apply_signal，确保 _handle_resume 的一致逻辑）
+        if state.status in (MeetingStatus.PAUSED, MeetingStatus.FAILED):
+            state = apply_signal(state, "resume")
+            set_state(state)
 
         # 启动后台任务执行完整六阶段流程
         from app.context import get_request_id

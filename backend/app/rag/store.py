@@ -118,16 +118,36 @@ class SiliconFlowEmbedding:
         all_vecs: list[list[float]] = []
         for i in range(0, len(texts), 32):
             batch = texts[i : i + 32]
-            resp = await client.post(
-                f"{base_url}/embeddings",
-                json={"model": model, "input": batch},
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()["data"]
-            # 按 index 排序确保顺序正确
-            data.sort(key=lambda x: x["index"])
-            all_vecs.extend([item["embedding"] for item in data])
+            # 重试机制：DNS 间歇性失败时自动重试 3 次（间隔 1s/2s/4s）
+            last_exc: Exception | None = None
+            for attempt in range(3):
+                try:
+                    resp = await client.post(
+                        f"{base_url}/embeddings",
+                        json={"model": model, "input": batch},
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()["data"]
+                    # 按 index 排序确保顺序正确
+                    data.sort(key=lambda x: x["index"])
+                    all_vecs.extend([item["embedding"] for item in data])
+                    last_exc = None
+                    break  # 成功则跳出重试循环
+                except (httpx.ConnectError, httpx.TimeoutException) as e:
+                    last_exc = e
+                    if attempt < 2:
+                        wait = 2**attempt
+                        logger.warning(
+                            "Embedding API 连接失败 (attempt %d/3), %ds 后重试: %s",
+                            attempt + 1,
+                            wait,
+                            str(e)[:100],
+                        )
+                        await asyncio.sleep(wait)
+            if last_exc is not None:
+                # 重试 3 次仍失败，抛出明确异常
+                raise RuntimeError(f"Embedding API 不可用（重试 3 次失败）: {last_exc}") from last_exc
         return all_vecs
 
 

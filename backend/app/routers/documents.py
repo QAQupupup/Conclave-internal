@@ -71,7 +71,14 @@ async def upload_document(meeting_id: str, file: UploadFile = File(...)) -> dict
     # 切块入库
     chunks = chunk_markdown(content, doc_id)
     store = get_store(meeting_id)
-    await store.add_chunks(chunks)
+    try:
+        await store.add_chunks(chunks)
+    except Exception as e:
+        # Embedding API 不可用（DNS 失败、网络超时等）时返回 503 而非 500
+        raise HTTPException(
+            status_code=503,
+            detail=f"文档入库失败，Embedding 服务暂时不可用，请稍后重试: {str(e)[:150]}",
+        ) from e
     # 缓存完整原文，支持跨 chunk 惰性展开
     store.store_raw_text(doc_id, content)
 
