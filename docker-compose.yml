@@ -143,8 +143,8 @@ services:
       - CONCLAVE_L2_NETWORK=conclave-dev-conclave-sandbox-l2
       - CONCLAVE_L2_DNS=10.20.0.10
     dns:
-      - 8.8.8.8
       - 223.5.5.5
+      - 223.6.6.6
     networks:
       - conclave-internal
       - conclave-sandbox-l2

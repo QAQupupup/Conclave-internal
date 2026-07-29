@@ -90,6 +90,14 @@ Qwen*/
 docs/audits/
 .tmp/
 
+# ===== Eval / Analysis reports（本地评估产物，不提交仓库）=====
+system-eval-*/
+system-evaluation-report/
+extract_report.py
+backend/eval/read_report.py
+backend/eval/reports/
+*.so.bak
+
 # ===== Audit / Analysis artifacts（本地审计产物，不提交仓库）=====
 arch-debt-audit/
 conlave-audit-master-prompt/
