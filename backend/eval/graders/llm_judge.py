@@ -98,8 +98,12 @@ class LLMJudgeGrader:
         return GraderResult(score=median, passed=passed, detail=detail, unreliable=unreliable)
 
     async def _call_llm(self, prompt: str) -> float:
-        """调用 OpenAI 兼容 API，返回解析后的 0-1 分数。"""
-        url = f"{self.base_url}/v1/chat/completions"
+        """调用 OpenAI 兼容 API，返回解析后的 0-1 分数。
+
+        URL 格式与后端 llm.py 一致：{base_url}/chat/completions
+        base_url 需包含完整 API 路径前缀（如 .../api/v3 或 .../v1）。
+        """
+        url = f"{self.base_url.rstrip('/')}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -109,7 +113,7 @@ class LLMJudgeGrader:
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()

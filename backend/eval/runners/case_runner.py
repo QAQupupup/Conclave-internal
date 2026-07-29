@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from conclave_core.roles import match_role  # 角色名中英文映射（依赖 app.models，eval 环境可用）
 from eval.graders.base import GraderResult
 from eval.graders.exact_match import ExactMatchGrader
 from eval.graders.field_check import FieldCheckGrader
@@ -14,7 +15,7 @@ from eval.graders.llm_judge import LLMJudgeGrader
 from eval.models import CaseResult
 
 POLL_INTERVAL = 3.0
-DEFAULT_TIMEOUT = 300.0
+DEFAULT_TIMEOUT = 600.0  # V4-pro 等深度思考模型需要更长完成时间
 PASS_THRESHOLD = 0.6
 
 # 会议终态：进入这些状态后不再变化
@@ -66,6 +67,13 @@ class CaseRunner:
             await self._start_meeting(meeting_id)
             detail = await self._wait_and_fetch(meeting_id, case)
             total_tokens = self._extract_tokens(detail)
+            # 检测 LLM 是否降级为 stub（token=0 且有 fallback 调用记录）
+            trace_summary = detail.get("llm_trace") or {}
+            if total_tokens == 0 and trace_summary.get("fallback_calls", 0) > 0:
+                errors.append(
+                    f"warning: LLM degraded to stub "
+                    f"({trace_summary.get('fallback_calls', 0)} fallback calls), token count unreliable"
+                )
             stage_scores = await self._grade_all_stages(case, detail)
             self._check_terminal_state(case, detail, errors)
             # 获取完整审计数据（best-effort，失败不影响评分）
@@ -240,7 +248,15 @@ class CaseRunner:
             checks.append(("min_key_questions", len(key_questions) >= min_kq))
         expected_roles = criteria.get("expected_roles")
         if expected_roles:
-            actual_roles = [tc.get("role") for tc in (detail.get("team_config") or [])]
+            # 系统返回的角色名可能是中文（如"系统架构师"），需要通过 match_role
+            # 映射为规范枚举值（如 "product_architect"）后再与 expected_roles 匹配
+            actual_roles_raw = [tc.get("role") for tc in (detail.get("team_config") or [])]
+            actual_roles: list[str] = []
+            for r in actual_roles_raw:
+                if not r:
+                    continue
+                mapped = match_role(r)
+                actual_roles.append(mapped.value if mapped else r)
             res = self._exact.grade(expected_roles, actual_roles)
             checks.append(("expected_roles", res.passed))
         # clarified_topic 非空作为 clarify 阶段完成的信号
@@ -271,7 +287,10 @@ class CaseRunner:
             checks.append(("max_conflicts", len(conflicts) <= max_c))
         expected_types = criteria.get("expected_conflict_types")
         if expected_types:
-            actual_types = [c.get("type") for c in conflicts if c.get("type")]
+            # 兼容 stage_runners 中 type -> conflict_type 的重命名
+            actual_types = [
+                c.get("conflict_type", c.get("type")) for c in conflicts if c.get("conflict_type", c.get("type"))
+            ]
             res = self._exact.grade(expected_types, actual_types)
             checks.append(("expected_conflict_types", res.passed))
 
@@ -284,7 +303,8 @@ class CaseRunner:
         if "expect_confidence_degradation" in criteria:
             expect_deg = bool(criteria.get("expect_confidence_degradation"))
             flags = detail.get("confidence_flags") or {}
-            has_low = any(v == "low" for v in flags.values())
+            # 只检查 evidence_check 自身的置信度，不被其他阶段的 low 污染
+            has_low = flags.get("evidence_check") == "low"
             if expect_deg:
                 checks.append(("confidence_degradation_present", has_low))
             else:
@@ -297,7 +317,7 @@ class CaseRunner:
         if criteria.get("all_conflicts_resolved"):
             checks.append(("all_conflicts_resolved", len(decisions) >= len(conflicts)))
         min_decisions = criteria.get("min_decisions")
-        if min_decisions is not None:
+        if min_decisions is not None and conflicts:  # 有冲突时才检查决策数量，无冲突时无决策是合理的
             checks.append(("min_decisions", len(decisions) >= min_decisions))
         min_rationale = criteria.get("min_rationale_length")
         if min_rationale is not None and decisions:
