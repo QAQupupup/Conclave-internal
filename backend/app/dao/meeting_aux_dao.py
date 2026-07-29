@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import async_session_factory
 from app.tenants import current_tenant_id
@@ -23,7 +24,11 @@ from app.tenants import current_tenant_id
 _AUX_KEYS = ("llm_trace", "evidence_set", "conclusion_chain", "borrowed_agents")
 
 
-async def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
+async def save_meeting_aux(
+    meeting_id: str,
+    aux: dict[str, Any],
+    session: AsyncSession | None = None,
+) -> None:
     """将 aux 大字段单独持久化到 meeting_aux 表。
 
     每个 aux key 对应一行，value_json 存 JSON 序列化后的值。
@@ -32,15 +37,18 @@ async def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
     Args:
         meeting_id: 会议 ID
         aux: extract_aux() 返回的 dict，key 为字段名，value 为可 JSON 序列化的值
+        session: 可选外部 session。传入时仅执行 SQL 不 commit（由调用方控制事务）；
+                 不传时创建独立 session 并 commit（向后兼容）。
     """
     if not aux:
         return
     now = datetime.now().isoformat()
     tid = current_tenant_id()
-    async with async_session_factory() as session:
+
+    async def _execute_in_session(sess: AsyncSession) -> None:
         for key, value in aux.items():
             if tid is not None:
-                await session.execute(
+                await sess.execute(
                     text(
                         """
                         INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at, tenant_id)
@@ -59,7 +67,7 @@ async def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
                     },
                 )
             else:
-                await session.execute(
+                await sess.execute(
                     text(
                         """
                         INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at)
@@ -76,7 +84,13 @@ async def save_meeting_aux(meeting_id: str, aux: dict[str, Any]) -> None:
                         "updated_at": now,
                     },
                 )
-        await session.commit()
+
+    if session is not None:
+        await _execute_in_session(session)
+    else:
+        async with async_session_factory() as session:
+            await _execute_in_session(session)
+            await session.commit()
 
 
 async def get_meeting_aux(meeting_id: str) -> dict[str, Any]:

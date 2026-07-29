@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import bindparam, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import async_session_factory
 from app.tenants import current_tenant_id, tenant_filter_clause
@@ -28,8 +29,14 @@ async def save_meeting(
     created_at: datetime,
     payload: dict[str, Any],
     owner_username: str | None = None,
+    session: AsyncSession | None = None,
 ) -> None:
-    """upsert 会议记录，payload 存 JSON。自动填充当前 tenant_id。"""
+    """upsert 会议记录，payload 存 JSON。自动填充当前 tenant_id。
+
+    Args:
+        session: 可选外部 session。传入时仅执行 SQL 不 commit（由调用方控制事务）；
+                 不传时创建独立 session 并 commit（向后兼容）。
+    """
     tid = current_tenant_id()  # None 表示系统租户
 
     cols = ["id", "topic", "status", "stage", "created_at", "payload"]
@@ -66,9 +73,12 @@ async def save_meeting(
         update_parts.append("tenant_id=COALESCE(meetings.tenant_id, excluded.tenant_id)")
     update_sql = ",\n    ".join(update_parts)
     sql = f"INSERT INTO meetings ({col_list})\nVALUES ({val_list})\nON CONFLICT(id) DO UPDATE SET\n    {update_sql}"
-    async with async_session_factory() as session:
+    if session is not None:
         await session.execute(text(sql), params)
-        await session.commit()
+    else:
+        async with async_session_factory() as session:
+            await session.execute(text(sql), params)
+            await session.commit()
 
 
 async def get_meeting(meeting_id: str) -> dict[str, Any] | None:

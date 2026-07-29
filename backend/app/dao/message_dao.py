@@ -12,13 +12,22 @@ import json
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import async_session_factory
 from app.tenants import current_tenant_id
 
 
-async def save_message(msg: dict[str, Any]) -> None:
-    """保存发言记录。自动填充当前 tenant_id。"""
+async def save_message(
+    msg: dict[str, Any],
+    session: AsyncSession | None = None,
+) -> None:
+    """保存发言记录。自动填充当前 tenant_id。
+
+    Args:
+        session: 可选外部 session。传入时仅执行 SQL 不 commit（由调用方控制事务）；
+                 不传时创建独立 session 并 commit（向后兼容）。
+    """
     tid = current_tenant_id()
     base_params = {
         "id": msg["id"],
@@ -30,7 +39,7 @@ async def save_message(msg: dict[str, Any]) -> None:
         "evidence_refs": json.dumps(msg.get("evidence_refs", []), ensure_ascii=False),
         "created_at": msg["created_at"],
     }
-    async with async_session_factory() as session:
+    if session is not None:
         if tid is not None:
             await session.execute(
                 text(
@@ -69,7 +78,47 @@ async def save_message(msg: dict[str, Any]) -> None:
                 ),
                 base_params,
             )
-        await session.commit()
+    else:
+        async with async_session_factory() as session:
+            if tid is not None:
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO messages
+                        (id, meeting_id, agent_role, stage, content, claim_refs, evidence_refs, created_at, tenant_id)
+                        VALUES (:id, :meeting_id, :agent_role, :stage, :content, :claim_refs, :evidence_refs, :created_at, :tenant_id)
+                        ON CONFLICT(id) DO UPDATE SET
+                            meeting_id=excluded.meeting_id,
+                            agent_role=excluded.agent_role,
+                            stage=excluded.stage,
+                            content=excluded.content,
+                            claim_refs=excluded.claim_refs,
+                            evidence_refs=excluded.evidence_refs,
+                            created_at=excluded.created_at
+                        """
+                    ),
+                    {**base_params, "tenant_id": tid},
+                )
+            else:
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO messages
+                        (id, meeting_id, agent_role, stage, content, claim_refs, evidence_refs, created_at)
+                        VALUES (:id, :meeting_id, :agent_role, :stage, :content, :claim_refs, :evidence_refs, :created_at)
+                        ON CONFLICT(id) DO UPDATE SET
+                            meeting_id=excluded.meeting_id,
+                            agent_role=excluded.agent_role,
+                            stage=excluded.stage,
+                            content=excluded.content,
+                            claim_refs=excluded.claim_refs,
+                            evidence_refs=excluded.evidence_refs,
+                            created_at=excluded.created_at
+                        """
+                    ),
+                    base_params,
+                )
+            await session.commit()
 
 
 async def list_messages(meeting_id: str) -> list[dict[str, Any]]:
