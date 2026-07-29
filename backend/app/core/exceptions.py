@@ -53,7 +53,8 @@ class ErrorCode(str, Enum):
 
     # LLM/外部服务 (5xxx)
     LLM_UNAVAILABLE = "LLM_UNAVAILABLE"
-    LLM_RATE_LIMITED = "LLM_RATE_LIMITED"
+    LLM_RATE_LIMITED = "LLM_RATE_LIMIT"
+    LLM_INSUFFICIENT_BALANCE = "LLM_INSUFFICIENT_BALANCE"
     LLM_RESPONSE_INVALID = "LLM_RESPONSE_INVALID"
     EMBEDDING_FAILED = "EMBEDDING_FAILED"
     RERANK_FAILED = "RERANK_FAILED"
@@ -160,6 +161,22 @@ class InvalidCredentialsError(AppException):
 class QuotaExceededError(AppException):
     def __init__(self, message: str = "配额已耗尽", details: dict[str, Any] | None = None) -> None:
         super().__init__(message, code=ErrorCode.QUOTA_EXCEEDED, status_code=429, details=details)
+
+
+class InsufficientBalanceError(AppException):
+    """API 余额不足异常。
+
+    当 LLM 提供商返回余额不足错误时抛出（HTTP 402 / 特定 403 / 429 insufficient_quota）。
+    Runner 捕获后暂停会议（PAUSED），而非标记 FAILED，允许用户充值后 resume 继续。
+    """
+
+    def __init__(self, message: str = "API 余额不足，请充值后恢复会议", details: dict[str, Any] | None = None) -> None:
+        super().__init__(
+            message,
+            code=ErrorCode.LLM_INSUFFICIENT_BALANCE,
+            status_code=402,
+            details=details,
+        )
 
 
 # ============================================================

@@ -20,7 +20,15 @@ MODERATOR_CLARIFY = """[系统] 你是 Conclave 会议主持人。职责是推�
    - "standard"：需要讨论但可能无冲突（跳过证据检查）
    - "full"：复杂议题需要完整六阶段讨论（默认）
 
-输出 JSON: {{"clarified_topic": "...", "key_questions": ["..."], "team_config": [{{"role": "...", "stance": "..."}}], "complexity": "simple|standard|full"}}"""
+输出 JSON: {{"clarified_topic": "...", "key_questions": ["..."], "team_config": [{{"role": "...", "stance": "..."}}], "complexity": "simple|standard|full", "topic_type": "analysis|design|build|research|report"}}
+
+topic_type 说明：
+- analysis: 商业分析、市场调研、数据洞察等分析类议题
+- design: 架构设计、系统设计、方案设计等设计类议题
+- build: 可部署服务、工程实现、代码生成等构建类议题
+- research: 技术调研、文献综述、可行性研究等调研类议题
+- report: 通用报告类议题（不属于以上类型时选此）
+仅当 complexity=full 时 topic_type 有意义；simple/standard 时填 "report" 即可。"""
 
 # ---------- 2.2 产品/架构师 IntraTeam 阶段 ----------
 # 角色画像从 ROLE_LIBRARY 动态注入（{role_persona}），此处只保留阶段骨架

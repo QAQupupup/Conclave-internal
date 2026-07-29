@@ -8,6 +8,7 @@ from typing import Any
 
 from app.agents.compute import build_intra_prompt, execute_think
 from app.agents.trace import set_current_trace
+from app.logging_config import get_logger
 from app.models import MeetingState, Role
 from app.orchestrator.stage_runners import run_intra_team
 
@@ -16,6 +17,8 @@ from ._helpers import (
     _resolve_model_for_call,
     _run_with_consistency,
 )
+
+logger = get_logger("orchestrator.nodes.intra_team")
 
 
 async def intra_team_node(state: MeetingState) -> MeetingState:
@@ -27,6 +30,10 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
 
     支持门禁 supplement 模式：当 gate_pending_action.action == "supplement" 时，
     仅运行 target_roles 指定的角色，替换其原有 claims（而非全量追加）。
+
+    支持子步骤断点续传：当 completed_roles 非空时（前次执行被余额不足等中断），
+    跳过已完成角色，仅运行未完成角色，结果与 intra_team_partial_results 合并后
+    传入 run_intra_team。阶段完成后清空检查点字段。
     """
     set_current_trace(state.llm_trace)
 
@@ -55,6 +62,9 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             # supplement 模式下仅运行目标角色
             if is_supplement and matched.value not in supplement_roles:
                 continue
+            # 断点续传：非 supplement 模式下跳过已完成的角色
+            if not is_supplement and matched.value in state.completed_roles:
+                continue
             seen_roles.add(matched)
             members.append((matched, stance))
 
@@ -68,6 +78,18 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             if matched is not None and matched not in seen_roles:
                 seen_roles.add(matched)
                 members.append((matched, stance))
+
+    # 断点续传：如果所有角色都已在之前的中断中完成，直接用已保存的结果
+    # （此检查必须在 default fallback 之前，否则会重新运行已完成角色）
+    if not is_supplement and not members and state.intra_team_partial_results:
+        logger.info(
+            "会议 %s intra_team 全部角色已完成（断点续传），直接聚合结果",
+            state.meeting_id,
+        )
+        all_results = list(state.intra_team_partial_results)
+        state.completed_roles = []
+        state.intra_team_partial_results = []
+        return await run_intra_team(state, all_results, replace_roles=None)
 
     if not members:
         members = [(Role.PRODUCT_ARCHITECT, "重价值与边界"), (Role.ENGINEER, "重可行性与风险")]
@@ -95,13 +117,38 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
             return resp.result
 
         result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
-        return {
+        output = {
             "role": role.value,
             "stance": stance,
             "claims": result.get("claims", []),
             "confidence": confidence,
             "react": False,
         }
+        # 子步骤检查点：标记角色已完成并保存结果（survives gather 异常中断）
+        if not is_supplement and role.value not in state.completed_roles:
+            state.completed_roles.append(role.value)
+            state.intra_team_partial_results.append(output)
+        return output
 
-    role_results = await asyncio.gather(*[_think_one(r, s) for r, s in members])
-    return await run_intra_team(state, list(role_results), replace_roles=supplement_roles if is_supplement else None)
+    # 全并发执行未完成的角色，使用 return_exceptions=True 捕获部分失败
+    raw_results = await asyncio.gather(*[_think_one(r, s) for r, s in members], return_exceptions=True)
+
+    # 分离成功结果与异常
+    gathered_results: list[dict[str, Any]] = list(state.intra_team_partial_results)
+    first_exc: Exception | None = None
+    for r in raw_results:
+        if isinstance(r, Exception):
+            if first_exc is None:
+                first_exc = r
+        elif isinstance(r, dict):
+            gathered_results.append(r)
+
+    if first_exc is not None:
+        # 部分角色失败（如余额不足）。已完成角色的结果已保存在 state 中。
+        # Runner 的异常处理会持久化 state（含 completed_roles），然后暂停/重试。
+        raise first_exc
+
+    # 全部角色成功完成，清空检查点字段
+    state.completed_roles = []
+    state.intra_team_partial_results = []
+    return await run_intra_team(state, gathered_results, replace_roles=supplement_roles if is_supplement else None)

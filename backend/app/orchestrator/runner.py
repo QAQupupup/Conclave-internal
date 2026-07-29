@@ -26,7 +26,9 @@ from app.orchestrator.instant import (
 )
 from app.orchestrator.manager import MeetingManager
 from app.orchestrator.nodes import _inc_loop_count, _let_borrowed_agents_speak, decide_next_stage
-from conclave_core.state import STAGE_ORDER, is_terminal, should_pause
+from conclave_core.state import STAGE_ORDER, is_terminal, should_pause  # noqa: F401 (STAGE_ORDER kept for fallback)
+
+from .workflow_templates import get_stage_sequence
 
 logger = get_logger("orchestrator.runner")
 
@@ -234,20 +236,30 @@ class Runner:
 
         # ===== 模型快照：在运行开始时 resolve 所有角色/阶段的最终模型 =====
         # 运行时 LLM 调用直接读取快照，不再动态 resolve，消除中途切模型的不确定性
-        if not state.resolved_models:
+        # resume 时如果 model_override 已变更（用户通过 control API 换了模型），重新 resolve
+        if not state.resolved_models or state.resolved_from_model_override != state.model_override:
             try:
                 from app.llm_providers import resolve_models_for_meeting
 
+                old_models = state.resolved_models
                 state.resolved_models = resolve_models_for_meeting(
                     role_configs=state.role_configs,
                     meeting_model=state.model_override,
                     stage_overrides=None,  # 阶段覆盖预留，暂未开放
                 )
-                log_bus.info(
-                    f"模型快照完成: {len(state.resolved_models)} 个角色/阶段",
-                    logger="orchestrator.runner",
-                    extra={"resolved_models": state.resolved_models},
-                )
+                state.resolved_from_model_override = state.model_override
+                if old_models and old_models != state.resolved_models:
+                    log_bus.info(
+                        f"模型快照已更新（model_override 变更）: {len(state.resolved_models)} 个角色/阶段",
+                        logger="orchestrator.runner",
+                        extra={"resolved_models": state.resolved_models, "old_models": old_models},
+                    )
+                else:
+                    log_bus.info(
+                        f"模型快照完成: {len(state.resolved_models)} 个角色/阶段",
+                        logger="orchestrator.runner",
+                        extra={"resolved_models": state.resolved_models},
+                    )
             except Exception as e:
                 log_bus.warning(f"模型快照失败（将回退到动态 resolve）: {e}", logger="orchestrator.runner")
         # --- Instant 模式分流 ---
@@ -261,7 +273,43 @@ class Runner:
             state.flow_plan = FLOW_INSTANT
             logger.info("会议 %s 使用即时模式（flow_plan=%s 已预设）", state.meeting_id, state.flow_plan)
         else:
-            intent = await classify_intent_async(state.topic, override_mode=state.flow_plan)
+            try:
+                intent = await classify_intent_async(state.topic, override_mode=state.flow_plan)
+            except Exception as intent_exc:
+                # 余额不足时暂停会议（classify_intent_async 在 try 块外，需单独处理）
+                from app.core.exceptions import InsufficientBalanceError
+
+                if isinstance(intent_exc, InsufficientBalanceError):
+                    logger.warning(f"会议 {state.meeting_id} 意图分流阶段 API 余额不足: {intent_exc}")
+                    state.paused_snapshot = state.snapshot()
+                    state.status = MeetingStatus.PAUSED
+                    state.error_detail = f"API 余额不足，会议已暂停: {str(intent_exc)[:500]}"
+                    state.checkpoint = {
+                        "failed_stage": "classify_intent",
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
+                        "error": str(intent_exc)[:1000],
+                        "pause_reason": "insufficient_balance",
+                        "resumable": True,
+                    }
+                    await self._persist(state)
+                    await bus.publish(
+                        make_event(
+                            "meeting.paused",
+                            state.meeting_id,
+                            {
+                                "stage": "classify_intent",
+                                "reason": "insufficient_balance",
+                                "message": "API 余额不足，会议已暂停，充值后可恢复",
+                                "resumable": True,
+                            },
+                        )
+                    )
+                    reset_meeting_id(mid_token)
+                    reset_runner_session_id(rsid_token)
+                    if rid_token is not None:
+                        reset_request_id(rid_token)
+                    return state
+                raise
             if intent == FLOW_INSTANT or intent == "simple":
                 use_instant = True
                 state.flow_plan = FLOW_INSTANT
@@ -278,6 +326,40 @@ class Runner:
             try:
                 state = await run_instant(state.topic, state)
             except Exception as exc:
+                # 余额不足时暂停会议（而非 FAILED），允许用户充值后 resume
+                from app.core.exceptions import InsufficientBalanceError
+
+                if isinstance(exc, InsufficientBalanceError):
+                    logger.warning(f"会议 {state.meeting_id} 即时模式 API 余额不足: {exc}")
+                    state.paused_snapshot = state.snapshot()
+                    state.status = MeetingStatus.PAUSED
+                    state.error_detail = f"API 余额不足，会议已暂停: {str(exc)[:500]}"
+                    state.checkpoint = {
+                        "failed_stage": "instant",
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
+                        "error": str(exc)[:1000],
+                        "pause_reason": "insufficient_balance",
+                        "resumable": True,
+                    }
+                    await self._persist(state)
+                    await bus.publish(
+                        make_event(
+                            "meeting.paused",
+                            state.meeting_id,
+                            {
+                                "stage": "instant",
+                                "reason": "insufficient_balance",
+                                "message": "API 余额不足，会议已暂停，充值后可恢复",
+                                "resumable": True,
+                            },
+                        )
+                    )
+                    reset_meeting_id(mid_token)
+                    reset_runner_session_id(rsid_token)
+                    if rid_token is not None:
+                        reset_request_id(rid_token)
+                    return state
+
                 logger.error("即时模式异常: %s", exc, exc_info=True)
                 state.status = MeetingStatus.FAILED
                 state.error_detail = str(exc)[:2000]
@@ -324,6 +406,50 @@ class Runner:
                 try:
                     state = await self.manager.run_stage(state, current_stage.value)
                 except Exception as stage_exc:
+                    # === 余额不足：暂停会议（PAUSED），等待用户充值后 resume ===
+                    # 不重试（余额为 0 时重试必然失败），不标记 FAILED（可恢复）
+                    from app.core.exceptions import InsufficientBalanceError
+
+                    if isinstance(stage_exc, InsufficientBalanceError):
+                        stage_name = current_stage.value
+                        logger.warning(
+                            f"会议 {state.meeting_id} 阶段 {stage_name} 因 API 余额不足暂停: {stage_exc}",
+                        )
+                        log_bus.warning(
+                            f"API 余额不足，会议暂停: stage={stage_name}",
+                            logger="orchestrator.runner",
+                            extra={
+                                "meeting_id": state.meeting_id,
+                                "stage": stage_name,
+                                "error": str(stage_exc)[:500],
+                                "pause_reason": "insufficient_balance",
+                            },
+                        )
+                        state.paused_snapshot = state.snapshot()
+                        state.status = MeetingStatus.PAUSED
+                        state.error_detail = f"API 余额不足，会议已暂停: {str(stage_exc)[:500]}"
+                        state.checkpoint = {
+                            "failed_stage": stage_name,
+                            "failed_at": datetime.now(timezone.utc).isoformat(),
+                            "error": str(stage_exc)[:1000],
+                            "pause_reason": "insufficient_balance",
+                            "resumable": True,
+                        }
+                        await self._persist(state)
+                        await bus.publish(
+                            make_event(
+                                "meeting.paused",
+                                state.meeting_id,
+                                {
+                                    "stage": stage_name,
+                                    "reason": "insufficient_balance",
+                                    "message": "API 余额不足，会议已暂停，充值后可恢复",
+                                    "resumable": True,
+                                },
+                            )
+                        )
+                        return state
+
                     # === 断点续传：阶段失败时不直接标记FAILED，而是记录checkpoint并重试 ===
                     import traceback
 
@@ -554,8 +680,10 @@ class Runner:
                     _regression_count = int(getattr(state, "_regression_count", 0))
 
                     if next_stage != old_stage and next_stage != Stage.PRODUCE:
-                        from_idx = STAGE_ORDER.index(old_stage) if old_stage in STAGE_ORDER else -1
-                        to_idx = STAGE_ORDER.index(next_stage) if next_stage in STAGE_ORDER else -1
+                        # ADR-014 Phase 2: 使用工作流模板的阶段序列进行回退检测
+                        _wf_stages = get_stage_sequence(state.workflow_template)
+                        from_idx = _wf_stages.index(old_stage) if old_stage in _wf_stages else -1
+                        to_idx = _wf_stages.index(next_stage) if next_stage in _wf_stages else -1
                         if to_idx < from_idx and from_idx >= 0 and to_idx >= 0:
                             # 回退转移
                             _regression_count += 1
@@ -617,24 +745,53 @@ class Runner:
         # [AUDIT-FIX P0-2/P0-4] 异常兜底：节点抛出未捕获异常时，
         # 将状态置为 FAILED 而非遗留 RUNNING 僵死态，并记录 error_detail
         except Exception as exc:
-            logger.error("会议 %s 节点执行异常: %s", state.meeting_id, exc, exc_info=True)
-            log_bus.error(
-                f"Runner 异常终止: {exc}",
-                logger="orchestrator.runner",
-                extra={
-                    "meeting_id": state.meeting_id,
-                    "runner_session_id": rsid,
-                    "stage": state.stage.value,
-                    "error": str(exc)[:500],
-                },
-            )
-            state.status = MeetingStatus.FAILED
-            state.error_detail = str(exc)[:2000]
-            from datetime import datetime as _dt
-            from datetime import timezone as _tz
+            # 余额不足：暂停会议（PAUSED），覆盖介入处理/借调发言等非阶段执行路径
+            from app.core.exceptions import InsufficientBalanceError
 
-            state.completed_at = _dt.now(_tz.utc)
-            await self._persist(state)
+            if isinstance(exc, InsufficientBalanceError):
+                logger.warning(f"会议 {state.meeting_id} 阶段外 API 余额不足: {exc}")
+                state.paused_snapshot = state.snapshot()
+                state.status = MeetingStatus.PAUSED
+                state.error_detail = f"API 余额不足，会议已暂停: {str(exc)[:500]}"
+                state.checkpoint = {
+                    "failed_stage": state.stage.value,
+                    "failed_at": datetime.now(timezone.utc).isoformat(),
+                    "error": str(exc)[:1000],
+                    "pause_reason": "insufficient_balance",
+                    "resumable": True,
+                }
+                await self._persist(state)
+                await bus.publish(
+                    make_event(
+                        "meeting.paused",
+                        state.meeting_id,
+                        {
+                            "stage": state.stage.value,
+                            "reason": "insufficient_balance",
+                            "message": "API 余额不足，会议已暂停，充值后可恢复",
+                            "resumable": True,
+                        },
+                    )
+                )
+            else:
+                logger.error("会议 %s 节点执行异常: %s", state.meeting_id, exc, exc_info=True)
+                log_bus.error(
+                    f"Runner 异常终止: {exc}",
+                    logger="orchestrator.runner",
+                    extra={
+                        "meeting_id": state.meeting_id,
+                        "runner_session_id": rsid,
+                        "stage": state.stage.value,
+                        "error": str(exc)[:500],
+                    },
+                )
+                state.status = MeetingStatus.FAILED
+                state.error_detail = str(exc)[:2000]
+                from datetime import datetime as _dt
+                from datetime import timezone as _tz
+
+                state.completed_at = _dt.now(_tz.utc)
+                await self._persist(state)
 
         logger.info("会议 %s 运行结束: stage=%s, status=%s", state.meeting_id, state.stage.value, state.status.value)
         # 旁路日志：记录 runner session 结束（因果链终点）
@@ -1213,26 +1370,34 @@ class Runner:
         )
 
     async def _persist(self, state: MeetingState) -> None:
-        """持久化会议状态与发言到 PostgreSQL
+        """持久化会议状态与发言到 PostgreSQL（原子事务）
 
-        db_legacy 已迁移到 SQLAlchemy async，直接 await 即可，
-        不再需要 asyncio.to_thread 线程隔离。
+        使用单 session 包裹 save_meeting + save_meeting_aux + save_message，
+        保证三张表要么全部成功提交，要么全部回滚。
         """
         from app.dao.meeting_aux_dao import save_meeting_aux
+        from app.db.engine import async_session_factory
 
         aux = state.extract_aux()
         try:
-            await save_meeting(
-                meeting_id=state.meeting_id,
-                topic=state.topic,
-                status=state.status.value,
-                stage=state.stage.value,
-                created_at=state.created_at,
-                payload=state.snapshot(),
-            )
-            await save_meeting_aux(state.meeting_id, aux)
-            for msg in state.messages:
-                await save_message(msg)
+            async with async_session_factory() as session:
+                try:
+                    await save_meeting(
+                        meeting_id=state.meeting_id,
+                        topic=state.topic,
+                        status=state.status.value,
+                        stage=state.stage.value,
+                        created_at=state.created_at,
+                        payload=state.snapshot(),
+                        session=session,
+                    )
+                    await save_meeting_aux(state.meeting_id, aux, session=session)
+                    for msg in state.messages:
+                        await save_message(msg, session=session)
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
         finally:
             state.inject_aux(aux)
 

@@ -19,7 +19,7 @@ from conclave_core.conclusion_logic import lock_conclusion
 from conclave_core.confidence import worst_confidence
 from conclave_core.roles import match_role
 from conclave_core.state import get_skipped_stages
-from conclave_core.state import next_stage as _next_stage
+from conclave_core.state import next_stage as _next_stage  # noqa: F401 (fallback)
 from conclave_core.text import (
     compress_decisions_to_brief,
     format_arbitrate_as_text,
@@ -27,6 +27,7 @@ from conclave_core.text import (
 )
 
 from .stage_common import emit_agent_spoke, record_drift
+from .workflow_templates import complexity_to_template, next_stage_with_template
 
 _logger = get_logger("orchestrator.stage_runners")
 
@@ -59,19 +60,24 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
         depth_map = {"simple": "light", "standard": "standard", "full": "deep"}
         state.debate_depth = depth_map.get(complexity, "standard")
 
+    # ADR-014 Phase 2: 根据 complexity + topic_type 选择工作流模板
+    topic_type = result.get("topic_type", "report")
+    state.workflow_template = complexity_to_template(complexity, topic_type)
+
     await bus.publish(
         make_event(
             "flow_plan.set",
             state.meeting_id,
             {
                 "flow_plan": state.flow_plan,
+                "workflow_template": state.workflow_template,
                 "debate_depth": state.debate_depth,
                 "skipped_stages": [s.value for s in get_skipped_stages(state.flow_plan)],
             },
         )
     )
 
-    nxt = _next_stage(Stage.CLARIFY, state.flow_plan)
+    nxt = next_stage_with_template(Stage.CLARIFY, state.workflow_template, state.flow_plan)
     state.stage = nxt or Stage.INTRA_TEAM
     return state
 
@@ -102,7 +108,7 @@ async def run_arbitrate(state: MeetingState, result: dict[str, Any], confidence:
     await emit_agent_spoke(state, Role.MODERATOR, Stage.ARBITRATE, content)
     record_drift(state, Role.MODERATOR, Stage.ARBITRATE, content)
 
-    nxt = _next_stage(Stage.ARBITRATE, state.flow_plan)
+    nxt = next_stage_with_template(Stage.ARBITRATE, state.workflow_template, state.flow_plan)
     state.stage = nxt or Stage.PRODUCE
     return state
 
@@ -320,9 +326,9 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
         nxt = Stage.CROSS_TEAM
     else:
         # 门禁通过或达轮次上限：推进到下一阶段
-        next_s = _next_stage(Stage.CROSS_TEAM, state.flow_plan)
+        next_s = next_stage_with_template(Stage.CROSS_TEAM, state.workflow_template, state.flow_plan)
         if next_s == Stage.EVIDENCE_CHECK and not conflicts and state.flow_plan == "standard":
-            next_s = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan)
+            next_s = next_stage_with_template(Stage.EVIDENCE_CHECK, state.workflow_template, state.flow_plan)
         nxt = next_s or Stage.PRODUCE
 
     await _moderator_assess_borrow(state, Stage.CROSS_TEAM)
@@ -436,7 +442,7 @@ async def run_intra_team(
     await _moderator_assess_borrow(state, Stage.INTRA_TEAM)
     await _let_borrowed_agents_speak(state, Stage.INTRA_TEAM)
 
-    nxt = _next_stage(Stage.INTRA_TEAM, state.flow_plan)
+    nxt = next_stage_with_template(Stage.INTRA_TEAM, state.workflow_template, state.flow_plan)
     state.stage = nxt or Stage.PRODUCE
     return state
 
@@ -501,7 +507,7 @@ async def run_evidence_check(
     await emit_agent_spoke(state, Role.MODERATOR, Stage.EVIDENCE_CHECK, summary)
 
     await _let_borrowed_agents_speak(state, Stage.EVIDENCE_CHECK)
-    nxt = _next_stage(Stage.EVIDENCE_CHECK, state.flow_plan)
+    nxt = next_stage_with_template(Stage.EVIDENCE_CHECK, state.workflow_template, state.flow_plan)
     state.stage = nxt or Stage.PRODUCE
     return state
 

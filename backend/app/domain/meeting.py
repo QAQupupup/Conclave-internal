@@ -187,6 +187,10 @@ class MeetingState(BaseModel):
     # "simple" = 简化路由（映射到 instant）
     # 兼容旧值："fast"/"fast_path"→instant, "deep_think"/"full"→standard
     flow_plan: str = "standard"
+    # ADR-014 Phase 2: 工作流模板 ID（clarify 阶段设置，Runner 据此选择阶段序列）
+    # "standard" = 默认六阶段管线（向后兼容）
+    # "design" / "build" / "research" / "analysis" = 按议题类型定制阶段序列
+    workflow_template: str = "standard"
     # 辩论深度：轻量(light) / 标准(standard) / 深度(deep)
     # - light: 2-3 Agents, 1 轮队内发言, 跳过跨队辩论和证据核验
     # - standard: 3-5 Agents, 2-3 轮辩论, 标准流程
@@ -201,6 +205,9 @@ class MeetingState(BaseModel):
     # 格式: {role_or_stage: "provider_id:model_id"}
     # key 可以是角色 id（如 "engineer"）或 @阶段名（如 "@arbitrate"）
     resolved_models: dict[str, str] = Field(default_factory=dict)
+    # 记录 resolved_models 是基于哪个 model_override 值解析的
+    # resume 时如果 model_override 已变更，则重新 resolve 模型快照
+    resolved_from_model_override: str = ""
     paused_snapshot: dict[str, Any] | None = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
     reference_meeting_ids: list[str] = Field(default_factory=list)  # 引用的历史会议 ID 列表
@@ -266,6 +273,13 @@ class MeetingState(BaseModel):
     # stage_retry_count: 各阶段重试次数 {stage_name: int}
     stage_retry_count: dict[str, int] = Field(default_factory=dict)
     max_stage_retries: int = 2  # 每个阶段最大重试次数
+    # intra_team 子步骤检查点：记录已产出 claims 的角色 ID
+    # 阶段内断点续传时，已完成的角色不再重复执行，仅运行未完成的角色
+    # 阶段完成后清空
+    completed_roles: list[str] = Field(default_factory=list)
+    # intra_team 子步骤检查点：已完成角色的产出结果（配合 completed_roles 使用）
+    # gather 失败时保留已完成角色的结果，resume 时合并到 run_intra_team 的输入
+    intra_team_partial_results: list[dict[str, Any]] = Field(default_factory=list)
     # === 自我迭代 Loop ===
     # iteration_count: 当前迭代轮次（0=首轮，1+=迭代轮）
     iteration_count: int = 0
