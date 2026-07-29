@@ -177,10 +177,10 @@ class TestValidateDecomposition:
 
     def test_max_depth_at_limit(self):
         """依赖链深度刚好等于限制（合法）"""
-        # 构建深度为 MAX_DEPENDENCY_DEPTH 的链
+        # 构建深度为 MAX_DEPENDENCY_DEPTH 的链（MAX_DEPENDENCY_DEPTH 个节点，深度 = 节点数）
         subtopics = []
         edges = []
-        for i in range(MAX_DEPENDENCY_DEPTH + 1):
+        for i in range(MAX_DEPENDENCY_DEPTH):
             deps = [f"sub-{i}"] if i > 0 else []
             subtopics.append(SubTopic(id=f"sub-{i + 1}", title=f"子议题{i + 1}", topic_type="report", depends_on=deps))
             if i > 0:

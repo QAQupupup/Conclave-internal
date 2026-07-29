@@ -175,9 +175,9 @@ def test_complexity_full_with_research_returns_research():
     assert complexity_to_template("full", "research") == "research"
 
 
-def test_complexity_full_with_report_returns_research():
-    """full + report → research 模板（回退）"""
-    assert complexity_to_template("full", "report") == "research"
+def test_complexity_full_with_report_returns_standard():
+    """full + report → standard 模板（保持六阶段向后兼容）"""
+    assert complexity_to_template("full", "report") == "standard"
 
 
 def test_complexity_full_with_unknown_type_returns_standard():

@@ -91,10 +91,11 @@ def aggregate_hierarchical(
     id_to_result = {r.get("subtopic_id", ""): r for r in subtopic_results}
     id_to_subtopic = {s.id: s for s in decomposition.subtopics}
 
-    # 构建反向邻接表（to → [from, ...]），即谁依赖了我
+    # 构建反向邻接表（from → [to, ...]），即我被谁依赖
+    # edge (from_id, to_id) 表示 to_id 依赖 from_id，所以 from_id 的 dependents 包含 to_id
     dependents: dict[str, list[str]] = {s.id: [] for s in decomposition.subtopics}
     for from_id, to_id in decomposition.edges:
-        dependents[to_id].append(from_id)
+        dependents[from_id].append(to_id)
 
     # 找到根节点（没有依赖任何其他子议题的节点）
     roots = [s for s in ordered if not s.depends_on]

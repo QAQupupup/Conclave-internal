@@ -208,7 +208,7 @@ def complexity_to_template(complexity: str, topic_type: str = "") -> str:
             "design": "design",
             "build": "build",
             "research": "research",
-            "report": "research",  # report 类型回退到 research
+            "report": "standard",  # report 类型走标准六阶段（保持向后兼容）
         }
         return type_mapping.get(topic_type, "standard")
     # simple / standard / 未知 → standard 模板
