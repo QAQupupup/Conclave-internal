@@ -191,6 +191,15 @@ class MeetingState(BaseModel):
     # "standard" = 默认六阶段管线（向后兼容）
     # "design" / "build" / "research" / "analysis" = 按议题类型定制阶段序列
     workflow_template: str = "standard"
+    # ADR-014 Phase 3: 议题拆分结果（序列化 TopicDecomposition）
+    # clarify 阶段后若 complexity=full 且非 standard 模板，调用 LLM 拆分为子议题 DAG
+    # None = 未拆分（默认），dict = 已拆分的 TopicDecomposition 序列化
+    topic_decomposition: dict[str, Any] | None = None
+    # ADR-014 Phase 3: 各子议题的执行结果
+    # 每项: {"subtopic_id": "...", "title": "...", "result": {...}, "artifact": {...}}
+    subtopic_results: list[dict[str, Any]] = Field(default_factory=list)
+    # ADR-014 Phase 3: 当前执行的子议题索引（-1 = 未进入子议题模式）
+    current_subtopic_idx: int = -1
     # 辩论深度：轻量(light) / 标准(standard) / 深度(deep)
     # - light: 2-3 Agents, 1 轮队内发言, 跳过跨队辩论和证据核验
     # - standard: 3-5 Agents, 2-3 轮辩论, 标准流程

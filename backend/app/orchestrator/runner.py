@@ -560,6 +560,118 @@ class Runner:
                     extra={"stage": current_stage.value, "messages_count": len(state.messages)},
                 )
 
+                # === ADR-014 Phase 3: 子议题迭代 ===
+                # produce 完成后，若处于子议题模式，保存当前子议题结果并切换到下一个
+                if (
+                    current_stage == Stage.PRODUCE
+                    and state.topic_decomposition is not None
+                    and state.current_subtopic_idx >= 0
+                    and not is_terminal(state)
+                ):
+                    from app.orchestrator.result_aggregator import build_aggregation_context
+                    from app.orchestrator.topic_decomposer import TopicDecomposition
+
+                    decomposition = TopicDecomposition(**state.topic_decomposition)
+                    subtopic_count = len(decomposition.subtopics)
+                    current_idx = state.current_subtopic_idx
+                    current_subtopic = decomposition.subtopics[current_idx]
+
+                    # 保存当前子议题的产出
+                    state.subtopic_results.append(
+                        {
+                            "subtopic_id": current_subtopic.id,
+                            "title": current_subtopic.title,
+                            "result": {
+                                "artifact": state.artifact,
+                                "decisions": state.decision_record,
+                            },
+                        }
+                    )
+                    logger.info(
+                        "会议 %s 子议题 %d/%d (%s) 完成，保存结果",
+                        state.meeting_id,
+                        current_idx + 1,
+                        subtopic_count,
+                        current_subtopic.title,
+                    )
+
+                    if current_idx + 1 < subtopic_count:
+                        # 还有更多子议题，切换到下一个
+                        next_idx = current_idx + 1
+                        next_subtopic = decomposition.subtopics[next_idx]
+                        state.current_subtopic_idx = next_idx
+                        state.workflow_template = next_subtopic.workflow_template
+
+                        # 重置辩论数据（保留 messages 供上下文参考）
+                        state.claims = []
+                        state.conflicts = []
+                        state.team_conclusions = []
+                        state.evidence_set = []
+                        state.decision_record = None
+                        state.artifact = None
+                        state.gate_history = []
+                        state.gate_pending_action = None
+                        state.prefetched_evidence = None
+                        state.iteration_count = 0
+                        state.quality_score = None
+                        state.quality_feedback = None
+                        state.quality_evaluation = None
+
+                        # 设置下一阶段为 intra_team（子议题的起始阶段）
+                        state.stage = Stage.INTRA_TEAM
+
+                        await bus.publish(
+                            make_event(
+                                "subtopic.switched",
+                                state.meeting_id,
+                                {
+                                    "subtopic_idx": next_idx,
+                                    "subtopic_title": next_subtopic.title,
+                                    "workflow_template": next_subtopic.workflow_template,
+                                },
+                            )
+                        )
+                        await self._persist(state)
+                        continue  # 跳过质量门禁，直接执行下一个子议题
+                    else:
+                        # 所有子议题完成，构建聚合上下文
+                        logger.info(
+                            "会议 %s 所有 %d 个子议题完成，开始聚合最终产出",
+                            state.meeting_id,
+                            subtopic_count,
+                        )
+                        aggregation_ctx = build_aggregation_context(
+                            decomposition,
+                            state.subtopic_results,
+                        )
+                        # 将聚合上下文追加到 reference_context
+                        if state.reference_context:
+                            state.reference_context += "\n" + aggregation_ctx
+                        else:
+                            state.reference_context = aggregation_ctx
+
+                        state.current_subtopic_idx = -1  # 退出子议题模式
+                        # 重置辩论数据，让最终 produce 基于聚合上下文生成
+                        state.claims = []
+                        state.conflicts = []
+                        state.team_conclusions = []
+                        state.evidence_set = []
+                        state.decision_record = None
+                        state.artifact = None
+                        state.stage = Stage.PRODUCE  # 最终 produce
+
+                        await bus.publish(
+                            make_event(
+                                "subtopic.aggregated",
+                                state.meeting_id,
+                                {
+                                    "subtopic_count": subtopic_count,
+                                    "strategy": decomposition.aggregation_strategy,
+                                },
+                            )
+                        )
+                        await self._persist(state)
+
                 # === 自我迭代 Loop：produce完成后评估质量，不达标则触发迭代 ===
                 if current_stage == Stage.PRODUCE and not is_terminal(state):
                     quality_result = await self._evaluate_quality(state)

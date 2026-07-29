@@ -27,6 +27,7 @@ from conclave_core.text import (
 )
 
 from .stage_common import emit_agent_spoke, record_drift
+from .topic_decomposer import decompose_topic, should_decompose
 from .workflow_templates import complexity_to_template, next_stage_with_template
 
 _logger = get_logger("orchestrator.stage_runners")
@@ -63,6 +64,43 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
     # ADR-014 Phase 2: 根据 complexity + topic_type 选择工作流模板
     topic_type = result.get("topic_type", "report")
     state.workflow_template = complexity_to_template(complexity, topic_type)
+
+    # ADR-014 Phase 3: 议题拆分（仅 full 复杂度 + 非 standard 模板时执行）
+    if should_decompose(complexity, state.workflow_template):
+        _logger.info(
+            "会议 %s 触发议题拆分 (complexity=%s, template=%s)", state.meeting_id, complexity, state.workflow_template
+        )
+        decomposition = await decompose_topic(
+            topic=state.clarified_topic or state.topic,
+            key_questions=state.key_questions,
+            team_config=state.team_config,
+        )
+        if decomposition is not None:
+            # 序列化存储到 state
+            state.topic_decomposition = decomposition.model_dump()
+            state.current_subtopic_idx = 0
+            # 第一个子议题的 workflow_template 覆盖当前模板
+            first_subtopic = decomposition.subtopics[0]
+            state.workflow_template = first_subtopic.workflow_template
+            _logger.info(
+                "会议 %s 议题拆分成功: %d 个子议题, 首个模板=%s",
+                state.meeting_id,
+                len(decomposition.subtopics),
+                state.workflow_template,
+            )
+            await bus.publish(
+                make_event(
+                    "topic.decomposed",
+                    state.meeting_id,
+                    {
+                        "subtopic_count": len(decomposition.subtopics),
+                        "subtopics": [s.model_dump() for s in decomposition.subtopics],
+                        "aggregation_strategy": decomposition.aggregation_strategy,
+                    },
+                )
+            )
+        else:
+            _logger.warning("会议 %s 议题拆分失败，回退到标准流程", state.meeting_id)
 
     await bus.publish(
         make_event(
