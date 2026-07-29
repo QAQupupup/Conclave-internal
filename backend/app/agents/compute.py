@@ -17,10 +17,15 @@ from app.agents.prompts import (
     ARBITRATE,
     ARCHITECT_INTRA,
     CROSS_TEAM,
+    DATA_ENGINEER_INTRA,
     ENGINEER_INTRA,
     EVIDENCE_CHECK,
+    MARKETING_EXPERT_INTRA,
     MODERATOR_CLARIFY,
+    MODERATOR_INTRA,
     PRODUCE,
+    SECURITY_EXPERT_INTRA,
+    UX_DESIGNER_INTRA,
     render,
 )
 from app.agents.role_templates import ROLE_LIBRARY
@@ -30,11 +35,15 @@ from app.models import Role
 logger = get_logger("agents.compute")
 
 # IntraTeam 阶段的角色 → 模板注册表（Registry 模式）
-# 消除 build_intra_prompt / build_intra_react_prompt 中的 if/elif 硬编码分派
-# 新增角色只需在此注册，无需改业务逻辑（开闭原则）
+# ADR-014 Phase 1: 全 7 角色覆盖，消除"5 角色回退到架构师模板"问题
 _INTRA_TEAM_TEMPLATES: dict[Role, str] = {
     Role.ENGINEER: ENGINEER_INTRA,
     Role.PRODUCT_ARCHITECT: ARCHITECT_INTRA,
+    Role.SECURITY_EXPERT: SECURITY_EXPERT_INTRA,
+    Role.DATA_ENGINEER: DATA_ENGINEER_INTRA,
+    Role.UX_DESIGNER: UX_DESIGNER_INTRA,
+    Role.MARKETING_EXPERT: MARKETING_EXPERT_INTRA,
+    Role.MODERATOR: MODERATOR_INTRA,
 }
 
 # Role 枚举值 → ROLE_LIBRARY key 映射
@@ -45,6 +54,7 @@ _ROLE_KEY_MAP: dict[str, str] = {
     "security_expert": "security_expert",
     "data_engineer": "data_engineer",
     "ux_designer": "ux_designer",
+    "marketing_expert": "marketing_expert",
 }
 
 

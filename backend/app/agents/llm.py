@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 from typing import Any, Protocol
 
 import httpx
@@ -670,7 +671,7 @@ class RealLLM:
 
             for attempt in range(1, self.MAX_ATTEMPTS + 1):
                 try:
-                    content = await self._call_api(
+                    content, native_reasoning = await self._call_api(
                         current_prompt,
                         schema_desc,
                         stage,
@@ -680,15 +681,32 @@ class RealLLM:
                         provider_id=_p_id,
                     )
                     # [FALLBACK] 最小输出长度校验：防止 LLM 返回空内容导致管线空转
-                    # cross_team / produce / arbitrate 需要生成结构化内容（冲突列表、PRD、裁决），
-                    # 50 字符远远不够；其他阶段（clarify, intra_team 等）保持较低阈值
-                    _min_len = 200 if stage in ("cross_team", "produce", "arbitrate") else 50
+                    # 按阶段分级：meta 输出短阶段名（~15 chars），produce 需要完整 PRD
+                    if stage in ("meta", "meta_next_stage"):
+                        _min_len = 10
+                    elif stage in ("clarify", "intra_team"):
+                        _min_len = 30
+                    elif stage in ("cross_team", "arbitrate"):
+                        _min_len = 100
+                    elif stage == "produce":
+                        _min_len = 200
+                    else:
+                        _min_len = 50
                     if len(content.strip()) < _min_len:
                         raise ValueError(
                             f"LLM 返回内容过短 ({len(content.strip())} chars < {_min_len})，"
                             f"阶段={stage} 模型={_p_model} 输出质量不足"
                         )
-                    parsed = self._extract_json(content)
+                    parsed, reasoning = _extract_json_with_reasoning(content)
+                    # 合并推理文本：标记前文本优先，其次原生 reasoning_content
+                    full_reasoning = reasoning or native_reasoning
+                    if full_reasoning:
+                        logger.info(
+                            "阶段=%s 模型推理过程 (%d chars): %s...",
+                            stage,
+                            len(full_reasoning),
+                            full_reasoning[:300],
+                        )
                     if model_cls is not None:
                         validated: BaseModel = model_cls.model_validate(parsed)
                         result = validated.model_dump()
@@ -697,6 +715,7 @@ class RealLLM:
                     update_last_record(
                         parsed_result=result if isinstance(result, dict) else None,
                         validation_status="valid",
+                        reasoning=full_reasoning[:2000] if full_reasoning else None,
                     )
                     logger.info(
                         "阶段=%s attempt=%d provider=%s 解析成功 (temp=%.1f)",
@@ -716,6 +735,16 @@ class RealLLM:
                         claims_val = result.get("claims")
                         if not claims_val:
                             raise ValueError("intra_team 阶段 claims 为空，LLM 未输出有效论点")
+                    # cross_team 阶段：空冲突 + pass 门禁 = 矛盾，触发重试
+                    if schema_hint == "cross_team" and isinstance(result, dict):
+                        conflicts_val = result.get("conflicts")
+                        gate_val = result.get("gate") or {}
+                        gate_dec = gate_val.get("decision", "pass") if isinstance(gate_val, dict) else "pass"
+                        if not conflicts_val and gate_dec == "pass":
+                            raise ValueError(
+                                "cross_team 阶段 conflicts 为空但门禁判定 pass，"
+                                "矛盾输出——冲突识别是 cross_team 的核心任务"
+                            )
                     # produce 阶段：校验代码类产出的关键字段非空
                     if schema_hint.startswith("produce") and isinstance(result, dict):
                         _ds = result.get("deployable_service")
@@ -758,17 +787,56 @@ class RealLLM:
                         error=str(conn_err)[:300],
                     )
                     break  # 跳出重试循环，尝试下一个 provider
-                except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError, ValueError) as e:
+                    # Tier 3 回退：JSON 解析失败时尝试强制 JSON 模式重试
+                    if isinstance(e, json.JSONDecodeError) and self._supports_json(_p_url, _p_model):
+                        logger.warning("阶段=%s 三层提取失败，尝试 Tier 3 (JSON Mode 强制重试)", stage)
+                        try:
+                            content_t3, _ = await self._call_api(
+                                current_prompt + "\n\n请注意：必须只输出合法 JSON，不要包含任何其他文本。",
+                                schema_desc,
+                                stage,
+                                attempt,
+                                config_override=(_p_url, _p_key, _p_model),
+                                agent_role=agent_role,
+                                provider_id=_p_id,
+                                force_json_mode=True,
+                            )
+                            parsed_t3 = json.loads(_strip_code_fences(content_t3))
+                            if model_cls is not None:
+                                validated_t3: BaseModel = model_cls.model_validate(parsed_t3)
+                                result_t3 = validated_t3.model_dump()
+                            else:
+                                result_t3 = parsed_t3 if isinstance(parsed_t3, dict) else {"result": parsed_t3}
+                            logger.info("阶段=%s Tier 3 JSON Mode 重试成功", stage)
+                            update_last_record(
+                                parsed_result=result_t3 if isinstance(result_t3, dict) else None,
+                                validation_status="valid",
+                            )
+                            _circuit_breaker.record_success()
+                            return result_t3  # type: ignore[no-any-return]
+                        except Exception:
+                            pass  # Tier 3 也失败，继续正常错误处理
+
                     error_detail = ""
                     if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
                         error_detail = f" [HTTP {e.response.status_code}: {e.response.text[:200]}]"
                     last_error = f"{_p_id}: {type(e).__name__}: {e}{error_detail}"
                     logger.warning("阶段=%s provider=%s attempt=%d 失败: %s", stage, _p_id, attempt, last_error[:200])
                     update_last_record(validation_status="invalid", error_detail=last_error)
+                    # 短内容错误时增强提示，要求详细输出
+                    short_content_hint = ""
+                    if "内容过短" in str(e) or "too short" in str(e).lower():
+                        short_content_hint = (
+                            "\n特别注意：上一次输出内容过短。"
+                            "请提供完整的结构化 JSON 输出，包含所有必需字段的详细内容，"
+                            "不要只输出简短的字段值。"
+                        )
                     current_prompt = (
                         f"{prompt}\n\n"
                         f"【上一次输出校验失败（第 {attempt} 次），错误：{last_error}】\n"
                         f"请严格按给定 JSON Schema 重新输出，仅输出合法 JSON，不要包含注释或围栏。"
+                        f"{short_content_hint}"
                     )
 
             provider_idx += 1
@@ -832,7 +900,7 @@ class RealLLM:
             logger.warning("熔断器打开，跳过摘要 LLM 调用")
             return ""
         try:
-            content = await self._call_api(
+            content, _ = await self._call_api(
                 prompt,
                 schema_desc="",
                 stage="summarize",
@@ -867,19 +935,24 @@ class RealLLM:
         agent_role: str = "",
         provider_id: str = "",
         system_message_override: str = "",
-    ) -> str:
-        """调用 chat completions，返回 message content 字符串
+        force_json_mode: bool = False,
+    ) -> tuple[str, str]:
+        """调用 chat completions，返回 (content, native_reasoning) 元组
 
         第1层确定性约束：
         - temperature 按阶段查 STAGE_TEMPERATURES（关键阶段=0，讨论阶段=0.3）
         - top_p 固定 1.0
         - seed 固定 42（API 支持则同一输入必同一输出）
-        - system message 末尾加 /no_think（关闭 Qwen3.5 思考模式）
 
         支持会议级模型覆盖：每次调用解析 _resolve_config() 获取当前生效的
         base_url / api_key / model，支持会议运行中切换模型和BYOK。
 
         config_override: 外部指定的 (base_url, api_key, model)，用于 provider 回退链。
+        force_json_mode: True 时强制使用 JSON Mode（Tier 3 回退），传 response_format
+                         并使用限制性 system message。
+
+        Returns:
+            (content, native_reasoning) — native_reasoning 为 DeepSeek/Qwen 原生推理
         """
         import time
 
@@ -897,14 +970,30 @@ class RealLLM:
         if system_message_override:
             # M1.1: 纯文本模式（摘要生成等），不强制 JSON，不加 /no_think（允许模型思考）
             system_content = system_message_override
-        else:
+        elif force_json_mode:
+            # Tier 3 回退：强制 JSON 模式，使用限制性 system message
             system_content = "你是会议决策助手，严格输出 JSON，不要输出多余文本。"
             if schema_desc:
                 system_content += (
                     f"\n输出必须严格符合以下 JSON Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n{schema_desc}"
                 )
-            # 关闭 Qwen3.5 思考模式，防止思考过程干扰 JSON 输出
-            if settings.llm_no_think:
+        else:
+            # 默认模式：鼓励模型自由思考，用标记分隔 JSON
+            system_content = (
+                "你是会议决策助手。请先深入思考和分析问题，展开推理过程。\n"
+                "思考完成后，输出 <<<JSON_RESULT>>> 标记，"
+                "然后在标记后面输出符合 Schema 的 JSON 结果。\n"
+                "思考过程和 JSON 结果之间用 <<<JSON_RESULT>>> 分隔。\n"
+                '在 JSON 中可包含可选字段 "_ck"，用一句话总结你的最终结论。\n'
+                "不要用 ```json``` 围栏包裹 JSON。"
+            )
+            if schema_desc:
+                system_content += (
+                    f"\n输出 JSON 必须符合以下 Schema（多余字段会被忽略，缺字段尽量补全默认值）：\n{schema_desc}"
+                )
+            # /no_think 是 Qwen3.5 专有指令，仅对 Qwen 模型附加
+            # DeepSeek 不需要此指令，附加可能干扰输出
+            if settings.llm_no_think and "qwen" in model.lower():
                 system_content += "\n/no_think"
         # 分阶段温度：按 stage 查表，默认 0（最严格）
         temp = STAGE_TEMPERATURES().get(stage, 0.0)
@@ -919,8 +1008,9 @@ class RealLLM:
             "top_p": 1.0,
             "seed": 42,
         }
-        # 请求层：纯文本模式不传 response_format；JSON 模式按 base_url+model 缓存支持情况
-        if not system_message_override and self._supports_json(base_url, model):
+        # 请求层：默认不传 response_format，允许模型自由思考
+        # 仅 force_json_mode=True（Tier 3 回退）时传 response_format
+        if force_json_mode and not system_message_override and self._supports_json(base_url, model):
             body["response_format"] = {"type": "json_object"}
 
         latency_ms = 0
@@ -939,6 +1029,39 @@ class RealLLM:
             latency_ms = int((time.monotonic() - t0) * 1000)
         except httpx.HTTPStatusError as e:
             latency_ms = int((time.monotonic() - t0) * 1000)
+            # 余额不足检测：402 Payment Required / 特定 403 / 429 insufficient_quota
+            # 抛出 InsufficientBalanceError，Runner 捕获后暂停会议（PAUSED）而非 FAILED
+            if self._is_insufficient_balance(e):
+                record_call(
+                    stage=stage,
+                    model=model,
+                    temperature=temp,
+                    seed=settings.llm_seed,
+                    prompt=user_prompt,
+                    raw_response=f"HTTP {e.response.status_code}: {e.response.text[:500]}",
+                    validation_status="invalid",
+                    attempt=attempt,
+                    latency_ms=latency_ms,
+                    input_tokens=0,
+                    output_tokens=0,
+                    total_tokens=0,
+                    agent_role=agent_role,
+                    provider_id=provider_id,
+                    error_detail=f"InsufficientBalance: HTTP {e.response.status_code} {e.response.text[:300]}",
+                    http_request_body=body,
+                    http_response_text=e.response.text[:2000],
+                )
+                from app.core.exceptions import InsufficientBalanceError
+
+                raise InsufficientBalanceError(
+                    f"API 余额不足: HTTP {e.response.status_code}",
+                    details={
+                        "status_code": e.response.status_code,
+                        "provider_id": provider_id,
+                        "model": model,
+                        "response_snippet": e.response.text[:500],
+                    },
+                ) from e
             # 接口可能不支持 response_format（返回 400），自动降级去掉该参数重试一次
             if (
                 self._supports_json(base_url, model)
@@ -1030,7 +1153,23 @@ class RealLLM:
             raise
 
         data = resp.json()
-        content = data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
+        content = message.get("content", "")
+        # 捕获原生推理字段（DeepSeek 的 reasoning_content）
+        native_reasoning = message.get("reasoning_content", "")
+        # 捕获 Qwen 的 <RichMediaReference> 思考内容（不修改 content，让提取管线处理）
+        if not native_reasoning and "<RichMediaReference>" in content:
+            think_end = content.find("<RichMediaReference>")
+            if think_end != -1:
+                native_reasoning = content[:think_end].strip()
+        # 记录原生推理到日志（调试关键信息）
+        if native_reasoning:
+            logger.debug(
+                "阶段=%s 模型原生推理 (%d chars): %s...",
+                stage,
+                len(native_reasoning),
+                native_reasoning[:200],
+            )
         # 解析 token 用量
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
@@ -1070,7 +1209,7 @@ class RealLLM:
             )
         except Exception as e:
             logger.debug("记录 LLM 调用成本失败: %s", e)
-        return content  # type: ignore[no-any-return]
+        return content, native_reasoning
 
     @staticmethod
     def _looks_like_json_mode_error(e: httpx.HTTPStatusError) -> bool:
@@ -1083,19 +1222,167 @@ class RealLLM:
         return any(kw in text for kw in ("response_format", "json_object", "json_schema", "not support"))
 
     @staticmethod
+    def _is_insufficient_balance(e: httpx.HTTPStatusError) -> bool:
+        """检测 HTTP 错误是否由 API 余额不足引起。
+
+        覆盖主流 LLM 提供商的余额不足错误模式：
+        - HTTP 402 Payment Required（DeepSeek、OpenRouter）
+        - HTTP 403 + 响应体含 balance/quota/payment 关键词（SiliconFlow）
+        - HTTP 429 + error.type == "insufficient_quota"（OpenAI）
+        - HTTP 429 + code == "SetLimitExceeded"/"QuotaExceeded"（火山方舟 Ark 安心体验模式）
+        """
+        status = e.response.status_code
+        if status == 402:
+            return True
+        try:
+            text = e.response.text.lower()
+        except Exception:
+            return False
+        if status == 403:
+            return any(kw in text for kw in ("balance", "insufficient", "quota", "payment required", "余额不足"))
+        if status == 429:
+            # OpenAI 风格: {"error": {"type": "insufficient_quota", ...}}
+            # 火山方舟风格: {"error": {"code": "SetLimitExceeded", ...}} 或 {"error": {"code": "QuotaExceeded", ...}}
+            return any(
+                kw in text
+                for kw in (
+                    "insufficient_quota",
+                    "setlimitexceeded",
+                    "quotaexceeded",
+                    "free trial quota",
+                    "inference limit",
+                    "额度",
+                )
+            ) or ("quota" in text and "balance" in text)
+        return False
+
+    @staticmethod
     def _extract_json(content: str) -> Any:
-        """容错提取 JSON：去掉 ```json 围栏与多余文本"""
-        content = (content or "").strip()
-        if content.startswith("```"):
-            # 去掉首行围栏（```json 或 ```）
-            parts = content.split("\n", 1)
-            if len(parts) >= 2:
-                content = parts[1]
-                # 去掉闭合围栏（如果存在）
-                closing = content.rsplit("```", 1)
-                if len(closing) >= 2:
-                    content = closing[0]
-        return json.loads(content)
+        """容错提取 JSON（兼容旧调用，内部委托给三层管线）"""
+        parsed, _ = _extract_json_with_reasoning(content)
+        return parsed
+
+
+# ── 三层 JSON 提取管线 ─────────────────────────────────────
+# Tier 1: 标记分隔提取（主方案）— 模型自由思考后用标记分隔 JSON
+# Tier 2: 启发式 JSON 块提取（回退 1）— 花括号匹配找最大合法 JSON
+# Tier 3: 围栏清理后直接解析（回退 2）— 兼容旧的 ```json``` 围栏
+
+_JSON_MARKERS: list[str] = [
+    "<<<JSON_RESULT>>>",
+    "这是最终思考后的Json答复",
+    "以下是最终的JSON答复",
+    "Final JSON:",
+    "最终JSON答复：",
+]
+
+
+def _strip_code_fences(content: str) -> str:
+    """去掉 ```json ... ``` 围栏"""
+    content = content.strip()
+    if content.startswith("```"):
+        parts = content.split("\n", 1)
+        if len(parts) >= 2:
+            content = parts[1]
+            closing = content.rsplit("```", 1)
+            if len(closing) >= 2:
+                content = closing[0]
+    return content.strip()
+
+
+def _try_parse_json(text: str) -> Any | None:
+    """尝试解析 JSON，失败则尝试提取花括号块，返回 None 表示失败"""
+    text = _strip_code_fences(text.strip())
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+    return None
+
+
+def _extract_largest_json_block(text: str) -> Any | None:
+    """从文本中提取最大的合法 JSON 块（花括号深度匹配，字符串感知）"""
+    for start in range(len(text)):
+        if text[start] != "{":
+            continue
+        depth = 0
+        in_string = False
+        escape = False
+        for end in range(start, len(text)):
+            ch = text[end]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start : end + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break  # 此起始位置无效，试下一个
+    return None
+
+
+def _extract_json_with_reasoning(content: str) -> tuple[Any, str]:
+    """三层回退提取 JSON，返回 (parsed_json, reasoning_text)
+
+    Tier 1: 标记分隔提取（主方案）— 搜索 _JSON_MARKERS 中的标记
+    Tier 2: 启发式 JSON 块提取（花括号匹配）
+    Tier 3: 围栏清理后直接解析（兼容旧行为）
+
+    Returns:
+        (parsed_json, reasoning_text) — reasoning_text 为标记前的思考过程
+    Raises:
+        json.JSONDecodeError — 三层全部失败时抛出
+    """
+    content = (content or "").strip()
+    if not content:
+        raise json.JSONDecodeError("空内容", "", 0)
+
+    # Tier 1: 标记分隔提取
+    for marker in _JSON_MARKERS:
+        if marker in content:
+            parts = content.split(marker, 1)
+            reasoning = parts[0].strip()
+            json_str = parts[1].strip() if len(parts) > 1 else ""
+            if json_str:
+                parsed = _try_parse_json(json_str)
+                if parsed is not None:
+                    return parsed, reasoning
+
+    # Tier 2: 启发式 JSON 块提取
+    parsed = _extract_largest_json_block(content)
+    if parsed is not None:
+        # 如果整个内容就是纯 JSON（无额外文字），reasoning 为空
+        stripped = content.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                json.loads(stripped)
+                return parsed, ""
+            except json.JSONDecodeError:
+                pass
+        return parsed, content
+
+    # Tier 3: 围栏清理后直接解析
+    cleaned = _strip_code_fences(content)
+    parsed = json.loads(cleaned)  # 失败时抛出 JSONDecodeError
+    return parsed, ""
 
 
 def get_llm() -> LLMClient:

@@ -50,6 +50,76 @@ ENGINEER_INTRA = """[系统] {role_persona}
 
 输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}"""
 
+# ---------- 2.3b 安全专家 IntraTeam 阶段 ----------
+SECURITY_EXPERT_INTRA = """[系统] {role_persona}
+
+[阶段: IntraTeam]
+议题：{clarified_topic}
+你的立场：{stance}
+任务：从安全视角给出论点，运用 STRIDE 威胁建模和 OWASP Top 10 识别安全风险，标注风险等级与证据来源：
+- [doc:section] 上传文档中的证据（强证据）
+- [common_knowledge] 通用工程实践或行业常识（弱证据，需用户验证）
+- [assumption] 基于当前信息的推理假设（最弱，需确认）
+每条论点应涵盖：威胁类型（Spoofing/Tampering/Repudiation/Info Disclosure/DoS/EoP）、攻击向量、防护方案。
+
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}"""
+
+# ---------- 2.3c 数据工程师 IntraTeam 阶段 ----------
+DATA_ENGINEER_INTRA = """[系统] {role_persona}
+
+[阶段: IntraTeam]
+议题：{clarified_topic}
+你的立场：{stance}
+任务：从数据工程视角给出论点，关注数据模型设计、存储策略、一致性和迁移风险，标注风险等级与证据来源：
+- [doc:section] 上传文档中的证据（强证据）
+- [common_knowledge] 通用工程实践或行业常识（弱证据，需用户验证）
+- [assumption] 基于当前信息的推理假设（最弱，需确认）
+每条论点应涵盖：范式级别、索引策略、一致性级别（ACID/BASE）、迁移风险。
+
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}"""
+
+# ---------- 2.3d UX 设计师 IntraTeam 阶段 ----------
+UX_DESIGNER_INTRA = """[系统] {role_persona}
+
+[阶段: IntraTeam]
+议题：{clarified_topic}
+你的立场：{stance}
+任务：从用户体验视角给出论点，运用 Nielsen 可用性启发式和用户旅程分析，标注证据来源：
+- [doc:section] 上传文档中的证据（强证据）
+- [common_knowledge] 通用工程实践或行业常识（弱证据，需用户验证）
+- [assumption] 基于当前信息的推理假设（最弱，需确认）
+每条论点应涵盖：用户目标、操作路径、错误处理、无障碍要求。
+
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}"""
+
+# ---------- 2.3e 市场专家 IntraTeam 阶段 ----------
+MARKETING_EXPERT_INTRA = """[系统] {role_persona}
+
+[阶段: IntraTeam]
+议题：{clarified_topic}
+你的立场：{stance}
+任务：从市场与商业视角给出论点，运用 SWOT/Porter/PEST 分析框架，标注证据来源：
+- [doc:section] 上传文档中的证据（强证据）
+- [common_knowledge] 通用工程实践或行业常识（弱证据，需用户验证）
+- [assumption] 基于当前信息的推理假设（最弱，需确认）
+每条论点应涵盖：市场规模、竞争格局、增长策略、商业可行性。
+
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}"""
+
+# ---------- 2.3f 主持人 IntraTeam 阶段 ----------
+MODERATOR_INTRA = """[系统] {role_persona}
+
+[阶段: IntraTeam]
+议题：{clarified_topic}
+你的立场：{stance}
+任务：从流程合规和冲突暴露视角给出论点，关注讨论完整性、逻辑一致性和潜在分歧点，标注证据来源：
+- [doc:section] 上传文档中的证据（强证据）
+- [common_knowledge] 通用工程实践或行业常识（弱证据，需用户验证）
+- [assumption] 基于当前信息的推理假设（最弱，需确认）
+每条论点应涵盖：流程风险、信息缺口、潜在冲突点。
+
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}"""
+
 # ---------- 2.4 跨队辩论阶段 ----------
 CROSS_TEAM = """[阶段: CrossTeam]
 各方队内结论：{team_conclusions}

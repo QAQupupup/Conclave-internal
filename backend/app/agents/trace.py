@@ -54,6 +54,7 @@ class LLMCallRecord(BaseModel):
     runner_session_id: str = ""  # 关联的 Runner 执行会话 ID（因果链）
     http_request_body: dict[str, Any] | None = None  # 完整 HTTP 请求体（model, messages, temperature 等）
     http_response_text: str = ""  # 完整 HTTP 响应文本（原始 JSON，含 usage/model/id 等元数据）
+    reasoning: str = ""  # 模型推理过程（标记前文本或原生 reasoning_content，用于调试审计）
 
 
 class CallTrace(BaseModel):

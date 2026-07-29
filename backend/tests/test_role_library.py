@@ -89,15 +89,21 @@ def test_get_borrow_prompt_returns_text():
 
 
 def test_get_borrow_prompt_backward_compatible():
-    """security_expert 的 prompt 与迭代一硬编码内容一致（向后兼容）"""
-    expected = "你是安全专家。关注认证、授权、数据安全、注入防护。决策偏置：先找安全漏洞，重风险。"
-    assert get_borrow_prompt("security_expert") == expected
+    """核心角色描述（视角+决策偏置）保持向后兼容，增强内容（方法论+检查清单）作为扩展附加"""
+    # ADR-014 Phase 1: 角色画像从"1-2句话"升级为"四维画像"
+    # 旧的精确匹配改为子串匹配，验证核心描述不变 + 新增方法论内容存在
+    prompt_sec = get_borrow_prompt("security_expert")
+    assert "你是安全专家。关注认证、授权、数据安全、注入防护。决策偏置：先找安全漏洞，重风险。" in prompt_sec
+    assert "STRIDE" in prompt_sec  # 方法论增强
+    assert "OWASP" in prompt_sec
 
-    expected_data = "你是数据工程师。关注数据模型、存储、迁移、一致性。决策偏置：重数据完整性。"
-    assert get_borrow_prompt("data_engineer") == expected_data
+    prompt_data = get_borrow_prompt("data_engineer")
+    assert "你是数据工程师。关注数据模型、存储、迁移、一致性。决策偏置：重数据完整性。" in prompt_data
+    assert "3NF" in prompt_data  # 方法论增强
 
-    expected_ux = "你是用户体验设计师。关注交互流程、可用性、错误处理。决策偏置：重用户视角。"
-    assert get_borrow_prompt("ux_designer") == expected_ux
+    prompt_ux = get_borrow_prompt("ux_designer")
+    assert "你是用户体验设计师。关注交互流程、可用性、错误处理。决策偏置：重用户视角。" in prompt_ux
+    assert "Nielsen" in prompt_ux  # 方法论增强
 
 
 def test_get_role_template_unknown_returns_none():

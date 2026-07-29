@@ -138,6 +138,19 @@ async def run_cross_team(state: MeetingState, result: dict[str, Any], confidence
     target_roles = list(gate.get("target_roles", []))
     weak_dimensions = list(gate.get("weak_dimensions", []))
 
+    # 空冲突校验：门禁判 pass 但未识别出任何冲突 → 矛盾，强制改判 supplement
+    # cross_team 的核心任务就是找冲突，pass 必须有冲突支撑
+    if gate_decision == "pass" and not conflicts:
+        gate_decision = "supplement"
+        gate_reason = "代码层校验：门禁判定 pass 但未识别出任何冲突，cross_team 核心任务未完成"
+        # 所有角色都需要补充论点以暴露分歧
+        target_roles = list({concl.get("role", "") for concl in state.team_conclusions if concl.get("role")})
+        weak_dimensions.append("2")
+        _logger.warning(
+            "cross_team 空冲突校验：gate_decision pass→supplement，target_roles=%s",
+            target_roles,
+        )
+
     # 第二层防偏：代码层硬校验（不可被 LLM 绕过）
     # 条件3：每个角色的 claims 至少有 1 条被冲突引用
     if gate_decision == "pass" and conflicts and state.team_conclusions:
