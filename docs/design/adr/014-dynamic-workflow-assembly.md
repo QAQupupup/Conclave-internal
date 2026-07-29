@@ -2,7 +2,7 @@
 
 ## 状态
 
-Proposed — 2026-07-29
+Accepted — 2026-07-29（Phase 1/2/3 全部实现完成）
 
 ## 背景
 
@@ -177,23 +177,26 @@ class WorkflowTemplate(BaseModel):
 
 遵循设计原则 7/8，分三个阶段实施：
 
-**Phase 1（本次）— 角色画像增强 + IntraTeam 全覆盖**
+**Phase 1（已完成, commit 467dfdc）— 角色画像增强 + IntraTeam 全覆盖**
 - 增强 `ROLE_LIBRARY` 中 7 个角色的 `prompt_template`（补充方法论/框架/清单）
 - 为 7 个角色各自创建专用 IntraTeam 模板
 - 修复 `_ROLE_KEY_MAP` 缺失 `marketing_expert`
 - **不改变编排流程**，仅提升发言质量
 
-**Phase 2（后续）— 工作流模板系统**
+**Phase 2（已完成, commit 45c6f6b）— 工作流模板系统**
 - 实现 `WorkflowTemplate` 数据模型和 `WORKFLOW_TEMPLATES` 注册表
-- clarify 阶段输出 `workflow_template` 字段
+- clarify 阶段输出 `topic_type` 字段，`complexity_to_template()` 映射到模板
 - Runner 根据模板选择阶段序列，替代固定 `STAGE_ORDER`
 - 默认模板 = 现有六阶段（向后兼容）
+- 28 个测试用例覆盖模板注册、阶段序列、向后兼容
 
-**Phase 3（后续）— 议题拆分器**
-- 实现 `TopicDecomposition` 数据模型
-- clarify 后对 `full` 复杂度议题执行拆分
-- 子议题各自走工作流模板，结果聚合
-- 聚合器实现 hierarchical 策略
+**Phase 3（已完成, commit c4d10ff）— 议题拆分器**
+- 实现 `TopicDecomposition` 数据模型（SubTopic + DAG + 聚合策略）
+- clarify 后对 `full` 复杂度+非 standard 模板执行拆分
+- DAG 校验：无环检测、深度限制（≤3）、子议题数限制（≤5）
+- 子议题各自走工作流模板，runner 支持子议题迭代执行
+- 聚合器实现 sequential/hierarchical 策略
+- 30+ 测试用例覆盖 DAG 校验、拓扑排序、结果聚合、序列化
 
 ## 备选方案
 
@@ -237,22 +240,28 @@ class WorkflowTemplate(BaseModel):
 | `backend/conclave_core/prompts.py` | 修改 | 新增 5 个角色的专用 IntraTeam 模板 |
 | `backend/app/agents/compute.py` | 修改 | `_INTRA_TEAM_TEMPLATES` 注册全 7 角色；`_ROLE_KEY_MAP` 补 marketing_expert |
 
-### Phase 2 文件变更（后续）
+### Phase 2 文件变更（已完成, commit 45c6f6b）
 
 | 文件 | 变更类型 | 说明 |
 |---|---|---|
-| `backend/app/orchestrator/workflow_templates.py` | 新增 | WorkflowTemplate 模型 + WORKFLOW_TEMPLATES 注册表 |
-| `backend/app/orchestrator/runner.py` | 修改 | 根据模板选择阶段序列 |
-| `backend/conclave_core/state.py` | 修改 | MeetingState 新增 workflow_template 字段 |
-| `backend/conclave_core/prompts.py` | 修改 | clarify 模板新增 workflow_template 输出 |
+| `backend/app/orchestrator/workflow_templates.py` | 新增 | WorkflowTemplate 模型 + WORKFLOW_TEMPLATES 注册表 + next_stage_with_template() |
+| `backend/app/orchestrator/runner.py` | 修改 | 根据模板选择阶段序列（get_stage_sequence） |
+| `backend/app/domain/meeting.py` | 修改 | MeetingState 新增 workflow_template 字段 |
+| `backend/conclave_core/prompts.py` | 修改 | clarify 模板新增 topic_type 输出 |
+| `backend/app/orchestrator/stage_runners.py` | 修改 | complexity_to_template() 选择模板 |
+| `backend/app/orchestrator/nodes/routing.py` | 修改 | next_stage_with_template() 替代 next_stage() |
+| `backend/tests/test_workflow_templates.py` | 新增 | 28 个测试用例 |
 
-### Phase 3 文件变更（后续）
+### Phase 3 文件变更（已完成, commit c4d10ff）
 
 | 文件 | 变更类型 | 说明 |
 |---|---|---|
-| `backend/app/orchestrator/topic_decomposer.py` | 新增 | 议题拆分器 |
-| `backend/app/orchestrator/result_aggregator.py` | 新增 | 子议题结果聚合器 |
-| `backend/conclave_core/state.py` | 修改 | MeetingState 新增 subtopics 字段 |
+| `backend/app/orchestrator/topic_decomposer.py` | 新增 | 议题拆分器（SubTopic + TopicDecomposition + DAG校验 + LLM拆分） |
+| `backend/app/orchestrator/result_aggregator.py` | 新增 | 子议题结果聚合器（sequential/hierarchical 策略） |
+| `backend/app/domain/meeting.py` | 修改 | MeetingState 新增 topic_decomposition/subtopic_results/current_subtopic_idx |
+| `backend/app/orchestrator/stage_runners.py` | 修改 | run_clarify 集成 decompose_topic() |
+| `backend/app/orchestrator/runner.py` | 修改 | produce 后子议题迭代 + 聚合上下文注入 |
+| `backend/tests/test_topic_decomposer.py` | 新增 | 30+ 测试用例（DAG校验/拓扑排序/聚合/序列化） |
 
 ### 不受影响
 
