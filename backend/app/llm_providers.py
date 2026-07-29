@@ -12,6 +12,7 @@
 #   docs/research/model-benchmark-2026-07-15.md — 11 模型基准测试报告（4 维度评分）
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -43,6 +44,7 @@ class ProviderConfig:
     models_are_openai_compatible: bool = True
     supports_custom_key: bool = True  # 是否支持用户自带Key
     pricing_note: str = ""  # 定价说明
+    default_model: str = ""  # 该 provider 在回退链中使用的默认模型名（不同 provider 模型命名不同）
 
 
 # 内置 Provider 注册表
@@ -56,6 +58,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         balance_response_path=("data", "totalBalance"),
         supports_custom_key=True,
         pricing_note="按百万Token计费，部分小模型免费",
+        default_model="deepseek-ai/DeepSeek-V3.2",
     ),
     "deepseek": ProviderConfig(
         id="deepseek",
@@ -65,6 +68,16 @@ PROVIDERS: dict[str, ProviderConfig] = {
         balance_response_path=("balance_infos", 0, "total_balance"),
         supports_custom_key=True,
         pricing_note="DeepSeek-V3 输入¥2/百万，输出¥8/百万",
+        default_model="deepseek-chat",
+    ),
+    "volcengine": ProviderConfig(
+        id="volcengine",
+        name="火山方舟 Volcengine Ark",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        balance_endpoint="",  # 方舟无公开余额查询 API，依赖配额告警
+        supports_custom_key=True,
+        pricing_note="DeepSeek-V4-Flash 免费额度 50万 tokens，超出后按方舟定价计费",
+        default_model="deepseek-v4-flash-260425",  # 方舟模型名：带版本日期后缀
     ),
     "openai": ProviderConfig(
         id="openai",
@@ -73,6 +86,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         balance_endpoint="",  # OpenAI 无公开余额API
         supports_custom_key=True,
         pricing_note="GPT-4o 输入$2.5/百万，输出$10/百万",
+        default_model="gpt-4o",
     ),
     "openrouter": ProviderConfig(
         id="openrouter",
@@ -82,6 +96,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         balance_response_path=("data", "limit_remaining"),
         supports_custom_key=True,
         pricing_note="返回模型列表含定价信息",
+        default_model="deepseek/deepseek-chat",
     ),
     "custom": ProviderConfig(
         id="custom",
@@ -91,10 +106,26 @@ PROVIDERS: dict[str, ProviderConfig] = {
         models_endpoint="/models",
         supports_custom_key=True,
         pricing_note="任意OpenAI兼容接口",
+        default_model="",
     ),
 }
 
-# 初始化默认 provider 的 API key
+# 初始化 provider 的 API key
+# 1. 先从 provider 专属环境变量读取（支持多 provider 同时配置 key）
+# 2. 如果是主 LLM 配置（CONCLAVE_LLM_*）匹配的 provider，则用主 key 覆盖
+_provider_env_keys: dict[str, str] = {
+    "siliconflow": "SILICONFLOW_API_KEY",
+    "volcengine": "VOLCENGINE_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+for _pid, _env_name in _provider_env_keys.items():
+    _key = os.environ.get(_env_name, "")
+    if _key:
+        PROVIDERS[_pid].api_key = _key
+
+# 主 LLM 配置（CONCLAVE_LLM_*）匹配的 provider，用主 key 覆盖
 if settings.llm_base_url and settings.llm_api_key:
     for pid, p in PROVIDERS.items():
         if pid != "custom" and p.base_url.rstrip("/") in settings.llm_base_url:
@@ -108,8 +139,9 @@ if settings.llm_base_url and settings.llm_api_key:
 
 # ========== Provider Fallback Chain ==========
 
-# 默认回退顺序：硅基流动 → DeepSeek → OpenAI → OpenRouter → custom
-_FALLBACK_ORDER: list[str] = ["siliconflow", "deepseek", "openai", "openrouter", "custom"]
+# 默认回退顺序：火山方舟 → 硅基流动 → DeepSeek → OpenAI → OpenRouter → custom
+# volcengine 优先：免费额度优先消耗，节省付费 API 成本
+_FALLBACK_ORDER: list[str] = ["volcengine", "siliconflow", "deepseek", "openai", "openrouter", "custom"]
 
 
 def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str, str, str]]:
@@ -194,8 +226,8 @@ def get_fallback_chain(model_override: str | None = None) -> list[tuple[str, str
         if url in seen_urls:
             continue
         seen_urls.add(url)
-        # 使用该 provider 的默认模型（回退链不使用 override，因为不同 provider 模型名不同）
-        model = settings.llm_model  # 统一使用用户配置的模型
+        # 使用该 provider 的默认模型（不同 provider 模型命名不同，不能统一用 settings.llm_model）
+        model = p.default_model or settings.llm_model
         chain.append((p.base_url, p.api_key, model, pid))
 
     return chain
@@ -306,6 +338,15 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
     "deepseek-reasoner": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "reasoning"},
     "gpt-4o": {"input": 18.0, "output": 72.0, "currency": "CNY", "tier": "pro"},
     "gpt-4o-mini": {"input": 1.08, "output": 4.32, "currency": "CNY", "tier": "cheap"},
+    # --- 火山方舟 Ark 模型名别名（Ark 使用全小写带版本日期后缀的模型名） ---
+    "deepseek-v4-flash": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "fast"},
+    "deepseek-v4-flash-260425": {"input": 1.0, "output": 2.0, "currency": "CNY", "tier": "fast"},
+    "deepseek-v4-pro": {"input": 12.0, "output": 24.0, "currency": "CNY", "tier": "pro"},
+    "deepseek-v4-pro-260425": {"input": 12.0, "output": 24.0, "currency": "CNY", "tier": "pro"},
+    # --- 豆包 Doubao-Seed-2.0-lite（火山方舟，≤32K 输入¥0.6/输出¥3.6） ---
+    "doubao-seed-2-0-lite": {"input": 0.6, "output": 3.6, "currency": "CNY", "tier": "cheap"},
+    "doubao-seed-2-0-lite-260428": {"input": 0.6, "output": 3.6, "currency": "CNY", "tier": "cheap"},
+    "doubao-seed-2-0-lite-260215": {"input": 0.6, "output": 3.6, "currency": "CNY", "tier": "cheap"},
     "_default": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard"},
 }
 
@@ -334,6 +375,18 @@ RECOMMENDED_MODELS = [
         "name": "DeepSeek-V4-Flash",
         "desc": "快速响应，成本低",
         "recommended_for": "快速讨论/简单任务",
+    },
+    {
+        "id": "volcengine:deepseek-v4-flash",
+        "name": "DeepSeek-V4-Flash (火山方舟免费)",
+        "desc": "火山方舟 50万 tokens 免费额度，OpenAI 兼容",
+        "recommended_for": "低成本会议/测试验证",
+    },
+    {
+        "id": "volcengine:doubao-seed-2-0-lite-260428",
+        "name": "Doubao-Seed-2.0-lite (火山方舟)",
+        "desc": "豆包 lite 模型，≤32K 输入¥0.6/输出¥3.6/百万，支持深度思考",
+        "recommended_for": "低成本会议/动态工作流验证",
     },
     {
         "id": "MiniMaxAI/MiniMax-M2.5",
@@ -483,7 +536,15 @@ def get_meeting_llm_config(meeting_id: str = "") -> tuple[str, str, str, str]:
     default_base = settings.llm_base_url or "https://api.siliconflow.cn/v1"
     default_key = settings.llm_api_key
     default_model = settings.llm_model
-    default_provider = "siliconflow" if "siliconflow" in default_base else "custom"
+    # 根据 base_url 自动推断 provider ID
+    if "siliconflow" in default_base:
+        default_provider = "siliconflow"
+    elif "volcengine" in default_base or "ark.cn-beijing" in default_base:
+        default_provider = "volcengine"
+    elif "deepseek.com" in default_base:
+        default_provider = "deepseek"
+    else:
+        default_provider = "custom"
 
     if not meeting_id or meeting_id not in _meeting_overrides:
         return default_base, default_key, default_model, default_provider
@@ -543,7 +604,15 @@ def resolve_models_for_meeting(
         dict[str, str]: {key: "provider_id:model_id"}
             key 为角色 id（如 "engineer"）或 @阶段名（如 "@arbitrate"）
     """
-    default_provider = "siliconflow" if "siliconflow" in (settings.llm_base_url or "") else "custom"
+    _base = settings.llm_base_url or ""
+    if "siliconflow" in _base:
+        default_provider = "siliconflow"
+    elif "volcengine" in _base or "ark.cn-beijing" in _base:
+        default_provider = "volcengine"
+    elif "deepseek.com" in _base:
+        default_provider = "deepseek"
+    else:
+        default_provider = "custom"
 
     # 解析 meeting_model 中是否已含 provider 前缀（如 "siliconflow:deepseek-ai/DeepSeek-V4-Flash"）
     if meeting_model and _is_provider_model_format(meeting_model):
