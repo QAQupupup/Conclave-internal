@@ -1,31 +1,37 @@
 # Conclave evaluation framework configuration
 # 评估框架配置：被测系统、评分器、执行、统计、服务连接
-# 当前策略：火山方舟 V4-Pro 作为被测模型（500K 免费额度），V4-Pro 同时作为 Judge
-# 被测系统和 Judge 共用 V4-Pro，确保评测不受模型能力差异干扰
+# 当前策略：火山方舟 Doubao-Seed-2.0-mini 作为被测模型（低时延高并发）
+# Judge 使用 SiliconFlow DeepSeek-V4-Flash（独立厂商，消除自评偏差）
 
 # 被测系统（System Under Test）配置
 target:
-  llm_model: "deepseek-v4-pro-260425"
-  base_url: "http://localhost:8000"
+  llm_model: "doubao-seed-2-0-mini-260428"
+  llm_vendor: "火山方舟 (Volcengine Ark) — Doubao"
+  base_url: "http://localhost:8000"                # 后端服务地址（评估入口）
+  llm_api_base_url: "https://ark.cn-beijing.volces.com/api/v3"  # 实际 LLM API 端点
   embedding_model: "bge-m3"
+  embedding_vendor: "火山方舟 (Volcengine Ark)"
   reranker_model: "bge-reranker-v2-m3"
+  reranker_vendor: "火山方舟 (Volcengine Ark)"
 
 # LLM-as-Judge 评分器配置
-# Judge 使用火山方舟 V4-Pro（与被测系统同模型，消除模型差异干扰）
-# judge 通过 /chat/completions 端点直接调用 LLM，不经过后端代理
+# Judge 通过 /chat/completions 端点直接调用 LLM，不经过后端代理
+# 独立 Judge 模型：使用 SiliconFlow DeepSeek-V4-Flash（与被测模型不同厂商/型号）
+# 消除自评偏差，judge_runs=3 启用标准差计算和不可信标记
 judge:
-  model: "deepseek-v4-pro-260425"
-  base_url: "https://ark.cn-beijing.volces.com/api/v3"
-  api_key_env: "VOLCENGINE_API_KEY"      # 从该环境变量读取 API key
-  judge_runs: 1                           # 基线测试用 1 次
+  model: "deepseek-ai/DeepSeek-V4-Flash"
+  llm_vendor: "SiliconFlow — DeepSeek"
+  base_url: "https://api.siliconflow.cn/v1"
+  api_key_env: "SILICONFLOW_API_KEY"     # 从该环境变量读取 API key
+  judge_runs: 3                           # 3 次运行取中位数，启用 stdev 不可信检测
   unreliable_threshold: 0.2              # 标准差超过该值则标记 unreliable
 
 # 执行配置
 execution:
   pass_k: 1                              # 基线测试用 1 次（后续可增至 3 次计算 Pass@k）
-  max_concurrent: 2                     # 最大并发用例数（降低以避免速率限制）
-  per_case_timeout: 600                 # 单用例超时（秒），V4-Pro 推理需要更长时间
-  retry_on_timeout: true                # 超时后是否重试
+  max_concurrent: 2                      # 最大并发用例数（降低以避免速率限制）
+  per_case_timeout: 600                  # 单用例超时（秒），深度思考模型需要更长时间
+  retry_on_timeout: true                 # 超时后是否重试
 
 # 统计配置
 stats:
@@ -39,3 +45,6 @@ service:
   frontend_url: "http://localhost:5173"
   admin_username: "admin"
   admin_password: "admin123"
+  # Dev token：admin 密码登录失败时使用 x-dev-token 认证（开发/评估环境）
+  # 获取方式：GET /debug/auth-info → token 字段
+  dev_token: "ba073cb5d9211494fd2578580ca374b869eadbf6e56bd9d9"

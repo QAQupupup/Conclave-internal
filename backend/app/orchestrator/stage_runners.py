@@ -473,6 +473,25 @@ async def run_intra_team(
     lock_conclusion(state.conclusion_chain, "intra_team", {"claims": state.claims, "team_conclusions": conclusions})
     state.confidence_flags["intra_team"] = worst_conf
 
+    # claim 类型分布结构化日志：便于退化追踪和同质化检测
+    type_dist: dict[str, int] = {}
+    for concl in conclusions:
+        for c in concl.get("claims", []):
+            t = c.get("type", "unknown")
+            type_dist[t] = type_dist.get(t, 0) + 1
+    _logger.info(
+        "intra_team claim 类型分布: %s (共 %d 条)",
+        type_dist,
+        sum(type_dist.values()),
+    )
+    from app.observability.log_bus import log_bus
+
+    log_bus.info(
+        f"intra_team claim type distribution: {type_dist}",
+        logger="orchestrator.stage_runners",
+        extra={"stage": "intra_team", "claim_type_distribution": type_dist},
+    )
+
     # 补充模式完成后清空门禁待执行动作，让后续 cross_team 正常执行
     if is_replace:
         state.gate_pending_action = None

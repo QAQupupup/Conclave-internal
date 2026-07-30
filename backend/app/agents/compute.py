@@ -123,6 +123,8 @@ class ThinkRequest:
     available_tools: list[dict[str, Any]] = field(default_factory=list)  # [{name, description, parameters}]
     tool_history: list[ToolResult] = field(default_factory=list)
     iteration: int = 0
+    # 流式回调：非 None 时启用 SSE 流式输出（仅 produce 等长等待阶段使用）
+    on_token: Any = None  # Callable[[str], Any] | None
 
 
 @dataclass
@@ -189,6 +191,7 @@ class LocalAgentCompute:
                 schema_hint=req.schema_hint,
                 model_override=req.model or "",
                 agent_role=req.agent_role or "",
+                on_token=req.on_token,
             )
 
             # ReAct 模式：从 result 中提取 tool_calls 和 need_continue

@@ -27,17 +27,30 @@ class CaseRunner:
 
     通过 Conclave 会议 API 运行一个测试用例：创建会议、触发运行、轮询直到完成、
     获取会议详情，然后按用例 ``expected`` 中各阶段的判定标准进行评分。
+
+    认证方式（按优先级）：
+    1. JWT Bearer Token（通过 /auth/login 获取）
+    2. Dev Token（通过 x-dev-token header，用于开发/评估环境）
     """
 
-    def __init__(self, base_url: str, auth_token: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        auth_token: str | None = None,
+        dev_token: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
+        self.dev_token = dev_token
         self.headers: dict[str, str] = {"Content-Type": "application/json"}
         if auth_token:
             self.headers["Authorization"] = f"Bearer {auth_token}"
+        elif dev_token:
+            self.headers["x-dev-token"] = dev_token
         self._exact = ExactMatchGrader()
         self._field = FieldCheckGrader()
         self._judge: LLMJudgeGrader | None = None
+        self._intra_team_type_dist: dict[str, int] | None = None
         self._stage_handlers: dict[str, Any] = {
             "clarify": self._grade_clarify,
             "intra_team": self._grade_intra_team,
@@ -76,9 +89,6 @@ class CaseRunner:
                 )
             stage_scores = await self._grade_all_stages(case, detail)
             self._check_terminal_state(case, detail, errors)
-            # 获取完整审计数据（best-effort，失败不影响评分）
-            if not errors:
-                audit_data = await self._fetch_audit(meeting_id)
         except TimeoutError:
             errors.append("case timed out waiting for meeting to finish")
         except httpx.HTTPStatusError as exc:
@@ -87,6 +97,11 @@ class CaseRunner:
             errors.append(f"http {code}: {body}")
         except Exception as exc:
             errors.append(f"{type(exc).__name__}: {exc}")
+        finally:
+            # 无条件获取审计数据（失败用例的审计数据是退化排查的核心证据）
+            # 仅当 meeting_id 非空时尝试（会议未创建则无数据可获取）
+            if meeting_id:
+                audit_data = await self._fetch_audit(meeting_id)
 
         latency = (time.monotonic() - start) * 1000.0
         passed = not errors and bool(stage_scores) and all(v >= PASS_THRESHOLD for v in stage_scores.values())
@@ -230,6 +245,8 @@ class CaseRunner:
         if handler is None:
             return GraderResult(score=1.0, passed=True, detail=f"no grader for stage '{stage}'")
         checks: list[tuple[str, bool]] = []
+        # 重置 intra_team 类型分布（避免跨用例污染）
+        self._intra_team_type_dist = None
         await handler(criteria, detail, checks)
         if not checks:
             return GraderResult(score=1.0, passed=True, detail=f"no criteria for stage '{stage}'")
@@ -239,6 +256,9 @@ class CaseRunner:
         detail_str = f"{passed_count}/{len(checks)} passed"
         if failed:
             detail_str += f"; failed: {', '.join(failed)}"
+        # intra_team 阶段追加 claim 类型分布到 detail（用于报告展示）
+        if stage == "intra_team" and self._intra_team_type_dist:
+            detail_str += f"; type_dist: {self._intra_team_type_dist}"
         return GraderResult(score=score, passed=passed_count == len(checks), detail=detail_str)
 
     async def _grade_clarify(self, criteria: dict, detail: dict, checks: list[tuple[str, bool]]) -> None:
@@ -276,6 +296,18 @@ class CaseRunner:
                     actual_types.append(t)
             res = self._exact.grade(expected_types, actual_types)
             checks.append(("expected_claim_types", res.passed))
+
+        # claim 类型分布质量检查：至少有 2 种不同类型才算通过
+        # 防止 LLM 将所有 claim 标为 "assumption"（同质化退化）
+        type_dist: dict[str, int] = {}
+        for c in claims:
+            t = c.get("type", "unknown")
+            type_dist[t] = type_dist.get(t, 0) + 1
+        if type_dist:
+            checks.append(("claim_type_diversity", len(type_dist) >= 2))
+            # 将分布信息追加到 checks 末尾的元数据（不影响评分，仅用于报告展示）
+            # 通过 detail 字符串间接传递
+            self._intra_team_type_dist = type_dist
 
     async def _grade_cross_team(self, criteria: dict, detail: dict, checks: list[tuple[str, bool]]) -> None:
         conflicts = detail.get("conflicts") or []

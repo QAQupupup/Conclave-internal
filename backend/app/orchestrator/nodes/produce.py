@@ -15,6 +15,35 @@ from app.models import MeetingState, Role, Stage
 from ._helpers import _emit_agent_spoke, _resolve_model_for_call, _run_with_consistency
 
 
+def _make_token_stream_callback(state: MeetingState) -> Any:
+    """创建限流的 token 流式回调，每 500ms 最多发一次 ``produce.token_stream`` 事件
+
+    用于 produce 阶段长等待时提供增量反馈，让用户感知 LLM 正在生成而非卡死。
+    """
+    import time
+
+    last_emit: list[float] = [0.0]
+
+    async def _on_token(delta: str) -> None:
+        now = time.monotonic()
+        if now - last_emit[0] < 0.5:  # 500ms 限流
+            return
+        last_emit[0] = now
+        with contextlib.suppress(Exception):
+            await bus.publish(
+                make_event(
+                    "produce.token_stream",
+                    state.meeting_id,
+                    {
+                        "meeting_id": state.meeting_id,
+                        "delta": delta[:200],  # 限制 delta 大小，避免事件过大
+                    },
+                )
+            )
+
+    return _on_token
+
+
 def _current_src_loc(depth: int = 1) -> dict[str, Any]:
     """返回当前代码位置（文件路径 + 行号），用于审计日志和降级事件"""
     import inspect
@@ -445,6 +474,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             evidence_summary=evidence_summary or None,
         )
         req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "produce")
+        req.on_token = _make_token_stream_callback(state)
         resp = await execute_think(req)
         if not resp.success:
             _lb.warning(
@@ -471,13 +501,13 @@ async def produce_node(state: MeetingState) -> MeetingState:
             state, Role.ENGINEER, Stage.PRODUCE, "启动分阶段代码生成管线：规划→规格→测试→骨架→模块→前端→整合"
         )
 
-        # 合并anchor上下文
+        # 合并anchor上下文（迭代反馈 + 跨会议baseline）
         extra_anchor_parts = []
         if iteration_anchor:
             extra_anchor_parts.append(iteration_anchor)
         if baseline_anchor:
             extra_anchor_parts.append(baseline_anchor)
-        "\n".join(extra_anchor_parts) if extra_anchor_parts else ""
+        extra_anchor = "\n".join(extra_anchor_parts) if extra_anchor_parts else ""
 
         async def _phased_progress(stage_name: str, message: str, percent: int) -> None:
             """子阶段进度回调"""
@@ -488,6 +518,7 @@ async def produce_node(state: MeetingState) -> MeetingState:
             phased_result = await generate_deployable_service_phased(
                 state,
                 on_progress=_phased_progress,
+                extra_anchor=extra_anchor,
             )
             result = phased_result.to_result_dict()
             confidence = "high"

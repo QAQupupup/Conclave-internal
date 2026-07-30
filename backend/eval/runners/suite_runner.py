@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Any
 
 import httpx
 
@@ -31,19 +32,21 @@ class SuiteRunner:
         self.admin_username = service.get("admin_username", "")
         self.admin_password = service.get("admin_password", "")
         self.auth_token: str | None = service.get("auth_token")
+        self.dev_token: str | None = service.get("dev_token")
         self.max_concurrent = int(execution.get("max_concurrent", 3))
         self.default_pass_k = int(execution.get("pass_k", 1))
 
     async def run_suite(self, cases: list[dict], pass_k: int = 1) -> SuiteResult:
         k = pass_k or self.default_pass_k
 
-        # 1. 获取 auth token（若未显式提供则尝试登录）
+        # 1. 获取 auth token（优先级：显式 auth_token > dev_token > 登录）
         token = self.auth_token
-        if not token and self.admin_username:
+        dev_token = self.dev_token
+        if not token and not dev_token and self.admin_username:
             token = await self._login()
 
         # 2. 构造 CaseRunner 并按需注入 LLM judge
-        runner = CaseRunner(self.base_url, token)
+        runner = CaseRunner(self.base_url, token, dev_token)
         self._configure_judge(runner)
 
         # 3. 并发执行（Semaphore 控制并发度），每个用例跑 k 次
@@ -145,6 +148,7 @@ class SuiteRunner:
             p95_latency_ms=p95,
             unstable_cases=unstable_cases,
             unreliable_judgments=[],
+            model_info=self._collect_model_info(),
         )
 
     @staticmethod
@@ -155,3 +159,58 @@ class SuiteRunner:
         for r in results:
             by_case.setdefault(r.case_id, []).append(r.passed)
         return [cid for cid, flags in by_case.items() if len(set(flags)) > 1]
+
+    def _collect_model_info(self) -> dict[str, Any]:
+        """从 config 收集被测系统和 Judge 的模型元信息。
+
+        包含：厂商、模型 ID、API 地址、Embedding/Reranker 模型等。
+        用于报告溯源和对比分析。
+        """
+        target = self.config.get("target", {}) or {}
+        judge = self.config.get("judge", {}) or {}
+
+        # 厂商映射：根据 base_url 或 model 前缀推断
+        def _infer_vendor(model_id: str, base_url: str) -> str:
+            model_lower = model_id.lower()
+            url_lower = base_url.lower()
+            if "volces.com" in url_lower or "ark" in url_lower:
+                if "doubao" in model_lower:
+                    return "火山方舟 (Volcengine Ark) — Doubao"
+                if "deepseek" in model_lower:
+                    return "火山方舟 (Volcengine Ark) — DeepSeek"
+                return "火山方舟 (Volcengine Ark)"
+            if "siliconflow" in url_lower:
+                return "SiliconFlow"
+            if "openai.com" in url_lower:
+                return "OpenAI"
+            if "localhost" in url_lower or "127.0.0.1" in url_lower:
+                return "本地服务 (Backend Proxy)"
+            return "未知"
+
+        target_model = target.get("llm_model", "unknown")
+        target_base = target.get("base_url", self.base_url)
+        judge_model = judge.get("model", "unknown")
+        judge_base = judge.get("base_url", "")
+
+        # 优先使用 config 中显式声明的 llm_vendor，否则从 base_url/model 推断
+        target_vendor = target.get("llm_vendor") or _infer_vendor(target_model, target_base)
+        judge_vendor = judge.get("llm_vendor") or _infer_vendor(judge_model, judge_base)
+
+        return {
+            "target": {
+                "vendor": target_vendor,
+                "model": target_model,
+                "base_url": target_base,
+                "llm_api_base_url": target.get("llm_api_base_url", "unknown"),
+                "embedding_model": target.get("embedding_model", "unknown"),
+                "embedding_vendor": target.get("embedding_vendor", "unknown"),
+                "reranker_model": target.get("reranker_model", "unknown"),
+                "reranker_vendor": target.get("reranker_vendor", "unknown"),
+            },
+            "judge": {
+                "vendor": judge_vendor,
+                "model": judge_model,
+                "base_url": judge_base,
+                "judge_runs": int(judge.get("judge_runs", 1)),
+            },
+        }

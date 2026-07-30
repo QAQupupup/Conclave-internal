@@ -50,6 +50,7 @@ def test_stats_endpoint(client):
     assert "drift" in data
     assert "borrowed_agents" in data
     assert "conclusion_chain_length" in data
+    assert "degradation_warnings_count" in data
 
     # stub 模式下消息数应大于 0
     assert data["message_count"] > 0
@@ -161,6 +162,7 @@ def test_stats_endpoint_fields_complete(client):
     assert isinstance(data["drift"]["drift_detected"], int)
     assert isinstance(data["borrowed_agents"], int)
     assert isinstance(data["conclusion_chain_length"], int)
+    assert isinstance(data["degradation_warnings_count"], int)
 
     # llm_trace 内部结构
     llm = data["llm_trace"]

@@ -32,6 +32,15 @@ topic_type 说明：
 
 # ---------- 2.2 产品/架构师 IntraTeam 阶段 ----------
 # 角色画像从 ROLE_LIBRARY 动态注入（{role_persona}），此处只保留阶段骨架
+
+# 论点类型使用指导（追加到所有 IntraTeam 模板末尾，引导 LLM 正确区分 claim 类型）
+_CLAIM_TYPE_GUIDE = """
+论点类型说明（每条 claim 必须选择最贴合的类型，不要全部使用同一种）：
+- fact: 有文档/数据支撑的客观事实（evidence_ref 为 [doc:section] 时优先用此类型）
+- assumption: 基于推理的假设，无直接证据（evidence_ref 为 [assumption] 时用此类型）
+- constraint: 技术或业务约束条件（如性能要求、合规限制、资源边界）
+要求：至少包含 1 条 fact 或 constraint 类型，不要全部标注为 assumption。"""
+
 ARCHITECT_INTRA = """[系统] {role_persona}
 
 [阶段: IntraTeam]
@@ -42,7 +51,7 @@ ARCHITECT_INTRA = """[系统] {role_persona}
 - [common_knowledge] 通用工程实践或行业常识（弱证据，需用户验证）
 - [assumption] 基于当前信息的推理假设（最弱，需确认）
 
-输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}"""
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}""" + _CLAIM_TYPE_GUIDE
 
 # ---------- 2.3 工程师 IntraTeam 阶段 ----------
 # 角色画像从 ROLE_LIBRARY 动态注入（{role_persona}），此处只保留阶段骨架
@@ -56,7 +65,7 @@ ENGINEER_INTRA = """[系统] {role_persona}
 - [common_knowledge] 通用工程实践或行业常识（弱证据，需用户验证）
 - [assumption] 基于当前信息的推理假设（最弱，需确认）
 
-输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}"""
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}""" + _CLAIM_TYPE_GUIDE
 
 # ---------- 2.3b 安全专家 IntraTeam 阶段 ----------
 SECURITY_EXPERT_INTRA = """[系统] {role_persona}
@@ -70,7 +79,7 @@ SECURITY_EXPERT_INTRA = """[系统] {role_persona}
 - [assumption] 基于当前信息的推理假设（最弱，需确认）
 每条论点应涵盖：威胁类型（Spoofing/Tampering/Repudiation/Info Disclosure/DoS/EoP）、攻击向量、防护方案。
 
-输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}"""
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}""" + _CLAIM_TYPE_GUIDE
 
 # ---------- 2.3c 数据工程师 IntraTeam 阶段 ----------
 DATA_ENGINEER_INTRA = """[系统] {role_persona}
@@ -84,7 +93,7 @@ DATA_ENGINEER_INTRA = """[系统] {role_persona}
 - [assumption] 基于当前信息的推理假设（最弱，需确认）
 每条论点应涵盖：范式级别、索引策略、一致性级别（ACID/BASE）、迁移风险。
 
-输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}"""
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "risk_level": "low|medium|high", "type": "fact|assumption|constraint"}}]}}""" + _CLAIM_TYPE_GUIDE
 
 # ---------- 2.3d UX 设计师 IntraTeam 阶段 ----------
 UX_DESIGNER_INTRA = """[系统] {role_persona}
@@ -98,7 +107,7 @@ UX_DESIGNER_INTRA = """[系统] {role_persona}
 - [assumption] 基于当前信息的推理假设（最弱，需确认）
 每条论点应涵盖：用户目标、操作路径、错误处理、无障碍要求。
 
-输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}"""
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}""" + _CLAIM_TYPE_GUIDE
 
 # ---------- 2.3e 市场专家 IntraTeam 阶段 ----------
 MARKETING_EXPERT_INTRA = """[系统] {role_persona}
@@ -112,7 +121,7 @@ MARKETING_EXPERT_INTRA = """[系统] {role_persona}
 - [assumption] 基于当前信息的推理假设（最弱，需确认）
 每条论点应涵盖：市场规模、竞争格局、增长策略、商业可行性。
 
-输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}"""
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}""" + _CLAIM_TYPE_GUIDE
 
 # ---------- 2.3f 主持人 IntraTeam 阶段 ----------
 MODERATOR_INTRA = """[系统] {role_persona}
@@ -126,7 +135,7 @@ MODERATOR_INTRA = """[系统] {role_persona}
 - [assumption] 基于当前信息的推理假设（最弱，需确认）
 每条论点应涵盖：流程风险、信息缺口、潜在冲突点。
 
-输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}"""
+输出 JSON: {{"claims": [{{"claim": "...", "evidence_ref": "...", "type": "fact|assumption|constraint"}}]}}""" + _CLAIM_TYPE_GUIDE
 
 # ---------- 2.4 跨队辩论阶段 ----------
 CROSS_TEAM = """[阶段: CrossTeam]

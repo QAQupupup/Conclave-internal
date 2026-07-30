@@ -114,6 +114,18 @@ def print_summary(report: dict, out_path: Path) -> None:
     print("=" * 60)
     print("Evaluation Summary")
     print("=" * 60)
+    # 模型信息
+    model_info = report.get("model_info", {}) or {}
+    target_info = model_info.get("target", {}) or {}
+    judge_info = model_info.get("judge", {}) or {}
+    if target_info:
+        print(f"Target Model:     {target_info.get('vendor', '?')} / {target_info.get('model', '?')}")
+        print(f"  Embedding:      {target_info.get('embedding_model', '?')}")
+        print(f"  Reranker:       {target_info.get('reranker_model', '?')}")
+    if judge_info:
+        print(f"Judge Model:      {judge_info.get('vendor', '?')} / {judge_info.get('model', '?')}")
+        print(f"  Judge runs:     {judge_info.get('judge_runs', 1)}")
+    print("-" * 60)
     print(f"Total cases:      {report.get('total_cases', 0)}")
     print(f"Pass@1:           {report.get('pass1', 0.0):.3f}")
     ci = report.get("pass1_ci") or [0.0, 0.0]
@@ -124,6 +136,17 @@ def print_summary(report: dict, out_path: Path) -> None:
     print(f"P50 latency (ms): {report.get('p50_latency_ms', 0.0):.0f}")
     print(f"P95 latency (ms): {report.get('p95_latency_ms', 0.0):.0f}")
     print(f"Unstable cases:   {len(report.get('unstable_cases', []))}")
+    # 中间阶段退化告警统计
+    total_degradation = 0
+    high_severity_degradation = 0
+    for case in report.get("per_case_results", []):
+        audit = case.get("audit_data", {}) or {}
+        meeting_data = audit.get("meeting", {}) or {}
+        warnings = meeting_data.get("degradation_warnings", []) or []
+        total_degradation += len(warnings)
+        high_severity_degradation += sum(1 for w in warnings if w.get("severity") == "high")
+    if total_degradation > 0:
+        print(f"Degradation warns: {total_degradation} (high: {high_severity_degradation})")
     breakdown = report.get("stage_breakdown", {}) or {}
     if breakdown:
         print("Stage pass rate:")

@@ -166,15 +166,16 @@ async def _call_llm(prompt: str, schema_hint: str, state: MeetingState, temperat
     return resp.result
 
 
-def _phase1_prompt(topic: str, decision_record: dict, quality_feedback: str) -> str:
+def _phase1_prompt(topic: str, decision_record: dict, quality_feedback: str, extra_anchor: str = "") -> str:
     fb = f"\n\n[质量迭代反馈]\n{quality_feedback}\n" if quality_feedback else ""
+    ea = f"\n{extra_anchor}\n" if extra_anchor else ""
     return f"""[分阶段生成 Phase 1/7: 架构规划]
 
 你是资深系统架构师。为以下需求做架构设计，不写代码。
 
 【需求】{topic}
 【讨论结论】{str(decision_record)[:2000]}
-{fb}
+{fb}{ea}
 
 【任务】评估复杂度，划分模块，确定技术栈。
 复杂度: micro(<10文件单文件)/small(10-20基础分层)/medium(20-50完整7层+React+PG+测试,默认)/large(50+多模块)
@@ -491,8 +492,12 @@ else:
 async def generate_deployable_service_phased(
     state: MeetingState,
     on_progress: Any = None,
+    extra_anchor: str = "",
 ) -> PhasedGenerationResult:
-    """分阶段生成可部署服务（主入口）"""
+    """分阶段生成可部署服务（主入口）
+
+    extra_anchor: 迭代反馈 + 跨会议 baseline 的合并文本，注入 Phase 1 架构规划
+    """
     result = PhasedGenerationResult()
     llm_calls = 0
 
@@ -507,7 +512,7 @@ async def generate_deployable_service_phased(
 
     # Phase 1: 架构规划
     await _p("phase1", "Phase 1/7: 架构规划...", 5)
-    r = await _call_llm(_phase1_prompt(topic, decision_record, qf), "phased_plan", state)
+    r = await _call_llm(_phase1_prompt(topic, decision_record, qf, extra_anchor), "phased_plan", state)
     llm_calls += 1
     if "_error" in r:
         result.errors.append(f"Phase1: {r['_error']}")

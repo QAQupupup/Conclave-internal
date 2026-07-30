@@ -560,6 +560,14 @@ class Runner:
                     extra={"stage": current_stage.value, "messages_count": len(state.messages)},
                 )
 
+                # === 中间阶段退化检测 ===
+                # 在 persist 之后、子议题逻辑之前检查退化指标
+                # 不触发迭代，仅记录结构化告警到 state.degradation_warnings
+                if current_stage in self._INTERMEDIATE_STAGES and not is_terminal(state):
+                    await self._check_intermediate_degradation(state, current_stage)
+                    if state.degradation_warnings:
+                        await self._persist(state)  # 持久化新增的告警
+
                 # === ADR-014 Phase 3: 子议题迭代 ===
                 # produce 完成后，若处于子议题模式，保存当前子议题结果并切换到下一个
                 if (
@@ -929,6 +937,164 @@ class Runner:
             _schedule_cleanup(state.meeting_id, _STATE_TTL_AFTER_DONE)
 
         return state
+
+    # ── 中间阶段退化检测 ──
+    # 不触发迭代（成本太高），仅记录结构化告警到 state.degradation_warnings，
+    # 供审计端点导出和根因分析使用。
+
+    _INTERMEDIATE_STAGES = {
+        Stage.INTRA_TEAM,
+        Stage.CROSS_TEAM,
+        Stage.EVIDENCE_CHECK,
+        Stage.ARBITRATE,
+    }
+
+    async def _check_intermediate_degradation(self, state: MeetingState, completed_stage: Stage) -> None:
+        """中间阶段完成后检查退化指标，记录结构化告警。
+
+        检查维度：
+        - intra_team: claim 类型多样性（同质化退化）、claim 数量过少
+        - cross_team: 冲突数量异常（0 冲突可能意味着角色观点趋同）
+        - evidence_check: 证据覆盖率过低
+        - arbitrate: 决策记录缺失
+        """
+        if completed_stage not in self._INTERMEDIATE_STAGES:
+            return
+
+        stage_name = completed_stage.value
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if completed_stage == Stage.INTRA_TEAM:
+            # claim 类型多样性检查
+            type_dist: dict[str, int] = {}
+            for concl in state.team_conclusions:
+                for c in concl.get("claims", []):
+                    t = c.get("type", "unknown")
+                    type_dist[t] = type_dist.get(t, 0) + 1
+            total_claims = sum(type_dist.values())
+            distinct_types = len(type_dist)
+
+            if total_claims > 0 and distinct_types < 2:
+                state.degradation_warnings.append(
+                    {
+                        "stage": stage_name,
+                        "warning_type": "claim_type_homogenization",
+                        "detail": f"所有 {total_claims} 条 claim 均为同一类型 {list(type_dist.keys())}，"
+                        f"缺乏事实/假设/约束的多样性区分",
+                        "type_distribution": type_dist,
+                        "total_claims": total_claims,
+                        "timestamp": now_iso,
+                        "severity": "high",
+                    }
+                )
+            elif total_claims > 0 and distinct_types == 2 and total_claims >= 6:
+                # 2 种类型但有大量 claim，可能有一种类型占比极高
+                max_ratio = max(type_dist.values()) / total_claims
+                if max_ratio > 0.85:
+                    state.degradation_warnings.append(
+                        {
+                            "stage": stage_name,
+                            "warning_type": "claim_type_imbalance",
+                            "detail": f"类型分布严重不均：{type_dist}，"
+                            f"主导类型占比 {max_ratio:.0%}，可能导致论证视角单一",
+                            "type_distribution": type_dist,
+                            "total_claims": total_claims,
+                            "timestamp": now_iso,
+                            "severity": "medium",
+                        }
+                    )
+
+            # claim 数量过少检查（每个角色至少应有 1 条 claim）
+            expected_min = max(len(state.team_config), 2)
+            if 0 < total_claims < expected_min:
+                state.degradation_warnings.append(
+                    {
+                        "stage": stage_name,
+                        "warning_type": "insufficient_claims",
+                        "detail": f"仅产出 {total_claims} 条 claim，预期至少 {expected_min} 条"
+                        f"（{len(state.team_config)} 个角色）",
+                        "total_claims": total_claims,
+                        "expected_min": expected_min,
+                        "timestamp": now_iso,
+                        "severity": "medium",
+                    }
+                )
+
+        elif completed_stage == Stage.CROSS_TEAM:
+            # 冲突数量检查：0 冲突可能意味着角色观点趋同（退化信号）
+            conflict_count = len(state.conflicts)
+            claim_count = sum(len(c.get("claims", [])) for c in state.team_conclusions)
+            if claim_count >= 6 and conflict_count == 0:
+                state.degradation_warnings.append(
+                    {
+                        "stage": stage_name,
+                        "warning_type": "zero_conflicts",
+                        "detail": f"有 {claim_count} 条 claim 但未检测到任何冲突，"
+                        f"角色观点可能过度趋同",
+                        "claim_count": claim_count,
+                        "conflict_count": conflict_count,
+                        "timestamp": now_iso,
+                        "severity": "medium",
+                    }
+                )
+
+        elif completed_stage == Stage.EVIDENCE_CHECK:
+            # 证据覆盖率检查
+            total_assessments = sum(len(es.get("assessments", [])) for es in state.evidence_set)
+            claim_count = sum(len(c.get("claims", [])) for c in state.team_conclusions)
+            if claim_count > 0 and total_assessments == 0:
+                state.degradation_warnings.append(
+                    {
+                        "stage": stage_name,
+                        "warning_type": "zero_evidence_assessments",
+                        "detail": f"有 {claim_count} 条 claim 但无任何证据评估，"
+                        f"证据检查阶段可能未正常执行",
+                        "claim_count": claim_count,
+                        "assessment_count": total_assessments,
+                        "timestamp": now_iso,
+                        "severity": "high",
+                    }
+                )
+
+        elif completed_stage == Stage.ARBITRATE:
+            # 决策记录缺失检查
+            if not state.decision_record:
+                state.degradation_warnings.append(
+                    {
+                        "stage": stage_name,
+                        "warning_type": "missing_decision_record",
+                        "detail": "仲裁阶段完成但未生成决策记录",
+                        "timestamp": now_iso,
+                        "severity": "high",
+                    }
+                )
+
+        # 如果有告警，发布事件并记录日志
+        new_warnings = [w for w in state.degradation_warnings if w.get("timestamp") == now_iso]
+        for warning in new_warnings:
+            log_bus.warning(
+                f"中间阶段退化告警: stage={warning['stage']}, "
+                f"type={warning['warning_type']}, severity={warning['severity']}",
+                logger="orchestrator.runner",
+                extra={
+                    "meeting_id": state.meeting_id,
+                    "stage": warning["stage"],
+                    "warning_type": warning["warning_type"],
+                    "severity": warning["severity"],
+                },
+            )
+            await bus.publish(
+                make_event(
+                    "intermediate.degradation",
+                    state.meeting_id,
+                    {
+                        "stage": warning["stage"],
+                        "warning_type": warning["warning_type"],
+                        "severity": warning["severity"],
+                        "detail": warning["detail"][:300],
+                    },
+                )
+            )
 
     async def _evaluate_quality(self, state: MeetingState) -> dict:
         """质量门禁评估：按 deliverable_type 分派到对应评估方法。"""

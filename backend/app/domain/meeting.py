@@ -303,6 +303,12 @@ class MeetingState(BaseModel):
     # auto_iterate: 是否自动迭代直到质量达标（用户可设置）
     auto_iterate: bool = False
 
+    # degradation_warnings: 中间阶段退化告警列表
+    # 每个 entry: {stage, warning_type, detail, timestamp, severity}
+    # 由 _check_intermediate_degradation() 在中间阶段完成后填充，
+    # 不触发迭代（中间阶段迭代成本太高），仅记录供审计和根因分析。
+    degradation_warnings: list[dict[str, Any]] = Field(default_factory=list)
+
     # [SECURITY-FIX] 消息列表上限：超过此数量时裁剪最旧消息（保留上下文窗口）
     MAX_MESSAGES: int = 500
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+from collections.abc import Callable
 from typing import Any, Protocol
 
 import httpx
@@ -62,7 +63,12 @@ class LLMClient(Protocol):
     """LLM 客户端协议：输入 prompt，返回解析后的 dict"""
 
     async def complete(
-        self, prompt: str, schema_hint: str = "", model_override: str = "", agent_role: str = ""
+        self,
+        prompt: str,
+        schema_hint: str = "",
+        model_override: str = "",
+        agent_role: str = "",
+        on_token: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -79,6 +85,7 @@ class StubLLM:
         schema_hint: str = "",
         model_override: str = "",
         agent_role: str = "",
+        on_token: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]:
         # 根据内容判定阶段，返回对应 schema 的假数据
         if "Clarify" in prompt or schema_hint == "clarify":
@@ -616,12 +623,18 @@ class RealLLM:
             await self._client.aclose()
 
     async def complete(
-        self, prompt: str, schema_hint: str = "", model_override: str = "", agent_role: str = ""
+        self,
+        prompt: str,
+        schema_hint: str = "",
+        model_override: str = "",
+        agent_role: str = "",
+        on_token: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]:
         """三明治模式：请求层 schema 注入 -> 解析层 Pydantic 校验 -> 重试层 -> 降级
 
         model_override: per-role 或 per-stage 模型覆盖（格式: "provider_id:model_id" 或 "model_id"）
         agent_role: 发起调用的 Agent 角色名（用于 trace/cost 记录）
+        on_token: 流式回调（仅 produce 等长等待阶段使用），非 None 时启用 SSE 流式输出
         """
         # 熔断器检查
         if not _circuit_breaker.can_call():
@@ -635,7 +648,7 @@ class RealLLM:
             return await StubLLM().complete(prompt, schema_hint)
 
         model_cls = SCHEMA_MAP.get(schema_hint)
-        schema_desc = self._schema_description(model_cls)
+        schema_desc = self._schema_description(model_cls, schema_hint)
         # schema_hint 即阶段名，用于 trace 记录
         stage = schema_hint
         temp = STAGE_TEMPERATURES().get(stage, 0.0)
@@ -671,6 +684,8 @@ class RealLLM:
 
             for attempt in range(1, self.MAX_ATTEMPTS + 1):
                 try:
+                    # 流式回调仅在首次尝试使用，重试不重复流式
+                    _stream_cb = on_token if attempt == 1 else None
                     content, native_reasoning = await self._call_api(
                         current_prompt,
                         schema_desc,
@@ -679,6 +694,7 @@ class RealLLM:
                         config_override=(_p_url, _p_key, _p_model),
                         agent_role=agent_role,
                         provider_id=_p_id,
+                        on_token=_stream_cb,
                     )
                     # [FALLBACK] 最小输出长度校验：防止 LLM 返回空内容导致管线空转
                     # 按阶段分级：meta 输出短阶段名（~15 chars），produce 需要完整 PRD
@@ -735,6 +751,29 @@ class RealLLM:
                         claims_val = result.get("claims")
                         if not claims_val:
                             raise ValueError("intra_team 阶段 claims 为空，LLM 未输出有效论点")
+                        # claim 类型同质化检测：全部为同一类型（尤其 assumption）时记录警告
+                        claim_types = {c.get("type", "assumption") for c in claims_val if isinstance(c, dict)}
+                        if len(claim_types) == 1:
+                            _homog_type = claim_types.pop() if claim_types else "unknown"
+                            result["_claim_type_homogeneous"] = True
+                            logger.warning(
+                                "intra_team claim 类型同质化: 全部为 '%s'（共 %d 条），"
+                                "LLM 未区分 fact/assumption/constraint",
+                                _homog_type,
+                                len(claims_val),
+                            )
+                            from app.observability.log_bus import log_bus
+
+                            log_bus.warning(
+                                f"intra_team claim 类型同质化: 全部为 '{_homog_type}'",
+                                logger="agents.llm",
+                                extra={
+                                    "stage": "intra_team",
+                                    "claim_type_homogeneous": True,
+                                    "homogeneous_type": _homog_type,
+                                    "claim_count": len(claims_val),
+                                },
+                            )
                     # cross_team 阶段：空冲突 + pass 门禁 = 矛盾，触发重试
                     if schema_hint == "cross_team" and isinstance(result, dict):
                         conflicts_val = result.get("conflicts")
@@ -918,12 +957,96 @@ class RealLLM:
     # ---------- 请求层 ----------
 
     @staticmethod
-    def _schema_description(model_cls: type[BaseModel] | None) -> str:
-        """把 Pydantic 模型转成 JSON Schema 文本，注入 system message"""
+    def _schema_description(
+        model_cls: type[BaseModel] | None,
+        schema_hint: str = "",
+    ) -> str:
+        """把 Pydantic 模型转成 JSON Schema 文本，注入 system message
+
+        对特定阶段追加字段语义说明，帮助 LLM 理解枚举值的区分标准
+        （JSON Schema 本身只有 ``"type": "string"``，无语义信息）。
+        """
         if model_cls is None:
             return ""
         schema = model_cls.model_json_schema()
-        return json.dumps(schema, ensure_ascii=False, indent=2)
+        desc = json.dumps(schema, ensure_ascii=False, indent=2)
+
+        # intra_team: claim.type 字段需要语义指导，防止 LLM 全部默认 "assumption"
+        if schema_hint == "intra_team":
+            desc += "\n\n字段说明：\n"
+            desc += "- type: 必须根据证据来源选择——"
+            desc += '有文档证据用 "fact"，纯推理用 "assumption"，'
+            desc += '技术/业务限制用 "constraint"。不要全部使用同一种类型。'
+
+        return desc
+
+    async def _call_api_stream(
+        self,
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        stage_timeout: float,
+        on_token: Callable[[str], Any],
+    ) -> tuple[str, str, int, int, int, int]:
+        """SSE 流式调用 LLM，返回 (content, reasoning, input_tok, output_tok, total_tok, latency_ms)
+
+        解析 SSE ``data: {...}`` 行，累积 content 和 reasoning_content，
+        每个 delta.content 片段通过 on_token 回调传递给调用方。
+        on_token 可以是同步或异步 callable，返回协程时自动 await。
+        usage 信息从最后一个 chunk 提取（部分 provider 不返回 usage，此时为 0）。
+        """
+        import asyncio
+        import time
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        t0 = time.monotonic()
+
+        async with self._client.stream("POST", url, headers=headers, json=body, timeout=stage_timeout) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                data_str = line[6:]  # strip "data: " prefix
+                if data_str.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                choices = chunk.get("choices") or []
+                if choices:
+                    delta = choices[0].get("delta") or {}
+                    delta_content = delta.get("content", "")
+                    if delta_content:
+                        content_parts.append(delta_content)
+                        try:
+                            _cb_result = on_token(delta_content)
+                            if asyncio.iscoroutine(_cb_result):
+                                await _cb_result
+                        except Exception:
+                            pass  # 回调异常不影响 LLM 调用
+                    delta_reasoning = delta.get("reasoning_content", "")
+                    if delta_reasoning:
+                        reasoning_parts.append(delta_reasoning)
+                # usage 通常在最后一个 chunk
+                chunk_usage = chunk.get("usage")
+                if isinstance(chunk_usage, dict):
+                    input_tokens = chunk_usage.get("prompt_tokens", 0) or input_tokens
+                    output_tokens = chunk_usage.get("completion_tokens", 0) or output_tokens
+                    total_tokens = chunk_usage.get("total_tokens", 0) or total_tokens
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        content = "".join(content_parts)
+        native_reasoning = "".join(reasoning_parts)
+        # 部分 provider 流式不返回 usage，用 content 长度粗估 output_tokens
+        if total_tokens == 0 and content:
+            output_tokens = max(1, len(content) // 4)
+            total_tokens = input_tokens + output_tokens
+        return content, native_reasoning, input_tokens, output_tokens, total_tokens, latency_ms
 
     async def _call_api(
         self,
@@ -936,6 +1059,7 @@ class RealLLM:
         provider_id: str = "",
         system_message_override: str = "",
         force_json_mode: bool = False,
+        on_token: Callable[[str], None] | None = None,
     ) -> tuple[str, str]:
         """调用 chat completions，返回 (content, native_reasoning) 元组
 
@@ -950,6 +1074,8 @@ class RealLLM:
         config_override: 外部指定的 (base_url, api_key, model)，用于 provider 回退链。
         force_json_mode: True 时强制使用 JSON Mode（Tier 3 回退），传 response_format
                          并使用限制性 system message。
+        on_token: 流式回调，非 None 时启用 SSE 流式输出，每收到一个 delta 调用一次。
+                  仅用于 produce 等长等待阶段提供增量反馈，不影响 JSON 解析逻辑。
 
         Returns:
             (content, native_reasoning) — native_reasoning 为 DeepSeek/Qwen 原生推理
@@ -1013,11 +1139,74 @@ class RealLLM:
         if force_json_mode and not system_message_override and self._supports_json(base_url, model):
             body["response_format"] = {"type": "json_object"}
 
-        latency_ms = 0
         # produce 阶段生成大量文本（OpenAPI），需要更长超时
         # DeepSeek-V3.2 生成 PRD+OpenAPI 可能需要 200-400s
         # produce_* 子类型同样需要长超时
         stage_timeout = settings.llm_produce_timeout if stage.startswith("produce") else settings.llm_default_timeout
+
+        # --- 流式路径（on_token 非空时启用，失败自动回退到非流式）---
+        if on_token is not None:
+            body["stream"] = True
+            try:
+                (
+                    content,
+                    native_reasoning,
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    latency_ms,
+                ) = await self._call_api_stream(url, headers, body, stage_timeout, on_token)
+                # 捕获 Qwen 的 <RichMediaReference> 思考内容（与非流式路径一致）
+                if not native_reasoning and "<RichMediaReference>" in content:
+                    think_end = content.find("<RichMediaReference>")
+                    if think_end != -1:
+                        native_reasoning = content[:think_end].strip()
+                if native_reasoning:
+                    logger.debug(
+                        "阶段=%s 模型原生推理 (%d chars): %s...",
+                        stage,
+                        len(native_reasoning),
+                        native_reasoning[:200],
+                    )
+                record_call(
+                    stage=stage,
+                    model=model,
+                    temperature=temp,
+                    seed=settings.llm_seed,
+                    prompt=user_prompt,
+                    raw_response=content,
+                    parsed_result=None,
+                    validation_status="valid",
+                    attempt=attempt,
+                    latency_ms=latency_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    agent_role=agent_role,
+                    provider_id=provider_id,
+                    http_request_body=body,
+                    http_response_text=content,
+                )
+                try:
+                    from app.observability.cost_tracker import get_cost_tracker
+
+                    await get_cost_tracker().record_llm(
+                        node=stage,
+                        model=model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        latency_ms=latency_ms,
+                    )
+                except Exception as e:
+                    logger.debug("记录 LLM 调用成本失败: %s", e)
+                return content, native_reasoning
+            except Exception as stream_err:
+                logger.warning("流式调用失败，回退到非流式: %s", stream_err)
+                body.pop("stream", None)
+                # 继续走非流式路径
+
+        # --- 非流式路径（原逻辑）---
+        latency_ms = 0
         t0 = time.monotonic()
         try:
             resp = await self._client.post(url, headers=headers, json=body, timeout=stage_timeout)

@@ -1020,6 +1020,7 @@ async def get_stats(meeting_id: str) -> dict[str, Any]:
         },
         "borrowed_agents": len(state.borrowed_agents) if state.borrowed_agents else 0,
         "conclusion_chain_length": len(state.conclusion_chain.conclusions),
+        "degradation_warnings_count": len(state.degradation_warnings) if state.degradation_warnings else 0,
     }
 
 
@@ -1153,7 +1154,7 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
     events = await bus.replay(meeting_id, from_seq=0)
     event_dicts = [e.model_dump(mode="json") for e in events]
     degradation_events = [
-        e for e in event_dicts if e.get("type") in ("produce.degradation", "meeting.fallback_warning")
+        e for e in event_dicts if e.get("type") in ("produce.degradation", "meeting.fallback_warning", "intermediate.degradation")
     ]
 
     # 3. 成本记录（从数据库查）
@@ -1211,6 +1212,7 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
         "quality_feedback": state.quality_feedback,
         "quality_evaluation": state.quality_evaluation,
         "iteration_history": list(state.iteration_history),
+        "degradation_warnings": list(state.degradation_warnings) if state.degradation_warnings else [],
         "auto_iterate": state.auto_iterate,
         "max_iterations": state.max_iterations,
         "iteration_count": state.iteration_count,

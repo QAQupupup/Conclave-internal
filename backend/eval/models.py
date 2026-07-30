@@ -44,6 +44,8 @@ class SuiteResult:
     p95_latency_ms: float = 0.0
     unstable_cases: list[str] = field(default_factory=list)
     unreliable_judgments: list[str] = field(default_factory=list)
+    # 模型元信息：厂商、型号、API 地址等（用于报告溯源）
+    model_info: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

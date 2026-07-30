@@ -488,6 +488,7 @@ class MockLLM:
         schema_hint: str = "",
         model_override: str = "",
         agent_role: str = "",
+        on_token=None,
     ) -> dict:
         self.call_log.append((prompt, schema_hint, model_override, agent_role))
         if schema_hint in self._responses:
