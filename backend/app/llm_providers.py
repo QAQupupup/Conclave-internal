@@ -351,6 +351,9 @@ MODEL_PRICING: dict[str, dict[str, Any]] = {
     "doubao-seed-2-0-mini": {"input": 0.2, "output": 2.0, "currency": "CNY", "tier": "cheap"},
     "doubao-seed-2-0-mini-260215": {"input": 0.2, "output": 2.0, "currency": "CNY", "tier": "cheap"},
     "doubao-seed-2-0-mini-260428": {"input": 0.2, "output": 2.0, "currency": "CNY", "tier": "cheap"},
+    # --- 豆包 Doubao-Seed-2.0-Code（火山方舟编程加强版，输入¥3.2/输出¥16，缓存命中¥0.64） ---
+    "doubao-seed-2-0-code": {"input": 3.2, "output": 16.0, "currency": "CNY", "tier": "standard"},
+    "doubao-seed-2-0-code-preview-260215": {"input": 3.2, "output": 16.0, "currency": "CNY", "tier": "standard"},
     "_default": {"input": 4.0, "output": 16.0, "currency": "CNY", "tier": "standard"},
 }
 

@@ -93,6 +93,7 @@ docs/audits/
 # ===== Eval / Analysis reports（本地评估产物，不提交仓库）=====
 system-eval-*/
 system-evaluation-report/
+conclave-baseline-comparison-*/
 extract_report.py
 backend/eval/read_report.py
 backend/eval/reports/

@@ -669,7 +669,8 @@ class RealLLM:
             )
             prompt = trim_prompt_to_budget(prompt, max_tokens=settings.llm_max_prompt_tokens)
 
-        # [FALLBACK] Provider 回退链：连接失败时尝试下一个 provider
+        # [FALLBACK] Provider 回退链：连接失败/余额不足时尝试下一个 provider
+        from app.core.exceptions import InsufficientBalanceError
         from app.llm_providers import get_fallback_chain
 
         fallback_chain = get_fallback_chain(model_override=model_override or None)
@@ -824,6 +825,35 @@ class RealLLM:
                         to_provider=next_provider_id,
                         reason=type(conn_err).__name__,
                         error=str(conn_err)[:300],
+                    )
+                    break  # 跳出重试循环，尝试下一个 provider
+                except InsufficientBalanceError as bal_err:
+                    # 余额不足：切换到下一个 provider
+                    # 而非穿透到 compute.think() 导致整个阶段直接失败
+                    last_error = f"{_p_id}: {type(bal_err).__name__}: {bal_err}"
+                    logger.warning(
+                        "阶段=%s provider=%s 余额不足, 尝试下一个 provider: %s",
+                        stage,
+                        _p_id,
+                        last_error[:200],
+                    )
+                    from app.observability.log_bus import log_bus
+
+                    log_bus.warning(
+                        f"Provider {_p_id} 余额不足, 尝试回退",
+                        logger="agents.llm",
+                        extra={"stage": stage, "provider": _p_id, "error": last_error[:300]},
+                    )
+                    next_provider_id = (
+                        fallback_chain[provider_idx + 1][3] if provider_idx + 1 < len(fallback_chain) else "stub"
+                    )
+                    record_trace_event(
+                        "provider_switch",
+                        stage=stage,
+                        from_provider=_p_id,
+                        to_provider=next_provider_id,
+                        reason="InsufficientBalanceError",
+                        error=str(bal_err)[:300],
                     )
                     break  # 跳出重试循环，尝试下一个 provider
                 except (ValidationError, json.JSONDecodeError, KeyError, httpx.HTTPError, ValueError) as e:
