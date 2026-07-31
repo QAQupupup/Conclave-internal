@@ -1,0 +1,15 @@
+{
+  "case_id": "design-ci-cd-pipeline",
+  "category": "design_doc",
+  "tier": 2,
+  "topic": "设计企业级 CI/CD 流水线平台架构，支持多语言构建（Java/Go/Python/Node.js/前端）、自动化测试（单元/集成/E2E）、代码质量门禁（SonarQube/ESLint/mypy）、容器镜像构建与安全扫描、蓝绿部署/金丝雀发布/灰度发布、多环境管理（dev/staging/prod）、回滚能力，目标是从代码提交到生产发布 < 30 分钟",
+  "description": "CI/CD 平台架构设计场景，涉及工具链选型（Jenkins vs GitLab CI vs GitHub Actions vs ArgoCD vs Tekton）、流水线即代码（Pipeline as Code）设计、构建缓存策略（依赖缓存/构建层缓存）、部署策略（蓝绿 vs 金丝雀 vs 滚动 vs 功能开关）、GitOps 工作流（ArgoCD Flux 模式）、安全扫描（SAST/DAST/镜像扫描/SBOM），以及多集群发布编排",
+  "config": {
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["cicd", "devops", "gitops", "kubernetes", "deployment", "automation"],
+  "notes": "CI/CD 平台成熟度演进路径：从脚本化到平台化，涉及自建 vs 采购 GitHub Enterprise/GitLab Ultimate 的成本争论。GitOps 与传统 CI 驱动 CD 的模式之争。"
+}

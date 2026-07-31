@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-realtime-analytics",
+  "category": "prd_openapi",
+  "tier": 2,
+  "topic": "设计实时数据分析平台 API，支持用户行为实时计算（Flink/Spark Streaming）、实时大屏、实时画像更新、AB 实验指标实时统计，端到端延迟要求 < 3 秒，日处理事件量 50 亿+，支持 Exactly-Once 语义和乱序数据处理",
+  "description": "实时计算平台场景，涉及流计算引擎选型（Flink vs Spark Streaming vs Kafka Streams）、窗口计算策略（滚动/滑动/会话窗口）、状态管理（RocksDB 状态后端大小与 TTL）、实时数仓分层（ODS/DWD/DWS/ADS）、Lambda vs Kappa 架构在实时场景的取舍",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["realtime-analytics", "stream-processing", "flink", "kafka", "data-pipeline", "exactly-once"],
+  "notes": "Exactly-Once 与延迟的天然矛盾：强一致性保证会增加端到端延迟，需要业务侧权衡。Tier 2 涉及流计算深度技术选型。"
+}

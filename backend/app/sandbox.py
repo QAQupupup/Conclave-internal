@@ -290,6 +290,10 @@ class ExecResult:
 
 # ---- Docker 可用性检测 ----
 
+# Docker Desktop 兼容性检测缓存
+# Windows/macOS Docker Desktop 通过 Hyper-V/VM 运行，部分 Linux 命名空间特性不可用
+_docker_is_desktop: bool | None = None
+
 
 async def _check_docker() -> bool:
     """检测 Docker daemon 是否可用"""
@@ -317,6 +321,61 @@ async def _check_docker() -> bool:
             logger="sandbox",
         )
     return _docker_available
+
+
+async def _is_docker_desktop() -> bool:
+    """检测 Docker daemon 是否为 Docker Desktop（Windows/macOS）。
+
+    Docker Desktop 通过 Hyper-V/VM 运行 Linux 内核，部分命名空间特性受限：
+    - --uts private：不支持（exit code 125: "invalid UTS mode"）
+    - --ipc private：正常工作
+
+    检测方法：通过 docker info 的 Operating System 字段判断。
+    结果缓存到模块级变量，整个进程生命周期只检测一次。
+    """
+    global _docker_is_desktop
+    if _docker_is_desktop is not None:
+        return _docker_is_desktop
+
+    # 也支持通过环境变量显式声明（覆盖自动检测）
+    env_override = os.environ.get("CONCLAVE_DOCKER_DESKTOP")
+    if env_override is not None:
+        _docker_is_desktop = env_override.lower() in ("1", "true", "yes")
+        log_bus.info(
+            f"Docker Desktop 模式: 由环境变量强制设置为 {_docker_is_desktop}",
+            logger="sandbox",
+        )
+        return _docker_is_desktop
+
+    try:
+        cmd = _shell_cmd(["docker", "info", "--format", "{{.OperatingSystem}}"])
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        os_info = stdout.decode(errors="replace").strip().lower()
+        # Docker Desktop 的 Operating System 字段通常包含 "Docker Desktop"
+        _docker_is_desktop = "docker desktop" in os_info
+        if _docker_is_desktop:
+            log_bus.info(
+                "检测到 Docker Desktop 环境，将禁用不兼容的命名空间隔离（--uts private）",
+                logger="sandbox",
+            )
+        else:
+            log_bus.info(
+                f"Docker daemon OS: {os_info!r}，启用完整命名空间隔离",
+                logger="sandbox",
+            )
+    except Exception as e:
+        # 检测失败时保守处理：不跳过任何安全特性
+        _docker_is_desktop = False
+        log_bus.warning(
+            f"Docker Desktop 检测失败（{type(e).__name__}: {e}），默认启用完整隔离",
+            logger="sandbox",
+        )
+    return _docker_is_desktop
 
 
 async def _resolve_image() -> str | None:
@@ -409,7 +468,7 @@ async def _resolve_named_image(image: str) -> str | None:
 # ---- 安全选项构建 ----
 
 
-def _build_security_args(
+async def _build_security_args(
     workspace_root: Path,
     network_level: SandboxNetworkLevel = "L1",
 ) -> list[str]:
@@ -432,7 +491,7 @@ def _build_security_args(
     - --cap-drop ALL + --security-opt no-new-privileges：阻止权限提升
     - --pids-limit：限制进程数，防 fork bomb
     - --ulimit：限制文件描述符和 core dump
-    - --ipc=private --uts=private：隔离 IPC 和 UTS 命名空间
+    - --ipc=private --uts=private：隔离 IPC 和 UTS 命名空间（UTS 在 Docker Desktop 上跳过）
     - --read-only + tmpfs：只读根文件系统，仅 /tmp 可写
     - 不挂载 Docker socket、不挂载宿主机敏感目录
     - 使用 nobody(65534) 用户运行，无 root 权限
@@ -479,8 +538,6 @@ def _build_security_args(
         # [H-07] 隔离命名空间
         "--ipc",
         "private",
-        "--uts",
-        "private",
         # [H-07] 禁止特权容器
         "--privileged=false",
         # [H-07] 工作区挂载为 rw（代码执行需要写输出文件），但根文件系统是 --read-only
@@ -490,6 +547,10 @@ def _build_security_args(
         "-w",
         container_cwd,  # [修复] 根据 workspace_root 设置正确的工作目录
     ]
+
+    # [H-07] UTS 命名空间隔离：Docker Desktop (Windows/macOS) 不支持，条件性添加
+    if not await _is_docker_desktop():
+        args.extend(["--uts", "private"])
 
     # 网络分级
     if network_level == "L1":
@@ -544,7 +605,7 @@ async def _run_in_container(
     if resolved is None:
         raise RuntimeError("无可用沙箱镜像")
 
-    security_args = _build_security_args(workspace_root, network_level=network_level)
+    security_args = await _build_security_args(workspace_root, network_level=network_level)
 
     # 计算容器内工作目录（与 _build_security_args 中 -w 一致）
     vol_root = os.environ.get("CONCLAVE_WORKSPACE_DIR", "/workspace")
@@ -902,9 +963,15 @@ async def warmup_sandbox() -> dict:
         if ds_image:
             log(f"[sandbox-warmup] 数据科学镜像就绪: {ds_image}", logger="sandbox")
         else:
-            log_warn("[sandbox-warmup] 数据科学镜像不可用，数据分析模板将使用标准镜像", logger="sandbox")
+            log_warn(
+                "[sandbox-warmup] 数据科学镜像不可用，数据分析模板将使用标准镜像（降级）。"
+                "可能原因：1) Dockerfile 构建失败（网络/镜像源问题） "
+                "2) Docker Socket Proxy 未启用 BUILD 端点。"
+                "排查：docker compose logs backend | grep -i datascience",
+                logger="sandbox",
+            )
     except Exception as e:
-        log_warn(f"[sandbox-warmup] 数据科学镜像准备失败: {e}", logger="sandbox")
+        log_warn(f"[sandbox-warmup] 数据科学镜像准备失败: {type(e).__name__}: {e}", logger="sandbox")
 
     # 4. 最小化自检：运行 echo hello 验证沙箱容器能正常创建/执行/清理
     try:

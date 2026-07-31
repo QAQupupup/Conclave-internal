@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 from app.agents.compute import build_evidence_prompt, execute_think
@@ -69,11 +70,18 @@ async def evidence_check_node(state: MeetingState) -> MeetingState:
         if tool_registry is not None:
             try:
                 from app.agents.compute import get_compute
+                from app.events import bus as _bus
+                from app.events import make_event as _make_event
+
+                async def _on_tool_event(event_type: str, payload: dict[str, Any]) -> None:
+                    with contextlib.suppress(Exception):
+                        await _bus.publish(_make_event(event_type, state.meeting_id, payload))
 
                 react = ReactLoop(
                     compute=get_compute(),
                     tools=tool_registry,
                     meeting_id=state.meeting_id,
+                    on_tool_event=_on_tool_event,
                 )
                 # 构建初始 prompt（含工具描述）
                 anchor = _full_anchor(state, "evidence_check")

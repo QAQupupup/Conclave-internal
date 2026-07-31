@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.auth import hash_password
+from app.auth import client_hash_password, hash_password
 from app.context import set_user_id, set_user_role, set_username
 from app.db.engine import async_session_factory
 from app.observability.audit import audit
@@ -79,7 +79,10 @@ async def _count_users() -> int:
 
 
 async def _create_admin_user(username: str, password: str, display_name: str = "系统管理员") -> dict:
-    pw_hash = hash_password(password)
+    # [修复] 双层哈希一致性：setup 流程收到的 password 是明文，
+    # 必须先做 client_hash（SHA-256）再 PBKDF2，与登录链路一致。
+    # 存储格式：PBKDF2(SHA-256(plaintext))，与 init_auth() 和 change_password() 一致。
+    pw_hash = hash_password(client_hash_password(password))
     async with async_session_factory() as session:
         try:
             # 查询默认租户 ID（在插件 on_startup 中已创建）
@@ -134,6 +137,8 @@ class SetupStatusResponse(BaseModel):
 class SetupRequest(BaseModel):
     setup_token: str = Field(..., min_length=10)
     username: str = Field(..., min_length=1, max_length=64)
+    # [注意] password 为明文密码（setup 流程专用端点，有 setup_token + 速率限制保护）
+    # 后端负责做 client_hash(SHA-256) + PBKDF2 双层哈希，与登录链路一致
     password: str = Field(..., min_length=8, max_length=128)
     display_name: str | None = Field(None, max_length=128)
 

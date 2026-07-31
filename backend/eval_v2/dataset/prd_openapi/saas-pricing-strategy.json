@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-saas-pricing-strategy",
+  "category": "prd_openapi",
+  "tier": 1,
+  "topic": "设计 SaaS 产品计费系统 API，支持订阅制（月付/年付）、按量计费（API 调用次数/存储容量/计算时长）、阶梯定价、免费试用、优惠券/折扣、企业定制合同，要求计费精度到分，账单生成延迟 < 5 分钟，支持多币种和多税率",
+  "description": "SaaS 计费系统场景，涉及定价模型（订阅 vs 按量 vs 混合）、计费引擎（实时计费 vs 离线批算）、账务系统（账户余额/充值/退款/对账）、发票管理，以及与支付网关（Stripe/支付宝/微信支付）的集成方案。注意：本用例交付物为 PRD+OpenAPI（系统设计视角），而非纯商业分析",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["saas", "billing", "pricing", "subscription", "payment", "finops"],
+  "notes": "计费准确性是底线：任何计费错误都直接影响收入和用户信任，对账机制和幂等设计是核心。Tier 1 但涉及资金安全，对精度要求高。"
+}

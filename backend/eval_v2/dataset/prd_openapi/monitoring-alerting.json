@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-monitoring-alerting",
+  "category": "prd_openapi",
+  "tier": 1,
+  "topic": "设计分布式系统监控告警平台 API，支持指标采集（Prometheus 兼容）、日志聚合（ELK/Loki）、链路追踪（OpenTelemetry）、告警规则引擎、通知渠道（邮件/飞书/钉钉/PagerDuty）、告警收敛和降噪，支持 10 万+ 监控指标、100+ 微服务",
+  "description": "可观测性平台设计场景，涉及三大支柱（Metrics/Logs/Traces）的存储选型、告警规则引擎（PromQL vs 自研 DSL）、告警收敛算法（时间窗口聚合 vs 依赖关系抑制）、高可用架构（多副本 vs 联邦集群），以及自建 vs 使用 Datadog/NewRelic 等 SaaS 的成本对比",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["monitoring", "alerting", "observability", "prometheus", "opentelemetry", "sre"],
+  "notes": "告警降噪是核心痛点：如何避免告警风暴同时不错过真实故障，涉及多维度告警聚合策略。Tier 1 基础场景。"
+}

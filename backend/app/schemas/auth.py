@@ -1,6 +1,8 @@
 # 认证相关 DTO + VO
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -17,13 +19,22 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
-    user: dict
+    user: dict[str, Any]
 
 
 class MeResponse(BaseModel):
-    """当前用户信息 VO"""
+    """当前用户信息 VO
 
+    [P0-2 修复] 补全前端 UserInfo 接口所需的全部字段：
+    id/tenant_id/tenants/email/avatar_url。uid 保留向后兼容。
+    """
+
+    id: str | None = None
+    uid: int | None = None  # 向后兼容
     username: str
     role: str
     display_name: str
-    uid: int | None = None
+    tenant_id: str = ""
+    tenants: list[dict[str, Any]] = Field(default_factory=list)
+    email: str | None = None
+    avatar_url: str | None = None

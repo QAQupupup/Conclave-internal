@@ -33,6 +33,7 @@ AI 助手在以下情况应**主动**检查并调用对应 Skill，无需用户�
 | `session-checkpoint` | 存档、保存进度、checkpoint、继续、恢复、上次说到哪了 | 阶段性完成、切换窗口前、新会话恢复 | — | 按需 |
 | `conclave-audit` | 系统审计、代码审查、架构债、安全扫描 | 大版本合并后、安全修复后、架构重构后 | — | 按需 |
 | `audit-cross-verify` | 交叉质证、核验审查报告、验证评审意见 | 收到外部审计报告、AI 生成的评估报告 | — | 收到报告时 |
+| `audit-remediation` | 审计报告修复、验证并修复、分析并修、fix audit | 收到审计报告后需要独立验证 + 实际代码修复 | 审计报告中的 P0/P1 问题需要修复 | 收到报告+需修复时 |
 | `orchestrator-state-check` | 阶段被跳过、阶段重复、质量门禁不执行、终态错误 | 修改编排器代码（runner.py、stage_runners.py、nodes/） | state.stage/status 赋值冲突 | 改编排器时 |
 
 ### 内置通用 Skill（平台提供）

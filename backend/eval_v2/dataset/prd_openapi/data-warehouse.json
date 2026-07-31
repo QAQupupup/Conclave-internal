@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-data-warehouse",
+  "category": "prd_openapi",
+  "tier": 2,
+  "topic": "设计企业级数据仓库平台，支持批流一体数据摄入、多维度 OLAP 查询、数据血缘追踪和权限管控，面向金融行业合规要求（数据保留 7 年、审计日志不可篡改），数据源涵盖 MySQL、PostgreSQL、Kafka、日志文件，日增数据量 5TB",
+  "description": "数据仓库架构设计场景，涉及 Lambda vs Kappa 架构选型、OLAP 引擎（ClickHouse/Doris/StarRocks/Snowflake）对比、数据湖（Iceberg/Hudi/Delta Lake）集成方案，以及金融合规对数据治理的严格约束",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["data-warehouse", "olap", "etl", "data-governance", "compliance", "fintech"],
+  "notes": "批流一体与合规约束双重挑战：技术选型受金融监管要求强约束，数据血缘和权限管控是核心难点。Tier 2 中等复杂度。"
+}

@@ -1,0 +1,15 @@
+{
+  "case_id": "research-api-gateway-patterns",
+  "category": "research",
+  "tier": 2,
+  "topic": "API 网关架构模式演进研究：从传统反向代理（Nginx）到微服务网关（Kong/APISIX/Spring Cloud Gateway）到服务网格（Istio/Linkerd）到 AI Gateway（Portkey/Helicone/Gateway API），梳理网关模式的演进路径、核心能力扩展、性能基准对比，以及在不同组织规模和技术栈下的网关选型策略",
+  "description": "API 网关模式调研场景，涉及网关核心能力矩阵（路由/限流/鉴权/熔断/可观测/转换）、数据面 vs 控制面分离架构、Envoy xDS 协议生态、Wasm 插件扩展机制、AI Gateway 新场景（LLM 路由/缓存/用量追踪/降级策略）、网关性能损耗量化（延迟/吞吐量/资源开销）、以及服务网格 Sidecar 模式的 Ambient Mesh 演进方向",
+  "config": {
+    "deliverable_type": "research_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["api-gateway", "service-mesh", "envoy", "istio", "ai-gateway", "patterns"],
+  "notes": "AI Gateway 是 2024-2026 年新兴方向，相关资料较少且快速变化。传统网关与服务网格的边界模糊化趋势值得关注。需要区分营销概念和实际生产可用能力。"
+}

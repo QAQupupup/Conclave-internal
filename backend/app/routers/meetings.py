@@ -1154,7 +1154,9 @@ async def get_full_audit(meeting_id: str) -> dict[str, Any]:
     events = await bus.replay(meeting_id, from_seq=0)
     event_dicts = [e.model_dump(mode="json") for e in events]
     degradation_events = [
-        e for e in event_dicts if e.get("type") in ("produce.degradation", "meeting.fallback_warning", "intermediate.degradation")
+        e
+        for e in event_dicts
+        if e.get("type") in ("produce.degradation", "meeting.fallback_warning", "intermediate.degradation")
     ]
 
     # 3. 成本记录（从数据库查）

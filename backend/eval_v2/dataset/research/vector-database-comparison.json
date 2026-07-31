@@ -1,0 +1,15 @@
+{
+  "case_id": "research-vector-database-comparison",
+  "category": "research",
+  "tier": 2,
+  "topic": "向量数据库选型对比研究：系统比较 Pinecone、Weaviate、Milvus、Qdrant、Chroma、PGVector、Vespa 七款主流向量数据库在架构设计、索引算法（HNSW/IVF/DiskANN）、性能表现（QPS/召回率/P99延迟）、扩展性（水平扩展/分片策略）、功能特性（元数据过滤/混合检索/多模态）、运维成本、开源协议和商业生态上的差异，面向 RAG 和语义搜索场景给出选型建议",
+  "description": "向量数据库深度调研场景，要求团队进行充分的资料检索和技术对比，涉及 ANN 算法原理、各产品架构差异、benchmark 方法论、云服务 vs 自建成本分析，以及不同规模场景（原型验证/中小规模/大规模生产）的选型决策树。需要识别厂商 marketing 与实际性能之间的差距，关注社区活跃度和长期可持续性",
+  "config": {
+    "deliverable_type": "research_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "deep"
+  },
+  "tags": ["vector-database", "rag", "ann", "hnsw", "comparison", "ai-infrastructure"],
+  "notes": "向量数据库赛道变化快，2024-2026 年格局持续演变。需要区分开源版本能力和云服务能力，注意 benchmark 结果的复现性。证据核查阶段需要交叉验证厂商声称的性能指标。"
+}

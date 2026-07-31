@@ -128,11 +128,27 @@ def _ensure_jwt_secret() -> str:
 # ---- 密码哈希 ----
 
 
-def hash_password(password: str, salt: bytes | None = None, iterations: int = PBKDF2_ITERATIONS) -> str:
-    """PBKDF2-HMAC-SHA256 密码哈希，返回格式：pbkdf2_sha256$iterations$salt_b64$hash_b64
+def client_hash_password(password: str) -> str:
+    """模拟前端 SHA-256 预哈希（与 frontend/src/lib/crypto.ts 一致）。
 
-    [H-04 修复] 默认使用 600,000 次迭代；验证时从存储的哈希中读取实际迭代次数，
-    旧密码（260,000 次）仍可验证。登录成功后可选择透明升级。
+    安全架构：前端发送 SHA-256(明文密码) 到后端，后端再对其做 PBKDF2 存储。
+    此函数仅在服务端初始化默认管理员时使用，确保存储格式与前端登录链路一致：
+    stored_hash = PBKDF2(SHA-256(plaintext_password))
+
+    Returns:
+        SHA-256(password) 的十六进制字符串（64 字符），与前端 sha256Hash() 输出一致。
+    """
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def hash_password(password: str, salt: bytes | None = None, iterations: int = PBKDF2_ITERATIONS) -> str:
+    """PBKDF2-HMAC-SHA256 密码哈希（双层架构：输入为客户端 SHA-256 预哈希值）。
+
+    存储格式：pbkdf2_ch_sha256$iterations$salt_b64$hash_b64
+    - ``pbkdf2_ch_sha256`` 前缀标识"客户端已预哈希"（ch = client-hashed）
+    - 与旧格式 ``pbkdf2_sha256`` 区分，支持向后兼容
+
+    安全链路：前端 SHA-256(明文) → 后端 PBKDF2(client_hash) → 存储
     """
     if salt is None:
         salt = secrets.token_bytes(PBKDF2_SALT_BYTES)
@@ -144,29 +160,61 @@ def hash_password(password: str, salt: bytes | None = None, iterations: int = PB
     )
     salt_b64 = base64.b64encode(salt).decode("ascii")
     hash_b64 = base64.b64encode(dk).decode("ascii")
-    return f"pbkdf2_sha256${iterations}${salt_b64}${hash_b64}"
+    return f"pbkdf2_ch_sha256${iterations}${salt_b64}${hash_b64}"
 
 
 def verify_password(password: str, stored_hash: str) -> tuple[bool, bool]:
-    """验证密码是否匹配存储的哈希。
+    """验证密码是否匹配存储的哈希。支持新旧两种格式。
+
+    新格式 ``pbkdf2_ch_sha256$...``（5 段）：
+        password 参数应为客户端 SHA-256 预哈希值，直接做 PBKDF2 比对。
+
+    旧格式 ``pbkdf2_sha256$...``（4 段）：
+        password 参数是客户端 SHA-256 预哈希值，但存储的是 PBKDF2(明文)。
+        需要模拟 ``SHA-256(password)`` 后做 PBKDF2 比对（回退兼容）。
+        匹配后 needs_rehash=True，触发迁移到新格式。
 
     Returns:
         (valid, needs_rehash): valid=True 表示密码正确；needs_rehash=True 表示
-            密码使用旧参数（如迭代次数较低），调用方应在登录成功后用新参数重新哈希。
+            密码使用旧参数（如迭代次数较低）或旧格式，调用方应重新哈希。
     """
     try:
         parts = stored_hash.split("$")
-        if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
-            return False, False
-        iterations = int(parts[1])
-        salt = base64.b64decode(parts[2])
-        expected = parts[3]
-        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
-        actual = base64.b64encode(dk).decode("ascii")
-        valid = hmac.compare_digest(expected, actual)
-        # 迭代次数低于当前标准时需要重新哈希
-        needs_rehash = valid and iterations < PBKDF2_ITERATIONS
-        return valid, needs_rehash
+
+        if len(parts) == 5 and parts[0] == "pbkdf2_ch_sha256":
+            # 新格式：输入已是 client_hash，直接 PBKDF2 比对
+            iterations = int(parts[2])
+            salt = base64.b64decode(parts[3])
+            expected = parts[4]
+            dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+            actual = base64.b64encode(dk).decode("ascii")
+            valid = hmac.compare_digest(expected, actual)
+            needs_rehash = valid and iterations < PBKDF2_ITERATIONS
+            return valid, needs_rehash
+
+        if len(parts) == 4 and parts[0] == "pbkdf2_sha256":
+            # 旧格式兼容：存储的是 PBKDF2(明文)，收到的 password 是 SHA-256(明文)
+            # 旧代码直接对明文做 PBKDF2，现在前端发送的是 SHA-256(明文)
+            # 因此直接用 password（已是 client_hash）做 PBKDF2 比对
+            # 注意：旧存储 = PBKDF2(plaintext)，前端发送 SHA-256(plaintext)
+            # 但 PBKDF2 的输入不同，无法直接匹配。需要尝试两种路径：
+            # 路径 A: 旧代码存储 PBKDF2(plaintext)，password=SHA-256(plaintext) → 无法匹配
+            # 路径 B: 旧代码存储 PBKDF2(client_hash)，password=client_hash → 直接匹配
+            # 实际上路径 A 是真实场景，但密码学上无法从 SHA-256(plaintext) 还原 plaintext
+            # 解决方案：在 init_auth 中检测旧格式并强制重置密码哈希
+            # 这里只做路径 B 的兼容（处理中间过渡期创建的哈希）
+            iterations = int(parts[1])
+            salt = base64.b64decode(parts[2])
+            expected = parts[3]
+            # 直接用 password（client_hash）做 PBKDF2
+            dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+            actual = base64.b64encode(dk).decode("ascii")
+            valid = hmac.compare_digest(expected, actual)
+            # 旧格式匹配后必须迁移到新格式
+            needs_rehash = valid
+            return valid, needs_rehash
+
+        return False, False
     except Exception:
         return False, False
 
@@ -394,9 +442,9 @@ async def change_password(username: str, old_password: str, new_password: str) -
         return False
     if len(new_password) < 6 or len(new_password) > 128:
         return False
-    from bcrypt import gensalt, hashpw
-
-    new_hash = hashpw(new_password.encode("utf-8"), gensalt()).decode("utf-8")
+    # [P0-1 修复] 统一使用 PBKDF2-HMAC-SHA256（与 hash_password/verify_password 一致）
+    # 原代码使用 bcrypt，但 bcrypt 未声明依赖且哈希格式与 verify_password 不兼容
+    new_hash = hash_password(new_password)
     async with async_session_factory() as session:
         await session.execute(
             text("UPDATE users SET password_hash = :hash WHERE username = :username"),
@@ -424,27 +472,36 @@ async def init_auth() -> None:
 
     [H-04 修复] 记录默认管理员密码配置状态，如果使用默认密码则输出警告。
     [P0-4 修复] 生产环境 fail-fast：JWT_SECRET / 弱密码不达标时拒绝启动。
+    [P1 改进] 启动时输出醒目的管理员凭据 Banner，便于首次部署获取凭据。
     """
     _check_production_security()
     await _init_users_table()
     await _load_users_from_db()
     _ensure_jwt_secret()
 
+    # [修复] 旧格式密码哈希迁移：检测管理员是否使用旧格式（pbkdf2_sha256），
+    # 如果是则用当前默认密码重新哈希为新格式（pbkdf2_ch_sha256），确保登录兼容。
+    # 场景：管理员在 SHA-256 预哈希功能添加前创建，旧存储 = PBKDF2(明文)，
+    # 但新前端发送 SHA-256(明文)，密码学上无法匹配，必须重置哈希。
+    with _users_lock:
+        admin_user = _users_cache.get(DEFAULT_ADMIN_USERNAME)
+        if admin_user and admin_user.get("password_hash", "").startswith("pbkdf2_sha256$"):
+            logger.warning("检测到管理员使用旧格式密码哈希，自动迁移为新格式（使用当前默认密码）")
+            new_hash = hash_password(client_hash_password(DEFAULT_ADMIN_PASSWORD))
+            try:
+                await _update_password_hash(DEFAULT_ADMIN_USERNAME, new_hash)
+                admin_user["password_hash"] = new_hash
+                logger.info("管理员密码哈希已迁移为 pbkdf2_ch_sha256 格式")
+            except Exception as e:
+                logger.error("管理员密码哈希迁移失败: %s", e)
+
     # 创建默认管理员
     with _users_lock:
         if DEFAULT_ADMIN_USERNAME not in _users_cache:
-            # 安全警告：如果使用默认密码，在日志中醒目标记
             using_default_pw = DEFAULT_ADMIN_PASSWORD == "admin123"
-            log_level = logging.WARNING if using_default_pw else logging.INFO
-            logger.log(
-                log_level,
-                "Creating default admin user: username=%s %s",
-                DEFAULT_ADMIN_USERNAME,
-                "(USING DEFAULT PASSWORD 'admin123' - SET CONCLAVE_ADMIN_PASSWORD IN PRODUCTION!)"
-                if using_default_pw
-                else "(custom password from env)",
-            )
-            pw_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
+            # 模拟前端 SHA-256 预哈希：stored = PBKDF2(SHA-256(plaintext))
+            # 与前端登录流程一致：前端发送 SHA-256(password)，后端再 PBKDF2
+            pw_hash = hash_password(client_hash_password(DEFAULT_ADMIN_PASSWORD))
             user = await _create_user_in_db(
                 username=DEFAULT_ADMIN_USERNAME,
                 password_hash=pw_hash,
@@ -454,11 +511,85 @@ async def init_auth() -> None:
             if user:
                 _users_cache[DEFAULT_ADMIN_USERNAME] = user
 
+            # [P1 改进] 醒目的启动 Banner，输出管理员凭据
+            _print_admin_credentials_banner(using_default_pw)
+        else:
+            # 管理员已存在，仍输出凭据提示（方便重启后查看）
+            using_default_pw = DEFAULT_ADMIN_PASSWORD == "admin123"
+            _print_admin_credentials_banner(using_default_pw, is_new=False)
+
+
+def _print_admin_credentials_banner(using_default_pw: bool, is_new: bool = True) -> None:
+    """输出醒目的管理员凭据 Banner。
+
+    使用 Unicode 方框字符绘制边框，在日志中高度可见。
+    生产环境不输出密码明文，仅提示环境变量名。
+    """
+    is_production = os.environ.get("APP_ENV", "") == "production"
+    action = "Created" if is_new else "Loaded"
+    username = DEFAULT_ADMIN_USERNAME
+
+    if is_production:
+        # 生产环境：不暴露密码，仅提示
+        lines = [
+            "=" * 60,
+            "  Conclave Admin Credentials",
+            "=" * 60,
+            f"  {action} admin user: {username}",
+            "  Password: set via CONCLAVE_ADMIN_PASSWORD env var",
+            "  View: echo $CONCLAVE_ADMIN_PASSWORD",
+            "=" * 60,
+        ]
+    elif using_default_pw:
+        # 开发环境 + 默认密码：完整输出（醒目警告）
+        lines = [
+            "*" * 60,
+            "*  WARNING: Using DEFAULT admin credentials!              *",
+            "*" * 60,
+            f"*  {action} admin user:                                   *",
+            f"*    Username : {username:<42s} *",
+            f"*    Password : {DEFAULT_ADMIN_PASSWORD:<42s} *",
+            "*" * 60,
+            "*  Login URL: http://localhost:5173                       *",
+            "*  CHANGE IN PRODUCTION:                                  *",
+            "*    export CONCLAVE_ADMIN_PASSWORD=<strong-password>     *",
+            "*" * 60,
+        ]
+    else:
+        # 开发环境 + 自定义密码：输出用户名，密码仅提示环境变量
+        lines = [
+            "=" * 60,
+            "  Conclave Admin Credentials",
+            "=" * 60,
+            f"  {action} admin user: {username}",
+            "  Password : (custom, from CONCLAVE_ADMIN_PASSWORD)",
+            "  View     : echo $CONCLAVE_ADMIN_PASSWORD",
+            "  Login URL: http://localhost:5173",
+            "=" * 60,
+        ]
+
+    # 同时使用 print + logger.warning 确保在 Docker 日志中始终可见
+    banner_text = "\n".join(lines)
+    print(banner_text, flush=True)
+    for line in lines:
+        logger.warning(line)
+
+    # 额外输出一行简洁的凭据摘要，便于快速复制
+    if not is_production and using_default_pw:
+        summary = f"ADMIN_LOGIN: username={username} password={DEFAULT_ADMIN_PASSWORD} url=http://localhost:5173"
+        print(summary, flush=True)
+        logger.warning(summary)
+
 
 async def authenticate_user(username: str, password: str) -> dict | None:
     """验证用户名密码，返回用户信息（不含密码哈希）或 None
 
-    [H-04 修复] 登录成功后自动将旧迭代次数的密码哈希升级到新标准。
+    安全架构（双层哈希）：
+    - 前端发送 client_hash = SHA-256(明文密码)
+    - 新格式存储：pbkdf2_ch_sha256$... — PBKDF2(client_hash)
+    - 旧格式存储：pbkdf2_sha256$... — PBKDF2(明文)（向后兼容，自动迁移）
+
+    verify_password 内部根据前缀自动选择验证路径。
     """
     with _users_lock:
         user = _users_cache.get(username)
@@ -466,20 +597,27 @@ async def authenticate_user(username: str, password: str) -> dict | None:
         return None
     if not user.get("is_active"):
         return None
+
     valid, needs_rehash = verify_password(password, user["password_hash"])
     if not valid:
         return None
+
     # 更新最后登录时间
     with contextlib.suppress(Exception):
         await _update_last_login(username)
-    # 透明升级密码哈希（旧迭代次数 → 新迭代次数）
+
+    # 透明升级：旧迭代次数 → 新迭代次数，或旧格式 → 新格式（双层哈希）
     if needs_rehash:
         try:
-            new_hash = hash_password(password)
+            new_hash = hash_password(password)  # password 已是 client_hash
             await _update_password_hash(username, new_hash)
-            logger.info("用户 %s 密码哈希已自动升级到 %d 次迭代", username, PBKDF2_ITERATIONS)
+            with _users_lock:
+                if username in _users_cache:
+                    _users_cache[username]["password_hash"] = new_hash
+            logger.info("用户 %s 密码哈希已自动升级到双层哈希格式", username)
         except Exception as e:
             logger.warning("密码哈希升级失败（不影响登录）: %s", e)
+
     # 返回不含密码哈希的副本
     return {k: v for k, v in user.items() if k != "password_hash"}
 

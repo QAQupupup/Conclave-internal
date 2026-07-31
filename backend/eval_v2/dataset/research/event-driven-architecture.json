@@ -1,0 +1,15 @@
+{
+  "case_id": "research-event-driven-architecture",
+  "category": "research",
+  "tier": 2,
+  "topic": "事件驱动架构（EDA）模式与实践研究：分析事件驱动架构的核心模式（事件通知/事件承载状态转移/事件溯源/CQRS/Saga 编排）、与微服务的协同关系、Event Storming 建模方法、事件总线和事件流平台选型、Schema 演化（Avro/Protobuf/JSON Schema 兼容性策略）、事件治理（事件目录/契约测试/幂等设计），以及从同步 REST 架构迁移到 EDA 的组织和技术挑战",
+  "description": "事件驱动架构调研场景，涉及 EDA 成熟度模型、事件 vs 命令 vs 消息的语义区分、Kafka vs Pulsar vs EventStoreDB 的事件存储能力对比、事件溯源（Event Sourcing）的适用边界和快照策略、CQRS 读写分离的数据一致性挑战、Outbox Pattern 保证事务消息可靠性、事件驱动系统的调试和可观测性挑战（分布式追踪/事件链路可视化）、以及与请求-响应模式混合架构的实践经验",
+  "config": {
+    "deliverable_type": "research_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["event-driven-architecture", "eda", "event-sourcing", "cqrs", "saga", "kafka", "microservices"],
+  "notes": "EDA 的核心挑战不在技术而在建模：事件粒度设计、Schema 演进治理、最终一致性调试。事件溯源在国内落地案例相对较少，需注意理论与实践的差距。"
+}

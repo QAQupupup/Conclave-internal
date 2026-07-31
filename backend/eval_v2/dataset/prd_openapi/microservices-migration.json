@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-microservices-migration",
+  "category": "prd_openapi",
+  "tier": 2,
+  "topic": "设计单体应用向微服务架构迁移的 API 方案，现有系统是单体 Java 应用（200 万行代码，500+ 数据库表），需制定渐进式迁移策略，包括服务拆分边界、数据拆分方案、服务间通信模式、灰度发布和回滚机制",
+  "description": "单体到微服务迁移场景，涉及服务拆分方法论（DDD 限界上下文 vs 按业务域拆分）、数据迁移（双写 vs CDC vs 停机迁移）、服务网格（Istio）引入时机、API 网关在迁移中的路由策略（ strangler fig 模式），以及迁移过程中的组织架构影响",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["microservices", "migration", "ddd", "service-mesh", "strangler-pattern", "architecture"],
+  "notes": "迁移策略是核心争议点：大爆炸式重构 vs 绞杀者渐进式迁移，以及 DDD 落地程度的争论。Tier 2 涉及架构决策和组织因素。"
+}

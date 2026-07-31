@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-ecommerce-platform",
+  "category": "prd_openapi",
+  "tier": 2,
+  "topic": "设计 B2C 电商平台核心交易系统 API，包括商品管理、购物车、订单、支付、库存、促销六大模块，支持大促场景（双 11 级别 QPS 10 万+），要求库存超卖率 < 0.01%，支付状态一致性保障，支持分布式事务",
+  "description": "电商交易系统设计场景，涉及订单状态机设计、库存扣减方案（预扣减 vs 实时扣减）、分布式事务（Saga/TCC/本地消息表）选型、秒杀场景的缓存预热与流量削峰，以及微服务拆分粒度的争论",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["ecommerce", "order-system", "inventory", "payment", "distributed-transaction", "high-concurrency"],
+  "notes": "高并发交易场景经典题：库存超卖、分布式事务一致性、大促流量削峰是核心矛盾。Tier 2 场景复杂度较高。"
+}

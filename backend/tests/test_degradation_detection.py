@@ -29,14 +29,20 @@ def test_intra_team_homogenization_detected():
     """intra_team 阶段：所有 claim 同类型 → 检测到同质化退化"""
     state = _make_state()
     state.team_conclusions = [
-        {"role": "engineer", "claims": [
-            {"claim": "A", "type": "assumption"},
-            {"claim": "B", "type": "assumption"},
-        ]},
-        {"role": "product_architect", "claims": [
-            {"claim": "C", "type": "assumption"},
-            {"claim": "D", "type": "assumption"},
-        ]},
+        {
+            "role": "engineer",
+            "claims": [
+                {"claim": "A", "type": "assumption"},
+                {"claim": "B", "type": "assumption"},
+            ],
+        },
+        {
+            "role": "product_architect",
+            "claims": [
+                {"claim": "C", "type": "assumption"},
+                {"claim": "D", "type": "assumption"},
+            ],
+        },
     ]
 
     runner = Runner()
@@ -52,23 +58,28 @@ def test_intra_team_diverse_types_no_warning():
     """intra_team 阶段：claim 类型多样 → 无同质化告警"""
     state = _make_state()
     state.team_conclusions = [
-        {"role": "engineer", "claims": [
-            {"claim": "A", "type": "fact"},
-            {"claim": "B", "type": "assumption"},
-            {"claim": "C", "type": "constraint"},
-        ]},
-        {"role": "product_architect", "claims": [
-            {"claim": "D", "type": "fact"},
-            {"claim": "E", "type": "assumption"},
-        ]},
+        {
+            "role": "engineer",
+            "claims": [
+                {"claim": "A", "type": "fact"},
+                {"claim": "B", "type": "assumption"},
+                {"claim": "C", "type": "constraint"},
+            ],
+        },
+        {
+            "role": "product_architect",
+            "claims": [
+                {"claim": "D", "type": "fact"},
+                {"claim": "E", "type": "assumption"},
+            ],
+        },
     ]
 
     runner = Runner()
     asyncio.run(runner._check_intermediate_degradation(state, Stage.INTRA_TEAM))
 
     homogenization_warnings = [
-        w for w in state.degradation_warnings
-        if w["warning_type"] == "claim_type_homogenization"
+        w for w in state.degradation_warnings if w["warning_type"] == "claim_type_homogenization"
     ]
     assert len(homogenization_warnings) == 0
 
@@ -78,21 +89,19 @@ def test_intra_team_type_imbalance_detected():
     state = _make_state()
     # 7 条 assumption + 1 条 fact → assumption 占 87.5%
     state.team_conclusions = [
-        {"role": "engineer", "claims": [
-            {"claim": f"claim-{i}", "type": "assumption"} for i in range(7)
-        ]},
-        {"role": "product_architect", "claims": [
-            {"claim": "only-fact", "type": "fact"},
-        ]},
+        {"role": "engineer", "claims": [{"claim": f"claim-{i}", "type": "assumption"} for i in range(7)]},
+        {
+            "role": "product_architect",
+            "claims": [
+                {"claim": "only-fact", "type": "fact"},
+            ],
+        },
     ]
 
     runner = Runner()
     asyncio.run(runner._check_intermediate_degradation(state, Stage.INTRA_TEAM))
 
-    imbalance_warnings = [
-        w for w in state.degradation_warnings
-        if w["warning_type"] == "claim_type_imbalance"
-    ]
+    imbalance_warnings = [w for w in state.degradation_warnings if w["warning_type"] == "claim_type_imbalance"]
     assert len(imbalance_warnings) == 1
     assert imbalance_warnings[0]["severity"] == "medium"
 
@@ -113,10 +122,7 @@ def test_intra_team_insufficient_claims():
     runner = Runner()
     asyncio.run(runner._check_intermediate_degradation(state, Stage.INTRA_TEAM))
 
-    insufficient_warnings = [
-        w for w in state.degradation_warnings
-        if w["warning_type"] == "insufficient_claims"
-    ]
+    insufficient_warnings = [w for w in state.degradation_warnings if w["warning_type"] == "insufficient_claims"]
     assert len(insufficient_warnings) == 1
 
 
@@ -124,19 +130,14 @@ def test_cross_team_zero_conflicts_with_claims():
     """cross_team 阶段：有 claim 但无冲突 → 检测到观点趋同"""
     state = _make_state(Stage.CROSS_TEAM)
     state.team_conclusions = [
-        {"role": "engineer", "claims": [
-            {"claim": f"c-{i}", "type": "fact"} for i in range(6)
-        ]},
+        {"role": "engineer", "claims": [{"claim": f"c-{i}", "type": "fact"} for i in range(6)]},
     ]
     state.conflicts = []
 
     runner = Runner()
     asyncio.run(runner._check_intermediate_degradation(state, Stage.CROSS_TEAM))
 
-    zero_conflict_warnings = [
-        w for w in state.degradation_warnings
-        if w["warning_type"] == "zero_conflicts"
-    ]
+    zero_conflict_warnings = [w for w in state.degradation_warnings if w["warning_type"] == "zero_conflicts"]
     assert len(zero_conflict_warnings) == 1
     assert zero_conflict_warnings[0]["severity"] == "medium"
 
@@ -145,9 +146,7 @@ def test_cross_team_with_conflicts_no_warning():
     """cross_team 阶段：有冲突 → 无告警"""
     state = _make_state(Stage.CROSS_TEAM)
     state.team_conclusions = [
-        {"role": "engineer", "claims": [
-            {"claim": f"c-{i}", "type": "fact"} for i in range(6)
-        ]},
+        {"role": "engineer", "claims": [{"claim": f"c-{i}", "type": "fact"} for i in range(6)]},
     ]
     state.conflicts = [
         {"side_a": "engineer", "side_b": "product_architect", "summary": "冲突1"},
@@ -156,10 +155,7 @@ def test_cross_team_with_conflicts_no_warning():
     runner = Runner()
     asyncio.run(runner._check_intermediate_degradation(state, Stage.CROSS_TEAM))
 
-    zero_conflict_warnings = [
-        w for w in state.degradation_warnings
-        if w["warning_type"] == "zero_conflicts"
-    ]
+    zero_conflict_warnings = [w for w in state.degradation_warnings if w["warning_type"] == "zero_conflicts"]
     assert len(zero_conflict_warnings) == 0
 
 
@@ -167,20 +163,20 @@ def test_evidence_check_zero_assessments():
     """evidence_check 阶段：有 claim 但无评估 → 检测到证据缺失"""
     state = _make_state(Stage.EVIDENCE_CHECK)
     state.team_conclusions = [
-        {"role": "engineer", "claims": [
-            {"claim": "c-1", "type": "fact"},
-            {"claim": "c-2", "type": "assumption"},
-        ]},
+        {
+            "role": "engineer",
+            "claims": [
+                {"claim": "c-1", "type": "fact"},
+                {"claim": "c-2", "type": "assumption"},
+            ],
+        },
     ]
     state.evidence_set = []
 
     runner = Runner()
     asyncio.run(runner._check_intermediate_degradation(state, Stage.EVIDENCE_CHECK))
 
-    zero_evidence_warnings = [
-        w for w in state.degradation_warnings
-        if w["warning_type"] == "zero_evidence_assessments"
-    ]
+    zero_evidence_warnings = [w for w in state.degradation_warnings if w["warning_type"] == "zero_evidence_assessments"]
     assert len(zero_evidence_warnings) == 1
     assert zero_evidence_warnings[0]["severity"] == "high"
 
@@ -194,8 +190,7 @@ def test_arbitrate_missing_decision_record():
     asyncio.run(runner._check_intermediate_degradation(state, Stage.ARBITRATE))
 
     missing_decision_warnings = [
-        w for w in state.degradation_warnings
-        if w["warning_type"] == "missing_decision_record"
+        w for w in state.degradation_warnings if w["warning_type"] == "missing_decision_record"
     ]
     assert len(missing_decision_warnings) == 1
     assert missing_decision_warnings[0]["severity"] == "high"
@@ -217,9 +212,12 @@ def test_degradation_warnings_serializable():
 
     state = _make_state()
     state.team_conclusions = [
-        {"role": "engineer", "claims": [
-            {"claim": "A", "type": "assumption"},
-        ]},
+        {
+            "role": "engineer",
+            "claims": [
+                {"claim": "A", "type": "assumption"},
+            ],
+        },
     ]
 
     runner = Runner()

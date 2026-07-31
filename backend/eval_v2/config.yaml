@@ -1,0 +1,150 @@
+# Conclave Eval V2 配置
+# 被测系统 (System Under Test)
+target:
+  base_url: "http://localhost:8000"
+  api_key_env: "CONCLAVE_API_KEY"
+  dev_token_env: "CONCLAVE_DEV_TOKEN"
+  # 以下字段由框架自动检测，留空即可
+  llm_model: ""
+  llm_vendor: ""
+  llm_base_url: ""
+
+# Judge LLM 配置（必须与被测模型不同家族）
+judge:
+  model: "deepseek-ai/DeepSeek-V4-Flash"
+  llm_vendor: "SiliconFlow"
+  base_url: "https://api.siliconflow.cn/v1"
+  api_key_env: "SILICONFLOW_API_KEY"
+  judge_runs: 3
+  temperature: 0.0
+  seed: 42
+  timeout: 60
+  # 不可靠判定：3次评分标准差 > 此值标记 unreliable
+  unreliable_std_threshold: 0.8
+  # kappa 校准目标
+  kappa_target: 0.6
+  # 长度偏置警告阈值（Pearson r）
+  length_bias_warning_threshold: 0.7
+  # 位置随机化（Pairwise 比较时）
+  position_randomization: true
+  # 同族检测
+  same_family_check: true
+
+# 执行参数
+execution:
+  pass_k: 3
+  max_concurrent: 2
+  per_case_timeout: 600
+  poll_interval: 3
+  max_poll_attempts: 200
+  retry_on_infra_failure: true
+  max_retries: 2
+
+# 层级权重（L0 是硬门槛不参与加权）
+weights:
+  l1_process_integrity: 0.20
+  l2_internal_quality: 0.20
+  l3_semantic: 0.45
+  l4_comparative: 0.15
+
+# L0 系统健康检查
+l0_health:
+  service_reachable_weight: 0.30
+  auth_valid_weight: 0.25
+  meeting_created_weight: 0.20
+  audit_endpoint_weight: 0.15
+  no_http_5xx_weight: 0.10
+
+# L1 流程完整性检查权重
+l1_process:
+  terminal_state_correct_weight: 0.20
+  expected_stages_completed_weight: 0.15
+  no_stub_fallback_weight: 0.15
+  no_critical_degradation_events_weight: 0.15
+  no_circuit_breaker_weight: 0.10
+  drift_acceptable_threshold: 0.3
+  drift_acceptable_weight: 0.10
+  conflict_resolution_weight: 0.10
+  iteration_normal_weight: 0.05
+  # stub 综合检测信号阈值
+  stub_token_threshold: 10
+  stub_cost_threshold: 0.0001
+
+# L2 内部质量检查权重
+l2_internal:
+  internal_quality_score_weight: 0.30
+  no_high_degradation_weight: 0.20
+  degradation_count_norm_weight: 0.10
+  confidence_stable_weight: 0.15
+  no_hard_failures_weight: 0.15
+  drift_rate_weight: 0.10
+  # 退化数量归一化：≥5 个退化告警归一化为 0
+  degradation_max_count: 5
+  # 内部分数及格线
+  quality_score_pass_threshold: 60
+
+# L3 语义评分配置
+l3_semantic:
+  # 归一化通过线：median likert ≥ 3
+  pass_threshold: 3
+  # 仅在 L0 通过且 L1/L2 分数高于此值时调用 Judge（节省成本）
+  min_prior_score_for_judge: 0.3
+  # 输出
+  max_artifact_length: 50000
+  # 每个维度权重由 llm_judge/rubrics.py 按 deliverable_type 定义
+
+# L4 对比评估
+l4_comparative:
+  pass3_stability_weight: 0.30
+  judge_self_consistency_weight: 0.20
+  ablation_uplift_weight: 0.35
+  no_length_bias_weight: 0.15
+  # 稳定通过定义：Pass@k 中 ≥ 此比例通过
+  stability_threshold: 0.67
+
+# 统计配置
+stats:
+  confidence_level: 0.95
+  # 回归判定阈值
+  regression_pass_rate_threshold: 0.05
+  regression_score_threshold: 5.0
+  regression_p_value_threshold: 0.05
+  # Fisher 精确检验
+  two_sided: true
+
+# 消融实验
+ablation:
+  enabled: true
+  direct_llm_temperature: 0.1
+  direct_llm_max_tokens: 8192
+  # Direct LLM prompt 模板
+  direct_prompt_template: |
+    你是一位专业的{role}。请根据以下需求，生成一份完整的{deliverable_name}。
+
+    需求：{topic}
+
+    请直接输出完整的{deliverable_name}内容，不要解释过程。
+
+# 成本配置
+cost:
+  # Judge 模型定价（USD per 1M tokens），当无法从 SUT 获取时使用
+  judge_input_price_per_mtok: 0.07
+  judge_output_price_per_mtok: 0.28
+  # 汇率（人民币→美元）
+  cny_to_usd: 7.2
+
+# 报告配置
+report:
+  title: "Conclave Eval V2 评估报告"
+  brand_color: "#335c8e"
+  include_judge_reasoning: true
+  include_raw_audit: false
+  echarts_local: true
+
+# Vault 导出
+vault:
+  enabled: true
+  vault_root: "D:/conclave-knowledge-vault/eval-runs"
+  export_html: true
+  export_json: true
+  max_history: 100

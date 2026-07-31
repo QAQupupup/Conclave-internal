@@ -1,104 +1,158 @@
-/* Conclave 前端共享类型定义
- * 消除 api.ts / ws.ts / AppContext.tsx / reportLayouts.ts 中的 any
- * 对应后端 app/domain/meeting.py 的 sections 结构
- */
+export type StageId =
+  | 'pending'
+  | 'clarification'
+  | 'intra_team'
+  | 'cross_team'
+  | 'evidence_check'
+  | 'arbitrate'
+  | 'produce'
+  | 'done'
+  | 'paused'
+  | 'error'
+  | 'aborted';
 
-/* ═══ 会议相关类型 ═══ */
+export type MeetingStatus = 'pending' | 'running' | 'paused' | 'done' | 'error' | 'aborted';
 
-/** 冲突项 */
-export interface Conflict {
-  id?: string;
-  summary: string;
-  sideA: string;
-  sideB: string;
-  verdict?: string;
-  rationale?: string;
-  trace?: string;
+export type AgentRole =
+  | 'moderator'
+  | 'architect'
+  | 'engineer'
+  | 'security'
+  | 'ux'
+  | 'data'
+  | 'tech_lead'
+  | 'sre'
+  | 'pm'
+  | 'dba'
+  | 'ml_engineer'
+  | 'search_expert'
+  | 'evaluator';
+
+export type AgentState = 'idle' | 'thinking' | 'speaking' | 'waiting' | 'done' | 'paused';
+
+export type WsConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  role: AgentRole;
+  state: AgentState;
+  avatar?: string;
 }
 
-/** 声明项 */
-export interface Claim {
-  id?: string;
-  text: string;
-  source?: string;
-  confidence?: number;
-}
-
-/** 置信度标记 */
-export interface ConfidenceFlag {
-  stage: string;
-  level: 'high' | 'medium' | 'low';
-  reason?: string;
-}
-
-/** 会议产出文档 */
-export interface MeetingArtifact {
-  prd: {
-    title: string;
-    goal: string;
-    scope?: string;
-    assumptions?: string[];
-    constraints?: string[];
-    apiEndpoints?: string[];
-    openQuestions?: string[];
-  };
-  openapi?: string;
-  attachments?: unknown[];
-}
-
-/** 报告数据（reportLayouts.ts 中各 _layout* 函数的参数类型） */
-export interface ProduceData {
-  clarifiedTopic: string;
-  adoptedClaims: string[];
-  keyQuestions: string[];
-  teamConfig: Array<{ role: string; stance: string }>;
-  conflicts: Conflict[];
-  decisions: Array<{ conflictId?: string; rationale?: string }>;
-  artifact: MeetingArtifact;
-}
-
-/* ═══ WS 消息类型 ═══ */
-
-/** WS 快照状态（onSnapshot 回调参数） */
-export interface WsSnapshotState {
-  meeting_id?: string;
-  stage?: string | number;
-  status?: string;
-  topic?: string;
-  messages?: unknown[];
-  conflicts?: unknown[];
-  claims?: unknown[];
+export interface WsMessage {
+  type: string;
   [key: string]: unknown;
 }
 
-/* ═══ API 返回类型 ═══ */
-
-/** 健康检查结果 */
-export interface HealthCheckResult {
-  ok: boolean;
-  host_id: number;
-  host_name: string;
-  health_status: string;
-  health_detail?: Record<string, unknown>;
-  error?: string;
+export interface MeetingMessage {
+  id: string;
+  meeting_id?: string;
+  agentId?: string;
+  agent_id?: string;
+  agentName?: string;
+  agent_name?: string;
+  agentRole?: AgentRole;
+  agent_role?: AgentRole;
+  role?: 'system' | 'user' | 'assistant' | 'tool_call';
+  content: string;
+  thinking?: string;
+  stage?: StageId;
+  timestamp: number | string;
+  isUser?: boolean;
+  isThinking?: boolean;
+  reactions?: Record<string, number>;
+  replyTo?: string;
+  metadata?: Record<string, unknown>;
 }
 
-/** Docker 主机预设 */
-export interface DockerHostPreset {
-  presets: unknown[];
-  connection_types: string[];
-  required_fields: Record<string, string[]>;
+export interface Meeting {
+  id: string;
+  title: string;
+  topic?: string;
+  description?: string;
+  status: MeetingStatus;
+  stage: StageId;
+  createdAt?: number;
+  created_at?: string;
+  updatedAt?: number;
+  updated_at?: string;
+  startedAt?: number;
+  endedAt?: number;
+  createdBy?: string;
+  created_by?: string;
+  deliverableType?: string;
+  agents: AgentInfo[];
+  messageCount?: number;
+  message_count?: number;
+  summary?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
-/** 容器信息 */
-export interface ContainerInfo {
+export interface BorrowRequest {
+  id: string;
+  fromAgent: string;
+  toAgent: string;
+  reason: string;
+  taskDescription: string;
+}
+
+export interface TenantInfo {
   id: string;
   name: string;
-  image: string;
-  status: string;
-  state: string;
-  ports?: string;
+  role: string; // owner / admin / member
 }
 
-/** 偏好设置值 */
-export type PreferenceValue = string | number | boolean | string[] | Record<string, unknown>;
+export interface UserInfo {
+  id: string;
+  username: string;
+  display_name: string;
+  tenant_id: string;
+  tenants: TenantInfo[];
+  email?: string;
+  role?: string; // 'admin' | 'owner' | 'member'
+  avatar_url?: string;
+}
+
+export interface AuthState {
+  token: string | null;
+  user: UserInfo | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+}
+
+// ===== 工具调用（Tool Call）类型 =====
+
+export type ToolCallStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface ToolStep {
+  id: string;
+  callId: string;
+  stepType: string;       // 'search_started' | 'results_found' | 'page_navigated' | 'content_extracted' | 'captcha_detected' | 'screenshot_taken' | 'error' | 'info'
+  label: string;          // 人类可读的步骤描述
+  data?: Record<string, unknown>;
+  screenshot?: string;    // base64 截图（可选）
+  url?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  timestamp: string;
+  durationMs?: number;
+}
+
+export interface ToolCallRecord {
+  id: string;             // call_id
+  toolName: string;       // 'web_search' | 'web_fetch' | 'browser.goto' | ...
+  agentId?: string;
+  agentName?: string;
+  iteration: number;
+  status: ToolCallStatus;
+  arguments: Record<string, unknown>;
+  reason?: string;
+  startedAt: string;
+  completedAt?: string;
+  latencyMs?: number;
+  success?: boolean;
+  error?: string;
+  summary?: Record<string, unknown>;
+  steps: ToolStep[];
+}
+

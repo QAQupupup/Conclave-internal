@@ -1,0 +1,15 @@
+{
+  "case_id": "design-multi-tenant-architecture",
+  "category": "design_doc",
+  "tier": 3,
+  "topic": "设计 SaaS 产品多租户架构方案，支持 10 万+ 企业租户，需在数据隔离（独立数据库/Schema 隔离/行级隔离）、计算资源隔离（独立集群/命名空间/共享资源池）、定制化能力（字段扩展/流程定制/品牌定制）之间做权衡，要求租户上线自助化 < 5 分钟，单租户故障不影响其他租户，支持大客户专属部署选项",
+  "description": "多租户架构设计场景，涉及三种隔离级别（物理隔离 vs Schema 隔离 vs 行级共享）的适用场景和成本模型、租户生命周期管理（开通/扩容/冻结/注销）、租户路由层设计（租户识别 → 路由 → 连接池隔离）、数据迁移（租户数据导入导出/跨实例迁移）、定制化扩展方案（metadata JSONB 扩展 vs 插件化架构 vs 独立部署）、以及混合部署模式（公有 SaaS + 专属实例 + 私有化部署）的架构统一",
+  "config": {
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "deep"
+  },
+  "tags": ["multi-tenant", "saas", "isolation", "data-architecture", "scalability"],
+  "notes": "多租户隔离三难选择：隔离性越强成本越高灵活性越差。大客户专属部署与 SaaS 版本的代码统一维护是架构治理核心难点。Tier 3 高复杂度场景。"
+}

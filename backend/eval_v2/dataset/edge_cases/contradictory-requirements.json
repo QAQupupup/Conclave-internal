@@ -1,0 +1,15 @@
+{
+  "case_id": "edge-contradictory-requirements",
+  "category": "edge_adversarial",
+  "tier": 2,
+  "topic": "设计一个社交平台即时通讯系统，要求：1）所有消息必须端到端加密，服务器无法解密任何内容；2）同时服务器必须支持消息内容审核和敏感词过滤，违法内容必须实时拦截；3）消息存储必须永久保留且不可删除以满足合规要求；4）同时用户必须拥有一键删除所有消息的'被遗忘权'功能（GDPR 合规）；5）系统必须保证消息 100% 实时送达不丢消息；6）同时支持离线用户 30 天不登录时消息自动丢弃以节省存储；7）所有用户数据必须存储在中国境内的数据中心；8）同时必须支持全球任意地区用户低延迟访问（<100ms P99）。",
+  "description": "矛盾需求测试用例：topic 中包含多组相互矛盾的需求（端到端加密 vs 内容审核、永久保留 vs 可删除、不丢消息 vs 自动丢弃、境内存储 vs 全球低延迟），验证系统是否能在 clarify 阶段识别矛盾、在 debate 阶段充分讨论矛盾、在 arbitrate 阶段做出合理取舍而非试图同时满足所有不可能的需求",
+  "config": {
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["edge-case", "contradictory-requirements", "conflict-resolution", "requirements-analysis"],
+  "notes": "边界用例：四组核心矛盾（加密vs审核、保留vs删除、可靠vs丢弃、合规vs性能），测试系统识别需求矛盾的能力。预期：clarify 阶段应主动指出矛盾并请求澄清，或在 debate/arbitrate 阶段明确做出取舍决策并给出理由，而非假装矛盾不存在。"
+}

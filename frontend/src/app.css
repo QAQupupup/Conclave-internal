@@ -1,0 +1,403 @@
+@import "tailwindcss";
+
+@theme {
+  /* === 品牌色（沉稳靛蓝，继承现有规范）=== */
+  --color-brand-50: oklch(0.97 0.01 250);
+  --color-brand-100: oklch(0.93 0.02 248);
+  --color-brand-200: oklch(0.86 0.04 248);
+  --color-brand-500: #335c8e;
+  --color-brand-600: #264670;
+  --color-brand-700: #1d3758;
+  --color-brand-soft: rgba(51, 92, 142, 0.06);
+
+  /* === 背景层级（亮色）=== */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #fafbfc;
+  --color-bg-tertiary: #f3f5f7;
+  --color-bg-elevated: #ffffff;
+  --color-bg-inverse: #111827;
+
+  /* === 文字层级 === */
+  --color-text-primary: #1a1d23;
+  --color-text-secondary: #5a6270;
+  --color-text-tertiary: #8b929e;
+  --color-text-inverse: #ffffff;
+
+  /* === 边框层级 === */
+  --color-border-default: #e2e6eb;
+  --color-border-soft: #eceff2;
+  --color-border-emphasis: #d1d5db;
+
+  /* === 语义色 === */
+  --color-success: #2d8a56;
+  --color-success-bg: rgba(45, 138, 86, 0.06);
+  --color-warning: #b87d2b;
+  --color-warning-bg: rgba(184, 125, 43, 0.06);
+  --color-danger: #c53030;
+  --color-danger-bg: rgba(197, 48, 48, 0.06);
+  --color-info: #335c8e;
+  --color-info-bg: rgba(51, 92, 142, 0.06);
+  --color-accent-purple: #7c3aed;
+  --color-accent-purple-bg: rgba(124, 58, 237, 0.06);
+
+  /* === Agent 角色糖果色（点缀色，面积 < 5%）=== */
+  --color-role-moderator: #5b6cff;
+  --color-role-architect: #6b4fa0;
+  --color-role-engineer: #3a8a5c;
+  --color-role-security: #b05050;
+  --color-role-ux: #9b6bb5;
+  --color-role-data: #6b5b95;
+
+  /* === 阶段状态色 === */
+  --color-stage-pending: var(--color-text-tertiary);
+  --color-stage-running: var(--color-brand-500);
+  --color-stage-done: var(--color-success);
+  --color-stage-paused: var(--color-warning);
+  --color-stage-error: var(--color-danger);
+
+  /* === 置信度指示 === */
+  --color-confidence-high: var(--color-success);
+  --color-confidence-medium: var(--color-warning);
+  --color-confidence-low: var(--color-danger);
+
+  /* === 字体 === */
+  --font-sans: "Inter", -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace;
+
+  /* === 字号（正文基准 14px）=== */
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.375rem;
+  --text-hero: 2rem;
+
+  --leading-tight: 1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.6;
+  --leading-loose: 1.85;
+
+  /* === 间距（4px 基准网格）=== */
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-10: 2.5rem;
+  --spacing-12: 3rem;
+  --spacing-16: 4rem;
+
+  /* === 圆角 === */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+
+  /* === 阴影（极轻）=== */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-focus: 0 0 0 2px rgba(51, 92, 142, 0.15);
+  --shadow-none: none;
+
+  /* === 动效 === */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 160ms;
+  --duration-slow: 200ms;
+
+  /* === 三栏布局默认宽度 === */
+  --width-timeline: 260px;
+  --width-thought-tree: 340px;
+
+  /* === z-index 层级 === */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-tooltip: 300;
+  --z-modal: 1000;
+  --z-toast: 1100;
+}
+
+/* === 暗色模式 === */
+@custom-variant dark (&:where(.dark, .dark *));
+
+.dark {
+  --color-bg-primary: #0a0a0b;
+  --color-bg-secondary: #151618;
+  --color-bg-tertiary: #1a1b1e;
+  --color-bg-elevated: #1e1f22;
+  --color-bg-inverse: #fafbfc;
+
+  --color-text-primary: #e8e6e0;
+  --color-text-secondary: #a0a0a0;
+  --color-text-tertiary: #666;
+
+  --color-border-default: #26272a;
+  --color-border-soft: #1e1f22;
+  --color-border-emphasis: #3a3a3a;
+
+  --color-brand-500: #6b8cc7;
+  --color-brand-600: #8baadf;
+  --color-brand-soft: rgba(107, 140, 199, 0.08);
+
+  --color-accent-purple: #a78bfa;
+  --color-accent-purple-bg: rgba(167, 139, 250, 0.08);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* === 全局基础样式 === */
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-primary);
+    background: var(--color-bg-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    height: 100%;
+  }
+
+  /* 细滚动条 */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-default);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border-emphasis);
+  }
+
+  /* 尊重减少动画偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* 焦点环 */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-sm);
+  }
+
+  /* 选中文本颜色 */
+  ::selection {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-600);
+  }
+}
+
+/* === shadcn/ui CSS Variables 映射 === */
+@layer base {
+  :root {
+    --background: var(--color-bg-primary);
+    --foreground: var(--color-text-primary);
+    --card: var(--color-bg-elevated);
+    --card-foreground: var(--color-text-primary);
+    --popover: var(--color-bg-elevated);
+    --popover-foreground: var(--color-text-primary);
+    --primary: var(--color-brand-500);
+    --primary-foreground: var(--color-text-inverse);
+    --secondary: var(--color-bg-tertiary);
+    --secondary-foreground: var(--color-text-primary);
+    --muted: var(--color-bg-secondary);
+    --muted-foreground: var(--color-text-tertiary);
+    --accent: var(--color-bg-tertiary);
+    --accent-foreground: var(--color-text-primary);
+    --destructive: var(--color-danger);
+    --destructive-foreground: var(--color-text-inverse);
+    --border: var(--color-border-default);
+    --input: var(--color-border-default);
+    --ring: var(--color-brand-500);
+    --radius: var(--radius-md);
+  }
+
+  .dark {
+    --background: var(--color-bg-primary);
+    --foreground: var(--color-text-primary);
+    --card: var(--color-bg-secondary);
+    --card-foreground: var(--color-text-primary);
+    --popover: var(--color-bg-secondary);
+    --popover-foreground: var(--color-text-primary);
+    --primary: var(--color-brand-500);
+    --primary-foreground: var(--color-bg-primary);
+    --secondary: var(--color-bg-tertiary);
+    --secondary-foreground: var(--color-text-primary);
+    --muted: var(--color-bg-tertiary);
+    --muted-foreground: var(--color-text-tertiary);
+    --accent: var(--color-bg-tertiary);
+    --accent-foreground: var(--color-text-primary);
+    --destructive: var(--color-danger);
+    --destructive-foreground: var(--color-text-primary);
+    --border: var(--color-border-default);
+    --input: var(--color-border-default);
+    --ring: var(--color-brand-500);
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+}
+
+/* === Markdown 内容样式 === */
+.prose-conclave {
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  word-break: break-word;
+}
+.prose-conclave p {
+  margin: 0;
+}
+.prose-conclave p + p {
+  margin-top: 0.5em;
+}
+.prose-conclave code {
+  background: var(--color-bg-tertiary);
+  padding: 0.125em 0.375em;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-text-secondary);
+}
+.prose-conclave pre {
+  background: var(--color-bg-tertiary);
+  padding: 0.75em 1em;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.prose-conclave pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85em;
+  color: var(--color-text-primary);
+}
+.prose-conclave ul, .prose-conclave ol {
+  padding-left: 1.25em;
+  margin: 0.25em 0;
+}
+.prose-conclave li + li {
+  margin-top: 0.125em;
+}
+.prose-conclave blockquote {
+  border-left: 2px solid var(--color-border-emphasis);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+.prose-conclave a {
+  color: var(--color-brand-500);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-conclave a:hover {
+  color: var(--color-brand-600);
+}
+.prose-conclave strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.prose-conclave h1, .prose-conclave h2, .prose-conclave h3, .prose-conclave h4 {
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+  line-height: 1.3;
+}
+.prose-conclave h1 { font-size: 1.25em; }
+.prose-conclave h2 { font-size: 1.1em; }
+.prose-conclave h3 { font-size: 1em; }
+.prose-conclave table {
+  border-collapse: collapse;
+  font-size: 0.9em;
+  margin: 0.5em 0;
+}
+.prose-conclave th, .prose-conclave td {
+  border: 1px solid var(--color-border-default);
+  padding: 0.375em 0.625em;
+}
+.prose-conclave th {
+  background: var(--color-bg-tertiary);
+  font-weight: 600;
+}
+.prose-conclave hr {
+  border: none;
+  border-top: 1px solid var(--color-border-soft);
+  margin: 0.75em 0;
+}
+
+/* === 打字机光标 === */
+.typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--color-text-tertiary);
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* === 消息出现动画 === */
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.message-enter {
+  animation: message-in 200ms var(--ease-out-expo);
+}
+

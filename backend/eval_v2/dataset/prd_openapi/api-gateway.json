@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-api-gateway",
+  "category": "prd_openapi",
+  "tier": 1,
+  "topic": "设计微服务 API 网关，支持限流、熔断、路由、鉴权，面向中大型互联网公司的内部微服务集群，日均请求量 5 亿+，要求 P99 延迟 < 50ms，支持 gRPC 和 HTTP/2 协议转换，需要与现有 Kubernetes 服务发现体系集成",
+  "description": "经典微服务网关设计场景，涉及自研与开源方案（Kong/APISIX/Spring Cloud Gateway）的选型争论，以及限流算法（令牌桶 vs 漏桶 vs 滑动窗口）、熔断策略、鉴权方案（JWT/OAuth2/mTLS）的多维权衡",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["microservices", "api-gateway", "rate-limiting", "circuit-breaker", "auth", "infrastructure"],
+  "notes": "自研与开源的经典争论：Kong/APISIX 成熟方案 vs 自研网关的定制化能力。Tier 1 基础场景，预期跨团队产生 1-3 个冲突点。"
+}

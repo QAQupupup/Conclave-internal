@@ -1,0 +1,15 @@
+{
+  "case_id": "design-observability-stack",
+  "category": "design_doc",
+  "tier": 2,
+  "topic": "设计云原生可观测性技术栈架构，覆盖 Metrics（指标）、Logs（日志）、Traces（链路追踪）三大支柱，支持 OpenTelemetry 统一接入、服务拓扑图自动生成、异常检测（基于基线的智能告警）、根因分析（Trace 到 Logs 到 Metrics 的关联跳转）、成本优化（高基数标签治理/日志采样/指标降采样），目标是故障定位时间（MTTR）< 5 分钟",
+  "description": "可观测性平台架构设计场景，涉及三大支柱的存储后端选型（Prometheus/Thanos/Cortex vs VictoriaMetrics 指标存储；Loki vs ES 日志存储；Jaeger/Tempo vs SkyWalking 链路存储）、OpenTelemetry Collector 部署架构（Sidecar vs Gateway vs DaemonSet）、采样策略（头部采样 vs 尾部采样 vs 自适应采样）、关联分析方案（TraceID 注入日志、Exemplar 关联指标）、AIOps 智能告警（基线学习/异常检测/告警收敛）、长期存储与成本控制策略",
+  "config": {
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["observability", "opentelemetry", "monitoring", "tracing", "logging", "sre", "cloud-native"],
+  "notes": "可观测性三大支柱融合是当前趋势：从分立工具栈到 OTel 统一标准的迁移路径。尾部采样的成本收益分析是核心争议点，高基数标签治理是落地最大痛点。"
+}

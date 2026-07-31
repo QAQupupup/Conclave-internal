@@ -1,0 +1,15 @@
+{
+  "case_id": "business-open-source-commercialization",
+  "category": "business",
+  "tier": 2,
+  "topic": "开源软件商业化路径分析，以向量数据库 Milvus 和消息队列 Pulsar 为例，比较 Open-Core（开源核心+商业版）、SaaS-only（仅云服务）、Dual-Licensing（双许可）、Open-Core + SaaS 混合四种模式的优劣，分析社区运营与商业变现的平衡、开源协议选择（Apache 2.0/SSPL/BSL/Elastic License 2.0）的影响、云厂商（AWS/Aliyun）「搭便车」问题及应对策略",
+  "description": "开源商业化商业分析场景，涉及开源商业化成熟度模型、Open-Core 功能边界划定（哪些功能必须开源/哪些可以商业化）、社区治理模型（基金会 vs 单一商业公司主导）、商业化收入结构（支持服务/企业版/云服务/培训认证）、估值逻辑（ARR 倍数/社区健康度指标）、典型失败案例分析（Redis Labs 许可变更/MongoDB SSPL 反弹/Labs 改名等），以及中国市场的开源商业化特殊挑战",
+  "config": {
+    "deliverable_type": "business_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["open-source", "commercialization", "licensing", "saas", "startup", "business-model"],
+  "notes": "开源商业化的核心矛盾：社区期望完全免费开放 vs 投资人要求 ARR 增长。SSPL/BSL 等源码可用但非开源许可的争议持续存在。中国开源项目融资环境和商业生态与硅谷有显著差异。"
+}

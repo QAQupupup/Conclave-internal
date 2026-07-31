@@ -1,0 +1,219 @@
+import * as React from 'react';
+import { useMeetingStore } from '@/stores';
+import { MessageBubble } from './message-bubble';
+import { ToolCallCard } from './tool-call-card';
+import { TakeoverPanel } from './takeover-panel';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { wsClient } from '@/lib/ws';
+import { useEventSource } from '@/hooks/use-realtime';
+import { useParams } from 'react-router';
+import { SendIcon, ArrowDownIcon, GitBranchIcon } from '@/components/ui/svg-icons';
+import { toast } from '@/hooks/use-toast';
+
+// 合并消息和工具调用为统一的时间线条目
+type TimelineItem =
+  | { type: 'message'; id: string; data: ReturnType<typeof useMeetingStore.getState>['messages'][number] }
+  | { type: 'tool'; id: string; data: ReturnType<typeof useMeetingStore.getState>['toolCalls'][number] };
+
+export function MessageStream({ className }: { className?: string }) {
+  const { id: meetingId } = useParams<{ id: string }>();
+  const messages = useMeetingStore((s) => s.messages);
+  const toolCalls = useMeetingStore((s) => s.toolCalls);
+  const selectedMessageId = useMeetingStore((s) => s.selectedMessageId);
+  const selectMessage = useMeetingStore((s) => s.selectMessage);
+  const status = useMeetingStore((s) => s.status);
+  const currentMeetingId = useMeetingStore((s) => s.currentMeetingId);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const shouldAutoScroll = React.useRef(true);
+  const [showScrollButton, setShowScrollButton] = React.useState(false);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [input, setInput] = React.useState('');
+  const [isSending, setIsSending] = React.useState(false);
+  const [takeoverOpen, setTakeoverOpen] = React.useState(false);
+  const [takeoverCallId, setTakeoverCallId] = React.useState<string | null>(null);
+  const [takeoverToolName, setTakeoverToolName] = React.useState<string | undefined>(undefined);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  useEventSource(meetingId);
+
+  // 合并消息和工具调用到时间线（按时间排序）
+  const timeline = React.useMemo<TimelineItem[]>(() => {
+    const items: TimelineItem[] = [];
+    for (const m of messages) {
+      items.push({ type: 'message', id: `msg-${m.id}`, data: m });
+    }
+    for (const tc of toolCalls) {
+      items.push({ type: 'tool', id: `tool-${tc.id}`, data: tc });
+    }
+    items.sort((a, b) => {
+      const getTs = (item: TimelineItem): number => {
+        if (item.type === 'message') {
+          const ts = item.data.timestamp;
+          return typeof ts === 'string' ? new Date(ts).getTime() : ts;
+        }
+        return new Date(item.data.startedAt).getTime();
+      };
+      return getTs(a) - getTs(b);
+    });
+    return items;
+  }, [messages, toolCalls]);
+
+  const scrollToBottom = React.useCallback((smooth = true) => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+      setUnreadCount(0);
+      shouldAutoScroll.current = true;
+    }
+  }, []);
+
+  // Auto-scroll to bottom on new items
+  React.useEffect(() => {
+    if (!shouldAutoScroll.current) {
+      setUnreadCount((c) => c + 1);
+      return;
+    }
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }, [timeline.length]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    shouldAutoScroll.current = nearBottom;
+    setShowScrollButton(!nearBottom && el.scrollHeight > el.clientHeight + 100);
+    if (nearBottom) setUnreadCount(0);
+  };
+
+  const handleSend = () => {
+    if (!input.trim() || isSending) return;
+    setIsSending(true);
+    const ok = wsClient.sendChat(input.trim());
+    if (ok) {
+      setInput('');
+      shouldAutoScroll.current = true;
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    }
+    setTimeout(() => setIsSending(false), 300);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    const el = e.target;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 128) + 'px';
+  };
+
+  const handleBranch = (messageId: string) => {
+    // 分支探索：在原型中展示提示，实际实现需后端支持
+    toast({
+      title: '分支探索',
+      description: '从该消息创建探索分支的功能开发中，敬请期待',
+    });
+  };
+
+  const handleTakeover = (callId: string, toolName: string) => {
+    setTakeoverCallId(callId);
+    setTakeoverToolName(toolName);
+    setTakeoverOpen(true);
+  };
+
+  const handleCloseTakeover = () => {
+    setTakeoverOpen(false);
+    setTakeoverCallId(null);
+    setTakeoverToolName(undefined);
+  };
+
+  return (
+    <div className={cn('flex h-full flex-col bg-bg-secondary relative', className)}>
+      <div className="border-b border-border-soft px-4 py-2 flex-shrink-0">
+        <div className="text-xs font-medium text-text-secondary">对话流</div>
+      </div>
+
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto py-2"
+      >
+        {timeline.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-xs text-text-tertiary">
+            {status === 'running' ? '等待 Agent 开始讨论...' : '暂无消息'}
+          </div>
+        ) : (
+          <div className="divide-y divide-border-soft/50">
+            {timeline.map((item) => {
+              if (item.type === 'message') {
+                return (
+                  <MessageBubble
+                    key={item.id}
+                    message={item.data}
+                    isSelected={selectedMessageId === item.data.id}
+                    onSelect={selectMessage}
+                    onBranch={handleBranch}
+                  />
+                );
+              }
+              return (
+                <div key={item.id} className="px-4 py-1.5">
+                  <ToolCallCard toolCall={item.data} onTakeover={handleTakeover} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Scroll to bottom button */}
+      {showScrollButton && (
+        <button
+          onClick={() => scrollToBottom(true)}
+          className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border-default bg-bg-elevated px-3 py-1.5 text-xs text-text-secondary shadow-md transition-all hover:border-brand-500/30 hover:text-brand-500"
+        >
+          <ArrowDownIcon size={12} />
+          {unreadCount > 0 ? `${unreadCount} 条新消息` : '回到底部'}
+        </button>
+      )}
+
+      <div className="border-t border-border-soft bg-bg-primary p-3 flex-shrink-0">
+        <div className="flex items-end gap-2 rounded-lg border border-border-default bg-bg-secondary p-2 focus-within:border-brand-500/40 focus-within:ring-2 focus-within:ring-brand-500/10 transition-colors">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder={status === 'running' ? '说点什么... (Enter 发送, Shift+Enter 换行)' : '会议未在运行'}
+            disabled={status !== 'running'}
+            rows={1}
+            className="max-h-32 flex-1 resize-none bg-transparent py-1 text-sm leading-relaxed text-text-primary outline-none placeholder:text-text-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <Button
+            size="icon"
+            className="h-7 w-7 flex-shrink-0"
+            disabled={!input.trim() || isSending || status !== 'running'}
+            onClick={handleSend}
+          >
+            <SendIcon size={14} />
+          </Button>
+        </div>
+      </div>
+
+      <TakeoverPanel
+        open={takeoverOpen}
+        onClose={handleCloseTakeover}
+        meetingId={currentMeetingId}
+        callId={takeoverCallId ?? undefined}
+        toolName={takeoverToolName}
+      />
+    </div>
+  );
+}

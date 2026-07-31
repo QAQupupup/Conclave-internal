@@ -1,0 +1,15 @@
+{
+  "case_id": "business-developer-tools-pricing",
+  "category": "business",
+  "tier": 2,
+  "topic": "开发者工具产品定价策略深度分析，以 API 监控和可观测性 SaaS 产品为例，分析 Seat-based（按席位）、Usage-based（按量计费）、Tier-based（分层套餐）、Outcome-based（按结果）四种定价模型的适用场景，对比 Datadog/New Relic/Sentry/Grafana Cloud/Honeycomb 的定价演变历史，设计适合从 0 到 1 和从 1 到 N 两个阶段的定价方案",
+  "description": "开发者工具定价策略商业分析场景，涉及定价心理学（锚定效应/诱饵效应）、定价指标选择（用户数/主机数/事件量/Span 数/查询量）、PLG 产品的定价门槛设计（免费层额度与转化率关系）、Enterprise 合同谈判中的定制定价和折扣策略、价格迭代的客户沟通策略（涨价/套餐调整）、以及 usage-based pricing 的计费透明度和账单冲击（bill shock）问题",
+  "config": {
+    "deliverable_type": "business_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["pricing", "developer-tools", "saas", "usage-based-pricing", "revenue-model", "plg"],
+  "notes": "可观测性领域 Datadog 的高价高毛利 vs Grafana Cloud 的开源导流模式形成鲜明对比。定价指标选择直接影响客户使用意愿（按 Span 数计费可能抑制客户充分使用产品）。"
+}

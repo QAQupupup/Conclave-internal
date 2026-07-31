@@ -1,0 +1,15 @@
+{
+  "case_id": "design-rate-limiting",
+  "category": "design_doc",
+  "tier": 1,
+  "topic": "设计 API 全局限流系统架构，支持多种限流算法（令牌桶/漏桶/滑动窗口/固定窗口计数器）、多维度限流（IP/用户/API/租户/全局）、分布式限流（Redis/Lua 脚本一致性）、限流降级策略（快速失败/排队等待/降级响应）、动态规则配置（热更新不重启），要求限流判断延迟 < 1ms，误限流率 < 0.01%",
+  "description": "分布式限流系统设计场景，涉及限流算法选型（令牌桶平滑突发 vs 滑动窗口准确计数）、分布式限流一致性方案（Redis Lua 原子执行 vs 本地+远程两级限流 vs 网关层限流）、限流维度设计（从粗粒度全局到细粒度用户级）、动态规则推送（配置中心 Nacos/Apollo vs 边车模式）、特殊场景处理（突发流量排队、白名单/特权通道、冷启动预热），以及与 API 网关和服务网格的集成",
+  "config": {
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["rate-limiting", "api-gateway", "resilience", "distributed-systems", "traffic-control"],
+  "notes": "限流精度与性能的权衡：本地限流快但不准，分布式限流准但增加网络开销。两级限流（本地粗粒度 + 分布式细粒度）是常见工程方案。Tier 1 基础场景。"
+}

@@ -1,0 +1,15 @@
+{
+  "case_id": "research-llm-agent-frameworks",
+  "category": "research",
+  "tier": 2,
+  "topic": "LLM Agent 框架对比研究：分析 LangChain、LangGraph、LlamaIndex、AutoGen、CrewAI、Semantic Kernel、Dify、Coze 等主流 Agent 框架在架构理念（链式/图式/多智能体）、工具调用抽象、记忆管理、工作流编排、可观测性、生产就绪度、社区生态和适用场景上的差异，面向企业级 AI 应用开发给出框架选型矩阵",
+  "description": "LLM Agent 框架调研场景，涉及 Agent 架构范式演进（ReAct/Plan-and-Execute/Reflection/Multi-Agent）、框架抽象层次对比（低代码 vs 代码优先 vs 声明式）、生产级需求（可观测性/可调试性/成本控制/容错）、框架锁定风险评估、以及基于业务场景的框架选型决策（快速原型 vs 复杂工作流 vs 多智能体协作 vs RAG 专精）",
+  "config": {
+    "deliverable_type": "research_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "deep"
+  },
+  "tags": ["llm-agent", "langchain", "autogen", "ai-frameworks", "comparison", "agent-orchestration"],
+  "notes": "Agent 框架领域迭代极快，需要关注版本间 breaking changes。LangChain 的高抽象层 vs LangGraph 的低层控制之争是核心争议。多智能体框架（AutoGen/CrewAI）的实际生产可用性需要审慎评估。"
+}

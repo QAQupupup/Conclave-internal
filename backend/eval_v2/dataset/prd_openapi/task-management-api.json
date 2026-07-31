@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-task-management-api",
+  "category": "prd_openapi",
+  "tier": 1,
+  "topic": "设计团队任务管理系统 API，支持任务创建/分配/状态流转、看板视图、甘特图、子任务/依赖关系、评论和附件、@提及通知、工作流自定义（状态机配置）、权限控制（项目级/任务级），参考 Jira/Linear/飞书项目的核心功能",
+  "description": "任务管理系统场景，涉及任务状态机设计（固定状态 vs 自定义工作流）、任务依赖关系（DAG 拓扑排序）、实时协作（WebSocket 推送 vs 轮询 vs SSE）、通知聚合策略、数据模型设计（任务/项目/工作区的层级关系），以及搜索和过滤（全文检索 vs 数据库查询）",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["task-management", "workflow", "collaboration", "kanban", "project-management"],
+  "notes": "工作流自定义是核心产品决策：固定状态机简单但不灵活，自定义工作流灵活但实现复杂。Tier 1 基础场景。"
+}

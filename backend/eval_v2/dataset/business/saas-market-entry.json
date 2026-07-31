@@ -1,0 +1,15 @@
+{
+  "case_id": "business-saas-market-entry",
+  "category": "business",
+  "tier": 2,
+  "topic": "AI 代码助手 SaaS 产品进入中国市场的商业策略分析，需评估市场规模和增长趋势、目标客户画像（个人开发者/中小企业/大型企业）、竞争格局（GitHub Copilot/通义灵码/CodeGeeX/Trae/文心快码）、定价策略、渠道策略（直销/渠道/PLG）、合规风险（数据出境/开源许可证/生成内容版权），给出 18 个月的 GTM（Go-To-Market）路线图",
+  "description": "SaaS 市场进入战略商业分析场景，涉及 TAM/SAM/SOM 市场规模估算、竞品功能矩阵和定价对比、PLG（Product-Led Growth）vs SLG（Sales-Led Growth）模式选择、免费增值（Freemium）转化率模型、中国市场特殊因素（信创/私有化部署/数据安全法）、渠道合作伙伴生态建设、以及盈亏平衡分析和关键里程碑设定",
+  "config": {
+    "deliverable_type": "business_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["saas", "market-entry", "gtm", "ai-tools", "developer-tools", "china-market", "competitive-analysis"],
+  "notes": "AI 代码助手赛道竞争白热化，Copilot 的先发优势和定价压力显著。中国市场信创和私有化需求是差异化机会但增加交付复杂度。PLG vs SLG 的路线选择直接影响团队配置和烧钱速度。"
+}

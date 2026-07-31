@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-file-storage",
+  "category": "prd_openapi",
+  "tier": 1,
+  "topic": "设计分布式文件存储服务 API，支持大文件分片上传/下载、断点续传、文件版本管理、权限控制和 CDN 加速，单文件最大支持 10GB，总存储容量 PB 级，要求上传成功率 > 99.99%，支持图片缩略图和文档预览",
+  "description": "分布式文件存储服务场景，涉及对象存储（S3 协议兼容）vs 文件系统选型、分片上传算法（并行分片 vs 串行分片）、元数据管理（文件目录结构存储方案）、冷热数据分层存储策略，以及 CDN 回源优化",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["file-storage", "object-storage", "cdn", "upload", "distributed-systems"],
+  "notes": "典型基础设施服务场景：直接用 MinIO/OSS SDK 封装 vs 自研存储层的取舍。Tier 1 基础场景。"
+}

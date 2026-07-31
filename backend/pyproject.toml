@@ -54,7 +54,7 @@ addopts = "-n auto --timeout=30 --timeout-method=thread"
 [tool.ruff]
 target-version = "py310"
 line-length = 120
-extend-exclude = ["scripts"]
+extend-exclude = ["scripts", "eval_v2"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]

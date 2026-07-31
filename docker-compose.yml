@@ -68,7 +68,7 @@ services:
   # DNS 代理 — L2 网络隔离的域名白名单解析
   # ============================================================
   sandbox-dns:
-    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/jpillora/dnsmasq:latest
+    image: conclave/dnsmasq:local
     container_name: conclave-dev-sandbox-dns
     restart: unless-stopped
     command: --no-resolv --log-facility=- \
@@ -133,6 +133,9 @@ services:
       - CONCLAVE_API_TOKEN=${CONCLAVE_API_TOKEN:-}
       - CONCLAVE_LLM_TIMEOUT=${CONCLAVE_LLM_TIMEOUT:-120.0}
       - CONCLAVE_PRODUCE_TIMEOUT=${CONCLAVE_PRODUCE_TIMEOUT:-1200.0}
+      # 管理员凭据（从 .env 读取，未设置时回退到默认值 admin123，启动日志中会打印）
+      - CONCLAVE_ADMIN_PASSWORD=${CONCLAVE_ADMIN_PASSWORD:-admin123}
+      - CONCLAVE_ADMIN_USERNAME=${CONCLAVE_ADMIN_USERNAME:-admin}
       # [v4] Docker 监控默认启用（entrypoint 会自动配置好权限）
       # 如果在无 Docker 的环境运行，可设 CONCLAVE_DOCKER_DISABLED=true
       - CONCLAVE_DOCKER_DISABLED=${CONCLAVE_DOCKER_DISABLED:-false}
@@ -281,6 +284,52 @@ services:
     networks:
       - conclave-internal
 
+  # ============================================================
+  # Gitea — 轻量 Git 托管（Agent 协作 / 会议产出归档）
+  # ============================================================
+  # 用途：
+  #   - Multi-Agent 流水线：每个 Agent 独立分支，通过 REST API 操作
+  #   - 会议产出归档：需求文档、设计稿、代码、review 全在 Git 历史
+  #   - 内置 Gitea Actions（兼容 GitHub Actions 语法）可跑 CI
+  # 访问：http://localhost:3000
+  gitea:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/gitea/gitea:latest
+    container_name: conclave-dev-gitea
+    restart: unless-stopped
+    # 自定义 entrypoint：自动初始化管理员 + 创建默认组织
+    entrypoint: ["/bin/bash", "/custom/entrypoint-gitea.sh"]
+    ports:
+      - "127.0.0.1:3000:3000"   # Web UI + REST API
+      - "127.0.0.1:3022:22"     # SSH（Agent 可通过 SSH 推拉代码）
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      # 使用内置 SQLite（Agent 协作场景足够，无需额外 PG 实例）
+      - GITEA__database__DB_TYPE=sqlite3
+      # 服务配置
+      - GITEA__server__DOMAIN=localhost
+      - GITEA__server__ROOT_URL=http://localhost:3000/
+      - GITEA__server__HTTP_PORT=3000
+      # 跳过 Web 安装页面（entrypoint 自动完成初始化）
+      - GITEA__security__INSTALL_LOCK=true
+      # 禁用注册（Agent 场景不需要自助注册，由管理员创建账号）
+      - GITEA__service__DISABLE_REGISTRATION=true
+      - GITEA__service__REQUIRE_SIGNIN_VIEW=false
+      # 自动初始化的管理员账号（首次启动时创建）
+      - GITEA_ADMIN_NAME=conclave
+      - GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD:-conclave_dev}
+      - GITEA_ADMIN_EMAIL=admin@conclave.local
+    volumes:
+      - conclave-dev-gitea-data:/data
+      - ./docker/entrypoint-gitea.sh:/custom/entrypoint-gitea.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s  # Gitea 首次启动需初始化数据库
+    networks:
+      - conclave-internal
+
 volumes:
   conclave-dev-workspace:
     driver: local
@@ -291,6 +340,8 @@ volumes:
   conclave-dev-pg-data:
     driver: local
   conclave-dev-redis-data:
+    driver: local
+  conclave-dev-gitea-data:
     driver: local
 
 networks:

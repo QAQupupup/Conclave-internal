@@ -247,16 +247,18 @@ class TestIsDangerousCommand:
 class TestBuildSecurityArgs:
     """_build_security_args 的网络分级与安全加固参数。"""
 
-    def test_l1_network_none(self):
+    @pytest.mark.asyncio
+    async def test_l1_network_none(self):
         """L1 网络分级应使用 --network none（纯计算，无网络）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--network" in args
         idx = args.index("--network")
         assert args[idx + 1] == "none"
 
-    def test_l2_custom_network_and_dns(self):
+    @pytest.mark.asyncio
+    async def test_l2_custom_network_and_dns(self):
         """L2 网络分级应使用自定义网络名 + DNS 代理。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L2")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L2")
         assert "--network" in args
         idx_net = args.index("--network")
         assert args[idx_net + 1] == sandbox.L2_NETWORK_NAME
@@ -264,75 +266,85 @@ class TestBuildSecurityArgs:
         idx_dns = args.index("--dns")
         assert args[idx_dns + 1] == sandbox.L2_DNS_SERVER
 
-    def test_l3_no_explicit_network_flag(self):
+    @pytest.mark.asyncio
+    async def test_l3_no_explicit_network_flag(self):
         """L3 网络分级不应显式添加 --network（使用默认 bridge）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L3")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L3")
         assert "--network" not in args
         assert "--dns" not in args
 
-    def test_l1_l2_l3_network_differs(self):
+    @pytest.mark.asyncio
+    async def test_l1_l2_l3_network_differs(self):
         """三个网络分级产出的网络参数应有显著区别。"""
-        l1 = sandbox._build_security_args(Path("/workspace"), network_level="L1")
-        l2 = sandbox._build_security_args(Path("/workspace"), network_level="L2")
-        l3 = sandbox._build_security_args(Path("/workspace"), network_level="L3")
+        l1 = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        l2 = await sandbox._build_security_args(Path("/workspace"), network_level="L2")
+        l3 = await sandbox._build_security_args(Path("/workspace"), network_level="L3")
         # L1 含 none，L2 含自定义网络，L3 无 network
         assert "none" in l1
         assert sandbox.L2_NETWORK_NAME in l2
         assert sandbox.L2_NETWORK_NAME not in l1
         assert "--network" not in l3
 
-    def test_read_only_flag_present(self):
+    @pytest.mark.asyncio
+    async def test_read_only_flag_present(self):
         """容器文件系统应设为只读（--read-only）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--read-only" in args
 
-    def test_user_nobody_flag_present(self):
+    @pytest.mark.asyncio
+    async def test_user_nobody_flag_present(self):
         """容器应以 nobody 用户运行（--user 65534:65534）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--user" in args
         idx = args.index("--user")
         assert args[idx + 1] == "65534:65534"
 
-    def test_cap_drop_all_flag_present(self):
+    @pytest.mark.asyncio
+    async def test_cap_drop_all_flag_present(self):
         """容器应丢弃全部 Linux capabilities（--cap-drop ALL）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--cap-drop" in args
         idx = args.index("--cap-drop")
         assert args[idx + 1] == "ALL"
 
-    def test_no_new_privileges_flag_present(self):
+    @pytest.mark.asyncio
+    async def test_no_new_privileges_flag_present(self):
         """容器应禁止权限提升（--security-opt no-new-privileges）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--security-opt" in args
         idx = args.index("--security-opt")
         assert args[idx + 1] == "no-new-privileges"
 
-    def test_rm_flag_present(self):
+    @pytest.mark.asyncio
+    async def test_rm_flag_present(self):
         """容器退出后应自动清理（--rm）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--rm" in args
 
-    def test_all_hardening_flags_present_together(self):
+    @pytest.mark.asyncio
+    async def test_all_hardening_flags_present_together(self):
         """所有核心安全加固参数应同时存在于任一网络分级下。"""
         for level in ("L1", "L2", "L3"):
-            args = sandbox._build_security_args(Path("/workspace"), network_level=level)  # type: ignore[arg-type]
+            args = await sandbox._build_security_args(Path("/workspace"), network_level=level)  # type: ignore[arg-type]
             assert "--read-only" in args, f"{level} 缺少 --read-only"
             assert "--user" in args and "65534:65534" in args, f"{level} 缺少 --user 65534:65534"
             assert "--cap-drop" in args and "ALL" in args, f"{level} 缺少 --cap-drop ALL"
             assert "--security-opt" in args and "no-new-privileges" in args, f"{level} 缺少 no-new-privileges"
             assert "--rm" in args, f"{level} 缺少 --rm"
 
-    def test_resource_limits_present(self):
+    @pytest.mark.asyncio
+    async def test_resource_limits_present(self):
         """容器应包含内存与 CPU 限制参数。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--memory" in args
         assert sandbox.SANDBOX_MEM_LIMIT in args
         assert "--cpus" in args
         assert sandbox.SANDBOX_CPU_LIMIT in args
 
-    def test_tmpfs_mount_present(self):
+    @pytest.mark.asyncio
+    async def test_tmpfs_mount_present(self):
         """容器应挂载 tmpfs 到 /tmp（只读根文件系统的可写区）。"""
-        args = sandbox._build_security_args(Path("/workspace"), network_level="L1")
+        args = await sandbox._build_security_args(Path("/workspace"), network_level="L1")
         assert "--tmpfs" in args
         idx = args.index("--tmpfs")
         assert "/tmp" in args[idx + 1]

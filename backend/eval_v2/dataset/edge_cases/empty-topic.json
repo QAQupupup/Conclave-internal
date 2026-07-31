@@ -1,0 +1,15 @@
+{
+  "case_id": "edge-empty-topic",
+  "category": "edge_adversarial",
+  "tier": 1,
+  "topic": "",
+  "description": "空主题测试用例：topic 字段为空字符串，验证系统对空输入的处理能力——是否能在 clarify 阶段主动要求用户提供需求，而非直接报错或产生无意义输出",
+  "config": {
+    "deliverable_type": "general",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "light"
+  },
+  "tags": ["edge-case", "empty-input", "validation", "robustness"],
+  "notes": "边界用例：topic 为空，违反 schema minLength 约束。预期系统应优雅处理，在 clarify 阶段请求用户明确需求，而非崩溃或跳过 clarify 直接 produce。测试系统对缺失输入的容错能力。"
+}

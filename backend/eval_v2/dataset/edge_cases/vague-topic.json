@@ -1,0 +1,15 @@
+{
+  "case_id": "edge-vague-topic",
+  "category": "edge_adversarial",
+  "tier": 1,
+  "topic": "做个系统，要好用，性能好，用户体验好，技术先进，要快。",
+  "description": "模糊需求测试用例：topic 极其模糊，没有明确的系统类型、目标用户、功能需求、性能指标、技术约束，验证系统是否能在 clarify 阶段通过有效提问逐步将模糊需求具体化，而非直接基于假设产出一个'大而全'但无的放矢的方案",
+  "config": {
+    "deliverable_type": "general",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["edge-case", "vague-requirements", "clarification", "requirements-elicitation"],
+  "notes": "边界用例：需求极度模糊，所有形容词（好用/性能好/用户体验好/技术先进/快）都不可量化。预期：clarify 阶段必须提出足够的关键问题来明确系统类型、用户画像、核心功能、性能指标和约束条件，不能直接跳到 produce 阶段做假设性设计。"
+}

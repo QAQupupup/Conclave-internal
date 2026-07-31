@@ -1,0 +1,15 @@
+{
+  "case_id": "business-ai-product-market",
+  "category": "business",
+  "tier": 3,
+  "topic": "AI 原生产品 PMF（Product-Market Fit）分析框架与应用，以 AI 会议纪要/智能协作产品赛道为例，分析如何判断 AI 产品是否达到 PMF、AI 产品与传统 SaaS 在 PMF 标准上的差异、Retention Curve（留存曲线）和 Magic Number 等指标的应用、竞争壁垒构建（数据飞轮/网络效应/工作流嵌入 vs 模型能力）、以及从 PMF 到 Scale 的关键挑战",
+  "description": "AI 产品市场契合度商业分析场景，涉及 AI 产品独特的 PMF 挑战（模型能力同质化导致产品差异化困难/用户期望管理/幻觉容忍度）、PMF 衡量指标体系（高频用户占比/自发推荐率/付费转化率/使用深度）、AI 产品的护城河分析（数据壁垒/分发壁垒/工作流锁定 vs 模型层没有壁垒）、赛道案例对比（Otter.ai/Fireflies/妙记/飞书妙记/通义听悟）、以及在大模型能力快速迭代背景下产品策略的韧性设计",
+  "config": {
+    "deliverable_type": "business_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "deep"
+  },
+  "tags": ["ai-product", "pmf", "product-market-fit", "retention", "moats", "ai-startup", "competitive-strategy"],
+  "notes": "AI 产品 PMF 是 2024-2026 年最具争议的话题之一：wrapper 应用是否有壁垒、模型能力提升是否会让产品层商品化、数据飞轮是否真实存在。不同观点分歧巨大，需要充分论证。Tier 3 高复杂度分析。"
+}

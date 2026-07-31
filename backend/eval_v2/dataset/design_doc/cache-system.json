@@ -1,0 +1,15 @@
+{
+  "case_id": "design-cache-system",
+  "category": "design_doc",
+  "tier": 2,
+  "topic": "设计分布式多级缓存系统架构，支持本地缓存（Caffeine/Guava）+ 分布式缓存（Redis Cluster）两级缓存、缓存穿透/击穿/雪崩防护、缓存一致性策略（Cache-Aside/Write-Through/Write-Behind）、热点 Key 自动发现与本地缓存加载，要求缓存命中率 > 95%，缓存集群支持 50 万 QPS",
+  "description": "分布式缓存系统设计文档场景，涉及缓存分层策略（L1 本地 + L2 远程）、一致性方案选型（延迟双删 vs 订阅 binlog vs 消息队列失效）、热点 Key 治理（本地副本 vs Key 分片 vs 流量调度）、大 Key 拆分、缓存淘汰策略（LRU/LFU/TTL 组合），以及 Redis Cluster vs Codis vs 自研代理的架构对比",
+  "config": {
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["cache", "redis", "distributed-systems", "consistency", "performance", "hot-key"],
+  "notes": "缓存一致性是分布式系统经典难题：强一致必然牺牲性能，最终一致需要处理各种边界场景。热点 Key 自动发现方案选择是主要争议点。"
+}

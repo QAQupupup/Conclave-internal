@@ -942,12 +942,14 @@ class Runner:
     # 不触发迭代（成本太高），仅记录结构化告警到 state.degradation_warnings，
     # 供审计端点导出和根因分析使用。
 
-    _INTERMEDIATE_STAGES = {
-        Stage.INTRA_TEAM,
-        Stage.CROSS_TEAM,
-        Stage.EVIDENCE_CHECK,
-        Stage.ARBITRATE,
-    }
+    _INTERMEDIATE_STAGES: frozenset[Stage] = frozenset(
+        {
+            Stage.INTRA_TEAM,
+            Stage.CROSS_TEAM,
+            Stage.EVIDENCE_CHECK,
+            Stage.ARBITRATE,
+        }
+    )
 
     async def _check_intermediate_degradation(self, state: MeetingState, completed_stage: Stage) -> None:
         """中间阶段完成后检查退化指标，记录结构化告警。
@@ -1029,8 +1031,7 @@ class Runner:
                     {
                         "stage": stage_name,
                         "warning_type": "zero_conflicts",
-                        "detail": f"有 {claim_count} 条 claim 但未检测到任何冲突，"
-                        f"角色观点可能过度趋同",
+                        "detail": f"有 {claim_count} 条 claim 但未检测到任何冲突，角色观点可能过度趋同",
                         "claim_count": claim_count,
                         "conflict_count": conflict_count,
                         "timestamp": now_iso,
@@ -1047,8 +1048,7 @@ class Runner:
                     {
                         "stage": stage_name,
                         "warning_type": "zero_evidence_assessments",
-                        "detail": f"有 {claim_count} 条 claim 但无任何证据评估，"
-                        f"证据检查阶段可能未正常执行",
+                        "detail": f"有 {claim_count} 条 claim 但无任何证据评估，证据检查阶段可能未正常执行",
                         "claim_count": claim_count,
                         "assessment_count": total_assessments,
                         "timestamp": now_iso,

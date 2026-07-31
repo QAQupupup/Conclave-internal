@@ -1,0 +1,15 @@
+{
+  "case_id": "design-message-queue",
+  "category": "design_doc",
+  "tier": 2,
+  "topic": "设计企业级消息队列平台架构，支持异步解耦、流量削峰、事件驱动、延迟消息、事务消息、顺序消息和死信队列，要求消息可靠性投递（至少一次/恰好一次），单集群支持日消息量 1000 亿+，延迟 < 10ms（P99），支持多租户隔离和消息轨迹追踪",
+  "description": "消息中间件架构设计场景，涉及 MQ 选型（Kafka vs RocketMQ vs Pulsar vs RabbitMQ）、存储架构（分区副本 ISR vs BookKeeper 分段存储）、消息顺序性保障（全局顺序 vs 分区顺序）、事务消息实现（两阶段提交 vs 事务消息表）、延迟消息方案（时间轮 vs 外部定时器）、消费模式（Push vs Pull vs 长轮询），以及多租户资源隔离策略",
+  "config": {
+    "deliverable_type": "design_doc",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["message-queue", "kafka", "rocketmq", "pulsar", "event-driven", "reliability"],
+  "notes": "Kafka 高吞吐 vs RocketMQ 事务/延迟消息能力 vs Pulsar 存算分离架构的三维对比。消息可靠性与吞吐量的权衡是核心矛盾。"
+}

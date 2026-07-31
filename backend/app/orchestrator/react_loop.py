@@ -12,9 +12,11 @@
 # - ReactLoop：LLM 自主决定"下一步调用什么工具"，工具执行后 LLM 观察结果再决策
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from app.agents.compute import (
@@ -251,10 +253,32 @@ class ReactLoop:
         compute: AgentCompute | None = None,
         tools: ToolRegistry | None = None,
         meeting_id: str = "",
+        on_tool_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self._compute = compute or get_compute()
         self._tools = tools or ToolRegistry()
         self._meeting_id = meeting_id  # 用于注入到浏览器工具调用中
+        self._on_tool_event = on_tool_event  # 工具事件回调（用于 WS 推送）
+
+    def _make_step_callback(self, call_id: str, tool_name: str):
+        """创建工具步骤回调，供 browser/web_search 工具推送中间步骤事件"""
+
+        async def _cb(step_type: str, step_data: dict[str, Any]) -> None:
+            if self._on_tool_event is None:
+                return
+            with contextlib.suppress(Exception):
+                await self._on_tool_event(
+                    "tool.step",
+                    {
+                        "call_id": call_id,
+                        "tool_name": tool_name,
+                        "step_type": step_type,
+                        "data": step_data,
+                        "ts": _now_iso(),
+                    },
+                )
+
+        return _cb
 
     async def run(
         self,
@@ -336,11 +360,54 @@ class ReactLoop:
                 args = dict(call.arguments)
                 if self._meeting_id:
                     args["meeting_id"] = self._meeting_id  # 强制覆盖，不接受 LLM 提供的值
-                # 记录工具调用成本
-                time.monotonic()
+
+                # 生成工具调用 ID
+                call_id = f"tool-{iteration}-{call.tool_name}-{id(call) & 0xFFFF:04x}"
+
+                # 推送 tool.started 事件
+                if self._on_tool_event is not None:
+                    with contextlib.suppress(Exception):
+                        await self._on_tool_event(
+                            "tool.started",
+                            {
+                                "call_id": call_id,
+                                "tool_name": call.tool_name,
+                                "arguments": _sanitize_args(args),
+                                "reason": call.reason,
+                                "iteration": iteration,
+                                "ts": _now_iso(),
+                            },
+                        )
+
+                # 为 browser 类工具注入步骤回调
+                if call.tool_name.startswith("browser.") or call.tool_name in ("web_search", "web_fetch"):
+                    args["_step_callback"] = self._make_step_callback(call_id, call.tool_name)
+
+                t0 = time.monotonic()
                 result = await self._tools.execute(call.tool_name, args)
+                latency_ms = int((time.monotonic() - t0) * 1000)
                 result.iteration = iteration
+                result.latency_ms = latency_ms
                 tool_history.append(result)
+
+                # 推送 tool.completed / tool.failed 事件
+                if self._on_tool_event is not None:
+                    try:
+                        event_type = "tool.completed" if result.success else "tool.failed"
+                        await self._on_tool_event(
+                            event_type,
+                            {
+                                "call_id": call_id,
+                                "tool_name": call.tool_name,
+                                "success": result.success,
+                                "error": result.error[:500] if result.error else "",
+                                "latency_ms": latency_ms,
+                                "summary": _summarize_result(result.result, call.tool_name),
+                                "ts": _now_iso(),
+                            },
+                        )
+                    except Exception:
+                        pass
 
                 # 记录到 CostTracker
                 try:
@@ -552,3 +619,74 @@ def create_default_tool_registry() -> ToolRegistry:
         logging.getLogger("orchestrator.react_loop").warning("工作区工具注册失败: %s", str(e)[:200])
 
     return registry
+
+
+# ---------- 工具事件辅助函数 ----------
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sanitize_args(args: dict[str, Any]) -> dict[str, Any]:
+    """清洗工具参数，移除内部字段和敏感内容，截断长文本"""
+    safe: dict[str, Any] = {}
+    for k, v in args.items():
+        if k.startswith("_"):
+            continue  # 跳过内部回调等
+        if isinstance(v, str) and len(v) > 500:
+            safe[k] = v[:500] + "...(truncated)"
+        else:
+            safe[k] = v
+    return safe
+
+
+def _summarize_result(result: Any, tool_name: str) -> dict[str, Any]:
+    """从工具返回值中提取摘要信息（不包含完整数据，用于前端快速展示）"""
+    try:
+        if result is None:
+            return {"type": "empty"}
+        if isinstance(result, list):
+            # web_search 返回 evidence 列表
+            if tool_name in ("web_search",):
+                items = []
+                for ev in result[:5]:
+                    if isinstance(ev, dict):
+                        items.append(
+                            {
+                                "url": ev.get("url", ""),
+                                "title": (ev.get("signals") or {}).get("page_title", ""),
+                                "source_tier": ev.get("source_tier", ""),
+                                "domain": ev.get("domain", ""),
+                            }
+                        )
+                return {"type": "search_results", "count": len(result), "items": items}
+            return {"type": "list", "count": len(result)}
+        if isinstance(result, dict):
+            status = result.get("status", "")
+            if status in ("ok", "error", "captcha", "blocked"):
+                # browser 工具返回
+                summary: dict[str, Any] = {"type": "browser_action", "status": status}
+                url = result.get("url") or (result.get("data") or {}).get("url", "")
+                title = (result.get("data") or {}).get("title", "")
+                if url:
+                    summary["url"] = url
+                if title:
+                    summary["title"] = title[:100]
+                if result.get("error"):
+                    summary["error"] = str(result["error"])[:200]
+                if result.get("base64"):
+                    summary["has_screenshot"] = True
+                return summary
+            # web_fetch 返回
+            if "content" in result or "chunks" in result:
+                return {
+                    "type": "page_content",
+                    "url": result.get("url", ""),
+                    "title": (result.get("signals") or {}).get("page_title", ""),
+                    "content_length": len(str(result.get("content", ""))),
+                }
+            return {"type": "dict", "keys": list(result.keys())[:10]}
+        return {"type": "value", "preview": str(result)[:200]}
+    except Exception:
+        return {"type": "unknown"}

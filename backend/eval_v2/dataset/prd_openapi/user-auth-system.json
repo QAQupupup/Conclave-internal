@@ -1,0 +1,15 @@
+{
+  "case_id": "prd-user-auth-system",
+  "category": "prd_openapi",
+  "tier": 1,
+  "topic": "设计统一用户认证与授权系统 API，支持手机号/邮箱/用户名密码登录、短信验证码、OAuth2（微信/Google/GitHub）、SSO（SAML2/OIDC）、MFA（TOTP/短信/邮件）、RBAC 权限模型、API Token 管理，面向 B2B2C 场景（支持企业租户隔离）",
+  "description": "用户认证系统场景，涉及认证方案选型（JWT vs Session vs PASETO）、OAuth2 授权码模式 PKCE 安全要求、RBAC vs ABAC 权限模型选择、MFA 强制策略（基于风险的自适应认证）、多租户数据隔离方案，以及密码安全存储（bcrypt/Argon2）和防暴力破解策略",
+  "config": {
+    "deliverable_type": "prd_openapi",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "standard"
+  },
+  "tags": ["auth", "oauth2", "jwt", "rbac", "sso", "mfa", "security"],
+  "notes": "安全与体验的典型权衡：OAuth2 复杂度带来的安全强度与用户体验冲突，MFA 强制策略的颗粒度设计。Tier 1 基础场景。"
+}

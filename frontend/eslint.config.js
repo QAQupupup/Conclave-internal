@@ -1,57 +1,35 @@
-import js from '@eslint/js'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
-import tseslint from 'typescript-eslint'
-import globals from 'globals'
+import js from '@eslint/js';
+import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
+import reactRefresh from 'eslint-plugin-react-refresh';
+import tseslint from 'typescript-eslint';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules'] },
+  { ignores: ['dist'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: 'module',
-      globals: {
-        ...globals.browser,
-        ...globals.es2022,
-      },
+      globals: globals.browser,
     },
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
+      'jsx-a11y': jsxA11y,
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // === Error 级别：必须修复的问题 ===
-      'react-hooks/rules-of-hooks': 'error',
-      // === Off：react-hooks v5 新规则过于严格，不适合现有代码 ===
-      'react-hooks/exhaustive-deps': 'off',
-      'react-hooks/set-state-in-effect': 'off',
-      'react-hooks/preserve-manual-memoization': 'off',
-      'react-hooks/refs': 'off',
-      'react-refresh/only-export-components': 'off',
-      // === TS/JS 规则调整 ===
-      '@typescript-eslint/no-explicit-any': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
-      '@typescript-eslint/no-non-null-assertion': 'off',
-      '@typescript-eslint/ban-ts-comment': 'off',
-      '@typescript-eslint/no-empty-object-type': 'off',
-      '@typescript-eslint/only-throw-error': 'off',
-      'no-undef': 'off',
-      'no-unreachable': 'error',
-      'no-duplicate-imports': 'off', // TS verbatimModuleSyntax 需要 type import 分开
-      'no-case-declarations': 'off',
-      'no-constant-condition': 'off',
-      'no-empty': 'off',
-      'prefer-const': 'off',
-      'no-var': 'off',
-      'no-useless-escape': 'off',
-      'no-useless-catch': 'off',
-      'require-await': 'off',
-      'no-control-regex': 'off',
-      'no-async-promise-executor': 'off',
-      'no-prototype-builtins': 'off',
+      // [P1 修复] 启用 jsx-a11y 无障碍规则，但降级为 warning 以避免阻塞预存代码
+      ...Object.fromEntries(
+        Object.entries(jsxA11y.configs.recommended.rules).map(([k, v]) => [k, 'warn'])
+      ),
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-empty-object-type': 'warn',
+      'no-empty': ['warn', { allowEmptyCatch: true }],
     },
-  },
-)
+  }
+);

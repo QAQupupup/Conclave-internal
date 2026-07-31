@@ -1,0 +1,15 @@
+{
+  "case_id": "research-rag-optimization",
+  "category": "research",
+  "tier": 3,
+  "topic": "RAG（检索增强生成）优化技术全景研究：系统梳理 Naive RAG → Advanced RAG → Modular RAG → Agentic RAG 的技术演进，深入分析查询改写（Query Rewriting）、混合检索（Dense+Sparse+BM25）、重排序（Reranker/Cross-Encoder）、分块策略（Semantic Chunking/Parent-Document）、上下文压缩、Self-RAG、GraphRAG 等优化技术的原理、效果提升幅度、工程实现复杂度和适用场景",
+  "description": "RAG 优化技术深度调研场景，涉及 RAG 评估框架（RAGAS/DeepEval/TruLens）对各优化环节的量化评估、分块策略对检索质量的影响研究、Embedding 模型选型（text-embedding-3-large/bge-m3/E5/Cohere）、Reranker 效果对比（bge-reranker/Cohere Rerank/Cross-Encoder）、GraphRAG 的知识图谱构建成本和适用边界、生产级 RAG 系统的端到端延迟预算分配，以及 RAG vs Fine-tuning vs Long Context 的能力边界对比",
+  "config": {
+    "deliverable_type": "research_report",
+    "flow_plan": "standard",
+    "workflow_template": "standard",
+    "debate_depth": "deep"
+  },
+  "tags": ["rag", "retrieval-augmented-generation", "embedding", "reranker", "graphrag", "llm", "optimization"],
+  "notes": "RAG 优化论文和博客数量极多但质量参差不齐，需要区分学术 benchmark 效果和实际业务提升。GraphRAG 是热点但落地成本高，需审慎评估 ROI。Tier 3 高复杂度研究场景。"
+}
