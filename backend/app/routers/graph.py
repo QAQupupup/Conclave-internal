@@ -50,7 +50,7 @@ def _get_auth_context(request: Request) -> tuple[str, str | None, int | None, bo
     return str(uid), username, tid, is_system_admin
 
 
-@router.get("")
+@router.get("/overview")
 async def get_graph(
     request: Request,
     meeting_id: str | None = Query(default=None, description="可选会议 ID，不传则返回最近会议的聚合图谱"),

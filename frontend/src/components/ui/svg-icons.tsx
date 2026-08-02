@@ -1117,3 +1117,30 @@ export function AlertCircleIcon({ size = 14, className }: { size?: number; class
     </svg>
   );
 }
+
+// 魔法棒/润色图标
+export function WandIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M15 4V2" />
+      <path d="M15 16v-2" />
+      <path d="M8 9h2" />
+      <path d="M20 9h2" />
+      <path d="M17.8 11.8 19 13" />
+      <path d="M15 9h0" />
+      <path d="M17.8 6.2 19 5" />
+      <path d="m3 21 9-9" />
+      <path d="M12.2 6.2 11 5" />
+    </svg>
+  );
+}
+
+// 撤销图标
+export function UndoIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M3 7v6h6" />
+      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </svg>
+  );
+}

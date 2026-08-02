@@ -6,11 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import type { MeetingStatus } from '@/types';
 import { STAGE_LABELS } from '@/lib/constants';
 import { toast } from '@/hooks/use-toast';
+import { api } from '@/lib/api';
 import {
   Logo,
   PlusIcon,
@@ -21,6 +23,8 @@ import {
   SpinnerIcon,
   ArrowRightIcon,
   TrashIcon,
+  WandIcon,
+  UndoIcon,
 } from '@/components/ui/svg-icons';
 
 const STATUS_CONFIG: Record<MeetingStatus, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive'; color: string }> = {
@@ -36,7 +40,10 @@ export default function BoardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [topic, setTopic] = React.useState('');
+  const [topicHistory, setTopicHistory] = React.useState<string[]>([]);
+  const [isPolishing, setIsPolishing] = React.useState(false);
   const [showNewForm, setShowNewForm] = React.useState(false);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const { data: meetingsData, isLoading } = useMeetings({ pageSize: 50 });
   const startMeeting = useStartMeeting();
   const deleteMeeting = useDeleteMeeting();
@@ -46,6 +53,38 @@ export default function BoardPage() {
   const activeMeetings = meetings.filter((m) => m.status === 'running' || m.status === 'paused');
   const pastMeetings = meetings.filter((m) => m.status === 'done' || m.status === 'error' || m.status === 'aborted' || m.status === 'pending');
 
+  // Auto-resize textarea
+  React.useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+  }, [topic, showNewForm]);
+
+  const handlePolish = async () => {
+    if (!topic.trim() || isPolishing) return;
+    setIsPolishing(true);
+    try {
+      const res = await api.post<{ polished: string }>('/meetings/polish-topic', { text: topic });
+      if (res.polished && res.polished !== topic) {
+        setTopicHistory((prev) => [...prev, topic]);
+        setTopic(res.polished);
+        toast({ title: '已润色', description: '议题描述已优化' });
+      }
+    } catch (e: any) {
+      toast({ title: '润色失败', description: e.message, variant: 'error' });
+    } finally {
+      setIsPolishing(false);
+    }
+  };
+
+  const handleUndo = () => {
+    if (topicHistory.length === 0) return;
+    const prev = topicHistory[topicHistory.length - 1];
+    setTopic(prev);
+    setTopicHistory((h) => h.slice(0, -1));
+  };
+
   const handleStart = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!topic.trim()) return;
@@ -53,6 +92,7 @@ export default function BoardPage() {
       const res = await startMeeting.mutateAsync({ topic: topic.trim() });
       toast({ title: '讨论已启动', description: truncate(topic, 50) });
       setTopic('');
+      setTopicHistory([]);
       setShowNewForm(false);
       navigate(`/explore/${res.meeting_id}`);
     } catch (e: any) {
@@ -94,23 +134,68 @@ export default function BoardPage() {
 
         <div className="mt-5">
           {showNewForm ? (
-            <form onSubmit={handleStart} className="flex gap-2 rounded-lg border border-border-default bg-bg-primary p-3 shadow-sm">
-              <Input
+            <form onSubmit={handleStart} className="rounded-lg border border-border-default bg-bg-primary p-4 shadow-sm">
+              <Textarea
+                ref={textareaRef}
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder="输入要讨论的话题或问题..."
-                className="flex-1"
+                placeholder="描述你想讨论的议题或问题...&#10;例如：分析微服务架构中服务间通信的最佳实践，对比 gRPC 和 REST 的适用场景"
+                className="min-h-[96px] text-[15px] leading-relaxed"
                 autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    handleStart();
+                  }
+                }}
               />
-              <Button type="submit" disabled={!topic.trim() || startMeeting.isPending}>
-                {startMeeting.isPending ? (
-                  <SpinnerIcon size={14} className="mr-2 animate-spin" />
-                ) : (
-                  <PlayIcon size={14} className="mr-2" />
-                )}
-                开始讨论
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setShowNewForm(false)}>取消</Button>
+              <div className="mt-3 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handlePolish}
+                    disabled={!topic.trim() || isPolishing}
+                    className="h-7 gap-1 text-xs"
+                  >
+                    {isPolishing ? (
+                      <SpinnerIcon size={12} className="animate-spin" />
+                    ) : (
+                      <WandIcon size={12} />
+                    )}
+                    AI 润色
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleUndo}
+                    disabled={topicHistory.length === 0}
+                    className="h-7 gap-1 text-xs"
+                  >
+                    <UndoIcon size={12} />
+                    撤回
+                  </Button>
+                  <span className="ml-2 text-[11px] text-text-tertiary">
+                    {topic.length} 字
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-text-tertiary hidden sm:inline">Ctrl+Enter 启动</span>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setShowNewForm(false); setTopic(''); setTopicHistory([]); }}>
+                    取消
+                  </Button>
+                  <Button type="submit" size="sm" disabled={!topic.trim() || startMeeting.isPending}>
+                    {startMeeting.isPending ? (
+                      <SpinnerIcon size={12} className="mr-1 animate-spin" />
+                    ) : (
+                      <PlayIcon size={12} className="mr-1" />
+                    )}
+                    开始讨论
+                  </Button>
+                </div>
+              </div>
             </form>
           ) : (
             <button

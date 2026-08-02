@@ -182,6 +182,14 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
         owner_username=username,
     )
     # 发布创建事件
+    # 创建会议工作区目录（确保在工作区立即可见）
+    try:
+        from pathlib import Path as _Path
+        from app.config import settings as _settings
+        _ws_dir = _Path(_settings.workspace_root) / meeting_id
+        _ws_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass  # 目录创建失败不影响会议创建
     await bus.publish(make_event("meeting.created", meeting_id, {"meeting_id": meeting_id, "topic": req.topic}))
     # [CON-20 修复] 同步广播 system 事件，通知前端 TaskBoard/Dashboard/Sidebar 立即刷新
     # 旧版依赖 5-10s 轮询，造成用户操作反馈延迟。系统级事件 meeting_id="*"
@@ -1498,3 +1506,47 @@ async def delete_key(provider: str, name: str = "default"):
     if not ok:
         raise HTTPException(status_code=404, detail="Key不存在")
     return {"deleted": True, "provider": provider, "name": name}
+
+
+# ---- 议题润色 ----
+
+from pydantic import BaseModel, Field
+
+
+class PolishRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+@router.post("/polish-topic")
+async def polish_topic(req: PolishRequest, request: Request) -> dict[str, str]:
+    """使用 LLM 润色议题描述，使其更清晰、更结构化。"""
+    from app.auth_guard import get_current_user
+    from app.agents.llm import get_llm
+
+    uid, username, _role = get_current_user(request)
+
+    text = req.text.strip()
+    if len(text) < 3:
+        return {"polished": text}
+
+    prompt = (
+        "你是一个议题优化助手。请将用户输入的讨论议题/问题润色得更加清晰、结构化、便于多 Agent 团队讨论。\n"
+        "要求：\n"
+        "1. 保留用户原意，不要添加用户没提到的内容\n"
+        "2. 如果议题模糊，将其明确化为具体可讨论的问题\n"
+        "3. 如果涉及多个方面，用简洁的分点形式表达（用数字序号）\n"
+        "4. 语言简洁，控制在 200 字以内\n"
+        "5. 直接输出润色后的内容，不要加任何前缀或解释\n\n"
+        f"用户输入：\n{text}\n\n润色后："
+    )
+
+    try:
+        llm = get_llm()
+        polished = await llm.complete_text(prompt, temperature=0.3)
+        polished = polished.strip().strip('"').strip("'").strip()
+        if not polished or len(polished) < 2:
+            polished = text
+        return {"polished": polished}
+    except Exception:
+        # 如果 LLM 调用失败，返回原文（不阻塞用户）
+        return {"polished": text}

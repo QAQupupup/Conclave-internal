@@ -216,21 +216,14 @@ export default function GraphPage() {
   // Selected meeting
   const [selectedMeetingId, setSelectedMeetingId] = React.useState<string | null>(null);
 
-  // Fetch graph data via API (returns mock in demo mode, real data in production)
+  // Fetch graph data via API
   const { data: graphData, isLoading: graphLoading, error: graphError } = useQuery({
-    queryKey: ['graph', selectedMeetingId || 'default'],
+    queryKey: ['graph', selectedMeetingId || 'overview'],
     queryFn: async (): Promise<GraphData> => {
-      try {
-        return await api.get<GraphData>(
-          selectedMeetingId ? `/graph?meeting_id=${selectedMeetingId}` : '/graph'
-        );
-      } catch (e) {
-        // In demo mode, fall back to mock data on API failure
-        if (isDemoMode()) {
-          return mockApi.getGraphData(selectedMeetingId || undefined) as GraphData;
-        }
-        throw e;
-      }
+      const url = selectedMeetingId
+        ? `/graph/overview?meeting_id=${selectedMeetingId}`
+        : '/graph/overview';
+      return await api.get<GraphData>(url);
     },
     retry: false,
   });
@@ -394,19 +387,22 @@ export default function GraphPage() {
     );
   }
 
-  // Real mode without backend graph API — show empty state instead of mock data
+  // Real mode without backend graph API — show error state
   if (graphError && !isDemoMode()) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
         <NetworkIcon size={32} className="text-text-tertiary" />
-        <div className="text-sm font-medium text-text-secondary">知识图谱功能暂未接入后端 API</div>
-        <div className="text-xs text-text-tertiary">可使用演示模式查看图谱演示数据</div>
+        <div className="text-sm font-medium text-text-secondary">图谱加载失败</div>
+        <div className="text-xs text-text-tertiary">{(graphError as Error)?.message || '请稍后重试'}</div>
       </div>
     );
   }
 
-  // No layout data (could be error in demo mode, or data doesn't have nodes/edges)
-  if (!layoutData) {
+  // No data state — API returned but no nodes/edges
+  const hasNoData = !graphLoading && layoutData && layoutData.nodes.length === 0;
+
+  // No layout data (still loading)
+  if (!layoutData && !hasNoData) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-sm text-text-tertiary">加载图谱中...</div>
@@ -431,9 +427,9 @@ export default function GraphPage() {
           onChange={(e) => setSelectedMeetingId(e.target.value || null)}
           className="h-7 rounded-md border border-border-soft bg-bg-secondary px-2 text-xs text-text-primary outline-none focus:border-brand-500"
         >
-          <option value="">演示图谱</option>
+          <option value="">全部会议</option>
           {meetings.map((m: any) => (
-            <option key={m.id} value={m.id}>{m.title?.slice(0, 40) || m.id}</option>
+            <option key={m.meeting_id || m.id} value={m.meeting_id || m.id}>{(m.topic || m.title || m.id)?.slice(0, 40)}</option>
           ))}
         </select>
 
@@ -497,6 +493,14 @@ export default function GraphPage() {
             backgroundSize: '20px 20px',
           }}
         >
+          {/* Empty state */}
+          {hasNoData && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-bg-secondary/80 backdrop-blur-sm">
+              <NetworkIcon size={28} className="text-text-tertiary" />
+              <div className="text-sm font-medium text-text-secondary">暂无图谱数据</div>
+              <div className="text-xs text-text-tertiary">启动一个讨论并产生对话后，这里会自动生成知识图谱</div>
+            </div>
+          )}
           <svg
             ref={svgRef}
             className="h-full w-full"

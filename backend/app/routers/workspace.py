@@ -150,10 +150,14 @@ async def list_files(path: str = "") -> dict[str, Any]:
 
     _is_root_listing = target == WORKSPACE_ROOT
     _tenant_meeting_ids: set[str] | None = None
-    if _is_root_listing and not is_system_tenant():
+    _meeting_topics: dict[str, str] = {}
+    if _is_root_listing:
         from app.dao.meeting_dao import list_meetings
 
-        _tenant_meeting_ids = {m["id"] for m in await list_meetings()}
+        meetings = await list_meetings()
+        _meeting_topics = {m["id"]: m.get("topic", "") for m in meetings}
+        if not is_system_tenant():
+            _tenant_meeting_ids = {m["id"] for m in meetings}
 
     for child in sorted(target.iterdir()):
         # 跳过隐藏文件和 __pycache__
@@ -175,14 +179,28 @@ async def list_files(path: str = "") -> dict[str, Any]:
                 child_count = sum(1 for c in child.iterdir() if not c.name.startswith(".") and c.name != "__pycache__")
             except OSError:
                 child_count = 0
+
+        # 会议目录显示名：mtg-xxx → 会议主题；孤立目录显示缩短 ID
+        display_name: str | None = None
+        if is_dir and child.name.startswith("mtg-"):
+            if child.name in _meeting_topics and _meeting_topics[child.name]:
+                topic = _meeting_topics[child.name].replace("\n", " ").replace("\r", " ").strip()
+                display_name = topic if len(topic) <= 30 else f"{topic[:28]}…"
+            else:
+                # 孤立目录（数据库中无对应会议）：显示缩短 ID
+                short_id = child.name[4:12] if len(child.name) > 12 else child.name[4:]
+                display_name = f"会议 {short_id}"
+
         items.append(
             {
                 "name": child.name,
+                "display_name": display_name,
                 "path": str(child.relative_to(WORKSPACE_ROOT)).replace("\\", "/"),
                 "type": "directory" if is_dir else "file",
                 "size": stat.st_size if not is_dir else 0,
                 "modified": stat.st_mtime,
                 "child_count": child_count,
+                "children_count": child_count,
                 "expanded": False,
             }
         )

@@ -57,7 +57,7 @@ export const useAuthStore = create<AuthStore>()(
         }
       },
       switchTenant: async (tenantId: string) => {
-        const result = await api.post<{ access_token: string }>('/api/tenants/switch', { tenant_id: tenantId });
+        const result = await api.post<{ access_token: string }>('/tenants/switch', { tenant_id: tenantId });
         // After switching, fetch updated user
         await get().fetchUser();
         // Update token if returned

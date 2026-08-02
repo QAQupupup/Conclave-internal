@@ -32,10 +32,12 @@ import { cn } from '@/lib/utils';
 // ===== Types =====
 interface FileItem {
   name: string;
+  display_name?: string;
   type: 'file' | 'directory';
   size?: number;
   modified?: string;
   children_count?: number;
+  child_count?: number;
 }
 
 interface FileListResponse {
@@ -461,10 +463,20 @@ export default function WorkspacePage() {
                               ) : (
                                 <FileIcon size={16} className="text-text-tertiary" />
                               )}
-                              <span className="text-sm text-text-primary">{item.name}</span>
-                              {item.type === 'directory' && item.children_count != null && (
+                              <span
+                                className="text-sm text-text-primary truncate max-w-[300px]"
+                                title={item.display_name ? `${item.display_name} (${item.name})` : item.name}
+                              >
+                                {item.display_name || item.name}
+                              </span>
+                              {item.display_name && (
+                                <span className="font-mono text-[10px] text-text-tertiary hidden lg:inline">
+                                  {item.name.slice(0, 12)}…
+                                </span>
+                              )}
+                              {(item.children_count ?? item.child_count) != null && (
                                 <span className="text-[11px] text-text-tertiary">
-                                  ({item.children_count})
+                                  ({item.children_count ?? item.child_count})
                                 </span>
                               )}
                             </div>

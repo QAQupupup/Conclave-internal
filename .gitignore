@@ -89,6 +89,11 @@ backend/data/
 Qwen*/
 docs/audits/
 .tmp/
+# 调试脚本和测试凭证（禁止提交）
+cookies.txt
+c.txt
+test-body.json
+_debug_*.py
 
 # ===== Eval / Analysis reports（本地评估产物，不提交仓库）=====
 system-eval-*/
