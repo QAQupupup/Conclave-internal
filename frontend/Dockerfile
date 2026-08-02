@@ -8,9 +8,10 @@ WORKDIR /app
 RUN npm config set registry https://registry.npmmirror.com
 # 先拷依赖描述以利用 Docker 层缓存
 COPY package.json package-lock.json ./
-# npm ci 严格按 lock 文件安装，Windows 生成的 lock 不含 Linux 平台的 rollup native binding，需补装
-RUN npm ci && npm install @rollup/rollup-linux-x64-gnu
-# 拷源码并构建
+# npm ci 严格按 lock 文件安装，BuildKit 缓存挂载加速 npm 下载
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci && npm install @rollup/rollup-linux-x64-gnu
+# 拷源码并构建（源码常变，放最后）
 COPY tsconfig.json vite.config.ts app.html eslint.config.js components.json vitest.config.ts ./
 COPY public ./public
 COPY src ./src

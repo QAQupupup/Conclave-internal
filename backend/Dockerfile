@@ -62,7 +62,8 @@ FROM system-deps AS playwright
 # Playwright 浏览器下载使用国内镜像加速
 ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
 
-RUN pip install --no-cache-dir playwright && \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir playwright && \
     playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -72,7 +73,9 @@ FROM playwright AS builder
 WORKDIR /build
 
 COPY requirements.lock ./
-RUN pip install --no-cache-dir -r requirements.lock
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.lock && \
+    pip check
 
 # ---------- 阶段 4: work（最终运行镜像，代码变更时只重建这层） ----------
 FROM system-deps AS work
@@ -84,35 +87,29 @@ COPY --from=playwright /usr/local/lib/python3.12/site-packages /usr/local/lib/py
 COPY --from=playwright /usr/local/bin /usr/local/bin
 COPY --from=playwright /root/.cache/ms-playwright /root/.cache/ms-playwright
 
-# 从 builder 层复制 Python 依赖
+# 从 builder 层复制 Python 依赖（已安装完毕，无需重复 pip install）
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# 复制源码（最常变，放最后）
-COPY requirements.lock ./
-RUN pip install --no-cache-dir -r requirements.lock && \
-    pip check
-
-COPY . .
-
-RUN pip install --no-cache-dir --no-deps -e .
-
-# 创建 app 用户（uid 1000），用于降权运行
+# 创建 app 用户（uid 1000），用于降权运行（提前创建，避免 COPY 后 chown）
 RUN groupadd -g 1000 app 2>/dev/null || true && \
     useradd -u 1000 -g 1000 -m -d /home/app -s /bin/bash app 2>/dev/null || true && \
-    mkdir -p /workspace /app/data /home/app && \
-    chown -R 1000:1000 /home/app
+    mkdir -p /workspace /app/data /home/app/.docker && \
+    chown -R 1000:1000 /home/app /workspace /app/data
 
-RUN mkdir -p /home/app/.docker && chown -R 1000:1000 /home/app/.docker
+# 复制源码（最常变，放最后以最大化缓存命中）
+COPY . .
+
+# 以可编辑模式安装 conclave_core 包本身（--no-deps 因为依赖已在 builder 层装好）
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir --no-deps -e .
 
 # 复制 entrypoint 脚本
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # 工作区目录 + 默认约束文件
-COPY workspace/constraints.yaml /workspace/constraints.yaml
 COPY --chown=1000:1000 workspace/constraints.yaml /workspace/constraints.yaml
-RUN chown -R 1000:1000 /workspace /app/data && chmod 755 /workspace /app/data
 VOLUME ["/workspace", "/app/data"]
 
 # 环境变量默认值
