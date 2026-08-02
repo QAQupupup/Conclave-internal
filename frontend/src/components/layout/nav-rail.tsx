@@ -7,6 +7,7 @@ import {
   NetworkIcon,
   FileTextIcon,
   BotIcon,
+  CpuIcon,
   SettingsIcon,
   ShieldIcon,
   ActivityIcon,
@@ -31,6 +32,7 @@ const navItems: NavItem[] = [
   { to: '/graph', icon: NetworkIcon, label: '图谱' },
   { to: '/reports', icon: FileTextIcon, label: '报告' },
   { to: '/agents', icon: BotIcon, label: 'Agent' },
+  { to: '/models', icon: CpuIcon, label: '模型' },
 ];
 
 export function NavRail() {
@@ -39,7 +41,9 @@ export function NavRail() {
     user?.system_role === 'system_owner' ||
     user?.system_role === 'system_admin' ||
     user?.role === 'admin' ||
-    user?.role === 'owner';
+    user?.role === 'owner' ||
+    user?.role === 'system_admin' ||
+    user?.role === 'system_owner';
 
   return (
     <nav className="flex h-full w-14 flex-col items-center border-r border-border-soft bg-bg-primary py-3">

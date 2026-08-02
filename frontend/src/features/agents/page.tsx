@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
   DialogContent,
@@ -23,6 +25,7 @@ import {
   XIcon,
   CheckIcon,
   SpinnerIcon,
+  SparklesIcon,
 } from '@/components/ui/svg-icons';
 import { api } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
@@ -61,6 +64,18 @@ interface GenerateRolesResponse {
 
 interface UpsertRoleResponse {
   role: AgentRole;
+}
+
+// Skill —— 与后端 GET /skills/list 返回结构对齐
+interface Skill {
+  name: string;
+  description: string;
+  triggers: string[];
+  scopes: string[];
+}
+
+interface SkillListResponse {
+  skills: Skill[];
 }
 
 // ============================================================
@@ -310,20 +325,35 @@ export default function AgentsPage() {
             配置参与会议讨论的 AI Agent 角色、人设和能力
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" onClick={() => setGenerateOpen(true)}>
-            <BrainIcon size={14} />
-            AI 生成
-          </Button>
-          <Button onClick={() => setCreateOpen(true)}>
-            <PlusIcon size={14} />
-            新建角色
-          </Button>
-        </div>
       </div>
 
-      {/* ---- Content ---- */}
-      {isLoading ? (
+      {/* ---- Tabs ---- */}
+      <Tabs defaultValue="roles" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="roles" className="gap-1.5">
+            <BrainIcon size={14} />
+            角色
+          </TabsTrigger>
+          <TabsTrigger value="skills" className="gap-1.5">
+            <SparklesIcon size={14} />
+            Skills
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="roles">
+          <div className="mb-4 flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setGenerateOpen(true)}>
+              <BrainIcon size={14} />
+              AI 生成
+            </Button>
+            <Button onClick={() => setCreateOpen(true)}>
+              <PlusIcon size={14} />
+              新建角色
+            </Button>
+          </div>
+
+          {/* ---- Content ---- */}
+          {isLoading ? (
         <LoadingGrid />
       ) : isError ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border-default py-16 text-center">
@@ -441,6 +471,12 @@ export default function AgentsPage() {
           })}
         </div>
       )}
+        </TabsContent>
+
+        <TabsContent value="skills">
+          <SkillsTab />
+        </TabsContent>
+      </Tabs>
 
       {/* ---- 创建 / 编辑 Dialog ---- */}
       <RoleFormDialog
@@ -990,5 +1026,117 @@ function GenerateDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ============================================================
+// Skills 标签页 —— 展示后端加载的 Agent Skills
+// ============================================================
+
+function SkillsTab() {
+  const qc = useQueryClient();
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['agent-skills', 'list'],
+    queryFn: () => api.get<SkillListResponse>('/skills/list'),
+  });
+
+  const skills = Array.isArray(data?.skills) ? data.skills : [];
+
+  // 加载中
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-text-tertiary">
+        <SpinnerIcon size={20} />
+        <span className="ml-2 text-sm">加载 Skills 中...</span>
+      </div>
+    );
+  }
+
+  // 加载失败
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border-default py-16 text-center">
+        <p className="text-sm text-danger">加载 Skills 列表失败</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          onClick={() => qc.invalidateQueries({ queryKey: ['agent-skills', 'list'] })}
+        >
+          重试
+        </Button>
+      </div>
+    );
+  }
+
+  // 空状态
+  if (skills.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border-default py-20 text-center">
+        <SparklesIcon size={28} className="text-text-tertiary" />
+        <h3 className="mt-3 text-sm font-medium text-text-primary">暂无可用 Skill</h3>
+        <p className="mt-1 text-xs text-text-tertiary">后端尚未加载任何 Agent Skill</p>
+      </div>
+    );
+  }
+
+  return (
+    <ScrollArea className="h-[calc(100vh-240px)] min-h-[320px]">
+      <div className="grid grid-cols-1 gap-4 pb-4 md:grid-cols-2 lg:grid-cols-3">
+        {skills.map((skill) => (
+          <Card
+            key={skill.name}
+            className="transition-all duration-150 hover:border-brand-500/30 hover:shadow-md"
+          >
+            <CardHeader className="pb-2">
+              <div className="flex items-start gap-2">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-500">
+                  <SparklesIcon size={15} />
+                </div>
+                <CardTitle className="truncate pt-1 text-sm font-medium">
+                  {skill.name}
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="pb-3">
+              <p className="line-clamp-3 text-xs leading-relaxed text-text-secondary">
+                {skill.description || '暂无描述'}
+              </p>
+
+              {Array.isArray(skill.triggers) && skill.triggers.length > 0 && (
+                <div className="mt-3">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-text-tertiary">
+                    触发词
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {skill.triggers.map((t) => (
+                      <Badge key={t} variant="secondary" className="text-[10px]">
+                        {t}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {Array.isArray(skill.scopes) && skill.scopes.length > 0 && (
+                <div className="mt-2">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-text-tertiary">
+                    适用范围
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {skill.scopes.map((s) => (
+                      <Badge key={s} variant="outline" className="text-[10px]">
+                        {s}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </ScrollArea>
   );
 }

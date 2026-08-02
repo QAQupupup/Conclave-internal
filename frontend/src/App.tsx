@@ -17,6 +17,7 @@ const WorkspacePage = React.lazy(() => import('./features/workspace/page'));
 const GraphPage = React.lazy(() => import('./features/graph/page'));
 const ReportsPage = React.lazy(() => import('./features/reports/page'));
 const AgentsPage = React.lazy(() => import('./features/agents/page'));
+const ModelsPage = React.lazy(() => import('./features/models/page'));
 const SettingsPage = React.lazy(() => import('./features/settings/page'));
 const TeamsPage = React.lazy(() => import('./features/teams/page'));
 const AdminPage = React.lazy(() => import('./features/admin/page'));
@@ -58,6 +59,7 @@ function App() {
               <Route path="/graph" element={<GraphPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/agents" element={<AgentsPage />} />
+              <Route path="/models" element={<ModelsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/teams" element={<TeamsPage />} />
               <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />

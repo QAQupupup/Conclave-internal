@@ -25,7 +25,9 @@ export function AdminRoute({ children }: AdminRouteProps) {
     user.system_role === 'system_owner' ||
     user.system_role === 'system_admin' ||
     user.role === 'admin' ||
-    user.role === 'owner';
+    user.role === 'owner' ||
+    user.role === 'system_admin' ||
+    user.role === 'system_owner';
 
   if (!isAdmin) {
     return (
