@@ -3,8 +3,8 @@
 
 id: code_conventions
 name: "代码生成规范"
-description: "代码生成时必须遵守的正面规范：项目结构、错误处理、安全、测试、文档等"
-version: 1
+description: "代码生成时必须遵守的正面规范：项目结构、错误处理、安全、测试、数据库DDL纪律等"
+version: 2
 type: checklist
 priority: 85
 tags: ["code", "quality", "conventions"]
@@ -45,13 +45,48 @@ prompt: |
   - 统一响应格式：成功 `{"data": ...}`、错误 `{"detail": "..."}`
   - 分页接口：支持 limit/offset 或 page/page_size，返回 total
   - 必须提供 `/health` 健康检查端点返回 `{"status":"ok"}`
-  - API前缀统一用 `/api/v1/...`
+  - API路径规则：核心业务路由无前缀（/auth/*, /meetings/*, /workspace/*），租户管理用 `/api/tenants/*`，验证码用 `/api/captcha`
+  - 注意：不要使用 `/api/v1/` 前缀，当前所有业务路由均无前缀
 
-  ## 数据库
+  ## 数据库（DDL 单一真相源纪律——核心红线）
   - 连接必须在所有路径（含异常）关闭，用context manager或try/finally
   - 启用WAL模式（SQLite）提升并发
   - 初始化时创建表和索引，用CREATE TABLE IF NOT EXISTS
-  - 外键约束必须开启（SQLite需PRAGMA foreign_keys=ON）
+
+  ### DDL 单一真相源原则（防止"改ORM忘改SQL"类bug）
+  - **每张表只能有一个"规范DDL定义"位置**：
+    - ORM 管理的表（有 Mapped 模型）：以 SQLAlchemy 模型定义为准，通过 `Base.metadata.create_all()` 建表
+    - Raw SQL 管理的 legacy 表：以 `app/dao/db_init.py` 或对应模块的 `ensure_*_table()` 函数为准
+  - **禁止在 conftest.py 中手写 CREATE TABLE**：测试初始化必须复用生产环境的初始化函数（如 `_init_users_table()`、`ensure_rbac_tables()`），与 `main.py` lifespan 保持完全一致的初始化顺序
+  - **禁止在业务查询函数中写 CREATE TABLE 作为"保险"**：`config_service.py` 中 `set_system_setting()`/`get_all_system_settings()` 这类查询函数不应自建表，表的创建是启动流程的职责
+  - 如必须在多处做"表存在防护"（防御性编程），只能写 `CREATE TABLE IF NOT EXISTS`（字段与规范定义一致）+ `ALTER TABLE ADD COLUMN IF NOT EXISTS`（补列），不能自行定义不同的列集合
+
+  ### ORM 模型字段纪律
+  - **所有 NOT NULL 列必须有 `server_default`**：Python 侧的 `default=` 仅对 ORM `session.add()` 路径有效，raw SQL INSERT 不会触发 Python default。时间戳字段用 `server_default=text("NOW()")`，布尔/字符串字段用 `server_default=text("'...'")` 或 DDL 侧 `DEFAULT`
+  - 时间戳 Mixin（CreatedAtMixin/UpdatedAtMixin）必须同时设置 `default=datetime.now(UTC)` 和 `server_default=text("NOW()")`，覆盖 ORM 和 raw SQL 两条路径
+  - 改 ORM 字段后必须 grep 检查：是否有 raw SQL INSERT 语句漏了新列？是否有其他 CREATE TABLE 语句需要同步？
+  - 加新 NOT NULL 列时，必须同时处理三件事：ORM 字段定义、对应 ensure/create 函数的 DDL、以及所有 raw SQL INSERT 语句
+
+  ### Raw SQL INSERT 纪律
+  - raw SQL INSERT 必须**显式列出所有 NOT NULL 且无 server_default 的列**，不能依赖 Python 侧 default
+  - INSERT 写完后必须检查：如果该表有 `created_at`/`updated_at` 等 Mixin 字段，即使有 server_default 也要考虑是否显式传入（避免跨测试用例的时间依赖）
+  - TRUNCATE 后重置 SEQUENCE（`ALTER SEQUENCE xxx RESTART WITH N`），避免后续 INSERT id 冲突
+
+  ### Schema 一致性校验
+  - 应用启动时会自动运行 `app/db/schema_verify.py::verify_schema_consistency()` 校验 ORM 与 DB 实际结构是否一致
+  - 如果启动日志出现 Schema 校验错误（列缺失、NOT NULL 不匹配），必须在修复 DDL 后再提交
+  - 新增 ORM 模型表后，确保在 lifespan 初始化链中被创建（`Base.metadata.create_all()` 或对应 `ensure_*_table()`）
+
+  ## 配置常量与共享模块纪律
+  - **跨模块使用的白名单/常量集合必须集中到一个零依赖模块**，禁止在多个文件中各自定义同名常量
+  - 典型案例：认证公开路径 `PUBLIC_PATHS` 集中在 `app/public_paths.py`，`app/middleware.py` 和 `app/plugins/builtin/auth/middleware.py` 都从该处导入。新增公开路径只改一处
+  - 判断常量集合成员资格的逻辑函数（如 `is_public_path()`）应与常量定义在同一模块，避免两个文件写不一致的匹配逻辑
+  - 如果发现两个文件有"看起来一样"的常量定义或工具函数，必须抽取到共享模块而非复制
+
+  ## 第三方库 API 调用纪律
+  - 使用第三方异步库（如 Casbin AsyncEnforcer）前，必须查阅官方文档或源码确认 API 名称，不要凭同步版本的方法名猜测（如 `add_policy_named` 是同步 API，异步版本叫 `add_policy`）
+  - 关键第三方库初始化后应在启动日志中做一次 smoke test（如调用一个简单方法确认 API 可用），避免运行时才抛 AttributeError
+  - 新增 pip 依赖必须同步更新 `requirements.lock`（用 `==` 固定版本），且在首次使用前通过 `pip check` 验证依赖完整性
 
   ## Docker/部署
   - uvicorn必须绑定 `0.0.0.0`（不是127.0.0.1）
@@ -67,3 +102,9 @@ prompt: |
   - 如果某个功能因Token预算简化实现，必须在代码注释中注明 `// TODO: 简化实现，需完善`
   - 统计/分析类接口必须基于真实数据库查询
   - 不要承诺未实现的功能
+
+  ## 测试初始化纪律
+  - **conftest.py 的 session-scoped fixture 必须复用生产环境的初始化函数链**（`init_db()` → `_init_users_table()` → `Base.metadata.create_all()` → `ensure_tenants_table()` → `ensure_rbac_tables()` → `init_auth_table()`），顺序与 `main.py` lifespan 一致，禁止自己重写 CREATE TABLE DDL
+  - TRUNCATE CASCADE 后必须显式插入测试所需的最小数据集（admin 用户、默认租户、tenant_members 关联），并重置相关 SEQUENCE
+  - 测试数据的 role 字段值必须与 RBAC 策略兼容（或依赖 middleware 中的 normalize 逻辑），不要使用系统中不存在的 role 名
+  - 安全相关测试（如 JWT 篡改）必须确保篡改方式确实改变了解码后的字节（base64 最后一个字符的翻转可能因 padding 不影响解码结果，应翻转倒数第二个字符或直接修改 payload 部分）

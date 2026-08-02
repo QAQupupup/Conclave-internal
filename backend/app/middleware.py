@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.context import new_request_id, reset_request_id, set_request_id
 from app.logging_config import get_logger
+from app.public_paths import is_public_path as _is_public_path
 
 logger = get_logger("middleware.trace")
 
@@ -54,19 +55,6 @@ def _load_or_create_dev_token() -> str:
 
 
 _DEV_TOKEN = _load_or_create_dev_token()
-
-# 免认证路径前缀
-_PUBLIC_PATHS = {
-    "/health",
-    "/metrics",
-    "/docs",
-    "/openapi.json",
-    "/redoc",
-    "/debug/auth-info",
-    "/auth/login",
-}
-# WebSocket 升级路径免认证（WebSocket 在 query 参数中传 token）
-_WS_PATHS = {"/ws"}
 
 # ---- 速率限制 ----
 _RATE_LIMIT_PER_MIN = int(os.environ.get("CONCLAVE_RATE_LIMIT_PER_MIN", "600"))
@@ -242,18 +230,8 @@ def _normalize_path(path: str) -> str:
 
 
 def _is_public(path: str) -> bool:
-    """判断路径是否免认证
-
-    [M-05 修复] 使用规范化路径 + 精确匹配/目录前缀匹配，防止编码绕过。
-    """
-    norm = _normalize_path(path)
-    for p in _PUBLIC_PATHS:
-        if norm == p:
-            return True
-        # 子路径匹配：/auth/login/xxx 也应视为公开（虽然目前没有子路由，保留扩展性）
-        if norm.startswith(p + "/"):
-            return True
-    return False
+    """判断路径是否免认证（委托给 app.public_paths.is_public_path）。"""
+    return _is_public_path(_normalize_path(path))
 
 
 def setup_auth_middleware(app: FastAPI) -> None:

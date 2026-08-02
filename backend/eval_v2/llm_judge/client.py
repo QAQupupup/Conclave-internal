@@ -29,15 +29,20 @@ class JudgeClient:
 
     def __init__(
         self,
-        model: str = "deepseek-ai/DeepSeek-V4-Flash",
-        base_url: str = "https://api.siliconflow.cn/v1",
+        model: str = "deepseek-v4-flash",
+        base_url: str = "https://api.deepseek.com",
         api_key: str = "",
-        api_key_env: str = "SILICONFLOW_API_KEY",
+        api_key_env: str = "DEEPSEEK_API_KEY",
         temperature: float = 0.0,
         seed: int = 42,
         timeout: float = 60.0,
         max_retries: int = 2,
         judge_runs: int = 3,
+        # DeepSeek V4-Flash 官方定价（CNY per 1M tokens）
+        # 缓存命中 ¥0.02, 缓存未命中 ¥1, 输出 ¥2
+        # 按 70% 缓存命中率估算综合输入成本 ≈ ¥0.314/M ≈ $0.044/M
+        input_price_per_mtok_usd: float = 0.044,
+        output_price_per_mtok_usd: float = 0.278,  # ¥2 / 7.2
     ):
         import os
 
@@ -49,6 +54,8 @@ class JudgeClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.judge_runs = judge_runs
+        self.input_price_per_mtok_usd = input_price_per_mtok_usd
+        self.output_price_per_mtok_usd = output_price_per_mtok_usd
         self._total_input_tokens = 0
         self._total_output_tokens = 0
         self._total_cost_usd = 0.0
@@ -200,8 +207,10 @@ class JudgeClient:
             except ValueError:
                 confidence = ConfidenceLevel.MEDIUM
 
-            # 估算成本（粗略）
-            cost = (in_tokens / 1_000_000) * 0.07 + (out_tokens / 1_000_000) * 0.28
+            # 估算成本
+            cost = (in_tokens / 1_000_000) * self.input_price_per_mtok_usd + (
+                out_tokens / 1_000_000
+            ) * self.output_price_per_mtok_usd
             self._total_cost_usd += cost
 
             return CoTJudgment(
@@ -235,7 +244,9 @@ class JudgeClient:
             except ValueError:
                 confidence = ConfidenceLevel.MEDIUM
 
-            cost = (in_tokens / 1_000_000) * 0.07 + (out_tokens / 1_000_000) * 0.28
+            cost = (in_tokens / 1_000_000) * self.input_price_per_mtok_usd + (
+                out_tokens / 1_000_000
+            ) * self.output_price_per_mtok_usd
             self._total_cost_usd += cost
 
             return PairwiseJudgment(

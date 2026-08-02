@@ -10,8 +10,11 @@ from __future__ import annotations
 # Used when cannot import from app or pricing data is unavailable
 _FALLBACK_PRICING: dict[str, tuple[float, float]] = {
     # (input_price_per_mtok, output_price_per_mtok)
+    # DeepSeek 官方 V4-Flash: 缓存命中 ¥0.02, 缓存未命中 ¥1, 输出 ¥2
+    # 按 70% 缓存命中率估算综合输入成本 ≈ ¥0.314/M ≈ $0.044/M
+    "deepseek-v4-flash": (0.044, 0.278),
+    "deepseek-ai/DeepSeek-V4-Flash": (0.044, 0.278),  # 兼容旧 SiliconFlow 路径
     "deepseek-ai/DeepSeek-V3.2": (0.14, 0.28),
-    "deepseek-ai/DeepSeek-V4-Flash": (0.07, 0.28),
     "deepseek-ai/DeepSeek-R1": (0.55, 2.19),
     "doubao-seed-code/Doubao-Seed-2.0-Code": (0.10, 0.30),
     "doubao-seed-code/Doubao-Seed-2.0-pro": (0.30, 0.60),

@@ -27,6 +27,10 @@ _user_id: contextvars.ContextVar[str] = contextvars.ContextVar("user_id", defaul
 _username: contextvars.ContextVar[str] = contextvars.ContextVar("username", default="-")
 _user_role: contextvars.ContextVar[str] = contextvars.ContextVar("user_role", default="")
 
+# RBAC 上下文（Casbin 中间件设置）
+_user_roles: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar("user_roles", default=())
+_domain: contextvars.ContextVar[str] = contextvars.ContextVar("domain", default="")
+
 # plugin_name：当前钩子调用所属的插件（插件系统在钩子调度时设置）
 _plugin_name: contextvars.ContextVar[str] = contextvars.ContextVar("plugin_name", default="-")
 
@@ -125,6 +129,22 @@ def set_user_role(role: str) -> contextvars.Token[str]:
     return _user_role.set(role)
 
 
+def get_user_roles() -> tuple[str, ...]:
+    return _user_roles.get()
+
+
+def set_user_roles(roles: tuple[str, ...]) -> contextvars.Token[tuple[str, ...]]:
+    return _user_roles.set(roles)
+
+
+def get_domain() -> str:
+    return _domain.get()
+
+
+def set_domain(dom: str) -> contextvars.Token[str]:
+    return _domain.set(dom)
+
+
 def get_plugin_name() -> str:
     return _plugin_name.get()
 
@@ -147,5 +167,7 @@ def get_trace_context() -> dict[str, str]:
         "user_id": _user_id.get(),
         "username": _username.get(),
         "user_role": _user_role.get(),
+        "user_roles": _user_roles.get(),
+        "domain": _domain.get(),
         "plugin_name": _plugin_name.get(),
     }

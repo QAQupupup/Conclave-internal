@@ -1604,8 +1604,17 @@ def _extract_json_with_reasoning(content: str) -> tuple[Any, str]:
     return parsed, ""
 
 
+_stub_llm_warned = False
+
+
 def get_llm() -> LLMClient:
     """按配置返回 LLM 客户端：有 key 用真实，否则用 stub"""
+    global _stub_llm_warned
     if settings.use_real_llm:
         return RealLLM()
+    if not _stub_llm_warned:
+        logger.warning(
+            "⚠️ LLM 未配置 API Key，使用 StubLLM 返回模拟数据。配置 LLM_API_KEY 或 LLM_PROVIDER 环境变量以使用真实 LLM。"
+        )
+        _stub_llm_warned = True
     return StubLLM()

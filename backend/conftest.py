@@ -196,29 +196,13 @@ def _ensure_db_initialized():
         _ensure_engine()
         await _init_db()
 
+        from app.auth import _init_users_table
         from app.auth import hash_password as _hash_pw
         from app.db.base import Base
         from app.db.engine import async_session_factory
 
-        # 1. 确保 users 表存在（ensure_tenants_table 依赖 users 表添加 tenant_id 列）
-        async with async_session_factory() as session:
-            await session.execute(
-                _text("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    username VARCHAR(64) UNIQUE NOT NULL,
-                    password_hash VARCHAR(256) NOT NULL,
-                    role VARCHAR(32) NOT NULL DEFAULT 'user',
-                    display_name VARCHAR(128),
-                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                    tenant_id INTEGER,
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    last_login_at TIMESTAMP
-                )
-            """)
-            )
-            await session.execute(_text("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
-            await session.commit()
+        # 1. 复用生产环境的 users 表初始化（与 auth 插件 on_startup 一致）
+        await _init_users_table()
 
         # 2. 创建 ORM 管理的表（记忆子系统 raw_memories/feature_memories/profile_memories、
         #    审计日志 audit_logs/cost_records、文档 documents 等）
@@ -235,6 +219,16 @@ def _ensure_db_initialized():
 
         await ensure_tenants_table()
         await ensure_business_tables_tenant_id()
+
+        # 3.5 RBAC 多租户表（tenant_members, user_settings, system_settings, casbin_rule）
+        from app.rbac.migrations import ensure_rbac_tables as _ensure_rbac
+
+        await _ensure_rbac()
+
+        # 3.6 net_auth 表（与 main.py lifespan 一致）
+        from app.net_auth import init_auth_table as _init_net_auth
+
+        await _init_net_auth()
 
         # 4. TRUNCATE 所有表 + 插入测试数据
         async with async_session_factory() as session:
@@ -260,17 +254,24 @@ def _ensure_db_initialized():
             await session.execute(_text("ALTER SEQUENCE users_id_seq RESTART WITH 2"))
 
             # 创建默认租户并关联 admin 用户
-            # 不使用 client fixture 的测试不会触发 lifespan 中的
-            # create_default_tenant_for_existing_users()，需要在此显式创建
             await session.execute(
                 _text(
-                    "INSERT INTO tenants(id, name, slug, plan, owner_id, settings) "
-                    "VALUES(1, '默认组织', 'default', 'free', 1, '{}'::jsonb) "
+                    "INSERT INTO tenants(id, name, slug, plan, owner_id, description, is_active, settings) "
+                    "VALUES(1, '默认组织', 'default', 'free', 1, '', TRUE, '{}'::jsonb) "
                     "ON CONFLICT (id) DO NOTHING"
                 )
             )
             await session.execute(_text("ALTER SEQUENCE tenants_id_seq RESTART WITH 2"))
             await session.execute(_text("UPDATE users SET tenant_id = 1 WHERE id = 1"))
+
+            # 确保 admin 在 tenant_members 表中（owner 角色）
+            await session.execute(
+                _text(
+                    "INSERT INTO tenant_members(tenant_id, user_id, role, is_banned, joined_at, created_at, updated_at) "
+                    "VALUES(1, 1, 'owner', FALSE, NOW(), NOW(), NOW()) "
+                    "ON CONFLICT (tenant_id, user_id) DO NOTHING"
+                )
+            )
 
             await session.commit()
 

@@ -225,7 +225,7 @@ async def decompose_topic(
     from app.orchestrator.nodes._helpers import _resolve_model_for_call
 
     resolved_model = model or _resolve_model_for_call(
-        MeetingStatePlaceholder(),
+        MeetingStatePlaceholder(),  # type: ignore[arg-type]
         role="moderator",
         stage="clarify",
     )

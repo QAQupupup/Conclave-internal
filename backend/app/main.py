@@ -25,16 +25,21 @@ from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware
 from app.net_auth import init_auth_table
 from app.plugins import PluginRegistry, set_global_registry
+from app.routers import admin as admin_router
 from app.routers import agent_roles as agent_roles_router
 from app.routers import audit_logs as audit_router
 from app.routers import captcha as captcha_router
+from app.routers import config as config_router
 from app.routers import docker_hosts as docker_hosts_router
 from app.routers import documents as documents_router
+from app.routers import graph as graph_router
 from app.routers import meetings as meetings_router
 from app.routers import metrics as metrics_router
 from app.routers import net_auth as net_auth_router
+from app.routers import notifications as notifications_router
 from app.routers import preferences as preferences_router
 from app.routers import regression as regression_router
+from app.routers import teams as teams_router
 from app.routers import workspace as workspace_router
 from app.routers import ws as ws_router
 from app.utils.tasks import create_supervised_task
@@ -90,6 +95,59 @@ async def lifespan(app: FastAPI):
     if settings.db_mode == "postgresql":
         async with async_session_factory() as session, session.bind.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)  # type: ignore[union-attr]
+
+    # RBAC 多租户：建表 + Casbin 初始化
+    try:
+        from app.rbac import ensure_rbac_tables, init_rbac
+        from app.rbac.policies import (
+            ROLE_BANNED,
+            seed_default_policies,
+            seed_team_policies,
+        )
+
+        await ensure_rbac_tables()
+        await init_rbac()
+
+        # 确保默认系统策略存在
+        await seed_default_policies()
+
+        # 为现有租户 seed Casbin 策略（幂等）
+        from sqlalchemy import select as _sel
+
+        from app.db.models import TenantModel
+
+        async with async_session_factory() as _s:
+            _tenants = (await _s.execute(_sel(TenantModel.id))).scalars().all()
+            for _tid in _tenants:
+                await seed_team_policies(_tid)
+
+        # 为现有用户同步 Casbin 角色（从 tenant_members 表，幂等）
+        from app.db.models import TenantMemberModel as _TM
+        from app.rbac.enforcer import get_enforcer as _get_enf
+        from app.rbac.enforcer import team_domain as _tdom
+
+        async with async_session_factory() as _s:
+            _members = (await _s.execute(_sel(_TM))).scalars().all()
+            _e = _get_enf()
+            for _m in _members:
+                _role = ROLE_BANNED if _m.is_banned else _m.role
+                await _e.add_grouping_policy(str(_m.user_id), _role, _tdom(_m.tenant_id))
+            await _e.save_policy()
+
+        logger.info("RBAC Casbin 初始化完成（%d 个租户，%d 个成员记录）", len(_tenants), len(_members))
+    except Exception as e:
+        logger.error("RBAC 初始化失败（致命）: %s: %s", type(e).__name__, str(e)[:300])
+        raise
+
+    # Schema 一致性校验（防止 ORM 与 raw SQL DDL 双源真相）
+    # 仅在 PostgreSQL 模式且非测试环境下做硬校验；测试环境在 conftest 中单独调用
+    if settings.db_mode == "postgresql" and not os.environ.get("CONCLAVE_TEST_MODE"):
+        try:
+            from app.db.schema_verify import verify_schema_consistency
+
+            await verify_schema_consistency(raise_on_error=False)  # 启动时仅警告，不阻断
+        except Exception as e:
+            logger.warning("Schema 校验执行失败（非致命）: %s", e)
 
     # 记忆子系统初始化（从 PG 恢复画像/特征/原始发言到内存）
     from app.memory.store import memory_store
@@ -324,6 +382,11 @@ def create_app() -> FastAPI:
     app.include_router(preferences_router.router)
     app.include_router(audit_router.router)
     app.include_router(docker_hosts_router.router)
+    app.include_router(graph_router.router)
+    app.include_router(notifications_router.router)
+    app.include_router(teams_router.router)
+    app.include_router(config_router.router)
+    app.include_router(admin_router.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, Any]:

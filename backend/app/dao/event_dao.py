@@ -67,29 +67,42 @@ async def save_event(
 
 async def load_events(meeting_id: str, from_seq: int = 0, limit: int = 0) -> list[dict[str, Any]]:
     """从 PostgreSQL 加载事件，支持增量回放。
+
+    防御性租户隔离：通过 EXISTS 子查询验证 meeting_id 属于当前租户。
     limit=0 表示不限制（增量回放场景）；全量恢复时应传 limit 防止内存暴涨。
-    meeting_id 来自已租户隔离的会议查询。
     """
+    tid = current_tenant_id()
+    tenant_clause = (
+        "AND EXISTS (SELECT 1 FROM meetings mt WHERE mt.id = e.meeting_id AND mt.tenant_id = :tid)"
+        if tid is not None
+        else ""
+    )
+    params: dict[str, Any] = {"meeting_id": meeting_id, "from_seq": from_seq}
+    if tid is not None:
+        params["tid"] = tid
     async with async_session_factory() as session:
         if limit > 0 and from_seq == 0:
+            params["limit"] = limit
             result = await session.execute(
                 text(
-                    """SELECT seq, meeting_id, type, payload, ts, trace_id FROM (
+                    f"""SELECT seq, meeting_id, type, payload, ts, trace_id FROM (
                         SELECT seq, meeting_id, type, payload, ts, trace_id
-                        FROM events WHERE meeting_id = :meeting_id AND seq > :from_seq
+                        FROM events e WHERE meeting_id = :meeting_id AND seq > :from_seq
+                        {tenant_clause}
                         ORDER BY seq DESC LIMIT CAST(:limit AS INTEGER)
                     ) t ORDER BY seq ASC"""
                 ),
-                {"meeting_id": meeting_id, "from_seq": from_seq, "limit": limit},
+                params,
             )
         else:
             result = await session.execute(
                 text(
-                    """SELECT seq, meeting_id, type, payload, ts, trace_id
-                    FROM events WHERE meeting_id = :meeting_id AND seq > :from_seq
+                    f"""SELECT seq, meeting_id, type, payload, ts, trace_id
+                    FROM events e WHERE meeting_id = :meeting_id AND seq > :from_seq
+                    {tenant_clause}
                     ORDER BY seq ASC"""
                 ),
-                {"meeting_id": meeting_id, "from_seq": from_seq},
+                params,
             )
         rows = result.mappings().all()
         out = []

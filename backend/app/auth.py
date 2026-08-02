@@ -166,7 +166,7 @@ def hash_password(password: str, salt: bytes | None = None, iterations: int = PB
 def verify_password(password: str, stored_hash: str) -> tuple[bool, bool]:
     """验证密码是否匹配存储的哈希。支持新旧两种格式。
 
-    新格式 ``pbkdf2_ch_sha256$...``（5 段）：
+    新格式 ``pbkdf2_ch_sha256$iterations$salt$hash``（4 段）：
         password 参数应为客户端 SHA-256 预哈希值，直接做 PBKDF2 比对。
 
     旧格式 ``pbkdf2_sha256$...``（4 段）：
@@ -181,11 +181,12 @@ def verify_password(password: str, stored_hash: str) -> tuple[bool, bool]:
     try:
         parts = stored_hash.split("$")
 
-        if len(parts) == 5 and parts[0] == "pbkdf2_ch_sha256":
-            # 新格式：输入已是 client_hash，直接 PBKDF2 比对
-            iterations = int(parts[2])
-            salt = base64.b64decode(parts[3])
-            expected = parts[4]
+        if len(parts) == 4 and parts[0] == "pbkdf2_ch_sha256":
+            # 新格式：pbkdf2_ch_sha256$iterations$salt_b64$hash_b64
+            # 输入已是 client_hash，直接 PBKDF2 比对
+            iterations = int(parts[1])
+            salt = base64.b64decode(parts[2])
+            expected = parts[3]
             dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
             actual = base64.b64encode(dk).decode("ascii")
             valid = hmac.compare_digest(expected, actual)
@@ -505,7 +506,7 @@ async def init_auth() -> None:
             user = await _create_user_in_db(
                 username=DEFAULT_ADMIN_USERNAME,
                 password_hash=pw_hash,
-                role="admin",
+                role="system_owner",
                 display_name="系统管理员",
             )
             if user:
@@ -631,10 +632,19 @@ def get_user_by_username(username: str) -> dict | None:
 
 
 def require_role(required_role: str):
-    """FastAPI 依赖：要求用户具有指定角色（admin 自动拥有所有权限）"""
+    """FastAPI 依赖：要求用户具有指定角色（system_owner/system_admin 自动拥有所有权限）。
+
+    注意：新代码应使用 app.rbac.deps.require_permission() 进行更细粒度的权限控制。
+    此函数保留用于向后兼容。
+    """
+    _SYS_ADMIN_ROLES = {"system_owner", "system_admin", "admin"}
 
     def _dep(user: dict = _get_current_user_dep) -> dict:  # type: ignore[assignment]
-        if user.get("role") != "admin" and user.get("role") != required_role:
+        user_role = user.get("role", "")
+        sys_role = user.get("system_role", user_role)
+        if sys_role in _SYS_ADMIN_ROLES:
+            return user
+        if user_role != required_role:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=403, detail=f"权限不足：需要 {required_role} 角色")

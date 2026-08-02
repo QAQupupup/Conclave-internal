@@ -72,10 +72,10 @@ class SuiteRunner:
         # 创建 Judge 客户端
         judge_api_key = self.judge_config.get("api_key", "")
         self.judge_client = JudgeClient(
-            model=self.judge_config.get("model", "deepseek-ai/DeepSeek-V4-Flash"),
-            base_url=self.judge_config.get("base_url", "https://api.siliconflow.cn/v1"),
+            model=self.judge_config.get("model", "deepseek-v4-flash"),
+            base_url=self.judge_config.get("base_url", "https://api.deepseek.com"),
             api_key=judge_api_key,
-            api_key_env=self.judge_config.get("api_key_env", "SILICONFLOW_API_KEY"),
+            api_key_env=self.judge_config.get("api_key_env", "DEEPSEEK_API_KEY"),
             temperature=self.judge_config.get("temperature", 0.0),
             seed=self.judge_config.get("seed", 42),
             timeout=self.judge_config.get("timeout", 60),
@@ -86,7 +86,7 @@ class SuiteRunner:
         # 初始化 L3 评分器
         self.l3_scorer = L3SemanticScorer(
             judge_client=self.judge_client,
-            config={**config.get("l3_semantic", {}), "weight": self.weights.get("l3_semantic", 0.45)},
+            config={**self.config.get("l3_semantic", {}), "weight": self.weights.get("l3_semantic", 0.45)},
         )
 
         return self
@@ -189,7 +189,7 @@ class SuiteRunner:
     ) -> SuiteResult:
         """聚合统计结果。"""
         n_cases = len(cases)
-        n_total_runs = len(results)
+        len(results)
 
         # Pass@k
         pass1 = compute_pass_at_k(results, k=1)
@@ -314,9 +314,9 @@ class SuiteRunner:
                     if call.provider:
                         providers.add(call.provider)
                 if models:
-                    info.model = list(models)[0]
+                    info.model = next(iter(models))
                 if providers:
-                    info.provider = list(providers)[0]
+                    info.provider = next(iter(providers))
                 break
 
         # 同族检测

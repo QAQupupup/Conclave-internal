@@ -1,6 +1,6 @@
 """SQLAlchemy ORM 模型包。
 
-从子模块 re-export 全部 14 个 ORM 模型。
+从子模块 re-export 全部 ORM 模型。
 Alembic 通过 ``from app.db.models import *`` 注册所有模型到 metadata。
 """
 
@@ -14,7 +14,10 @@ from app.db.models.meeting import MeetingAuxModel, MeetingModel, MeetingTagModel
 from app.db.models.memory import FeatureMemoryModel, ProfileMemoryModel, RawMemoryModel
 from app.db.models.message import MessageModel
 from app.db.models.observability import AuditLogModel, CostRecordModel
-from app.db.models.user import ApiKeyModel, UserPreferenceModel
+from app.db.models.tenant import TenantModel
+from app.db.models.tenant_member import TenantMemberModel
+from app.db.models.user import ApiKeyModel, UserPreferenceModel, UserSettingModel
+from app.db.models.user_account import UserModel
 
 __all__ = [
     "AgentRoleModel",
@@ -32,5 +35,9 @@ __all__ = [
     "MessageModel",
     "ProfileMemoryModel",
     "RawMemoryModel",
+    "TenantMemberModel",
+    "TenantModel",
+    "UserModel",
     "UserPreferenceModel",
+    "UserSettingModel",
 ]

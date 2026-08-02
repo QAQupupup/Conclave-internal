@@ -1,33 +1,12 @@
 # 角色模糊匹配测试 + 真实 LLM 回归防护
 # 防止 StubLLM 盲区：测试中文角色名、混合角色名、未知角色名等各种情况
-
+#
+# [P27 修复] 此前本文件在测试中重新实现了一份 _match_role 逻辑副本，
+# 而非 import 真实函数。如果 conclave_core.roles.match_role 变更，
+# 副本不会更新，测试通过但真实代码可能有 bug。现已改为 import 真实函数。
 
 from app.models import Role
-
-# ---------- 角色模糊匹配单元测试 ----------
-
-
-def _match_role(role_str: str) -> Role | None:
-    """从 nodes.py 提取的匹配逻辑（保持一致）"""
-    _ROLE_KEYWORDS: dict[str, list[str]] = {
-        Role.PRODUCT_ARCHITECT.value: ["product", "architect", "产品", "架构", "pm", "产品经理", "产品架构"],
-        Role.SECURITY_EXPERT.value: ["security", "安全", "风控", "sec"],
-        Role.DATA_ENGINEER.value: ["data", "数据", "analytics", "分析"],
-        Role.UX_DESIGNER.value: ["ux", "design", "设计", "体验", "ui"],
-        Role.MARKETING_EXPERT.value: ["marketing", "市场", "营销", "brand", "growth"],
-        Role.ENGINEER.value: ["engineer", "develop", "开发", "工程", "后端", "前端", "技术"],
-        Role.MODERATOR.value: ["moderator", "host", "主持", "协调", "facilitator"],
-    }
-
-    def _match(role_str: str) -> Role | None:
-        role_lower = role_str.lower()
-        for role, keywords in _ROLE_KEYWORDS.items():
-            for kw in keywords:
-                if kw in role_lower:
-                    return Role(role)
-        return None
-
-    return _match(role_str)
+from conclave_core.roles import match_role as _match_role
 
 
 def test_match_english_role_names():

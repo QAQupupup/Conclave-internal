@@ -24,6 +24,21 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # 幂等确保 tenant_id 列存在（全新数据库 alembic upgrade 时，
+    # ensure_business_tables_tenant_id() 尚未运行，需要先添加列）
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables WHERE table_name = 'meetings'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'meetings' AND column_name = 'tenant_id'
+            ) THEN
+                ALTER TABLE meetings ADD COLUMN tenant_id INTEGER;
+            END IF;
+        END $$;
+    """)
     op.create_index(
         "idx_meetings_tenant_status_created",
         "meetings",

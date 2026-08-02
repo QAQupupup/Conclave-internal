@@ -681,9 +681,15 @@ async def system_overview() -> dict[str, Any]:
     """
     from app.sandbox import get_status as get_sandbox_status
 
-    # 1. Docker 主机列表
+    # 1. Docker 主机列表（按租户过滤 + 系统主机）
     async with async_session_factory() as session:
-        result = await session.execute(select(DockerHostModel))
+        from sqlalchemy import and_
+
+        result = await session.execute(
+            select(DockerHostModel).where(
+                and_(DockerHostModel.enabled == True, _tenant_filter())  # noqa: E712
+            )
+        )
         hosts = result.scalars().all()
         host_list = []
         for h in hosts:
@@ -692,11 +698,16 @@ async def system_overview() -> dict[str, Any]:
                     "id": h.id,
                     "name": h.name,
                     "connection_type": h.connection_type,
-                    "status": h.status,
+                    "status": h.health_status,
                     "region": h.region,
-                    "tags": h.tags,
+                    "tags": h.tags or [],
                     "running_containers": h.running_containers,
                     "total_containers": h.total_containers,
+                    "cpu_cores": h.cpu_cores or None,
+                    "memory_total": f"{h.memory_gb} GB" if h.memory_gb else None,
+                    "memory_used": None,  # 实时内存使用需 Docker API 查询，暂不提供
+                    "last_health_check": h.last_health_check.isoformat() if h.last_health_check else None,
+                    "error": h.last_error or None,
                 }
             )
 

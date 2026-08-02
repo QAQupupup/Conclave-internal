@@ -587,14 +587,23 @@ async def test_trigger_extraction_mixed_roles():
 
 
 def test_trigger_extraction_exception_safe():
-    """trigger_extraction 异常时不影响主流程"""
+    """trigger_extraction 对无效输入不抛异常，不影响主流程。
+
+    [P27 修复] 此前本函数无任何 assert，仅调用函数。
+    现补充显式断言：函数应正常返回（不抛异常），且返回值为 None。
+    """
     import asyncio
 
     from app.memory.profile import trigger_extraction
 
     original = _enable_memory()
     try:
-        asyncio.run(trigger_extraction(None))  # type: ignore
-        asyncio.run(trigger_extraction("not a state"))  # type: ignore
+        # 传入 None 和非法类型，函数应内部 try/except 吞掉异常，不向上抛出
+        result1 = asyncio.run(trigger_extraction(None))  # type: ignore
+        result2 = asyncio.run(trigger_extraction("not a state"))  # type: ignore
+
+        # 显式断言：函数应正常返回（不抛异常），返回值为 None
+        assert result1 is None, "trigger_extraction(None) 应返回 None 且不抛异常"
+        assert result2 is None, "trigger_extraction('not a state') 应返回 None 且不抛异常"
     finally:
         _restore_memory(original)

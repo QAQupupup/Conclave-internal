@@ -122,12 +122,28 @@ async def save_message(
 
 
 async def list_messages(meeting_id: str) -> list[dict[str, Any]]:
-    """取某会议的全部发言。meeting_id 来自已租户隔离的会议查询。"""
+    """取某会议的全部发言。
+
+    防御性租户隔离：通过 EXISTS 子查询验证 meeting_id 属于当前租户，
+    即使调用方传入了跨租户的 meeting_id，也不会返回数据。
+    """
+    tid = current_tenant_id()
     async with async_session_factory() as session:
-        result = await session.execute(
-            text("SELECT * FROM messages WHERE meeting_id = :meeting_id ORDER BY created_at ASC"),
-            {"meeting_id": meeting_id},
-        )
+        if tid is not None:
+            result = await session.execute(
+                text(
+                    "SELECT m.* FROM messages m "
+                    "WHERE m.meeting_id = :meeting_id "
+                    "AND EXISTS (SELECT 1 FROM meetings mt WHERE mt.id = m.meeting_id AND mt.tenant_id = :tid) "
+                    "ORDER BY m.created_at ASC"
+                ),
+                {"meeting_id": meeting_id, "tid": tid},
+            )
+        else:
+            result = await session.execute(
+                text("SELECT * FROM messages WHERE meeting_id = :meeting_id ORDER BY created_at ASC"),
+                {"meeting_id": meeting_id},
+            )
         rows = result.mappings().all()
         out = []
         for row in rows:

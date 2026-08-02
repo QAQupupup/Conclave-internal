@@ -32,6 +32,10 @@ redis[hiredis]>=5.0
 # 加密（API Key 持久化）
 cryptography>=42.0
 
+# 权限（Casbin RBAC with Domains）
+casbin>=1.37.0
+casbin-async-sqlalchemy-adapter>=1.11.0
+
 # ===== 测试 + lint + type check（不分 dev，单一文件） =====
 pytest>=8.0
 pytest-asyncio>=0.23

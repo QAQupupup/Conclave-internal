@@ -64,6 +64,92 @@ def test_mask_key():
     assert _mask_key("sk-1234567890abcdef") == "sk-1***cdef"
 
 
+# ── encrypt/decrypt 往返测试 ──────────────────────────────
+
+
+def test_encrypt_decrypt_roundtrip():
+    """加密→解密必须得到原文。"""
+    from app.services.key_store import decrypt_key, encrypt_key
+
+    original = "sk-abc123def456ghi789"
+    encrypted = encrypt_key(original)
+    assert encrypted != original
+    assert encrypted != ""
+    decrypted = decrypt_key(encrypted)
+    assert decrypted == original
+
+
+def test_encrypt_empty_string_returns_empty():
+    """空字符串加密返回空字符串。"""
+    from app.services.key_store import decrypt_key, encrypt_key
+
+    assert encrypt_key("") == ""
+    assert decrypt_key("") == ""
+
+
+def test_decrypt_with_wrong_key_fails():
+    """用错误密钥解密必须返回空字符串（不抛异常）。"""
+    import os
+
+    from app.services.key_store import decrypt_key, encrypt_key
+
+    original = "my-secret-key"
+    encrypted = encrypt_key(original)
+
+    # 替换环境变量使 _get_fernet 使用不同密钥
+    old_key = os.environ.get("CONCLAVE_SECRET_KEY")
+    os.environ["CONCLAVE_SECRET_KEY"] = "different-key-for-testing-only-32b!!"
+    try:
+        # 需要重置 _fernet 缓存才能使用新密钥
+        import app.services.key_store as ks
+
+        ks._fernet = None
+        result = decrypt_key(encrypted)
+        assert result == ""  # 解密失败返回空字符串
+    finally:
+        if old_key is not None:
+            os.environ["CONCLAVE_SECRET_KEY"] = old_key
+        else:
+            os.environ.pop("CONCLAVE_SECRET_KEY", None)
+        # 重置 fernet 缓存
+        import app.services.key_store as ks
+
+        ks._fernet = None
+
+
+def test_encrypt_decrypt_long_data():
+    """长数据往返验证。"""
+    from app.services.key_store import decrypt_key, encrypt_key
+
+    long_key = "sk-" + "x" * 500
+    encrypted = encrypt_key(long_key)
+    decrypted = decrypt_key(encrypted)
+    assert decrypted == long_key
+
+
+def test_encrypt_deterministic_but_unique():
+    """Fernet 使用随机 IV，每次加密结果不同但都能正确解密。"""
+    from app.services.key_store import decrypt_key, encrypt_key
+
+    plaintext = "same-plaintext"
+    e1 = encrypt_key(plaintext)
+    e2 = encrypt_key(plaintext)
+    assert e1 != e2  # 随机 IV 导致密文不同
+    assert decrypt_key(e1) == plaintext
+    assert decrypt_key(e2) == plaintext
+
+
+def test_decrypt_tampered_ciphertext_returns_empty():
+    """篡改密文解密必须返回空字符串。"""
+    from app.services.key_store import decrypt_key, encrypt_key
+
+    encrypted = encrypt_key("secret")
+    # 翻转最后一个字符
+    tampered = encrypted[:-1] + ("A" if encrypted[-1] != "A" else "B")
+    result = decrypt_key(tampered)
+    assert result == ""
+
+
 def pytest_fail(msg: str):
     import pytest
 

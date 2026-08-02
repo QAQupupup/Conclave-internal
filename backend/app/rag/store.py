@@ -738,10 +738,20 @@ class QdrantVectorStore(InMemoryVectorStore):
 # ---------------------------------------------------------------------------
 
 
+_stub_embed_warned = False
+
+
 def _build_embedding() -> Embedding:
     """按配置构建嵌入器：有 key 用真实 bge-m3，否则用 stub"""
+    global _stub_embed_warned
     if settings.use_real_embed:
         return SiliconFlowEmbedding()
+    if not _stub_embed_warned:
+        logger.warning(
+            "⚠️ Embedding 未配置 API Key，使用 StubEmbedding 返回伪向量。"
+            "配置 EMBEDDING_API_KEY 环境变量以使用真实嵌入模型。"
+        )
+        _stub_embed_warned = True
     return StubEmbedding()
 
 

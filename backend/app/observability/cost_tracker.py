@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.context import get_meeting_id, get_request_id, get_runner_session_id
+from app.lazy_asyncio import LazyLock
 
 # 保存对后台刷盘任务的引用，防止被垃圾回收
 _flush_tasks: set[asyncio.Task] = set()
@@ -134,7 +135,7 @@ class CostTracker:
 
     def __init__(self) -> None:
         self._records: list[CostRecord] = []
-        self._lock = asyncio.Lock()
+        self._lock = LazyLock()  # 延迟初始化，避免跨事件循环绑定
 
     def _get_trace_id(self) -> str:
         """获取当前上下文的 trace_id（复用 runner_session_id）"""

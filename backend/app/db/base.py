@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, Integer, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -55,7 +55,9 @@ class IntegerPrimaryKeyMixin:
 class CreatedAtMixin:
     """仅 created_at（不可变记录，如 events、messages、tags）。"""
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, server_default=text("NOW()")
+    )
 
 
 class UpdatedAtMixin:
@@ -63,7 +65,11 @@ class UpdatedAtMixin:
     带 onupdate=utcnow 自动刷新。"""
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+        DateTime(timezone=True),
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+        server_default=text("NOW()"),
     )
 
 

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, select
 
 from app.config import settings
 from app.db.engine import async_session_factory
@@ -94,8 +94,14 @@ async def save_api_key(
     name: str = "default",
     base_url: str = "",
     is_default: bool = False,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """保存或更新 API Key（加密后存入数据库）。自动关联当前租户。
+
+    支持三层存储：
+    - user_id is not None: 个人 Key（优先级最高）
+    - tenant_id is not None, user_id is None: Team Key（回退层）
+    - 两者都为 None: 系统 Key（最低优先级，仅系统管理员可设置）
 
     [Wave 5] fail-closed：无租户上下文且非系统租户时拒绝操作，防止跨租户覆盖。
     """
@@ -107,39 +113,23 @@ async def save_api_key(
         raise RuntimeError("save_api_key 需要租户上下文或系统租户模式")
 
     async with async_session_factory() as session:
-        # 查找是否已存在：优先找租户专属 key，其次系统 key
-        if tid is not None:
-            result = await session.execute(
-                select(ApiKeyModel).where(
-                    ApiKeyModel.provider == provider,
-                    ApiKeyModel.name == name,
-                    ApiKeyModel.tenant_id == tid,
-                )
-            )
-            existing = result.scalar_one_or_none()
-            if existing is None:
-                # 回退到系统 key（将被复制为租户专属）
-                result2 = await session.execute(
-                    select(ApiKeyModel).where(
-                        ApiKeyModel.provider == provider,
-                        ApiKeyModel.name == name,
-                        ApiKeyModel.tenant_id.is_(None),
-                    )
-                )
-                existing = result2.scalar_one_or_none()
-                if existing is not None:
-                    # 系统 key 不直接修改，创建租户专属副本
-                    existing = None
+        # 查找是否已存在：按 (tenant_id, user_id, provider, name) 精确匹配
+        q = select(ApiKeyModel).where(
+            ApiKeyModel.provider == provider,
+            ApiKeyModel.name == name,
+        )
+        if user_id is not None:
+            # 个人 Key：精确匹配 user_id
+            q = q.where(ApiKeyModel.tenant_id == tid, ApiKeyModel.user_id == user_id)
+        elif tid is not None:
+            # Team Key：tenant_id 匹配且 user_id IS NULL
+            q = q.where(ApiKeyModel.tenant_id == tid, ApiKeyModel.user_id.is_(None))
         else:
-            # 系统租户：仅查询系统级 key（tenant_id IS NULL）
-            result = await session.execute(
-                select(ApiKeyModel).where(
-                    ApiKeyModel.provider == provider,
-                    ApiKeyModel.name == name,
-                    ApiKeyModel.tenant_id.is_(None),
-                )
-            )
-            existing = result.scalar_one_or_none()
+            # 系统 Key：tenant_id IS NULL 且 user_id IS NULL
+            q = q.where(ApiKeyModel.tenant_id.is_(None), ApiKeyModel.user_id.is_(None))
+
+        result = await session.execute(q)
+        existing = result.scalar_one_or_none()
 
         if existing:
             existing.encrypted_key = encrypted
@@ -149,6 +139,7 @@ async def save_api_key(
         else:
             record = ApiKeyModel(
                 tenant_id=tid,
+                user_id=user_id,
                 provider=provider,
                 name=name,
                 encrypted_key=encrypted,
@@ -157,23 +148,27 @@ async def save_api_key(
             )
             session.add(record)
 
-        # 如果设为默认，取消同租户同 provider 其他 key 的默认状态
+        # 如果设为默认，取消同 scope 下其他 key 的默认状态
         if is_default:
-            q = select(ApiKeyModel).where(
+            q_default = select(ApiKeyModel).where(
                 ApiKeyModel.provider == provider,
                 ApiKeyModel.name != name,
                 ApiKeyModel.is_default.is_(True),
             )
-            if tid is not None:
-                q = q.where(ApiKeyModel.tenant_id == tid)
-            others = await session.execute(q)
+            if user_id is not None:
+                q_default = q_default.where(ApiKeyModel.tenant_id == tid, ApiKeyModel.user_id == user_id)
+            elif tid is not None:
+                q_default = q_default.where(ApiKeyModel.tenant_id == tid, ApiKeyModel.user_id.is_(None))
+            else:
+                q_default = q_default.where(ApiKeyModel.tenant_id.is_(None), ApiKeyModel.user_id.is_(None))
+            others = await session.execute(q_default)
             for other in others.scalars().all():
                 other.is_default = False
 
         await session.commit()
 
     # 同步更新内存中的 PROVIDERS 配置（仅系统级 key 更新全局配置）
-    if tid is None:
+    if tid is None and user_id is None:
         try:
             if provider in PROVIDERS:
                 PROVIDERS[provider].api_key = api_key
@@ -187,39 +182,71 @@ async def save_api_key(
         "name": name,
         "base_url": base_url,
         "is_default": is_default,
+        "user_id": user_id,
         "saved": True,
     }
 
 
-async def list_api_keys() -> list[dict[str, Any]]:
-    """列出当前租户的 API Key（返回的 key 字段为脱敏形式，仅显示前4位+后4位）。
-    同时返回系统级 key（tenant_id IS NULL）作为基础。
+async def list_api_keys(
+    scope: str = "team",
+    user_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """列出 API Key。
 
-    [Wave 5] fail-closed：无租户上下文且非系统租户时返回空列表。
+    Args:
+        scope: "personal"（个人 Key）/ "team"（Team Key）/ "system"（系统 Key，仅管理员）/ "all"（所有可见层）
+        user_id: 用户 ID（scope=personal 时必填）
+
+    返回的 key 字段为脱敏形式（前4位+后4位）。
     """
     tid = current_tenant_id()
 
-    # [Wave 5] fail-closed：无租户上下文且非系统租户时返回空
     if tid is None and not is_system_tenant():
         logger.warning("list_api_keys 拒绝无租户上下文的查询")
         return []
 
     async with async_session_factory() as session:
-        if tid is not None:
-            result = await session.execute(
-                select(ApiKeyModel)
-                .where(or_(ApiKeyModel.tenant_id == tid, ApiKeyModel.tenant_id.is_(None)))
-                .order_by(ApiKeyModel.tenant_id.desc(), ApiKeyModel.provider, ApiKeyModel.name)
-            )
+        conditions = []
+        if scope == "personal" and user_id is not None and tid is not None:
+            conditions.append((ApiKeyModel.tenant_id == tid) & (ApiKeyModel.user_id == user_id))
+        elif scope == "team" and tid is not None:
+            conditions.append((ApiKeyModel.tenant_id == tid) & (ApiKeyModel.user_id.is_(None)))
+        elif scope == "system":
+            conditions.append((ApiKeyModel.tenant_id.is_(None)) & (ApiKeyModel.user_id.is_(None)))
+        elif scope == "all":
+            # 所有可见层：个人 + Team + 系统
+            if user_id is not None and tid is not None:
+                conditions.append((ApiKeyModel.tenant_id == tid) & (ApiKeyModel.user_id == user_id))
+            if tid is not None:
+                conditions.append((ApiKeyModel.tenant_id == tid) & (ApiKeyModel.user_id.is_(None)))
+            conditions.append((ApiKeyModel.tenant_id.is_(None)) & (ApiKeyModel.user_id.is_(None)))
         else:
-            # 系统租户：可查看全部
-            result = await session.execute(select(ApiKeyModel).order_by(ApiKeyModel.provider, ApiKeyModel.name))
+            # 默认：Team 层
+            if tid is not None:
+                conditions.append((ApiKeyModel.tenant_id == tid) & (ApiKeyModel.user_id.is_(None)))
+
+        if not conditions:
+            return []
+
+        from sqlalchemy import or_ as _or
+
+        query = (
+            select(ApiKeyModel)
+            .where(_or(*conditions))
+            .order_by(
+                ApiKeyModel.user_id.is_(None).asc(),  # personal first (user_id not null)
+                ApiKeyModel.provider,
+                ApiKeyModel.name,
+            )
+        )
+        result = await session.execute(query)
         records = result.scalars().all()
 
     keys = []
     for r in records:
         plain = decrypt_key(r.encrypted_key)
         masked = _mask_key(plain)
+        key_scope = "personal" if r.user_id else ("team" if r.tenant_id else "system")
         keys.append(
             {
                 "id": r.id,
@@ -228,6 +255,7 @@ async def list_api_keys() -> list[dict[str, Any]]:
                 "key_masked": masked,
                 "base_url": r.base_url,
                 "is_default": r.is_default,
+                "scope": key_scope,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
@@ -235,55 +263,90 @@ async def list_api_keys() -> list[dict[str, Any]]:
     return keys
 
 
-async def get_api_key(provider: str, name: str = "default") -> str:
+async def get_api_key(
+    provider: str,
+    name: str = "default",
+    user_id: int | None = None,
+    base_url_only: bool = False,
+) -> str | tuple[str, str]:
     """获取指定 provider 的明文 API Key（供 LLM 调用使用）。
-    优先查租户专属 key，回退系统 key。
 
-    [Wave 5] fail-closed：无租户上下文且非系统租户时返回空字符串，
-    防止通过缺少中间件的入口跨租户读取 API Key。
+    解析顺序（3 层回退）：
+    1. 个人 Key（user_id 不为空时）
+    2. Team Key（tenant_id 不为空时）
+    3. 系统 Key（全局默认）
+
+    [Wave 5] fail-closed：无租户上下文且非系统租户时返回空字符串。
+
+    Args:
+        provider: Provider 名
+        name: Key 名称
+        user_id: 用户 ID（传则先查个人 Key）
+        base_url_only: True 时返回 (api_key, base_url) 元组
     """
     tid = current_tenant_id()
 
     # [Wave 5] fail-closed：无租户上下文且非系统租户时返回空
     if tid is None and not is_system_tenant():
         logger.warning("get_api_key 拒绝无租户上下文的查询: provider=%s", provider)
-        return ""
+        return "" if not base_url_only else ("", "")
 
     async with async_session_factory() as session:
+        # 构建查找条件：按优先级顺序查找
+        conditions = []
+        if user_id is not None and tid is not None:
+            conditions.append((ApiKeyModel.tenant_id == tid) & (ApiKeyModel.user_id == user_id))
         if tid is not None:
-            result = await session.execute(
-                select(ApiKeyModel)
-                .where(
-                    ApiKeyModel.provider == provider,
-                    ApiKeyModel.name == name,
-                    or_(ApiKeyModel.tenant_id == tid, ApiKeyModel.tenant_id.is_(None)),
-                )
-                .order_by(ApiKeyModel.tenant_id.desc())
-            )
-        else:
-            # 系统租户：仅查询系统级 key（tenant_id IS NULL）
+            conditions.append((ApiKeyModel.tenant_id == tid) & (ApiKeyModel.user_id.is_(None)))
+        conditions.append((ApiKeyModel.tenant_id.is_(None)) & (ApiKeyModel.user_id.is_(None)))
+
+        for cond in conditions:
             result = await session.execute(
                 select(ApiKeyModel).where(
                     ApiKeyModel.provider == provider,
                     ApiKeyModel.name == name,
-                    ApiKeyModel.tenant_id.is_(None),
+                    cond,
                 )
             )
-        record = result.scalar_one_or_none()
+            record = result.scalar_one_or_none()
+            if record:
+                key = decrypt_key(record.encrypted_key)
+                if key:
+                    if base_url_only:
+                        return (key, record.base_url or "")
+                    return key
 
-    if record:
-        return decrypt_key(record.encrypted_key)
+    if base_url_only:
+        return ("", "")
     return ""
 
 
-async def delete_api_key(provider: str, name: str = "default") -> bool:
-    """删除指定的 API Key（仅删除当前租户的 key，不删除系统 key）
+async def get_resolved_key_and_base_url(
+    provider: str,
+    name: str = "default",
+    user_id: int | None = None,
+) -> tuple[str, str]:
+    """同时获取 key 和 base_url（便捷方法）。"""
+    result = await get_api_key(provider, name, user_id=user_id, base_url_only=True)
+    if isinstance(result, tuple):
+        return result
+    return (result, "")
 
-    [Wave 5] fail-closed：无租户上下文且非系统租户时拒绝操作。
+
+async def delete_api_key(
+    provider: str,
+    name: str = "default",
+    user_id: int | None = None,
+) -> bool:
+    """删除指定的 API Key。
+
+    按 scope 删除：
+    - user_id 不为空：删除个人 Key
+    - user_id 为空但有 tenant_id：删除 Team Key
+    - 系统租户且两者都空：删除系统 Key
     """
     tid = current_tenant_id()
 
-    # [Wave 5] fail-closed：无租户上下文且非系统租户时拒绝
     if tid is None and not is_system_tenant():
         logger.warning("delete_api_key 拒绝无租户上下文的操作: provider=%s", provider)
         return False
@@ -293,7 +356,12 @@ async def delete_api_key(provider: str, name: str = "default") -> bool:
             ApiKeyModel.provider == provider,
             ApiKeyModel.name == name,
         )
-        q = q.where(ApiKeyModel.tenant_id == tid) if tid is not None else q.where(ApiKeyModel.tenant_id.is_(None))
+        if user_id is not None:
+            q = q.where(ApiKeyModel.tenant_id == tid, ApiKeyModel.user_id == user_id)
+        elif tid is not None:
+            q = q.where(ApiKeyModel.tenant_id == tid, ApiKeyModel.user_id.is_(None))
+        else:
+            q = q.where(ApiKeyModel.tenant_id.is_(None), ApiKeyModel.user_id.is_(None))
         result = await session.execute(q)
         await session.commit()
         return result.rowcount > 0  # type: ignore[attr-defined, no-any-return]
