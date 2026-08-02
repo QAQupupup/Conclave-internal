@@ -77,6 +77,9 @@ _SYSTEM_POLICIES: list[list[str]] = [
     [ROLE_SYSTEM_ADMIN, SYSTEM_DOMAIN, "system:audit", "read"],
     [ROLE_SYSTEM_ADMIN, SYSTEM_DOMAIN, "team:info", "read"],
     [ROLE_SYSTEM_ADMIN, SYSTEM_DOMAIN, "team:members", "list"],
+    # TODO(quota): Phase 3 启用时取消注释
+    # [ROLE_SYSTEM_ADMIN, SYSTEM_DOMAIN, "system:quotas", "*"],
+    # [ROLE_SYSTEM_ADMIN, SYSTEM_DOMAIN, "system:feedbacks", "*"],
 ]
 
 # g 策略格式：[user/role, role, dom]
@@ -97,6 +100,10 @@ def _team_policies(dom: str) -> list[list[str]]:
         [ROLE_OWNER, dom, "team:reports", "*"],
         [ROLE_OWNER, dom, "team:billing", "*"],
         [ROLE_OWNER, dom, "team:keys", "*"],
+        # TODO(quota/feedback): Phase 3-4 启用时取消注释
+        # [ROLE_OWNER, dom, "team:quotas", "*"],
+        # [ROLE_OWNER, dom, "team:feedbacks", "*"],
+        # [ROLE_OWNER, dom, "team:keys", "reveal"],
         # maintainer
         [ROLE_MAINTAINER, dom, "team:info", "read"],
         [ROLE_MAINTAINER, dom, "team:info", "update"],
@@ -117,6 +124,11 @@ def _team_policies(dom: str) -> list[list[str]]:
         [ROLE_MAINTAINER, dom, "team:billing", "read"],
         [ROLE_MAINTAINER, dom, "team:keys", "read"],
         [ROLE_MAINTAINER, dom, "team:keys", "manage"],
+        # TODO(quota/feedback): Phase 3-4 启用时取消注释
+        # [ROLE_MAINTAINER, dom, "team:quotas", "read"],
+        # [ROLE_MAINTAINER, dom, "team:quotas", "update"],
+        # [ROLE_MAINTAINER, dom, "team:feedbacks", "read"],
+        # [ROLE_MAINTAINER, dom, "team:keys", "reveal"],
         # member
         [ROLE_MEMBER, dom, "team:info", "read"],
         [ROLE_MEMBER, dom, "team:settings", "read"],
@@ -126,11 +138,16 @@ def _team_policies(dom: str) -> list[list[str]]:
         [ROLE_MEMBER, dom, "team:meetings", "control"],
         [ROLE_MEMBER, dom, "team:reports", "read"],
         [ROLE_MEMBER, dom, "team:keys", "read"],
+        # TODO(quota/feedback): Phase 3-4 启用时取消注释
+        # [ROLE_MEMBER, dom, "team:quotas", "read_own"],
+        # [ROLE_MEMBER, dom, "team:feedbacks", "create"],
         # reporter
         [ROLE_REPORTER, dom, "team:info", "read"],
         [ROLE_REPORTER, dom, "team:members", "list"],
         [ROLE_REPORTER, dom, "team:meetings", "read"],
         [ROLE_REPORTER, dom, "team:reports", "read"],
+        # TODO(feedback): Phase 4 启用时取消注释
+        # [ROLE_REPORTER, dom, "team:feedbacks", "create"],
         # banned 无任何权限（不写策略，被封禁即无权限）
     ]
 
