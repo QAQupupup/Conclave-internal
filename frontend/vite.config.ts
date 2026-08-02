@@ -10,16 +10,50 @@ export default defineConfig({
     {
       name: 'conclave-spa-fallback',
       configureServer(server) {
+        // 后端 API 前缀（注意：只匹配子路径，不匹配精确路径，因为 /admin、/meetings 等同时是前端路由）
+        // 浏览器页面导航通过 Accept: text/html 判断（见下方），XHR/fetch 请求不会带 text/html
+        const API_SUBPATHS = [
+          '/api/', '/ws/', '/legacy/', '/websockify/',
+          '/setup/', '/auth/', '/workspace/', '/health',
+          '/agent-roles/', '/preferences/', '/tenants/', '/metrics/',
+          '/audit/', '/debug/', '/captcha/', '/config/', '/documents/',
+          '/net-auth/', '/docker-hosts/', '/regression/', '/admin/',
+          '/graph/', '/llm/', '/vnc.html', '/vnc/', '/meetings/',
+        ];
+        // WebSocket 路径
+        const WS_PATHS = ['/ws', '/vnc', '/websockify'];
         server.middlewares.use((req, _res, next) => {
           const url = req.url || '/';
-          if (
-            !url.startsWith('/api') &&
-            !url.startsWith('/ws') &&
-            !url.startsWith('/legacy') &&
-            !url.startsWith('/websockify') &&
-            !url.includes('.') &&
-            !url.startsWith('/node_modules')
-          ) {
+          const method = (req.method || 'GET').toUpperCase();
+
+          // 非 GET 请求不做 SPA fallback（POST/PUT/DELETE 等都是 API 调用）
+          if (method !== 'GET') return next();
+
+          // WebSocket 升级请求不拦截
+          if (req.headers.upgrade === 'websocket') return next();
+
+          // 静态文件不拦截
+          const isStatic = url.includes('.') || url.startsWith('/node_modules');
+          if (isStatic) return next();
+
+          const accept = (req.headers.accept as string) || '';
+          const isPageNav = accept.includes('text/html');
+
+          if (isPageNav) {
+            // 浏览器页面导航：始终返回 app.html（SPA 入口），由前端路由处理
+            req.url = '/app.html';
+            return next();
+          }
+
+          // XHR/fetch 请求（Accept: */* 或 application/json）：只对 API 子路径代理
+          const isApi = API_SUBPATHS.some((p) => url.startsWith(p)) ||
+            // /health 精确匹配是 API
+            url === '/health' ||
+            // /meetings 精确匹配且带查询参数（如 ?page_size=20）是 API；无查询时可能是前端导航，但非 text/html 就是 API
+            (url.startsWith('/meetings') && !isPageNav) ||
+            (url.startsWith('/admin') && !isPageNav);
+
+          if (!isApi) {
             req.url = '/app.html';
           }
           next();
@@ -45,6 +79,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
+      '/setup': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/ws': { target: process.env.VITE_WS_URL || 'ws://localhost:8000', ws: true },
       '/vnc.html': { target: process.env.VITE_VNC_URL || 'http://localhost:6080', ws: false },
       '/vnc': { target: process.env.VITE_VNC_URL || 'http://localhost:6080', ws: true },

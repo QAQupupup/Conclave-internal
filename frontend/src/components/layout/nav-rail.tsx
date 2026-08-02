@@ -10,6 +10,7 @@ import {
   SettingsIcon,
   ShieldIcon,
   ActivityIcon,
+  BuildingIcon,
 } from '@/components/ui/svg-icons';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores';
@@ -26,6 +27,7 @@ const navItems: NavItem[] = [
   { to: '/board', icon: LayoutDashboardIcon, label: '看板' },
   { to: '/explore', icon: SparklesIcon, label: '探索' },
   { to: '/workspace', icon: FolderIcon, label: '工作区' },
+  { to: '/teams', icon: BuildingIcon, label: '团队' },
   { to: '/graph', icon: NetworkIcon, label: '图谱' },
   { to: '/reports', icon: FileTextIcon, label: '报告' },
   { to: '/agents', icon: BotIcon, label: 'Agent' },
@@ -33,7 +35,11 @@ const navItems: NavItem[] = [
 
 export function NavRail() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === 'admin' || user?.role === 'owner';
+  const isAdmin =
+    user?.system_role === 'system_owner' ||
+    user?.system_role === 'system_admin' ||
+    user?.role === 'admin' ||
+    user?.role === 'owner';
 
   return (
     <nav className="flex h-full w-14 flex-col items-center border-r border-border-soft bg-bg-primary py-3">
@@ -63,6 +69,7 @@ function NavItemButton({ item }: { item: NavItem }) {
   return (
     <NavLink
       to={item.to}
+      aria-label={item.label}
       className={({ isActive }) =>
         cn(
           'group relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-fast',

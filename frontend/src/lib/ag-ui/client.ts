@@ -318,7 +318,7 @@ class AGUIClient {
 
       case 'TEXT_MESSAGE_END': {
         const e = event as TextMessageEndEvent;
-        const existing = useMeetingStore.getState().messages.find((m) => m.id === e.messageId);
+        const existing = useMeetingStore.getState().messages?.find((m) => m.id === e.messageId);
         store.finalizeMessage(e.messageId, e.content, existing?.thinking);
         if (existing?.agentId) {
           store.updateAgentState(existing.agentId, 'waiting');
@@ -350,7 +350,7 @@ class AGUIClient {
 
       case 'THINKING_END': {
         const e = event as ThinkingEndEvent;
-        const existing = useMeetingStore.getState().messages.find((m) => m.id === e.messageId);
+        const existing = useMeetingStore.getState().messages?.find((m) => m.id === e.messageId);
         if (existing) {
           store.finalizeMessage(e.messageId, existing.content, existing.thinking);
         }

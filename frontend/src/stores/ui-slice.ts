@@ -15,6 +15,8 @@ interface UIState {
   setThoughtTreeWidth: (w: number) => void;
   toggleTimeline: () => void;
   toggleThoughtTree: () => void;
+  setTimelineCollapsed: (collapsed: boolean) => void;
+  setThoughtTreeCollapsed: (collapsed: boolean) => void;
   openCommandPalette: () => void;
   closeCommandPalette: () => void;
 }
@@ -31,19 +33,22 @@ export const useUIStore = create<UIState>()(
       theme: 'system',
       timelineWidth: DEFAULT_TIMELINE_WIDTH,
       thoughtTreeWidth: DEFAULT_THOUGHT_TREE_WIDTH,
-      timelineCollapsed: false,
-      thoughtTreeCollapsed: false,
+      timelineCollapsed: true,
+      thoughtTreeCollapsed: true,
       commandPaletteOpen: false,
       setTheme: (theme) => set({ theme }),
       setTimelineWidth: (timelineWidth) => set({ timelineWidth }),
       setThoughtTreeWidth: (thoughtTreeWidth) => set({ thoughtTreeWidth }),
       toggleTimeline: () => set({ timelineCollapsed: !get().timelineCollapsed }),
       toggleThoughtTree: () => set({ thoughtTreeCollapsed: !get().thoughtTreeCollapsed }),
+      setTimelineCollapsed: (collapsed) => set({ timelineCollapsed: collapsed }),
+      setThoughtTreeCollapsed: (collapsed) => set({ thoughtTreeCollapsed: collapsed }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
     }),
     {
       name: 'conclave:ui:layout',
+      version: 1,
       partialize: (state) => ({
         theme: state.theme,
         timelineWidth: state.timelineWidth,
@@ -68,6 +73,20 @@ export const useUIStore = create<UIState>()(
             // 忽略 localStorage 访问错误
           }
         }
+      },
+      migrate: (persistedState: unknown, version: number) => {
+        // Version 0 → 1: fill missing fields with defaults
+        if (version < 1) {
+          const s = persistedState as Record<string, unknown> | undefined;
+          return {
+            theme: (s?.theme as Theme) ?? 'system',
+            timelineWidth: (s?.timelineWidth as number) ?? DEFAULT_TIMELINE_WIDTH,
+            thoughtTreeWidth: (s?.thoughtTreeWidth as number) ?? DEFAULT_THOUGHT_TREE_WIDTH,
+            timelineCollapsed: (s?.timelineCollapsed as boolean) ?? true,
+            thoughtTreeCollapsed: (s?.thoughtTreeCollapsed as boolean) ?? true,
+          };
+        }
+        return persistedState;
       },
     }
   )

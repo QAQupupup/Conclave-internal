@@ -35,3 +35,16 @@ export type {
 } from './ag-ui';
 
 export type { ApiError, PaginatedResponse } from './api';
+
+// RBAC / Team 多租户
+export type {
+  SystemRole,
+  TeamRole,
+  TeamMember,
+  TeamDetail,
+  TeamListResponse,
+  TeamMemberListResponse,
+  EffectiveConfig,
+  TeamRoleMeta,
+} from './rbac';
+export { TEAM_ROLE_META, canManageRole, getAssignableRoles } from './rbac';

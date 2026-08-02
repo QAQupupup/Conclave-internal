@@ -100,18 +100,25 @@ export interface BorrowRequest {
 export interface TenantInfo {
   id: string;
   name: string;
-  role: string; // owner / admin / member
+  role: string; // owner / admin / member / maintainer / reporter
+  my_role?: string;
+  slug?: string;
 }
 
 export interface UserInfo {
   id: string;
+  uid?: string | number;
   username: string;
   display_name: string;
   tenant_id: string;
   tenants: TenantInfo[];
   email?: string;
-  role?: string; // 'admin' | 'owner' | 'member'
+  role?: string; // 旧字段：'admin' | 'owner' | 'member'
+  system_role?: 'system_owner' | 'system_admin' | 'user' | string;
+  domain?: string; // RBAC domain
+  roles?: string[]; // 当前 Team 角色
   avatar_url?: string;
+  is_system_admin?: boolean;
 }
 
 export interface AuthState {

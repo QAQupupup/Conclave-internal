@@ -46,7 +46,6 @@ jobs:
         run: mypy --version
 
       - name: Type check with mypy
-        continue-on-error: true
         run: mypy app conclave_core
 
   frontend-checks:

@@ -278,7 +278,7 @@ function enterSystem(){
     if(status==='error'){
       showBackendModal();
     }else{
-      location.href='/app';
+      location.href='/login';
     }
   });
 }
@@ -295,7 +295,7 @@ function retryEnterSystem(){
       desc.dataset.retried='1';
     }else{
       closeBackendModal();
-      location.href='/app';
+      location.href='/login';
     }
   });
 }

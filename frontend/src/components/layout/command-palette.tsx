@@ -61,7 +61,7 @@ export function CommandPalette() {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
-      <DialogContent className="overflow-hidden p-0 shadow-lg sm:max-w-[520px]" closeClassName="top-3 right-3">
+      <DialogContent className="overflow-hidden p-0 shadow-sm sm:max-w-[520px]" closeClassName="top-3 right-3">
         <CommandPrimitive
           className={cn(
             'flex h-[420px] w-full flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground'

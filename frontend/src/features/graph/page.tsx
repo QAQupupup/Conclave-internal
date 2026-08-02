@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { extractArray } from '@/lib/extract';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +17,7 @@ import {
   type GraphData,
 } from './lib/types';
 import { forceLayout, getEdgePath } from './lib/force-layout';
-import { generateMockGraph, buildGraphFromMeeting } from './lib/mock-data';
+import { isDemoMode, mockApi } from '@/lib/mock-data';
 
 // --- Inline SVG Icons ---
 function SvgIcon({ children, size = 14, className }: { children: React.ReactNode; size?: number; className?: string }) {
@@ -210,37 +211,46 @@ export default function GraphPage() {
     retry: false,
   });
 
-  const meetings = meetingsData?.items || meetingsData?.meetings || [];
+  const meetings = extractArray<any>(meetingsData, ['items', 'meetings']);
 
   // Selected meeting
   const [selectedMeetingId, setSelectedMeetingId] = React.useState<string | null>(null);
 
-  // Build graph data
-  React.useEffect(() => {
-    let data: GraphData;
-    if (selectedMeetingId) {
-      const meeting = meetings.find((m: any) => m.id === selectedMeetingId);
-      if (meeting) {
-        data = buildGraphFromMeeting(meeting);
-      } else {
-        data = generateMockGraph();
+  // Fetch graph data via API (returns mock in demo mode, real data in production)
+  const { data: graphData, isLoading: graphLoading, error: graphError } = useQuery({
+    queryKey: ['graph', selectedMeetingId || 'default'],
+    queryFn: async (): Promise<GraphData> => {
+      try {
+        return await api.get<GraphData>(
+          selectedMeetingId ? `/graph?meeting_id=${selectedMeetingId}` : '/graph'
+        );
+      } catch (e) {
+        // In demo mode, fall back to mock data on API failure
+        if (isDemoMode()) {
+          return mockApi.getGraphData(selectedMeetingId || undefined) as GraphData;
+        }
+        throw e;
       }
-    } else {
-      data = generateMockGraph();
-    }
+    },
+    retry: false,
+  });
 
-    // Run force layout
+  // Run force layout when graph data changes
+  React.useEffect(() => {
+    if (!graphData) return;
+    // Defensive: ensure nodes and edges are arrays before running layout
+    if (!Array.isArray(graphData.nodes) || !Array.isArray(graphData.edges)) return;
     const svgWidth = 800;
     const svgHeight = 600;
-    const laidOut = forceLayout(data.nodes, data.edges, {
+    const laidOut = forceLayout(graphData.nodes, graphData.edges, {
       width: svgWidth,
       height: svgHeight,
       iterations: 150,
       repulsion: 6000,
       attraction: 0.01,
     });
-    setLayoutData({ nodes: laidOut, edges: data.edges });
-  }, [selectedMeetingId, meetings.length]);
+    setLayoutData({ nodes: laidOut, edges: graphData.edges });
+  }, [graphData]);
 
   // Filter nodes by visibility and search
   const filteredNodes = React.useMemo(() => {
@@ -375,6 +385,27 @@ export default function GraphPage() {
 
   const selectedNode = selectedNodeId ? nodeMap.get(selectedNodeId) : null;
 
+  // Loading state
+  if (graphLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="text-sm text-text-tertiary">加载图谱中...</div>
+      </div>
+    );
+  }
+
+  // Real mode without backend graph API — show empty state instead of mock data
+  if (graphError && !isDemoMode()) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <NetworkIcon size={32} className="text-text-tertiary" />
+        <div className="text-sm font-medium text-text-secondary">知识图谱功能暂未接入后端 API</div>
+        <div className="text-xs text-text-tertiary">可使用演示模式查看图谱演示数据</div>
+      </div>
+    );
+  }
+
+  // No layout data (could be error in demo mode, or data doesn't have nodes/edges)
   if (!layoutData) {
     return (
       <div className="flex h-full items-center justify-center">

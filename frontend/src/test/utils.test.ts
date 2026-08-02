@@ -5,7 +5,8 @@ describe('cn utility', () => {
   it('merges class names correctly', () => {
     expect(cn('a', 'b')).toBe('a b');
     expect(cn('a', { b: true, c: false })).toBe('a b');
-    expect(cn('a', 'a')).toBe('a'); // tailwind-merge dedupes
+    // tailwind-merge dedupes conflicting tailwind classes (not arbitrary strings)
+    expect(cn('px-2 px-4')).toBe('px-4');
   });
 });
 

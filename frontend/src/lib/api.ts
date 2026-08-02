@@ -225,13 +225,13 @@ function getMockResponse<T>(path: string, method: string, body?: unknown): T | n
   }
 
   // Tenants
-  if (method === 'GET' && path.startsWith('/tenants')) {
+  if (method === 'GET' && (path.startsWith('/tenants') || path.startsWith('/api/tenants'))) {
     return { tenants: mockApi.getTenants() } as unknown as T;
   }
 
   // Switch tenant - just return success in demo
   if (method === 'POST' && path.includes('/tenants/switch')) {
-    return { success: true } as unknown as T;
+    return { success: true, access_token: 'demo-token-' + Date.now() } as unknown as T;
   }
 
   // Auth/me - return demo user
@@ -296,7 +296,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
     if (res.status === 401) {
       if (!path.startsWith('/auth/login') && !path.startsWith('/auth/me')) {
+        // 触发登出流程（清除认证状态并跳转到 /login）
         useAuthStore.getState().logout();
+        // 返回永不 resolve 的 Promise，避免 React Query 在跳转前闪现错误 UI
+        // logout() 会硬跳转，页面即将卸载，不会造成内存泄漏
+        return new Promise<T>(() => {});
       } else {
         useAuthStore.setState({ token: null, user: null, isAuthenticated: false, isLoading: false });
       }
@@ -314,6 +318,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
     const text = await res.text();
     if (!text) return undefined as T;
+    // Detect HTML response (nginx fallback or backend error page)
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html') || text.startsWith('<HTML')) {
+      throw new ApiError('服务器返回了 HTML 而非 JSON，可能该接口尚未实现或路由未配置', res.status, { html: text.slice(0, 200) });
+    }
     return JSON.parse(text);
   } catch (err) {
     // If network error in demo mode, return mock fallback

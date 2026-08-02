@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { extractArray } from '@/lib/extract';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -41,7 +42,7 @@ export default function ExploreListPage() {
   });
 
   const meetings = React.useMemo(() => {
-    const items = data?.meetings || data?.items || [];
+    const items = extractArray<Meeting>(data, ['meetings', 'items']);
     let filtered = items;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();

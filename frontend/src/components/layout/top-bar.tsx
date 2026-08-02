@@ -66,9 +66,9 @@ function TenantSwitcher() {
   const [switching, setSwitching] = React.useState(false);
   const { toast } = useToast();
 
-  if (!user || user.tenants.length <= 1) return null;
+  if (!user || !Array.isArray(user.tenants) || user.tenants.length <= 1) return null;
 
-  const currentTenant = user.tenants.find((t) => t.id === user.tenant_id);
+  const currentTenant = user.tenants?.find((t) => t.id === user.tenant_id);
 
   const handleSwitch = async (tenant: TenantInfo) => {
     if (tenant.id === user.tenant_id) return;
@@ -150,6 +150,7 @@ export function TopBar() {
             size="icon"
             className="h-7 w-7"
             onClick={() => navigate('/board')}
+            aria-label="返回看板"
           >
             <ChevronLeftIcon size={16} />
           </Button>
@@ -167,6 +168,7 @@ export function TopBar() {
               className="h-7 w-7"
               onClick={handlePauseResume}
               title={meeting.status === 'paused' ? '继续' : '暂停'}
+              aria-label={meeting.status === 'paused' ? '继续' : '暂停'}
             >
               {meeting.status === 'paused' ? <PlayIcon size={14} /> : <PauseIcon size={14} />}
             </Button>
@@ -176,6 +178,7 @@ export function TopBar() {
               className="h-7 w-7"
               onClick={handleSkip}
               title="跳过当前阶段"
+              aria-label="跳过当前阶段"
             >
               <SkipForwardIcon size={14} />
             </Button>
@@ -185,6 +188,7 @@ export function TopBar() {
               className="h-7 w-7 text-danger"
               onClick={() => wsClient.sendControl('stop')}
               title="终止会议"
+              aria-label="终止会议"
             >
               <StopCircleIcon size={14} />
             </Button>
@@ -217,7 +221,7 @@ export function TopBar() {
       <div className="flex items-center gap-1">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7">
+            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="切换主题">
               {theme === 'dark' ? <MoonIcon size={14} /> : theme === 'light' ? <SunIcon size={14} /> : <MonitorIcon size={14} />}
             </Button>
           </DropdownMenuTrigger>
@@ -244,7 +248,7 @@ export function TopBar() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" title={displayName}>
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" title={displayName} aria-label="用户菜单">
               <UserInitialsAvatar name={displayName} size={24} />
             </Button>
           </DropdownMenuTrigger>
@@ -264,7 +268,7 @@ export function TopBar() {
                 <span className="text-[11px] text-text-tertiary truncate pl-[36px]">{user.email}</span>
               )}
               {(() => {
-                const ct = user?.tenants.find((t) => t.id === user.tenant_id);
+                const ct = user?.tenants?.find((t) => t.id === user.tenant_id);
                 if (!ct) return null;
                 return (
                   <div className="mt-1 flex items-center gap-1 rounded bg-bg-secondary px-2 py-1 text-[10px] text-text-secondary">

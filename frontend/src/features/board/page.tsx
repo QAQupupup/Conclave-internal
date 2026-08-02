@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import type { MeetingStatus } from '@/types';
 import { STAGE_LABELS } from '@/lib/constants';
@@ -39,8 +40,9 @@ export default function BoardPage() {
   const { data: meetingsData, isLoading } = useMeetings({ pageSize: 50 });
   const startMeeting = useStartMeeting();
   const deleteMeeting = useDeleteMeeting();
+  const [deleteTarget, setDeleteTarget] = React.useState<{ id: string; title: string } | null>(null);
 
-  const meetings = meetingsData?.items || [];
+  const meetings = Array.isArray(meetingsData?.items) ? meetingsData.items : [];
   const activeMeetings = meetings.filter((m) => m.status === 'running' || m.status === 'paused');
   const pastMeetings = meetings.filter((m) => m.status === 'done' || m.status === 'error' || m.status === 'aborted' || m.status === 'pending');
 
@@ -58,20 +60,26 @@ export default function BoardPage() {
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, meetingId: string, title: string) => {
+  const handleDelete = (e: React.MouseEvent, meetingId: string, title: string) => {
     e.stopPropagation();
-    if (!confirm(`确定要删除「${truncate(title, 30)}」吗？`)) return;
+    setDeleteTarget({ id: meetingId, title });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteMeeting.mutateAsync(meetingId);
+      await deleteMeeting.mutateAsync(deleteTarget.id);
       toast({ title: '已删除', description: '讨论已删除' });
       queryClient.invalidateQueries({ queryKey: ['meetings'] });
     } catch (err: any) {
       toast({ title: '删除失败', description: err.message, variant: 'error' });
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="mx-auto max-w-5xl pt-6 px-8 pb-8">
       {/* Hero / New meeting */}
       <section className="mb-8">
         <div className="flex items-center gap-3">
@@ -159,6 +167,16 @@ export default function BoardPage() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="删除讨论"
+        description={`确定要删除「${truncate(deleteTarget?.title || '', 30)}」吗？`}
+        destructive={true}
+        confirmText="删除"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
@@ -232,6 +250,7 @@ function MeetingRow({ meeting, onClick, onDelete }: { meeting: any; onClick: () 
         onClick={onDelete}
         className="rounded p-1 text-text-tertiary opacity-0 transition-all hover:bg-danger-bg hover:text-danger group-hover:opacity-100"
         title="删除"
+        aria-label="删除"
       >
         <TrashIcon size={14} />
       </button>

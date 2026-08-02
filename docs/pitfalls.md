@@ -375,7 +375,44 @@ git commit -F commit-msg.txt
 2. 不要为了"修复"这个 import 错误而把 `context` 改成其他写法，那会破坏 alembic 迁移。
 3. IDE 中显示红色波浪线是正常的（静态分析无法识别 alembic 的运行时注入），可加 `# noqa: I001` 抑制 ruff 误报。
 
+### P27. 测试质量失效（假绿测试与覆盖盲区）
+
+**症状**：CI 全绿但生产环境频繁出 bug。典型表现：
+- `verify_password` 段数检查 bug（4 段 vs 5 段）导致所有登录 401，但该函数零测试覆盖
+- `test_role_matching.py` 在测试文件中重新实现 `_match_role` 逻辑副本，而非 import 真实函数
+- `test_memory.py:589` 测试函数无任何 `assert` 语句，仅调用函数
+- `test_stats.py:116` 用 `try/except: pass` 吞掉异常，测试通过但未验证任何结果
+
+**根因**：测试规则只要求"必须加测试"，但未约束测试质量。导致：
+1. 测试逻辑副本代替真实代码 import → 被测代码变更时测试不更新，假绿
+2. 无断言或弱断言（`assert True` / `.not.toThrow()`）→ 测试永远通过，检测不到回归
+3. `try/except: pass` 吞异常 → 即使被测函数抛错，测试也绿
+4. 配对函数（hash/verify）无往返测试 → 一侧改了格式，另一侧不知道
+5. `@pytest.mark.skip` 无追踪 → 跳过的测试永远不运行，成为永久盲区
+
+**规则（强制，对应 AGENTS.md §5.7）**：
+
+1. **禁止测试逻辑副本**。必须 `import` 真实函数，不能在测试中重新实现。反面案例：`test_role_matching.py:10-30`。
+2. **每个测试函数至少一个有意义的断言**。无断言的测试必须删除或补全。反面案例：`test_memory.py:589-600`。
+3. **禁止 `try/except: pass` 在测试体中吞异常**。预期异常用 `pytest.raises`。反面案例：`test_stats.py:116-122`。
+4. **配对函数（hash/verify、encode/decode、create/verify）必须有往返测试**：正向通过 + 反向拒绝。这是 `verify_password` bug 的直接预防措施。
+5. **关键安全函数（auth.py、middleware.py、csrf.py）必须有专项测试文件**。无测试的安全函数禁止合并。
+6. **`@pytest.mark.skip` 必须标注原因、恢复条件、责任人**。模块级 skip 必须在本文件或 issue 中有记录。
+7. **Bug 修复必须先写失败用例**。先复现 bug（测试红），再修复（测试绿）。禁止"先修后测"。
+8. **禁止通过削弱断言强行通过**。`assert x == 5` 失败时不能改成 `assert x is not None`。
+9. **测试必须能检测回归**：故意改坏被测代码，确认测试失败。永远通过的测试是噪音。
+10. **测试命名必须与断言一致**。`test_xxx_has_strength_weak` 不能断言 `"none"`（见 P14）。
+
+**验证清单（提交前自查）**：
+- [ ] 新增测试是否 `import` 了真实被测函数？（grep 检查 import 行）
+- [ ] 每个测试函数是否有至少一个 `assert` / `expect`？
+- [ ] 是否有 `try/except: pass` 在测试体中？
+- [ ] 配对函数是否有往返测试？
+- [ ] 被测函数本身是否被 mock？（应为否）
+- [ ] 故意改坏代码，测试是否失败？（抽检）
+
 ---
 
 > 本文件从 AGENTS.md §4 拆出于 2026-07-30。子节编号从原 §4.x 改为 P1-P26，内容不变。
 > AGENTS.md §4 现在只保留类别索引，按需指向本文件。
+> P27 新增于 2026-08-01，对应 AGENTS.md §5.7 测试纪律硬性规则。

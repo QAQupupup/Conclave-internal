@@ -11,6 +11,16 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const isLoading = useAuthStore((s) => s.isLoading);
   const location = useLocation();
 
+  // 兜底超时：如果 loading 超过 15 秒，强制跳转登录页
+  React.useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => {
+        useAuthStore.setState({ isLoading: false, isAuthenticated: false });
+      }, 15_000);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
+
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-bg-primary">

@@ -3,6 +3,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { AppProviders } from './providers';
 import { AppShell } from './components/layout/app-shell';
 import { ProtectedRoute, PublicOnlyRoute } from './components/auth/protected-route';
+import { AdminRoute } from './components/auth/admin-route';
+import { ErrorBoundary } from './components/error-boundary';
+import { TooltipProvider } from '@radix-ui/react-tooltip';
 
 const LandingPage = React.lazy(() => import('./features/landing/page'));
 const LoginPage = React.lazy(() => import('./features/login/page'));
@@ -15,6 +18,7 @@ const GraphPage = React.lazy(() => import('./features/graph/page'));
 const ReportsPage = React.lazy(() => import('./features/reports/page'));
 const AgentsPage = React.lazy(() => import('./features/agents/page'));
 const SettingsPage = React.lazy(() => import('./features/settings/page'));
+const TeamsPage = React.lazy(() => import('./features/teams/page'));
 const AdminPage = React.lazy(() => import('./features/admin/page'));
 const OperationsPage = React.lazy(() => import('./features/operations/page'));
 const NotFoundPage = React.lazy(() => import('./features/not-found/page'));
@@ -33,8 +37,10 @@ function LoadingFallback() {
 function App() {
   return (
     <AppProviders>
-      <BrowserRouter>
-        <React.Suspense fallback={<LoadingFallback />}>
+      <TooltipProvider>
+        <ErrorBoundary>
+          <BrowserRouter>
+          <React.Suspense fallback={<LoadingFallback />}>
           <Routes>
             {/* Public routes */}
             <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
@@ -53,14 +59,17 @@ function App() {
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/teams" element={<TeamsPage />} />
+              <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
               <Route path="/operations" element={<OperationsPage />} />
             </Route>
 
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
-        </React.Suspense>
-      </BrowserRouter>
+          </React.Suspense>
+          </BrowserRouter>
+        </ErrorBoundary>
+      </TooltipProvider>
     </AppProviders>
   );
 }

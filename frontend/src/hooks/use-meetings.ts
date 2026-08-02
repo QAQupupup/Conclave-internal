@@ -1,6 +1,53 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { Meeting, PaginatedResponse } from '@/types';
+import { extractArray } from '@/lib/extract';
+import type { Meeting, PaginatedResponse, MeetingStatus, StageId, AgentRole, AgentState } from '@/types';
+
+// === Backend Response Types ===
+interface BackendMeetingItem {
+  meeting_id: string;
+  topic: string;
+  stage: string;
+  status: string;
+  created_at: string;
+  is_running: boolean;
+  summary?: string;
+  message_count?: number;
+  agents?: Array<{ id: string; name: string; role: string; state?: string }>;
+  tags?: string[];
+}
+
+interface BackendMeetingsResponse {
+  meetings: BackendMeetingItem[];
+  total: number;
+  concurrent_limit?: number;
+  running_count?: number;
+}
+
+// === Normalization ===
+function normalizeMeeting(raw: BackendMeetingItem): Meeting {
+  return {
+    id: raw.meeting_id,
+    title: raw.topic || '未命名讨论',
+    topic: raw.topic,
+    status: (raw.status || 'pending') as MeetingStatus,
+    stage: (raw.stage || 'pending') as StageId,
+    created_at: raw.created_at,
+    createdAt: raw.created_at ? Date.parse(raw.created_at) : undefined,
+    summary: raw.summary,
+    message_count: raw.message_count,
+    messageCount: raw.message_count,
+    agents: Array.isArray(raw.agents)
+      ? raw.agents.map((a) => ({
+          id: a.id,
+          name: a.name,
+          role: a.role as AgentRole,
+          state: (a.state || 'idle') as AgentState,
+        }))
+      : [],
+    metadata: { is_running: raw.is_running, tags: raw.tags },
+  };
+}
 
 // === Query Keys ===
 export const meetingKeys = {
@@ -16,12 +63,27 @@ export const meetingKeys = {
 export function useMeetings(params: { page?: number; pageSize?: number; status?: string } = {}) {
   return useQuery({
     queryKey: meetingKeys.list(params),
-    queryFn: () =>
-      api.get<PaginatedResponse<Meeting>>(
+    queryFn: async () => {
+      const res = await api.get<BackendMeetingsResponse | PaginatedResponse<Meeting>>(
         `/meetings?page=${params.page ?? 1}&page_size=${params.pageSize ?? 20}${
           params.status ? `&status=${params.status}` : ''
         }`
-      ),
+      );
+      // 兼容两种格式：后端 { meetings: [...] } 和 前端 { items: [...] }
+      const rawMeetings = extractArray<BackendMeetingItem | Meeting>(res, ['meetings', 'items']);
+      const meetings = rawMeetings.map((m) => {
+        // 如果已经有 id 字段（前端格式），直接返回
+        if ((m as Meeting).id) return m as Meeting;
+        // 否则从后端格式规范化
+        return normalizeMeeting(m as BackendMeetingItem);
+      });
+      return {
+        items: meetings,
+        total: (res as unknown as Record<string, unknown>)?.total as number ?? meetings.length,
+        page: params.page ?? 1,
+        pageSize: params.pageSize ?? 20,
+      } as PaginatedResponse<Meeting>;
+    },
   });
 }
 
@@ -39,12 +101,17 @@ export function useMeetingMessages(
 ) {
   return useQuery({
     queryKey: [...meetingKeys.messages(id!), params],
-    queryFn: () =>
-      api.get<{ messages: any[] }>(
+    queryFn: async () => {
+      const res = await api.get<{ messages: any[] } | any[]>(
         `/meetings/${id}/messages?limit=${params.limit ?? 50}${
           params.before ? `&before=${params.before}` : ''
         }`
-      ),
+      );
+      // 标准化：兼容 { messages: [...] } 和裸数组 [...] 两种格式
+      if (Array.isArray(res)) return res;
+      if (res && typeof res === 'object' && Array.isArray(res.messages)) return res.messages;
+      return [];
+    },
     enabled: !!id,
   });
 }

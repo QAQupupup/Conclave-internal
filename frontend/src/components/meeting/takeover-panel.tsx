@@ -80,7 +80,7 @@ export function TakeoverPanel({ open, onClose, meetingId, toolName, callId }: Ta
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="relative flex h-[80vh] w-[90vw] max-w-5xl flex-col overflow-hidden rounded-xl border border-border-default bg-bg-elevated shadow-2xl">
+      <div className="relative flex h-[80vh] w-[90vw] max-w-5xl flex-col overflow-hidden rounded-lg border border-border-default bg-bg-elevated shadow-md">
         {/* 头部 */}
         <div className="flex items-center justify-between border-b border-border-default px-4 py-3">
           <div className="flex items-center gap-2.5">

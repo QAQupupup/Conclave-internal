@@ -66,7 +66,7 @@ export function WebSearchReplay({ toolCall }: WebSearchReplayProps) {
   // 根据步骤推断当前阶段
   const phase: SearchPhase = React.useMemo(() => {
     if (toolCall.status === 'completed') return 'done';
-    const steps = toolCall.steps;
+    const steps = Array.isArray(toolCall.steps) ? toolCall.steps : [];
     if (steps.length === 0) return 'querying';
     const lastStep = steps[steps.length - 1];
     if (lastStep.stepType.includes('search')) return 'searching';
@@ -214,7 +214,7 @@ export function WebSearchReplay({ toolCall }: WebSearchReplayProps) {
       )}
 
       {/* 详细步骤时间线（来自 tool.step 事件） */}
-      {toolCall.steps.length > 0 && (
+      {Array.isArray(toolCall.steps) && toolCall.steps.length > 0 && (
         <div className="border-t border-border-default/50 pt-2">
           <div className="mb-1.5 px-0.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">操作日志</div>
           <div className="max-h-40 space-y-0.5 overflow-y-auto pl-0.5">

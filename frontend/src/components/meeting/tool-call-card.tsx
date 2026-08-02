@@ -98,7 +98,8 @@ export function ToolCallCard({ toolCall, onTakeover, defaultExpanded = false }: 
   const [expanded, setExpanded] = React.useState(defaultExpanded);
   const isRunning = toolCall.status === 'running';
   const isFailed = toolCall.status === 'failed';
-  const hasSteps = toolCall.steps.length > 0;
+  const safeSteps = Array.isArray(toolCall.steps) ? toolCall.steps : [];
+  const hasSteps = safeSteps.length > 0;
   const canReplay = isReplayable(toolCall.toolName);
   const canTakeover = isRunning && toolCall.toolName.startsWith('browser.');
 
@@ -185,7 +186,7 @@ export function ToolCallCard({ toolCall, onTakeover, defaultExpanded = false }: 
           ) : toolCall.toolName.startsWith('browser.') || toolCall.toolName === 'web_fetch' ? (
             <BrowserReplayView toolCall={toolCall} />
           ) : (
-            <GenericStepTimeline steps={toolCall.steps} />
+            <GenericStepTimeline steps={safeSteps} />
           )}
         </div>
       )}
@@ -195,10 +196,11 @@ export function ToolCallCard({ toolCall, onTakeover, defaultExpanded = false }: 
 
 // 浏览器操作回放视图
 function BrowserReplayView({ toolCall }: { toolCall: ToolCallRecord }) {
-  const [activeStepIdx, setActiveStepIdx] = React.useState(toolCall.steps.length - 1);
-  const activeStep = toolCall.steps[activeStepIdx];
+  const safeSteps = Array.isArray(toolCall.steps) ? toolCall.steps : [];
+  const [activeStepIdx, setActiveStepIdx] = React.useState(safeSteps.length - 1);
+  const activeStep = safeSteps[activeStepIdx];
 
-  if (toolCall.steps.length === 0) {
+  if (safeSteps.length === 0) {
     return (
       <div className="py-3 text-center text-xs text-text-tertiary">
         {toolCall.status === 'running' ? '等待浏览器操作...' : '无详细步骤记录'}
@@ -210,7 +212,7 @@ function BrowserReplayView({ toolCall }: { toolCall: ToolCallRecord }) {
     <div className="flex gap-3">
       {/* 步骤时间线 */}
       <div className="flex w-40 flex-shrink-0 flex-col gap-0.5">
-        {toolCall.steps.map((step, idx) => (
+        {safeSteps.map((step, idx) => (
           <button
             key={step.id}
             type="button"
@@ -266,7 +268,7 @@ function BrowserReplayView({ toolCall }: { toolCall: ToolCallRecord }) {
 
 // 通用步骤时间线
 function GenericStepTimeline({ steps }: { steps: ToolCallRecord['steps'] }) {
-  if (steps.length === 0) return null;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 pl-1">
       {steps.map((step) => (

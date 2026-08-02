@@ -67,7 +67,7 @@ export function ThoughtTree({ className }: { className?: string }) {
                   recentMessages={recentByAgent.get(agent.id) || []}
                   isHighlighted={
                     selectedMessageId
-                      ? messages.find((m) => m.id === selectedMessageId)?.agentId === agent.id
+                      ? messages?.find((m) => m.id === selectedMessageId)?.agentId === agent.id
                       : false
                   }
                 />

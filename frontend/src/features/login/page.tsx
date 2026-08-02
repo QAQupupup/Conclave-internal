@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useNavigate, useLocation } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,14 +18,15 @@ interface LoginResponse {
 }
 
 export default function LoginPage() {
-  const [username, setUsername] = React.useState('admin');
-  const [password, setPassword] = React.useState('admin123');
+  const [username, setUsername] = React.useState(import.meta.env.DEV ? 'admin' : '');
+  const [password, setPassword] = React.useState(import.meta.env.DEV ? 'admin123' : '');
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const navigate = useNavigate();
   const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/board';
 
@@ -44,6 +46,7 @@ export default function LoginPage() {
     };
     setAuth('demo-token-' + Date.now(), mockUser);
     toast({ title: '演示模式', description: '已使用演示账号登录，部分功能使用模拟数据' });
+    queryClient.clear();
     navigate(from, { replace: true });
   };
 
@@ -95,8 +98,18 @@ export default function LoginPage() {
         // Fallback: fetch /auth/me if user not in response
         useAuthStore.setState({ token });
         try {
-          const meUser = await api.get<UserInfo>('/auth/me');
+          const meRes = await api.get<UserInfo | { user: UserInfo }>('/auth/me');
+          const meUser: UserInfo = (meRes as { user?: UserInfo }).user ?? (meRes as UserInfo);
+          // 确保 tenants 是数组
+          if (meUser && !Array.isArray(meUser.tenants)) {
+            meUser.tenants = [];
+          }
+          // 确保 tenant_id 不为 null
+          if (meUser && meUser.tenant_id == null) {
+            meUser.tenant_id = '';
+          }
           setAuth(token, meUser);
+          toast({ title: '登录成功', description: `欢迎回来，${meUser.display_name || meUser.username || username}` });
         } catch {
           setError('获取用户信息失败');
           useAuthStore.setState({ token: null });
@@ -104,13 +117,26 @@ export default function LoginPage() {
           return;
         }
       } else {
+        // 确保 tenants 是数组
+        if (!Array.isArray(user.tenants)) {
+          user.tenants = [];
+        }
+        // 确保 tenant_id 不为 null
+        if (user.tenant_id == null) {
+          user.tenant_id = '';
+        }
         setAuth(token, user);
+        toast({ title: '登录成功', description: `欢迎回来，${user.display_name || user.username || username}` });
       }
 
-      toast({ title: '登录成功', description: `欢迎回来，${user?.display_name || user?.username || username}` });
+      queryClient.clear();
       navigate(from, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        setError('无法连接到服务器，请确认后端服务已启动');
+      } else {
+        setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -146,9 +172,6 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 disabled={isLoading}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSubmit(e);
-                }}
               />
             </div>
             {error && (
@@ -165,18 +188,22 @@ export default function LoginPage() {
             <span className="text-[10px] text-text-tertiary">或</span>
             <div className="h-px flex-1 bg-border" />
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="mt-3 w-full"
-            onClick={handleDemoLogin}
-            disabled={isLoading}
-          >
-            演示模式（无需后端）
-          </Button>
-          <p className="mt-2 text-center text-[10px] text-text-tertiary">
-            默认账号：admin / admin123
-          </p>
+          {import.meta.env.DEV && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3 w-full"
+                onClick={handleDemoLogin}
+                disabled={isLoading}
+              >
+                演示模式（无需后端）
+              </Button>
+              <p className="mt-2 text-center text-[10px] text-text-tertiary">
+                默认账号：admin / admin123
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

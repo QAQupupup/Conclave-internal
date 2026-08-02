@@ -17,8 +17,6 @@ services:
       - ./frontend/index.html:/app/index.html
       - ./frontend/app.html:/app/app.html
       - ./frontend/vite.config.ts:/app/vite.config.ts
-      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts
-      - ./frontend/postcss.config.js:/app/postcss.config.js
       - ./frontend/tsconfig.json:/app/tsconfig.json
       - /app/node_modules
     environment:

@@ -223,7 +223,7 @@ export default function AgentsPage() {
     queryFn: () => api.get<AgentRoleListResponse>('/agent-roles'),
   });
 
-  const roles = rolesData?.roles ?? [];
+  const roles = Array.isArray(rolesData?.roles) ? rolesData.roles : [];
 
   // --- 创建 Mutation ---
   const createMutation = useMutation({
@@ -270,7 +270,7 @@ export default function AgentsPage() {
   const toggleActive = (role: AgentRole) => {
     // 乐观更新
     qc.setQueryData<AgentRoleListResponse>(roleKeys.list(), (old) => {
-      if (!old) return old;
+      if (!old || !Array.isArray(old.roles)) return old;
       return {
         ...old,
         roles: old.roles.map((r) =>
@@ -301,7 +301,7 @@ export default function AgentsPage() {
   // ============================================================
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div className="mx-auto max-w-6xl pt-6 px-8 pb-8">
       {/* ---- Header ---- */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
@@ -386,7 +386,7 @@ export default function AgentsPage() {
                   <p className="line-clamp-2 text-xs leading-relaxed text-text-secondary">
                     {getRoleDescription(role)}
                   </p>
-                  {role.expertise_domains.length > 0 && (
+                  {Array.isArray(role.expertise_domains) && role.expertise_domains.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {role.expertise_domains.slice(0, 3).map((tag) => (
                         <span
@@ -655,7 +655,7 @@ function RoleFormDialog({
             {isEdit ? '修改角色的人设和配置' : '创建一个新的 AI Agent 角色'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 px-4 pb-2">
+        <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
           {/* 预览头像 */}
           <div className="flex items-center gap-3 rounded-lg bg-bg-tertiary/50 p-3">
             <AgentAvatar
@@ -677,8 +677,9 @@ function RoleFormDialog({
 
           {/* 名称 */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">角色名称</label>
+            <label className="text-sm font-medium text-text-secondary">角色名称</label>
             <Input
+              className="h-9 text-sm"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：安全审计员"
@@ -688,12 +689,12 @@ function RoleFormDialog({
 
           {/* 角色类型 */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">角色类型</label>
+            <label className="text-sm font-medium text-text-secondary">角色类型</label>
             <select
               value={roleType}
               onChange={(e) => setRoleType(e.target.value as RoleType)}
               disabled={isEdit && role?.is_builtin}
-              className="flex h-8 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary focus-visible:outline-none focus-visible:border-brand-500/50 focus-visible:ring-2 focus-visible:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-9 w-full rounded-md border border-border-default bg-bg-primary px-3 text-sm text-text-primary focus-visible:outline-none focus-visible:border-brand-500/50 focus-visible:ring-2 focus-visible:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {ROLE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -705,7 +706,7 @@ function RoleFormDialog({
 
           {/* 颜色 */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">标识颜色</label>
+            <label className="text-sm font-medium text-text-secondary">标识颜色</label>
             <div className="flex items-center gap-2">
               {COLOR_PRESETS.map((c) => (
                 <button
@@ -727,8 +728,9 @@ function RoleFormDialog({
 
           {/* 专业领域 */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">专业领域（逗号分隔）</label>
+            <label className="text-sm font-medium text-text-secondary">专业领域（逗号分隔）</label>
             <Input
+              className="h-9 text-sm"
               value={domainsText}
               onChange={(e) => setDomainsText(e.target.value)}
               placeholder="例如：安全审计, 渗透测试, 合规"
@@ -737,19 +739,19 @@ function RoleFormDialog({
 
           {/* 描述 */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">角色描述</label>
+            <label className="text-sm font-medium text-text-secondary">角色描述</label>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="描述这个角色的核心视角和职责..."
               rows={2}
-              className="min-h-[60px] resize-none border-border-default bg-bg-primary text-sm focus-visible:border-brand-500/50 focus-visible:ring-2 focus-visible:ring-brand-500/10"
+              className="min-h-[60px] resize-y border-border-default bg-bg-primary text-sm focus-visible:border-brand-500/50 focus-visible:ring-2 focus-visible:ring-brand-500/10"
             />
           </div>
 
           {/* System Prompt */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">系统提示词 (System Prompt)</label>
+            <label className="text-sm font-medium text-text-secondary">系统提示词 (System Prompt)</label>
             <Textarea
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
@@ -795,8 +797,9 @@ function GenerateDialog({
     mutationFn: (t: string) =>
       api.post<GenerateRolesResponse>('/agent-roles/generate', { topic: t }),
     onSuccess: (data) => {
-      setGeneratedRoles(data.roles);
-      setAccepted(new Set(data.roles.map((r) => r.id)));
+      const roles = Array.isArray(data?.roles) ? data.roles : [];
+      setGeneratedRoles(roles);
+      setAccepted(new Set(roles.map((r) => r.id)));
     },
     onError: (err: Error) => {
       toast({ title: '生成失败', description: err.message, variant: 'error' });
@@ -880,19 +883,21 @@ function GenerateDialog({
           <DialogDescription>输入会议议题，AI 将自动推荐合适的角色阵容</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 px-4">
+        <div className="space-y-4 px-6 py-5">
           {/* 输入区 */}
           <div className="flex gap-2">
             <Input
+              className="h-9 text-sm"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               placeholder="例如：讨论微服务架构下的分布式事务方案"
               onKeyDown={(e) => e.key === 'Enter' && !generateMutation.isPending && handleGenerate()}
             />
             <Button
+              size="sm"
               onClick={handleGenerate}
               disabled={generateMutation.isPending || !topic.trim()}
-              className="shrink-0"
+              className="shrink-0 h-9"
             >
               {generateMutation.isPending ? <SpinnerIcon size={13} /> : <BrainIcon size={13} />}
               生成

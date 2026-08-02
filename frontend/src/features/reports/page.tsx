@@ -270,7 +270,7 @@ function ReportBlockRenderer({ block }: { block: LayoutBlock }) {
 
 function ReportLayoutRenderer({ layout }: { layout: LayoutSpec | null }) {
   if (!layout) return null;
-  const sections = layout.sections ?? [];
+  const sections = Array.isArray(layout.sections) ? layout.sections : [];
   if (sections.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border-default p-4 text-center text-xs text-text-tertiary">
@@ -364,7 +364,7 @@ function ReportDialog({ meeting, open, onOpenChange }: ReportDialogProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[65vh] px-4 pb-4">
+        <ScrollArea className="max-h-[65vh] px-6 pb-5">
           {/* Agent 信息 */}
           {meeting?.agents && meeting.agents.length > 0 && (
             <div className="mb-4 flex items-center gap-2">
@@ -587,7 +587,7 @@ export default function ReportsPage() {
   }, [isError, error]);
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="mx-auto max-w-5xl pt-6 px-8 pb-8">
       {/* 页头 */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-text-primary">报告库</h1>

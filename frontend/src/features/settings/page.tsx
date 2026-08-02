@@ -131,7 +131,7 @@ export default function SettingsPage() {
   const currentTenant = user?.tenants?.find((t) => t.id === user.tenant_id);
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-2xl pt-6 px-8 pb-8">
       {/* Page header */}
       <div className="mb-6 flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/10 text-brand-500">
@@ -408,7 +408,7 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-4 rounded-lg bg-bg-tertiary p-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-brand-500/10">
+                <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-brand-500/10">
                   <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="8" cy="10" r="3" fill="var(--color-brand-500)" fillOpacity="0.9" />
                     <circle cx="24" cy="10" r="3" fill="var(--color-brand-400)" fillOpacity="0.9" />

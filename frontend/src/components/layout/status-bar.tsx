@@ -68,9 +68,7 @@ export function StatusBar() {
         </React.Fragment>
       )}
 
-      <div className="ml-auto flex items-center gap-3">
-        <span>Ready</span>
-      </div>
+      <div className="ml-auto" />
     </footer>
   );
 }

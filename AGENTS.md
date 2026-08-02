@@ -68,7 +68,7 @@
 |---|---|---|
 | 后端 | Python 3.12 + FastAPI + asyncio + SQLAlchemy (async) | asyncio 原生，禁止阻塞调用 |
 | 数据库 | PostgreSQL + pgvector + Redis + Qdrant | 元数据扩展走 JSONB `meetings.metadata`，禁止随意加核心列 |
-| 前端 | React 18 + TypeScript + Vite + Ant Design | 入口 `app.html`（非 `index.html`），路径别名 `@ → src/` |
+| 前端 | React 19 + TypeScript + Vite + Tailwind CSS v4 + Radix UI + Zustand + TanStack Query | 入口 `app.html`（非 `index.html`），路径别名 `@ → src/` |
 | 测试 | pytest + pytest-asyncio + Vitest + Playwright | 集成测试必须走 Docker Compose |
 | 部署 | Docker Compose（多阶段构建强制） | 禁止本地直接 `python main.py` / `npm run dev` 跑服务 |
 | 镜像源 | pip 清华 TUNA / npm npmmirror / apt 清华 / Docker 华为 SWR | 所有依赖必须国内源 |
@@ -90,12 +90,18 @@
 - [ ] `cd backend && python -m mypy --config-file pyproject.toml app conclave_core` → **0 新增 errors**（mypy 2.3.0 本地显示 0 errors，见 `docs/pitfalls.md` P15，不得新增）
 - [ ] 若改了 ORM 模型，确认 `app/dao/db_init.py` 的 DDL 与模型字段一致（尤其是新增列/默认值/JSONB）
 - [ ] 若改了 API 路由，确认所有路径都在前端 `vite.config.ts` 的 proxy 列表和 `nginx.conf` 中
+- [ ] **若新增/修改了函数，确认有对应单元测试且测试 import 了真实函数**（§5.7.1）
+- [ ] **若修改了配对函数（hash/verify、encode/decode、create/verify），确认有往返测试**（§5.7.3）
+- [ ] **若修改了认证/安全代码，确认 `test_password_hash.py` 通过 + 手动 curl 登录返回 200**（§5.7.4）
+- [ ] **确认新增测试无反模式**：无逻辑副本、无 `try/except:pass`、无空断言、无被测函数自身被 mock（§5.7）
 
 ### 2.2 前端
 - [ ] `cd frontend && npx eslint .` → 无新增 error（warnings 遵循现有宽松策略）
 - [ ] `cd frontend && npx tsc -b --noEmit` → **0 errors**
 - [ ] `cd frontend && npm run build` → 构建成功（CI 会跑）
 - [ ] 若改了路由，确认 `App.tsx` 中有对应 `<Route>`，`nginx.conf` 有 fallback
+- [ ] **若新增/修改了组件或 hook，确认有对应测试且测试 import 了真实组件**（§5.7.1）
+- [ ] **确认前端测试无 `.not.toThrow()` 作为唯一断言**（§5.7.2）
 
 ### 2.3 集成验证
 - [ ] `docker compose -f docker-compose.test.yml config` → 配置合法
@@ -146,7 +152,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 | 异步/事件循环 | P1-P2 | 改 asyncio 代码、遇到事件循环报错 |
 | Docker/部署 | P3-P4 | 改 Dockerfile/compose、Playwright 依赖 |
 | 数据库/ORM | P5-P10 | 改 ORM 模型、DDL、多租户、Alembic |
-| 测试 | P11-P14 | 写/改测试、fixture、断言 |
+| 测试 | P11-P14, P27 | 写/改测试、fixture、断言、测试质量 |
 | CI/Git | P15-P17 | 提交、推送、hook 问题 |
 | 编排器 | P18-P20 | 改 runner/nodes/门禁 |
 | 文档质量 | P21-P22 | 写文档、回应代码审查 |
@@ -185,7 +191,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 ### 5.3 禁止引入未授权依赖
 
 - 后端加 pip 包：先确认 `requirements.txt` 中没有替代，且包维护活跃、license 兼容。
-- 前端加 npm 包：优先用 React/Ant Design 原生能力，包大小 > 50KB gzipped 要慎重。
+- 前端加 npm 包：优先用 Radix UI + Tailwind 原生能力，包大小 > 50KB gzipped 要慎重。
 - **禁止用任何绕过 Playwright/浏览器指纹的库**，禁止用未审核的爬虫/注入工具。
 - 加依赖后必须更新 lock 文件（`requirements.txt` 或 `package-lock.json`）。
 
@@ -210,13 +216,86 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 - 禁止跨插件写入 metadata（插件隔离）。
 - DDL 变更必须考虑已有数据（默认值、NULL 处理、回滚策略）。
 
-### 5.7 测试纪律
+### 5.7 测试纪律（硬性规则，不可绕过）
 
-- **新增功能必须加测试**。Bug 修复先加能复现 bug 的失败用例，再修复。
+> 本节规则是强制性的。违反任何一条等同于违反工程规范，CI 有权拒绝合并。
+> 历史教训：`verify_password` 段数检查 bug（4 段 vs 5 段）导致所有登录 401，
+> 该函数零测试覆盖。`test_role_matching.py` 测试逻辑副本而非真实函数。
+> 这些不是个例，是系统性测试失效。
+
+#### 5.7.1 测试必须验证真实代码
+
+- **禁止测试逻辑副本**。测试必须 `import` 并调用真实的被测函数，不允许在测试文件中重新实现一份"保持一致"的逻辑。如果被测函数变更，副本不会自动更新，测试通过但真实代码可能有 bug。
+  - 错误：`def _match_role(role_str): ...  # 从 nodes.py 提取的匹配逻辑`
+  - 正确：`from app.orchestrator.nodes import _match_role`
+- **禁止 mock 被测函数本身**。mock 只能用于被测函数的依赖（数据库、外部 API、LLM）。如果被测函数被 mock 了，测试验证的是 mock 行为而非真实代码。
+- **测试必须 import 真实模块路径**，不能通过 `sys.path` hack 或动态加载绕过正常 import 链。
+
+#### 5.7.2 测试必须有有意义断言
+
+- **每个测试函数至少一个断言**。无断言的测试函数（仅调用函数不验证结果）不算测试，必须删除或补全断言。
+- **禁止 `assert True` / `pass` / 空函数体**作为测试。测试通过必须有可验证的原因。
+- **禁止 `.not.toThrow()` 作为唯一断言**（前端）。必须跟具体的 DOM/状态/返回值断言。"没崩溃"不等于"功能正确"。
+- **断言必须验证具体值**，不能只验证类型或存在性。`assert result is not None` 太弱，应改为 `assert result.status == "active"`。
+- **异常测试必须用 `pytest.raises` / `expect().toThrow()`**，禁止 `try/except: pass` 吞掉异常后继续执行。吞掉异常意味着你不知道函数是否抛了预期的异常。
+
+#### 5.7.3 配对函数必须有往返测试
+
+以下配对函数类型，提交时必须附带"正向验证通过 + 反向验证拒绝"的往返测试：
+
+| 配对类型 | 示例 | 必须覆盖 |
+|---------|------|---------|
+| hash/verify | `hash_password` / `verify_password` | 正确密码通过 + 错误密码拒绝 |
+| encode/decode | `_b64url_encode` / `_b64url_decode` | 往返一致 + 格式校验 |
+| create/verify | `create_jwt` / `verify_jwt` | 有效 token 通过 + 篡改 token 拒绝 + 过期 token 拒绝 |
+| encrypt/decrypt | 任何加解密对 | 往返一致 + 密钥错误拒绝 |
+| serialize/deserialize | `model_dump` / `model_validate` | 往返一致 + 格式错误拒绝 |
+
+**没有往返测试的配对函数，禁止合并。** 这是 `verify_password` 401 bug 的直接预防措施。
+
+#### 5.7.4 关键安全函数必须有专项测试
+
+以下函数是认证/安全的心脏，必须有独立的测试文件覆盖：
+
+- `app/auth.py`：`hash_password` / `verify_password` / `create_jwt` / `verify_jwt` / `authenticate_user`
+- `app/plugins/builtin/auth/middleware.py`：Cookie 解析、token 提取
+- `app/plugins/builtin/auth/csrf.py`：CSRF token 生成与验证
+- `app/tenants/service.py`：租户隔离（跨租户数据不可见）
+
+新增安全相关函数时，同步新增对应测试文件。无测试的安全函数禁止合并。
+
+#### 5.7.5 测试禁止依赖外部状态
+
 - 测试禁止依赖外网（Bing/OpenAI 等）。必须 mock 或走 stub。
-- 测试禁止依赖执行顺序。每个 test 必须独立可运行。
+- 测试禁止依赖执行顺序。每个 test 必须独立可运行（`pytest -p no:randomly` 随机顺序也能过）。
 - 测试用例中的数据必须自包含，不要依赖其他测试留下的数据。
 - Flaky 测试（偶发失败）必须修，不能简单 `@pytest.mark.skip` 绕过。
+- **`@pytest.mark.skip` / `skipif` 是技术债务，不是解决方案**。每个 skip 必须在注释中说明：(1) 为什么跳过 (2) 什么条件下恢复运行 (3) 恢复的责任人。模块级 skip（整个文件跳过）必须在 `docs/pitfalls.md` 或 issue 中有对应记录。
+
+#### 5.7.6 测试必须能检测代码回归
+
+- **测试必须在被测代码出 bug 时失败**。如果一个测试无论代码是否正确都能通过，它不是测试，是噪音。验证方法：故意改坏被测代码（如把 `==` 改成 `!=`），确认测试失败。
+- **Bug 修复必须先加失败用例**。先写一个能复现 bug 的测试（此时应失败），再修复代码（此时应通过）。禁止"先修后测"。
+- **禁止通过削弱断言来让测试通过**。如果测试失败，应该修代码或修测试断言值（需 grep 确认真实返回值），不能把 `assert x == 5` 改成 `assert x is not None` 来强行通过。
+
+#### 5.7.7 测试代码质量等于生产代码质量
+
+- 测试文件必须通过 `ruff check` 和 `ruff format`。
+- 测试函数命名必须与断言一致（`test_xxx_has_strength_weak` 不能断言 `"none"`）。
+- 测试必须有 docstring 说明验证的场景（一句话即可）。
+- 测试中禁止硬编码 magic number 而不说明来源（如 `assert len(result) == 7  # 7 个角色`）。
+
+#### 5.7.8 测试执行时机（何时必须跑测试）
+
+| 时机 | 必须执行的操作 | 验证标准 |
+|------|--------------|---------|
+| 新增/修改后端函数 | Docker 容器内跑相关测试文件 | 0 failed |
+| 新增/修改前端组件 | `npx vitest run` 相关测试文件 | 0 failed |
+| 修改认证/安全代码 | 跑 `test_password_hash.py` + 手动 curl 登录验证 | 登录返回 200 |
+| 修改 ORM 模型 | 跑全量后端测试（模型变更影响面大） | 0 failed |
+| `git commit` 前 | pre-commit hook（ruff/mypy/tsc/eslint） | 0 errors |
+| `git push` 前 | pre-push hook（Docker CI 一致性） | 0 failed |
+| 后端代码变更后部署 | `docker compose up -d --build backend`（必须重建镜像） | 容器 healthy |
 
 ### 5.8 回退策略
 
@@ -235,7 +314,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 | `SKILL_REGISTRY.md` | Skill 索引——AI 助手自动发现和调用 Skill 的入口 |
 | `docs/pitfalls.md` | **高频踩坑清单**（26 条，按类别分组，从 AGENTS.md §4 拆出） |
 | `docs/design/design-principles.md` | 11 条固化设计原则（RAG五原则、借调三问法、MVP三问等） |
-| `docs/design/adr/001-013` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移/论点提纯/会话检查点/状态机契约等） |
+| `docs/design/adr/001-015` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移/论点提纯/会话检查点/状态机契约/动态工作流/prompt回归测试） |
 | `docs/RETROSPECTIVE_CONVENTIONS.md` | 修复报告归档规范（HTML 格式、commit 区间、13 种错误模式） |
 | `docs/ci-stability-guide.md` | CI 稳定性详细指南（双层 Hook 体系、历史修复记录，P15 的补充） |
 | `docs/conclave-sandbox-directory-standard.md` | 沙箱目录规范 |

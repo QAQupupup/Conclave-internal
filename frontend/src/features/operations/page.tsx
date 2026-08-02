@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { extractArray } from '@/lib/extract';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -276,7 +277,7 @@ function SystemTopology({ overview }: { overview: SystemOverview }) {
 
       {/* Selected node details */}
       {selectedNode && (
-        <div className="absolute top-4 right-4 w-64 bg-bg-primary border border-border-default rounded-lg shadow-lg p-4">
+        <div className="absolute top-4 right-4 w-64 bg-bg-primary border border-border-default rounded-lg shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-text-primary">
               {nodes.find((n) => n.id === selectedNode)?.label}
@@ -489,7 +490,7 @@ function DockerHostCard({ host }: { host: DockerHost }) {
           </div>
 
           {/* Tags */}
-          {host.tags.length > 0 && (
+          {Array.isArray(host.tags) && host.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {host.tags.map((tag) => (
                 <Badge key={tag} variant="outline" className="text-xs">
@@ -540,7 +541,7 @@ export default function OperationsPage() {
   const [activeTab, setActiveTab] = React.useState('overview');
 
   // Fetch system overview
-  const { data: overview = MOCK_OVERVIEW, isLoading: overviewLoading } = useQuery({
+  const { data: overview, isLoading: overviewLoading } = useQuery({
     queryKey: ['operations', 'overview'],
     queryFn: async () => {
       if (isDemoMode()) {
@@ -553,14 +554,16 @@ export default function OperationsPage() {
   });
 
   // Fetch commands reference
-  const { data: commands = MOCK_COMMANDS } = useQuery({
+  const { data: commands, isLoading: commandsLoading } = useQuery({
     queryKey: ['operations', 'commands'],
     queryFn: async () => {
       if (isDemoMode()) {
         await new Promise((r) => setTimeout(r, 200));
         return MOCK_COMMANDS;
       }
-      return api.get<CommandCategory[]>('/docker-hosts/commands-reference');
+      return api.get<CommandCategory[] | { commands: CommandCategory[] }>(
+        '/docker-hosts/commands-reference'
+      ).then((res) => extractArray<CommandCategory>(res, ['commands']));
     },
   });
 
@@ -607,7 +610,7 @@ export default function OperationsPage() {
               <ServerIcon size={14} />
               Docker 主机
               <Badge className="ml-1 bg-bg-tertiary text-text-tertiary text-[10px] px-1 py-0">
-                {overview.hosts.length}
+                {overview?.hosts?.length ?? 0}
               </Badge>
             </TabsTrigger>
             <TabsTrigger
@@ -623,6 +626,15 @@ export default function OperationsPage() {
         <ScrollArea className="flex-1">
           {/* Overview Tab */}
           <TabsContent value="overview" className="p-4 m-0">
+            {overviewLoading && !overview ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-brand-500" />
+              </div>
+            ) : !overview ? (
+              <div className="flex items-center justify-center py-12 text-text-tertiary text-xs">
+                暂无系统概览数据
+              </div>
+            ) : (
             <div className="space-y-6">
               {/* System Topology */}
               <Card>
@@ -637,7 +649,7 @@ export default function OperationsPage() {
 
               {/* Component Status Grid */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                {Object.entries(overview.components).map(([key, component]) => {
+                {overview?.components && typeof overview.components === 'object' && Object.entries(overview.components).map(([key, component]) => {
                   const Icon = COMPONENT_ICONS[component.type] || ServerIcon;
                   const colors = STATUS_COLORS[component.status] || STATUS_COLORS.healthy;
 
@@ -663,6 +675,7 @@ export default function OperationsPage() {
                 })}
               </div>
             </div>
+            )}
           </TabsContent>
 
           {/* Hosts Tab */}
@@ -680,7 +693,7 @@ export default function OperationsPage() {
                 <div className="flex items-center justify-center py-12">
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-brand-500" />
                 </div>
-              ) : overview.hosts.length === 0 ? (
+              ) : !overview?.hosts || overview.hosts.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center">
                     <ServerIcon size={48} className="mx-auto text-text-tertiary mb-3" />
@@ -690,7 +703,7 @@ export default function OperationsPage() {
                 </Card>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {overview.hosts.map((host) => (
+                  {overview?.hosts?.map((host) => (
                     <DockerHostCard key={host.id} host={host} />
                   ))}
                 </div>
@@ -700,18 +713,28 @@ export default function OperationsPage() {
 
           {/* Commands Tab */}
           <TabsContent value="commands" className="p-4 m-0">
+            {commandsLoading && !commands ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-brand-500" />
+              </div>
+            ) : !commands || commands.length === 0 ? (
+              <div className="flex items-center justify-center py-12 text-text-tertiary text-xs">
+                暂无命令参考数据
+              </div>
+            ) : (
             <div className="space-y-6">
-              {commands.map((category) => (
+              {Array.isArray(commands) && commands.map((category) => (
                 <div key={category.category}>
                   <h3 className="text-sm font-medium text-text-primary mb-3">{category.category}</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {category.commands.map((cmd, idx) => (
+                    {Array.isArray(category.commands) && category.commands.map((cmd, idx) => (
                       <CommandCard key={idx} command={cmd} />
                     ))}
                   </div>
                 </div>
               ))}
             </div>
+            )}
           </TabsContent>
         </ScrollArea>
       </Tabs>

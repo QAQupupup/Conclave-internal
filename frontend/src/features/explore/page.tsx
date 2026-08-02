@@ -43,6 +43,31 @@ export default function ExplorePage() {
     }
   }, [meeting, id, setMeeting]);
 
+  // Responsive: auto-collapse sidebars on small screens (< 1024px)
+  React.useEffect(() => {
+    const RESPONSIVE_BREAKPOINT = 1024;
+    let wasSmallScreen = window.innerWidth < RESPONSIVE_BREAKPOINT;
+
+    // Auto-collapse on initial load if small screen
+    if (wasSmallScreen) {
+      useUIStore.getState().setTimelineCollapsed(true);
+      useUIStore.getState().setThoughtTreeCollapsed(true);
+    }
+
+    const handleResize = () => {
+      const isSmallScreen = window.innerWidth < RESPONSIVE_BREAKPOINT;
+      // Only auto-collapse when transitioning from large to small
+      if (isSmallScreen && !wasSmallScreen) {
+        useUIStore.getState().setTimelineCollapsed(true);
+        useUIStore.getState().setThoughtTreeCollapsed(true);
+      }
+      wasSmallScreen = isSmallScreen;
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const handleTimelineResize = (newSize: number) => {
     setTimelineWidth(Math.max(200, Math.min(380, newSize)));
   };
@@ -83,6 +108,7 @@ export default function ExplorePage() {
           onClick={toggleTimeline}
           className="flex w-6 flex-shrink-0 items-center justify-center border-r border-border-soft bg-bg-primary hover:bg-bg-tertiary transition-colors group"
           title="展开阶段时间线"
+          aria-label="展开阶段时间线"
         >
           <PanelLeftOpenIcon size={14} className="text-text-tertiary group-hover:text-text-secondary" />
         </button>
@@ -96,7 +122,7 @@ export default function ExplorePage() {
             style={{ width: timelineWidth }}
           >
             <div className="flex h-8 items-center justify-end border-b border-border-soft px-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleTimeline} title="折叠时间线">
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleTimeline} title="折叠时间线" aria-label="折叠时间线">
                 <PanelLeftCloseIcon size={13} />
               </Button>
             </div>
@@ -133,7 +159,7 @@ export default function ExplorePage() {
             style={{ width: thoughtTreeWidth }}
           >
             <div className="flex h-8 items-center justify-start border-b border-border-soft px-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠 Agent 树">
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠 Agent 树" aria-label="折叠 Agent 树">
                 <PanelRightCloseIcon size={13} />
               </Button>
             </div>
@@ -148,6 +174,7 @@ export default function ExplorePage() {
           onClick={toggleThoughtTree}
           className="flex w-6 flex-shrink-0 items-center justify-center border-l border-border-soft bg-bg-primary hover:bg-bg-tertiary transition-colors group"
           title="展开 Agent 状态树"
+          aria-label="展开 Agent 状态树"
         >
           <PanelRightOpenIcon size={14} className="text-text-tertiary group-hover:text-text-secondary" />
         </button>

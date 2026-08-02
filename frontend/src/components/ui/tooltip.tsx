@@ -1,4 +1,5 @@
 import * as React from 'react';
+import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import { cn } from '@/lib/utils';
 
 interface TooltipProps {
@@ -9,33 +10,26 @@ interface TooltipProps {
 }
 
 const Tooltip: React.FC<TooltipProps> = ({ content, children, side = 'top', className }) => {
-  const [show, setShow] = React.useState(false);
-
   return (
-    <div
-      className="relative inline-block"
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onFocus={() => setShow(true)}
-      onBlur={() => setShow(false)}
-    >
-      {children}
-      {show && (
-        <div
-          role="tooltip"
+    <TooltipPrimitive.Root>
+      <TooltipPrimitive.Trigger asChild>
+        {children}
+      </TooltipPrimitive.Trigger>
+      <TooltipPrimitive.Portal>
+        <TooltipPrimitive.Content
+          side={side}
+          sideOffset={4}
           className={cn(
-            'absolute z-tooltip px-2 py-1 text-xs rounded-md bg-bg-inverse text-text-inverse whitespace-nowrap pointer-events-none shadow-sm',
-            side === 'top' && 'bottom-full left-1/2 -translate-x-1/2 mb-2',
-            side === 'bottom' && 'top-full left-1/2 -translate-x-1/2 mt-2',
-            side === 'left' && 'right-full top-1/2 -translate-y-1/2 mr-2',
-            side === 'right' && 'left-full top-1/2 -translate-y-1/2 ml-2',
+            'z-tooltip px-2 py-1 text-xs rounded-md bg-bg-inverse text-text-inverse whitespace-nowrap pointer-events-none shadow-sm',
+            'data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0',
             className
           )}
         >
           {content}
-        </div>
-      )}
-    </div>
+          <TooltipPrimitive.Arrow className="fill-bg-inverse" />
+        </TooltipPrimitive.Content>
+      </TooltipPrimitive.Portal>
+    </TooltipPrimitive.Root>
   );
 };
 

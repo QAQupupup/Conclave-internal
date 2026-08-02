@@ -308,7 +308,7 @@ export default function WorkspacePage() {
   const breadcrumbs = getPathSegments(currentPath);
 
   return (
-    <div className="flex h-full flex-col p-6">
+    <div className="flex h-full flex-col pt-6 px-8 pb-8">
       {/* Header with breadcrumb */}
       <div className="mb-4">
         <div className="flex items-center justify-between">
@@ -566,12 +566,13 @@ export default function WorkspacePage() {
               在 {currentPath || '/'} 下创建{newDialogType === 'file' ? '文件' : '文件夹'}
             </DialogDescription>
           </DialogHeader>
-          <div className="px-4 py-3 space-y-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
+          <div className="px-6 py-5 space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-text-secondary">
                 名称
               </label>
               <Input
+                className="h-9 text-sm"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder={newDialogType === 'file' ? 'example.txt' : 'new-folder'}
@@ -582,8 +583,8 @@ export default function WorkspacePage() {
               />
             </div>
             {newDialogType === 'file' && (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-text-secondary">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-text-secondary">
                   内容（可选）
                 </label>
                 <Textarea
