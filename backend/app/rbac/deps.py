@@ -34,11 +34,11 @@ async def _check_permission(
     system_role = user.get("system_role", user.get("role", ""))
 
     # 系统级用户在 system domain 自动通过系统域权限检查
-    if system_role in ("system_owner", "admin"):
+    if system_role in ("system_owner", "system_admin", "admin"):
         # system_owner 拥有所有权限（通配）
         if dom == SYSTEM_DOMAIN or obj.startswith("system:"):
             return user
-        # system_admin 在 Team 域不自动通过，需要显式角色
+        # system_admin 在非系统域不自动通过，需要显式角色
         if system_role == "system_admin" and dom == SYSTEM_DOMAIN:
             return user
 

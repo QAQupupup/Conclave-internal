@@ -27,8 +27,14 @@ def get_current_user(request: Request) -> tuple[str | None, str, str | None]:
 
 
 def is_admin(role: str | None) -> bool:
-    """判断是否为管理员"""
-    return role == "admin"
+    """判断是否为管理员
+
+    支持三种管理员角色标识：
+    - system_owner: 系统所有者
+    - system_admin: 系统管理员（数据库 users.role 的实际值）
+    - admin: 兼容 dev token 和旧数据
+    """
+    return role in ("system_owner", "system_admin", "admin")
 
 
 def assert_meeting_access(

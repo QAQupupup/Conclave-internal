@@ -82,7 +82,7 @@ def _check_meeting_access(user: dict, meeting_id: str) -> tuple[bool, str]:
     if not user:
         return False, "未认证"
     role = user.get("role", "")
-    if role == "admin":
+    if role in ("system_owner", "system_admin", "admin"):
         return True, "admin"
     username = user.get("username", "")
     state = get_state(meeting_id)

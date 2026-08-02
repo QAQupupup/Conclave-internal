@@ -61,18 +61,36 @@ SYSTEM_OVERRIDABLE_KEYS: set[str] = {
     "llm_api_key",
     "llm_base_url",
     "llm_model",
+    "llm_provider",
     "embed_api_key",
     "embed_base_url",
     "embed_model",
+    "embed_provider",
     "rerank_api_key",
     "rerank_base_url",
     "rerank_model",
+    "rerank_provider",
     "web_search_api_key",
     "web_search_mode",
     # 系统级功能开关
     "allow_user_create_tenant",
     "default_team_role",
     "max_meetings_per_user",
+    # 阶段模型分配（为会议流水线各阶段指定模型）
+    "stage_model_clarify",
+    "stage_model_intra_team",
+    "stage_model_cross_team",
+    "stage_model_evidence_check",
+    "stage_model_arbitrate",
+    "stage_model_produce",
+    # 基础设施配置
+    "vector_db_provider",
+    "vector_db_url",
+    "vector_db_collection",
+    "max_agents",
+    "max_meeting_duration",
+    "enable_public_registration",
+    "default_temperature",
 }
 
 # Team 权限配置（哪些角色可以发起会议等）
