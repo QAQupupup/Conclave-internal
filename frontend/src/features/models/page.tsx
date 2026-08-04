@@ -69,10 +69,10 @@ interface CatalogModel {
 }
 
 const MODEL_CATALOG: CatalogModel[] = [
-  { id: 'deepseek-chat', name: 'DeepSeek Chat', provider: 'deepseek', cat: 'chat', recommended: true },
-  { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', provider: 'deepseek', cat: 'reasoning', recommended: true },
-  { id: 'deepseek-ai/DeepSeek-V3', name: 'DeepSeek-V3', provider: 'siliconflow', cat: 'chat', recommended: true },
-  { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen2.5-72B', provider: 'siliconflow', cat: 'chat', recommended: false },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'deepseek', cat: 'chat', recommended: true },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', provider: 'deepseek', cat: 'reasoning', recommended: true },
+  { id: 'deepseek-ai/DeepSeek-V4-Flash', name: 'DeepSeek V4 Flash (硅基)', provider: 'siliconflow', cat: 'chat', recommended: true },
+  { id: 'deepseek-ai/DeepSeek-V3.2', name: 'DeepSeek V3.2 (硅基)', provider: 'siliconflow', cat: 'chat', recommended: false },
   { id: 'qwen-plus', name: 'Qwen Plus', provider: 'qwen', cat: 'chat', recommended: true },
   { id: 'qwen-max', name: 'Qwen Max', provider: 'qwen', cat: 'chat', recommended: false },
   { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', cat: 'chat', recommended: true },

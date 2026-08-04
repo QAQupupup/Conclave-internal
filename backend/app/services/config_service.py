@@ -653,6 +653,26 @@ def _invalidate_system_cache() -> None:
     _sys_cache = None
 
 
+def get_cached_system_settings() -> dict[str, Any]:
+    """同步读取系统配置缓存（供无法 await 的调用点使用，如 LLM 客户端 _resolve_config）。
+
+    缓存由 _load_system_settings() 异步填充（TTL 120s）。
+    缓存未命中或过期时返回空 dict，调用方应回退到 settings 默认值。
+    """
+    if _sys_cache is None:
+        return {}
+    expire_ts, data = _sys_cache
+    if time.monotonic() > expire_ts:
+        return {}
+    return data
+
+
+async def refresh_system_cache() -> dict[str, Any]:
+    """强制刷新系统配置缓存并返回最新数据。供 API 路由在更新配置后调用。"""
+    _invalidate_system_cache()
+    return await _load_system_settings()
+
+
 def invalidate_config_cache(tenant_id: int | None = None, user_id: int | None = None) -> None:
     """统一缓存失效入口。"""
     if tenant_id is not None:

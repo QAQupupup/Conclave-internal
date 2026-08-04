@@ -132,11 +132,15 @@ async def save_api_key(
         existing = result.scalar_one_or_none()
 
         if existing:
-            existing.encrypted_key = encrypted
-            existing.base_url = base_url
+            # 更新：api_key 为空时保留原密钥（支持仅切换默认/改 base_url）
+            if api_key:
+                existing.encrypted_key = encrypted
+            existing.base_url = base_url if base_url else existing.base_url
             existing.is_default = is_default
             existing.updated_at = datetime.now(timezone.utc)
         else:
+            if not api_key:
+                raise ValueError("新建 Key 必须提供 api_key")
             record = ApiKeyModel(
                 tenant_id=tid,
                 user_id=user_id,
@@ -171,7 +175,8 @@ async def save_api_key(
     if tid is None and user_id is None:
         try:
             if provider in PROVIDERS:
-                PROVIDERS[provider].api_key = api_key
+                if api_key:
+                    PROVIDERS[provider].api_key = api_key
                 if base_url:
                     PROVIDERS[provider].base_url = base_url
         except Exception:

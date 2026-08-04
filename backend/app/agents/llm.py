@@ -582,8 +582,9 @@ class RealLLM:
     def _resolve_config(self) -> tuple[str, str, str]:
         """解析当前调用应使用的 (base_url, api_key, model)
 
-        优先级：会议级覆盖 > 租户级覆盖 > 全局默认（环境变量）
+        优先级：会议级覆盖 > 租户级覆盖 > 系统配置(DB) > 全局默认（环境变量）
         """
+        # 会议级覆盖（最高优先级）
         try:
             from app.context import get_meeting_id
             from app.llm_providers import get_meeting_llm_config
@@ -594,20 +595,36 @@ class RealLLM:
                 if base_url and api_key and model:
                     return base_url, api_key, model
         except Exception as e:
-            logger.debug("解析会议级 LLM 配置失败，降级到租户级: %s", e)
-        # 租户级覆盖
+            logger.debug("解析会议级 LLM 配置失败，降级到下一层: %s", e)
+
+        # 系统配置层（admin 通过 UI 配置，优先于环境变量默认）
+        sys_base, sys_key, sys_model = self.base_url, self.api_key, self.model
+        try:
+            from app.services.config_service import get_cached_system_settings
+
+            sys_cfg = get_cached_system_settings()
+            if sys_cfg.get("llm_api_key"):
+                sys_key = sys_cfg["llm_api_key"]
+            if sys_cfg.get("llm_base_url"):
+                sys_base = sys_cfg["llm_base_url"]
+            if sys_cfg.get("llm_model"):
+                sys_model = sys_cfg["llm_model"]
+        except Exception as e:
+            logger.debug("读取系统配置缓存失败，使用环境变量默认: %s", e)
+
+        # 租户级覆盖（以系统配置为 base，租户设置覆盖之）
         try:
             from app.tenants.context import get_tenant_id
             from app.tenants.settings_override import resolve_llm_config
 
             tid = get_tenant_id()
             if tid is not None:
-                t_base, t_key, t_model = resolve_llm_config(tid, self.base_url, self.api_key, self.model)
+                t_base, t_key, t_model = resolve_llm_config(tid, sys_base, sys_key, sys_model)
                 if t_base and t_key and t_model:
                     return t_base, t_key, t_model
         except Exception as e:
-            logger.debug("解析租户级 LLM 配置失败，降级到全局默认: %s", e)
-        return self.base_url, self.api_key, self.model
+            logger.debug("解析租户级 LLM 配置失败，降级到系统配置: %s", e)
+        return sys_base, sys_key, sys_model
 
     def _supports_json(self, base_url: str, model: str) -> bool:
         key = f"{base_url}|{model}"

@@ -21,38 +21,49 @@ import { ApiError } from '@/lib/api';
 
 interface AdminUser { id: string; username: string; display_name: string; email: string; role: string; tenant_id: string; tenant_name: string; status: 'active' | 'disabled'; created_at: string; last_login?: string; }
 interface AdminTenant { id: string; name: string; slug: string; member_count: number; meeting_count: number; status: 'active' | 'suspended'; plan: 'free' | 'pro' | 'enterprise'; created_at: string; }
-interface SystemConfig { llm_provider: string; llm_model: string; llm_base_url: string; llm_api_key_configured: boolean; embed_provider: string; embed_model: string; embed_base_url: string; embed_api_key_configured: boolean; rerank_model: string; rerank_base_url: string; rerank_api_key_configured: boolean; vector_db_provider: string; vector_db_url: string; vector_db_collection: string; max_agents: number; max_meeting_duration: number; enable_public_registration: boolean; default_temperature: number; }
-interface ProviderCatalog { value: string; label: string; baseUrl: string; models: { value: string; label: string }[]; }
+interface SystemConfig { llm_provider: string; llm_model: string; llm_base_url: string; llm_api_key_configured: boolean; embed_provider: string; embed_model: string; embed_base_url: string; embed_api_key_configured: boolean; rerank_provider: string; rerank_model: string; rerank_base_url: string; rerank_api_key_configured: boolean; vector_db_provider: string; vector_db_url: string; vector_db_collection: string; max_agents: number; max_meeting_duration: number; enable_public_registration: boolean; default_temperature: number; stage_model_clarify: string; stage_model_intra_team: string; stage_model_cross_team: string; stage_model_evidence_check: string; stage_model_arbitrate: string; stage_model_produce: string; }
+type ModelCapability = 'llm' | 'embedding' | 'reranker';
+interface ProviderCatalogItem { value: string; label: string; baseUrl: string; capabilities: ModelCapability[]; models: Partial<Record<ModelCapability, { value: string; label: string }[]>>; needsKey: boolean; }
 interface TeamItem { id: string | number; name: string; slug: string; member_count?: number; meeting_count?: number; status?: string; plan?: string; created_at?: string; }
 interface MemberItem { user_id: string | number; username: string; display_name: string; email: string; is_active?: boolean; role: string; is_banned?: boolean; joined_at?: string; created_at?: string; }
 interface ApiKeyItem { id: string | number; provider: string; name: string; key_masked: string; base_url: string; is_default: boolean; scope: string; created_at?: string; }
 
-const LLM_PROVIDERS: ProviderCatalog[] = [
-  { value: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: [{ value: 'deepseek-chat', label: 'deepseek-chat' }, { value: 'deepseek-reasoner', label: 'deepseek-reasoner' }] },
-  { value: 'siliconflow', label: '硅基流动 (SiliconFlow)', baseUrl: 'https://api.siliconflow.cn/v1', models: [{ value: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek-V3' }, { value: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen2.5-72B' }] },
-  { value: 'doubao', label: '豆包 (火山引擎)', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', models: [{ value: 'doubao-seed-2-0-code', label: 'doubao-seed-2-0-code' }] },
-  { value: 'qwen', label: '通义千问 (DashScope)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [{ value: 'qwen-plus', label: 'qwen-plus' }, { value: 'qwen-max', label: 'qwen-max' }] },
-  { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: [{ value: 'gpt-4o', label: 'GPT-4o' }, { value: 'gpt-4o-mini', label: 'GPT-4o mini' }] },
-  { value: 'custom', label: '自定义 (OpenAI 兼容)', baseUrl: '', models: [] },
-];
-const EMBED_PROVIDERS: ProviderCatalog[] = [
-  { value: 'local', label: '本地模型 (BGE/M3E/E5)', baseUrl: '', models: [{ value: 'BAAI/bge-m3', label: 'BAAI/bge-m3 (推荐)' }, { value: 'BAAI/bge-large-zh-v1.5', label: 'BAAI/bge-large-zh-v1.5' }, { value: 'moka-ai/m3e-base', label: 'm3e-base' }] },
-  { value: 'siliconflow', label: '硅基流动 (SiliconFlow)', baseUrl: 'https://api.siliconflow.cn/v1', models: [{ value: 'BAAI/bge-m3', label: 'BAAI/bge-m3' }] },
-  { value: 'qwen', label: '通义千问 (DashScope)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [{ value: 'text-embedding-v3', label: 'text-embedding-v3' }] },
-  { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: [{ value: 'text-embedding-3-large', label: 'text-embedding-3-large' }, { value: 'text-embedding-3-small', label: 'text-embedding-3-small' }] },
-  { value: 'custom', label: '自定义 (OpenAI 兼容)', baseUrl: '', models: [] },
+/** 统一厂商目录——每个厂商声明其能力和可用模型 */
+const PROVIDER_CATALOG: ProviderCatalogItem[] = [
+  { value: 'siliconflow', label: '硅基流动 (SiliconFlow)', baseUrl: 'https://api.siliconflow.cn/v1', needsKey: true, capabilities: ['llm', 'embedding', 'reranker'], models: {
+    llm: [{ value: 'deepseek-ai/DeepSeek-V3.2', label: 'DeepSeek V3.2' }, { value: 'deepseek-ai/DeepSeek-V4-Flash', label: 'DeepSeek V4 Flash' }, { value: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen2.5 72B' }],
+    embedding: [{ value: 'BAAI/bge-m3', label: 'BAAI/bge-m3 (推荐)' }, { value: 'BAAI/bge-large-zh-v1.5', label: 'BAAI/bge-large-zh-v1.5' }],
+    reranker: [{ value: 'BAAI/bge-reranker-v2-m3', label: 'BAAI/bge-reranker-v2-m3' }],
+  } },
+  { value: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', needsKey: true, capabilities: ['llm'], models: {
+    llm: [{ value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' }, { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }],
+  } },
+  { value: 'doubao', label: '豆包 (火山引擎)', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', needsKey: true, capabilities: ['llm'], models: {
+    llm: [{ value: 'doubao-seed-2-0-code', label: 'Doubao Seed 2.0 Code' }],
+  } },
+  { value: 'qwen', label: '通义千问 (DashScope)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', needsKey: true, capabilities: ['llm', 'embedding'], models: {
+    llm: [{ value: 'qwen-plus', label: 'Qwen Plus' }, { value: 'qwen-max', label: 'Qwen Max' }],
+    embedding: [{ value: 'text-embedding-v3', label: 'text-embedding-v3' }],
+  } },
+  { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', needsKey: true, capabilities: ['llm', 'embedding'], models: {
+    llm: [{ value: 'gpt-4o', label: 'GPT-4o' }, { value: 'gpt-4o-mini', label: 'GPT-4o mini' }],
+    embedding: [{ value: 'text-embedding-3-large', label: 'text-embedding-3-large' }, { value: 'text-embedding-3-small', label: 'text-embedding-3-small' }],
+  } },
+  { value: 'ollama', label: 'Ollama (本地)', baseUrl: 'http://localhost:11434/v1', needsKey: false, capabilities: ['llm', 'embedding'], models: {} },
+  { value: 'custom', label: '自定义 (OpenAI 兼容)', baseUrl: '', needsKey: true, capabilities: ['llm', 'embedding', 'reranker'], models: {} },
 ];
 const VDB_PROVIDERS = [{ value: 'qdrant', label: 'Qdrant' }, { value: 'memory', label: '内存模式（仅测试）' }];
-const KEY_PROVIDERS = [
-  { value: 'siliconflow', label: '硅基流动 (SiliconFlow)' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'qwen', label: '通义千问 (DashScope)' },
-  { value: 'doubao', label: '豆包 (火山引擎)' },
-  { value: 'custom', label: '自定义' },
+const CAP_LABELS: Record<ModelCapability, string> = { llm: 'LLM', embedding: 'Embedding', reranker: 'Reranker' };
+const STAGE_DEFS: { key: keyof SystemConfig; label: string; desc: string }[] = [
+  { key: 'stage_model_clarify', label: '澄清', desc: '议题理解与分解' },
+  { key: 'stage_model_intra_team', label: '组内讨论', desc: '角色独立思考' },
+  { key: 'stage_model_cross_team', label: '跨组协作', desc: '角色间借调与碰撞' },
+  { key: 'stage_model_evidence_check', label: '证据核查', desc: '事实校验' },
+  { key: 'stage_model_arbitrate', label: '仲裁', desc: '分歧裁决' },
+  { key: 'stage_model_produce', label: '产出', desc: '最终报告生成' },
 ];
 // 系统配置中可通过 PUT /api/config/system/{key} 保存的键（对齐后端 SYSTEM_OVERRIDABLE_KEYS）
-const SAVABLE_CONFIG_KEYS: (keyof SystemConfig)[] = ['llm_model', 'llm_base_url', 'llm_provider', 'embed_model', 'embed_base_url', 'embed_provider', 'rerank_model', 'rerank_base_url', 'default_temperature', 'enable_public_registration', 'max_agents', 'max_meeting_duration', 'vector_db_provider', 'vector_db_url', 'vector_db_collection'];
+const SAVABLE_CONFIG_KEYS: (keyof SystemConfig)[] = ['llm_model', 'llm_base_url', 'llm_provider', 'embed_model', 'embed_base_url', 'embed_provider', 'rerank_model', 'rerank_base_url', 'rerank_provider', 'default_temperature', 'enable_public_registration', 'max_agents', 'max_meeting_duration', 'vector_db_provider', 'vector_db_url', 'vector_db_collection', 'stage_model_clarify', 'stage_model_intra_team', 'stage_model_cross_team', 'stage_model_evidence_check', 'stage_model_arbitrate', 'stage_model_produce'];
 
 function getErrorDisplay(err: unknown, endpoint: string): { title: string; hint: string } {
   if (err instanceof ApiError) {
@@ -65,8 +76,9 @@ function getErrorDisplay(err: unknown, endpoint: string): { title: string; hint:
   if (err instanceof TypeError) return { title: '无法连接服务器', hint: '请确认后端服务已启动' };
   return { title: '加载失败', hint: endpoint ? `后端尚未提供 ${endpoint} 端点` : '未知错误' };
 }
-const findProvider = (cat: ProviderCatalog[], v: string) => cat.find((p) => p.value === v);
-const inferProvider = (baseUrl: string, cat: ProviderCatalog[]) => { if (!baseUrl) return ''; return cat.find((p) => p.baseUrl && baseUrl.startsWith(p.baseUrl))?.value || ''; };
+const findProvider = (v: string) => PROVIDER_CATALOG.find((p) => p.value === v);
+const providersWithCapability = (cap: ModelCapability) => PROVIDER_CATALOG.filter((p) => p.capabilities.includes(cap));
+const inferProvider = (baseUrl: string) => { if (!baseUrl) return ''; return PROVIDER_CATALOG.find((p) => p.baseUrl && baseUrl.startsWith(p.baseUrl))?.value || ''; };
 
 /** 将 GET /api/config/system 的响应（可能为 {settings:{...}} 包装或裸 dict）归一化为 SystemConfig。 */
 function normalizeConfig(raw: unknown): SystemConfig {
@@ -80,17 +92,19 @@ function normalizeConfig(raw: unknown): SystemConfig {
   const rrKey = getStr('rerank_api_key');
   const llmBaseUrl = getStr('llm_base_url');
   const embBaseUrl = getStr('embed_base_url');
+  const rrBaseUrl = getStr('rerank_base_url');
   return {
-    llm_provider: getStr('llm_provider') || inferProvider(llmBaseUrl, LLM_PROVIDERS),
+    llm_provider: getStr('llm_provider') || inferProvider(llmBaseUrl),
     llm_model: getStr('llm_model'),
     llm_base_url: llmBaseUrl,
     llm_api_key_configured: getBool('llm_api_key_configured') || (!!llmKey && llmKey !== ''),
-    embed_provider: getStr('embed_provider') || inferProvider(embBaseUrl, EMBED_PROVIDERS) || 'local',
+    embed_provider: getStr('embed_provider') || inferProvider(embBaseUrl) || 'local',
     embed_model: getStr('embed_model') || 'BAAI/bge-m3',
     embed_base_url: embBaseUrl,
     embed_api_key_configured: getBool('embed_api_key_configured') || (!!embKey && embKey !== ''),
+    rerank_provider: getStr('rerank_provider') || inferProvider(rrBaseUrl) || getStr('embed_provider') || '',
     rerank_model: getStr('rerank_model') || 'BAAI/bge-reranker-v2-m3',
-    rerank_base_url: getStr('rerank_base_url'),
+    rerank_base_url: rrBaseUrl,
     rerank_api_key_configured: getBool('rerank_api_key_configured') || (!!rrKey && rrKey !== ''),
     vector_db_provider: getStr('vector_db_provider') || 'qdrant',
     vector_db_url: getStr('vector_db_url') || 'http://qdrant:6333',
@@ -99,6 +113,12 @@ function normalizeConfig(raw: unknown): SystemConfig {
     max_meeting_duration: getNum('max_meeting_duration', 120),
     enable_public_registration: getBool('enable_public_registration'),
     default_temperature: getNum('default_temperature', 0.1),
+    stage_model_clarify: getStr('stage_model_clarify'),
+    stage_model_intra_team: getStr('stage_model_intra_team'),
+    stage_model_cross_team: getStr('stage_model_cross_team'),
+    stage_model_evidence_check: getStr('stage_model_evidence_check'),
+    stage_model_arbitrate: getStr('stage_model_arbitrate'),
+    stage_model_produce: getStr('stage_model_produce'),
   };
 }
 
@@ -119,10 +139,10 @@ function mapMemberToUser(m: MemberItem, t: TeamItem): AdminUser {
 
 const MOCK_USERS: AdminUser[] = [{ id: 'u1', username: 'admin', display_name: '系统管理员', email: 'admin@conclave.local', role: 'owner', tenant_id: 't1', tenant_name: '默认组织', status: 'active', created_at: '2026-01-01T00:00:00Z', last_login: new Date().toISOString() }];
 const MOCK_TENANTS: AdminTenant[] = [{ id: 't1', name: '默认组织', slug: 'default', member_count: 1, meeting_count: 0, status: 'active', plan: 'enterprise', created_at: '2026-01-01T00:00:00Z' }];
-const MOCK_CONFIG: SystemConfig = { llm_provider: 'siliconflow', llm_model: 'deepseek-ai/DeepSeek-V3', llm_base_url: 'https://api.siliconflow.cn/v1', llm_api_key_configured: true, embed_provider: 'local', embed_model: 'BAAI/bge-m3', embed_base_url: '', embed_api_key_configured: false, rerank_model: 'BAAI/bge-reranker-v2-m3', rerank_base_url: '', rerank_api_key_configured: false, vector_db_provider: 'qdrant', vector_db_url: 'http://qdrant:6333', vector_db_collection: 'conclave_chunks', max_agents: 8, max_meeting_duration: 120, enable_public_registration: false, default_temperature: 0.1 };
+const MOCK_CONFIG: SystemConfig = { llm_provider: 'siliconflow', llm_model: 'deepseek-ai/DeepSeek-V3.2', llm_base_url: 'https://api.siliconflow.cn/v1', llm_api_key_configured: true, embed_provider: 'siliconflow', embed_model: 'BAAI/bge-m3', embed_base_url: 'https://api.siliconflow.cn/v1', embed_api_key_configured: true, rerank_provider: 'siliconflow', rerank_model: 'BAAI/bge-reranker-v2-m3', rerank_base_url: 'https://api.siliconflow.cn/v1', rerank_api_key_configured: true, vector_db_provider: 'qdrant', vector_db_url: 'http://qdrant:6333', vector_db_collection: 'conclave_chunks', max_agents: 8, max_meeting_duration: 120, enable_public_registration: false, default_temperature: 0.1, stage_model_clarify: '', stage_model_intra_team: '', stage_model_cross_team: '', stage_model_evidence_check: '', stage_model_arbitrate: '', stage_model_produce: '' };
 const MOCK_KEYS: ApiKeyItem[] = [
   { id: 'k1', provider: 'siliconflow', name: 'default', key_masked: 'sk-****1234', base_url: 'https://api.siliconflow.cn/v1', is_default: true, scope: 'system', created_at: new Date().toISOString() },
-  { id: 'k2', provider: 'deepseek', name: 'default', key_masked: 'sk-****5678', base_url: 'https://api.deepseek.com/v1', is_default: false, scope: 'team', created_at: new Date().toISOString() },
+  { id: 'k2', provider: 'deepseek', name: 'default', key_masked: 'sk-****5678', base_url: 'https://api.deepseek.com', is_default: false, scope: 'team', created_at: new Date().toISOString() },
 ];
 const ROLE_BADGE: Record<string, { className: string; label: string }> = { owner: { className: 'bg-accent-purple/15 text-accent-purple', label: '所有者' }, maintainer: { className: 'bg-brand-soft text-brand-600', label: '管理员' }, admin: { className: 'bg-brand-soft text-brand-600', label: '管理员' }, member: { className: 'bg-bg-tertiary text-text-secondary', label: '成员' }, reporter: { className: 'bg-bg-tertiary text-text-secondary', label: '访客' } };
 const PLAN_BADGE: Record<string, { className: string; label: string }> = { free: { className: 'bg-bg-tertiary text-text-secondary', label: '免费版' }, pro: { className: 'bg-brand-soft text-brand-600', label: '专业版' }, enterprise: { className: 'bg-accent-purple/15 text-accent-purple', label: '企业版' } };
@@ -141,18 +161,16 @@ export default function AdminPage() {
   const [tenantForm, setTenantForm] = React.useState({ name: '', slug: '', plan: 'free' as AdminTenant['plan'] });
   const [config, setConfig] = React.useState<SystemConfig | null>(null);
   const configSnapshot = React.useRef<SystemConfig | null>(null);
-  const [llmKey, setLlmKey] = React.useState(''); const [embKey, setEmbKey] = React.useState(''); const [rrKey, setRrKey] = React.useState('');
-  const [showLlmKey, setShowLlmKey] = React.useState(false); const [showEmbKey, setShowEmbKey] = React.useState(false); const [showRrKey, setShowRrKey] = React.useState(false);
   const [delUserTarget, setDelUserTarget] = React.useState<AdminUser | null>(null);
   const [keyDialogOpen, setKeyDialogOpen] = React.useState(false);
   const [editingKey, setEditingKey] = React.useState<ApiKeyItem | null>(null);
-  const [keyForm, setKeyForm] = React.useState({ provider: 'siliconflow', name: 'default', api_key: '', base_url: '', is_default: false, scope: 'system' });
+  const [keyForm, setKeyForm] = React.useState({ provider: PROVIDER_CATALOG[0].value, name: 'default', api_key: '', base_url: '', is_default: false, scope: 'system' });
   const [showKeyValue, setShowKeyValue] = React.useState(false);
   const [delKeyTarget, setDelKeyTarget] = React.useState<ApiKeyItem | null>(null);
 
   // 系统配置：GET /api/config/system
   const { data: configData, error: cfgErr, isLoading: cfgLoad } = useQuery({ queryKey: ['admin', 'config'], queryFn: async () => isDemoMode() ? MOCK_CONFIG : normalizeConfig(await api.get<unknown>('/api/config/system')), retry: false });
-  React.useEffect(() => { if (configData) { setConfig(configData); configSnapshot.current = configData; setLlmKey(''); setEmbKey(''); setRrKey(''); } }, [configData]);
+  React.useEffect(() => { if (configData) { setConfig(configData); configSnapshot.current = configData; } }, [configData]);
 
   // 组织列表：GET /api/teams
   const { data: tenants, isLoading: tenLoad, error: tenErr } = useQuery({ queryKey: ['admin', 'tenants'], queryFn: async () => isDemoMode() ? MOCK_TENANTS : extractArray<AdminTenant>(await api.get<{ items: AdminTenant[] }>('/api/teams'), ['items']), retry: false });
@@ -222,15 +240,12 @@ export default function AdminPage() {
       const snap = configSnapshot.current;
       const changes: { key: string; value: string }[] = [];
       for (const f of SAVABLE_CONFIG_KEYS) { if (String(config[f] ?? '') !== String(snap?.[f] ?? '')) changes.push({ key: f, value: String(config[f] ?? '') }); }
-      if (llmKey.trim()) changes.push({ key: 'llm_api_key', value: llmKey.trim() });
-      if (embKey.trim()) changes.push({ key: 'embed_api_key', value: embKey.trim() });
-      if (rrKey.trim()) changes.push({ key: 'rerank_api_key', value: rrKey.trim() });
       if (!changes.length) return;
       const results = await Promise.allSettled(changes.map((c) => api.put(`/api/config/system/${encodeURIComponent(c.key)}`, { value: c.value })));
       const failed = results.filter((r) => r.status === 'rejected');
       if (failed.length) { const fr = failed[0]; const err = fr.status === 'rejected' ? fr.reason : null; throw err instanceof Error ? err : new Error(`${failed.length} 项保存失败`); }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'config'] }); setLlmKey(''); setEmbKey(''); setRrKey(''); toast({ title: '配置已保存', description: '部分设置需重启服务生效' }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'config'] }); toast({ title: '配置已保存', description: '部分设置需重启服务生效' }); },
     onError: (e: unknown) => { const info = getErrorDisplay(e, 'PUT /api/config/system/{key}'); toast({ title: info.title, description: info.hint, variant: 'destructive' }); },
   });
   // 保存/设为默认 API Key：POST /api/keys
@@ -240,7 +255,16 @@ export default function AdminPage() {
       if (isDemoMode()) return;
       await api.post('/api/keys', { provider: keyForm.provider, name: keyForm.name || 'default', api_key: keyForm.api_key, base_url: keyForm.base_url, is_default: keyForm.is_default, scope: keyForm.scope });
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'keys'] }); toast({ title: editingKey ? 'Key 已更新' : 'Key 已保存' }); setKeyDialogOpen(false); setEditingKey(null); setKeyForm({ provider: 'siliconflow', name: 'default', api_key: '', base_url: '', is_default: false, scope: 'system' }); setShowKeyValue(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'keys'] }); qc.invalidateQueries({ queryKey: ['admin', 'config'] }); toast({ title: editingKey ? 'Key 已更新' : 'Key 已保存' }); setKeyDialogOpen(false); setEditingKey(null); setKeyForm({ provider: PROVIDER_CATALOG[0].value, name: 'default', api_key: '', base_url: '', is_default: false, scope: 'system' }); setShowKeyValue(false); },
+    onError: (e: unknown) => { const info = getErrorDisplay(e, 'POST /api/keys'); toast({ title: info.title, description: e instanceof Error ? e.message : info.hint, variant: 'destructive' }); },
+  });
+  // 一键切换默认 Key（无需重新输入 Key）
+  const setDefaultKey = useMutation({
+    mutationFn: async (k: ApiKeyItem) => {
+      if (isDemoMode()) return;
+      await api.post('/api/keys', { provider: k.provider, name: k.name, api_key: '', base_url: k.base_url || '', is_default: true, scope: k.scope });
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'keys'] }); qc.invalidateQueries({ queryKey: ['admin', 'config'] }); toast({ title: '默认 Key 已切换', description: '已同步到系统配置，LLM 客户端将使用新 Key' }); },
     onError: (e: unknown) => { const info = getErrorDisplay(e, 'POST /api/keys'); toast({ title: info.title, description: e instanceof Error ? e.message : info.hint, variant: 'destructive' }); },
   });
   // 删除 API Key：DELETE /api/keys/{provider}/{name}?scope=
@@ -263,20 +287,21 @@ export default function AdminPage() {
     else { setEditingTenant(null); setTenantForm({ name: '', slug: '', plan: 'free' }); }
     setTenantDialogOpen(true);
   };
-  const openAddKey = () => { setEditingKey(null); setKeyForm({ provider: 'siliconflow', name: 'default', api_key: '', base_url: '', is_default: false, scope: 'system' }); setShowKeyValue(false); setKeyDialogOpen(true); };
-  const openSetDefault = (k: ApiKeyItem) => { setEditingKey(k); setKeyForm({ provider: k.provider, name: k.name, api_key: '', base_url: k.base_url || '', is_default: true, scope: k.scope }); setShowKeyValue(false); setKeyDialogOpen(true); };
+  const openAddKey = (provider?: string) => { setEditingKey(null); const p = provider || PROVIDER_CATALOG[0].value; const dp = findProvider(p); const existing = (apiKeys || []).filter((k) => k.provider === p); setKeyForm({ provider: p, name: 'default', api_key: '', base_url: dp?.baseUrl || '', is_default: existing.length === 0, scope: 'system' }); setShowKeyValue(false); setKeyDialogOpen(true); };
   const onSaveCfg = () => {
     if (isDemoMode()) { toast({ title: '演示模式', description: '配置不可修改' }); return; }
     if (!config) return;
     const snap = configSnapshot.current;
-    const hasChanges = SAVABLE_CONFIG_KEYS.some((f) => String(config[f] ?? '') !== String(snap?.[f] ?? '')) || !!llmKey.trim() || !!embKey.trim() || !!rrKey.trim();
+    const hasChanges = SAVABLE_CONFIG_KEYS.some((f) => String(config[f] ?? '') !== String(snap?.[f] ?? ''));
     if (!hasChanges) { toast({ title: '无变更', description: '没有需要保存的配置项' }); return; }
     saveCfg.mutate();
   };
-  const onLlmProvider = (v: string) => { if (!config) return; const p = findProvider(LLM_PROVIDERS, v); setConfig({ ...config, llm_provider: v, llm_base_url: p?.baseUrl || config.llm_base_url, llm_model: p?.models?.[0]?.value || '' }); };
-  const onEmbProvider = (v: string) => { if (!config) return; const p = findProvider(EMBED_PROVIDERS, v); setConfig({ ...config, embed_provider: v, embed_base_url: p?.baseUrl || '', embed_model: p?.models?.[0]?.value || 'BAAI/bge-m3' }); };
-  const llmModels = findProvider(LLM_PROVIDERS, config?.llm_provider || '')?.models || [];
-  const embModels = findProvider(EMBED_PROVIDERS, config?.embed_provider || '')?.models || [];
+  const onLlmProvider = (v: string) => { if (!config) return; const p = findProvider(v); const models = p?.models?.llm || []; setConfig({ ...config, llm_provider: v, llm_base_url: p?.baseUrl || config.llm_base_url, llm_model: models[0]?.value || '' }); };
+  const onEmbProvider = (v: string) => { if (!config) return; const p = findProvider(v); const models = p?.models?.embedding || []; setConfig({ ...config, embed_provider: v, embed_base_url: p?.baseUrl || '', embed_model: models[0]?.value || 'BAAI/bge-m3' }); };
+  const onRrProvider = (v: string) => { if (!config) return; const p = findProvider(v); const models = p?.models?.reranker || []; setConfig({ ...config, rerank_provider: v, rerank_base_url: p?.baseUrl || '', rerank_model: models[0]?.value || '' }); };
+  const llmModels = findProvider(config?.llm_provider || '')?.models?.llm || [];
+  const embModels = findProvider(config?.embed_provider || '')?.models?.embedding || [];
+  const rrModels = findProvider(config?.rerank_provider || '')?.models?.reranker || [];
 
   return (
     <div className="flex h-full flex-col">
@@ -353,49 +378,30 @@ export default function AdminPage() {
               : cfgErr ? <div className="flex flex-col items-center justify-center gap-3 py-12"><div className="text-xs text-danger">{getErrorDisplay(cfgErr, '/api/config/system').title}</div><div className="text-[10px] text-text-tertiary">{getErrorDisplay(cfgErr, '/api/config/system').hint}</div></div>
               : !config ? <div className="flex items-center justify-center py-12 text-xs text-text-tertiary">暂无配置数据</div>
               : <div className="mx-auto max-w-3xl space-y-5">
-                <Card>
-                  <CardHeader><CardTitle className="text-base">大语言模型 (LLM)</CardTitle><CardDescription className="text-xs">配置用于会议主持和讨论推理的大语言模型</CardDescription></CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-2"><Label className="text-sm">LLM 提供商</Label>
-                      <Select value={config.llm_provider} onValueChange={onLlmProvider}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{LLM_PROVIDERS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select>
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div className="grid gap-2"><Label className="text-sm">API Base URL</Label><Input className="h-9 text-sm" value={config.llm_base_url} onChange={(e) => setConfig({ ...config, llm_base_url: e.target.value })} placeholder="https://api.example.com/v1" /></div>
-                      <div className="grid gap-2"><Label className="text-sm">模型名称</Label>
-                        {llmModels.length > 0 ? <Select value={config.llm_model} onValueChange={(v) => setConfig({ ...config, llm_model: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{llmModels.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent></Select>
-                          : <Input className="h-9 text-sm" value={config.llm_model} onChange={(e) => setConfig({ ...config, llm_model: e.target.value })} placeholder="模型 ID" />}
-                      </div>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label className="flex items-center gap-2 text-sm"><KeyIcon size={14} /> API Key (SK){config.llm_api_key_configured && !llmKey && <Badge className="bg-success/15 px-1.5 py-0 text-[10px] text-success">已配置</Badge>}</Label>
-                      <div className="flex gap-2"><Input className="h-9 flex-1 font-mono text-sm" type={showLlmKey ? 'text' : 'password'} value={llmKey} onChange={(e) => setLlmKey(e.target.value)} placeholder={config.llm_api_key_configured ? '留空则保持原 Key 不变' : '请输入 API Key'} autoComplete="off" /><Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setShowLlmKey(!showLlmKey)}>{showLlmKey ? '隐藏' : '显示'}</Button></div>
-                      <p className="text-[11px] text-text-tertiary">API Key 仅在服务端加密存储，不会返回给前端。留空表示保持现有配置不变。</p>
-                    </div>
-                  </CardContent>
-                </Card>
 
                 <Card>
-                  <CardHeader><div className="flex items-center justify-between"><div><CardTitle className="text-base">API Key 管理</CardTitle><CardDescription className="text-xs">管理系统、团队级的 API Key，支持多 Provider 多 Key 配置</CardDescription></div><Button size="sm" variant="outline" onClick={openAddKey}><PlusIcon size={14} /> 添加 Key</Button></div></CardHeader>
+                  <CardHeader><div className="flex items-center justify-between"><div><CardTitle className="text-base">厂商管理</CardTitle><CardDescription className="text-xs">配置各 AI 厂商的接入地址和 API Key。一个厂商可添加多个 Key，在各维度中按需选用。</CardDescription></div><Button size="sm" variant="outline" onClick={() => openAddKey()}><PlusIcon size={14} /> 添加 Key</Button></div></CardHeader>
                   <CardContent>
                     {keysLoad && !apiKeys ? <div className="flex items-center justify-center gap-2 py-8 text-xs text-text-tertiary"><SpinnerIcon size={16} className="animate-spin" /> 加载 API Key 列表...</div>
                       : keysErr ? <div className="flex flex-col items-center justify-center gap-2 py-8"><div className="text-xs text-danger">{getErrorDisplay(keysErr, '/api/keys').title}</div><div className="text-[10px] text-text-tertiary">{getErrorDisplay(keysErr, '/api/keys').hint}</div></div>
                       : !apiKeys?.length ? <div className="flex items-center justify-center py-8 text-xs text-text-tertiary">暂无 API Key，点击右上角"添加 Key"创建</div>
                       : <div className="overflow-x-auto"><table className="w-full text-sm">
                         <thead><tr className="border-b border-border-soft bg-bg-secondary text-text-tertiary">
-                          <th className="px-3 py-2.5 text-left font-medium">Provider</th><th className="px-3 py-2.5 text-left font-medium">名称</th><th className="px-3 py-2.5 text-left font-medium">Scope</th><th className="px-3 py-2.5 text-left font-medium">Key</th><th className="px-3 py-2.5 text-left font-medium">Base URL</th><th className="px-3 py-2.5 text-right font-medium">操作</th>
+                          <th className="px-3 py-2.5 text-left font-medium">厂商</th><th className="px-3 py-2.5 text-left font-medium">能力</th><th className="px-3 py-2.5 text-left font-medium">Key</th><th className="px-3 py-2.5 text-left font-medium">Scope</th><th className="px-3 py-2.5 text-left font-medium">Base URL</th><th className="px-3 py-2.5 text-right font-medium">操作</th>
                         </tr></thead>
                         <tbody>
                           {apiKeys.map((k: ApiKeyItem) => {
                             const sb = SCOPE_BADGE[k.scope] || SCOPE_BADGE.team;
+                            const pcat = findProvider(k.provider);
                             return (
                               <tr key={`${k.provider}-${k.name}-${k.id}`} className="border-b border-border-soft last:border-0 hover:bg-bg-secondary/50">
-                                <td className="px-3 py-2.5 font-medium text-text-primary">{k.provider}</td>
-                                <td className="px-3 py-2.5 text-text-secondary">{k.name}</td>
-                                <td className="px-3 py-2.5"><Badge className={`${sb.className} px-2 py-0.5 text-[11px]`}>{sb.label}</Badge></td>
+                                <td className="px-3 py-2.5 font-medium text-text-primary">{pcat?.label || k.provider}</td>
+                                <td className="px-3 py-2.5"><div className="flex flex-wrap gap-1">{(pcat?.capabilities || []).map((c) => <Badge key={c} className="bg-bg-tertiary px-1.5 py-0 text-[10px] text-text-secondary">{CAP_LABELS[c]}</Badge>)}</div></td>
                                 <td className="px-3 py-2.5"><div className="flex items-center gap-2"><span className="font-mono text-xs text-text-secondary">{k.key_masked}</span>{k.is_default && <Badge className="bg-success/15 px-1.5 py-0 text-[10px] text-success">默认</Badge>}</div></td>
+                                <td className="px-3 py-2.5"><Badge className={`${sb.className} px-2 py-0.5 text-[11px]`}>{sb.label}</Badge></td>
                                 <td className="px-3 py-2.5 font-mono text-xs text-text-tertiary">{k.base_url || '-'}</td>
                                 <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-1">
-                                  {!k.is_default && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openSetDefault(k)} title="设为默认"><StarIcon size={14} /></Button>}
+                                  {!k.is_default && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDefaultKey.mutate(k)} title="设为默认" disabled={setDefaultKey.isPending}><StarIcon size={14} /></Button>}
                                   <Button variant="ghost" size="icon" className="h-8 w-8 text-danger" onClick={() => setDelKeyTarget(k)} title="删除"><TrashIcon size={14} /></Button>
                                 </div></td>
                               </tr>
@@ -407,36 +413,136 @@ export default function AdminPage() {
                 </Card>
 
                 <Card>
-                  <CardHeader><CardTitle className="text-base">Embedding 模型 & 向量库</CardTitle><CardDescription className="text-xs">配置文本向量化模型、重排序模型和向量数据库。Embedding 模型与 LLM 独立，不能选择 DeepSeek 等仅提供对话能力的模型。</CardDescription></CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-2"><Label className="text-sm">Embedding 提供商</Label>
-                      <Select value={config.embed_provider} onValueChange={onEmbProvider}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{EMBED_PROVIDERS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select>
+                  <CardHeader><CardTitle className="text-base">模型配置</CardTitle><CardDescription className="text-xs">为每个使用维度选择厂商和模型。LLM 用于对话推理，Embedding 用于文本向量化，Reranker 用于检索重排序。</CardDescription></CardHeader>
+                  <CardContent className="space-y-5">
+
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2"><Badge className="bg-brand-soft px-2 py-0.5 text-[11px] text-brand-600">LLM</Badge><span className="text-sm font-medium text-text-primary">大语言模型</span></div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">厂商</Label>
+                          <Select value={config.llm_provider} onValueChange={onLlmProvider}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{providersWithCapability('llm').map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select>
+                        </div>
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">模型</Label>
+                          {llmModels.length > 0 ? <Select value={config.llm_model} onValueChange={(v) => setConfig({ ...config, llm_model: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{llmModels.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent></Select>
+                          : <Input className="h-9 text-sm" value={config.llm_model} onChange={(e) => setConfig({ ...config, llm_model: e.target.value })} placeholder="模型 ID" />}
+                        </div>
+                      </div>
+                      {(() => { const llmKeys = (apiKeys || []).filter((k) => k.provider === config.llm_provider); const defaultKey = llmKeys.find((k) => k.is_default) || llmKeys[0]; const pcat = findProvider(config.llm_provider); if (!pcat?.needsKey) return <p className="text-[11px] text-text-tertiary">该厂商无需 API Key</p>; if (llmKeys.length === 0) return (
+                        <div className="flex items-center gap-3 rounded-md border border-border-soft bg-bg-secondary/50 px-3 py-2">
+                          <Badge className="bg-danger/15 px-2 py-0.5 text-[11px] text-danger">未配置</Badge>
+                          <span className="text-xs text-text-tertiary">请添加 {pcat?.label || config.llm_provider} 的 API Key</span>
+                          <Button type="button" variant="outline" size="sm" className="ml-auto h-7 text-xs" onClick={() => openAddKey(config.llm_provider)}><PlusIcon size={12} /> 添加 Key</Button>
+                        </div>
+                      ); return (
+                        <div className="flex items-center gap-2">
+                          <Label className="flex items-center gap-1.5 text-xs text-text-secondary"><KeyIcon size={12} /> Key</Label>
+                          <Select value={String(defaultKey?.id || '')} onValueChange={(v) => { const selected = llmKeys.find((k) => String(k.id) === v); if (selected && !selected.is_default) setDefaultKey.mutate(selected); }}>
+                            <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>{llmKeys.map((k) => (<SelectItem key={k.id} value={String(k.id)}><span className="flex items-center gap-2">{k.name} <span className="font-mono text-xs text-text-tertiary">{k.key_masked}</span>{k.is_default && <Badge className="bg-success/15 px-1 py-0 text-[10px] text-success">默认</Badge>}</span></SelectItem>))}</SelectContent>
+                          </Select>
+                          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => openAddKey(config.llm_provider)}><PlusIcon size={12} /></Button>
+                        </div>
+                      ); })()}
                     </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div className="grid gap-2"><Label className="text-sm">Embedding API Base URL</Label><Input className="h-9 text-sm" value={config.embed_base_url} onChange={(e) => setConfig({ ...config, embed_base_url: e.target.value })} placeholder={config.embed_provider === 'local' ? '本地模型无需配置' : 'https://api.example.com/v1'} disabled={config.embed_provider === 'local'} /></div>
-                      <div className="grid gap-2"><Label className="text-sm">Embedding 模型</Label>
-                        {embModels.length > 0 ? <Select value={config.embed_model} onValueChange={(v) => setConfig({ ...config, embed_model: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{embModels.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent></Select>
+
+                    <div className="border-t border-border-soft" />
+
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2"><Badge className="bg-accent-purple/15 px-2 py-0.5 text-[11px] text-accent-purple">Embedding</Badge><span className="text-sm font-medium text-text-primary">向量化模型</span></div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">厂商</Label>
+                          <Select value={config.embed_provider} onValueChange={onEmbProvider}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{providersWithCapability('embedding').map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select>
+                        </div>
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">模型</Label>
+                          {embModels.length > 0 ? <Select value={config.embed_model} onValueChange={(v) => setConfig({ ...config, embed_model: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{embModels.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent></Select>
                           : <Input className="h-9 text-sm" value={config.embed_model} onChange={(e) => setConfig({ ...config, embed_model: e.target.value })} placeholder="BAAI/bge-m3" />}
+                        </div>
+                      </div>
+                      {(() => { const embKeys = (apiKeys || []).filter((k) => k.provider === config.embed_provider); const defaultKey = embKeys.find((k) => k.is_default) || embKeys[0]; const pcat = findProvider(config.embed_provider); if (!pcat?.needsKey) return <p className="text-[11px] text-text-tertiary">该厂商无需 API Key</p>; if (embKeys.length === 0) return (
+                        <div className="flex items-center gap-3 rounded-md border border-border-soft bg-bg-secondary/50 px-3 py-2">
+                          <Badge className="bg-danger/15 px-2 py-0.5 text-[11px] text-danger">未配置</Badge>
+                          <span className="text-xs text-text-tertiary">请添加 {pcat?.label || config.embed_provider} 的 API Key</span>
+                          <Button type="button" variant="outline" size="sm" className="ml-auto h-7 text-xs" onClick={() => openAddKey(config.embed_provider)}><PlusIcon size={12} /> 添加 Key</Button>
+                        </div>
+                      ); return (
+                        <div className="flex items-center gap-2">
+                          <Label className="flex items-center gap-1.5 text-xs text-text-secondary"><KeyIcon size={12} /> Key</Label>
+                          <Select value={String(defaultKey?.id || '')} onValueChange={(v) => { const selected = embKeys.find((k) => String(k.id) === v); if (selected && !selected.is_default) setDefaultKey.mutate(selected); }}>
+                            <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>{embKeys.map((k) => (<SelectItem key={k.id} value={String(k.id)}><span className="flex items-center gap-2">{k.name} <span className="font-mono text-xs text-text-tertiary">{k.key_masked}</span>{k.is_default && <Badge className="bg-success/15 px-1 py-0 text-[10px] text-success">默认</Badge>}</span></SelectItem>))}</SelectContent>
+                          </Select>
+                          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => openAddKey(config.embed_provider)}><PlusIcon size={12} /></Button>
+                        </div>
+                      ); })()}
+                    </div>
+
+                    <div className="border-t border-border-soft" />
+
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2"><Badge className="bg-success/15 px-2 py-0.5 text-[11px] text-success">Reranker</Badge><span className="text-sm font-medium text-text-primary">重排序模型</span></div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">厂商</Label>
+                          <Select value={config.rerank_provider} onValueChange={onRrProvider}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{providersWithCapability('reranker').map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select>
+                        </div>
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">模型</Label>
+                          {rrModels.length > 0 ? <Select value={config.rerank_model} onValueChange={(v) => setConfig({ ...config, rerank_model: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{rrModels.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent></Select>
+                          : <Input className="h-9 text-sm" value={config.rerank_model} onChange={(e) => setConfig({ ...config, rerank_model: e.target.value })} placeholder="BAAI/bge-reranker-v2-m3" />}
+                        </div>
+                      </div>
+                      {(() => { const rrKeys = (apiKeys || []).filter((k) => k.provider === config.rerank_provider); const defaultKey = rrKeys.find((k) => k.is_default) || rrKeys[0]; const pcat = findProvider(config.rerank_provider); if (!pcat?.needsKey) return <p className="text-[11px] text-text-tertiary">该厂商无需 API Key</p>; if (rrKeys.length === 0) return (
+                        <div className="flex items-center gap-3 rounded-md border border-border-soft bg-bg-secondary/50 px-3 py-2">
+                          <Badge className="bg-danger/15 px-2 py-0.5 text-[11px] text-danger">未配置</Badge>
+                          <span className="text-xs text-text-tertiary">请添加 {pcat?.label || config.rerank_provider} 的 API Key</span>
+                          <Button type="button" variant="outline" size="sm" className="ml-auto h-7 text-xs" onClick={() => openAddKey(config.rerank_provider)}><PlusIcon size={12} /> 添加 Key</Button>
+                        </div>
+                      ); return (
+                        <div className="flex items-center gap-2">
+                          <Label className="flex items-center gap-1.5 text-xs text-text-secondary"><KeyIcon size={12} /> Key</Label>
+                          <Select value={String(defaultKey?.id || '')} onValueChange={(v) => { const selected = rrKeys.find((k) => String(k.id) === v); if (selected && !selected.is_default) setDefaultKey.mutate(selected); }}>
+                            <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>{rrKeys.map((k) => (<SelectItem key={k.id} value={String(k.id)}><span className="flex items-center gap-2">{k.name} <span className="font-mono text-xs text-text-tertiary">{k.key_masked}</span>{k.is_default && <Badge className="bg-success/15 px-1 py-0 text-[10px] text-success">默认</Badge>}</span></SelectItem>))}</SelectContent>
+                          </Select>
+                          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => openAddKey(config.rerank_provider)}><PlusIcon size={12} /></Button>
+                        </div>
+                      ); })()}
+                    </div>
+
+                    <div className="border-t border-border-soft" />
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2"><span className="text-sm font-medium text-text-primary">Agent 模型覆盖</span><Badge className="bg-bg-tertiary px-1.5 py-0 text-[10px] text-text-tertiary">可选</Badge></div>
+                      <p className="text-[11px] text-text-tertiary">为不同阶段的 Agent 指定不同的 LLM。留空则跟随默认 LLM 配置。</p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {STAGE_DEFS.map((s) => (
+                          <div key={s.key} className="flex items-center gap-3 rounded-md border border-border-soft px-3 py-2">
+                            <div className="min-w-0 flex-shrink-0"><div className="text-xs font-medium text-text-primary">{s.label}</div><div className="text-[10px] text-text-tertiary">{s.desc}</div></div>
+                            <div className="flex-1">
+                              {llmModels.length > 0 ? (
+                                <Select value={String(config[s.key] || '__default__')} onValueChange={(v) => setConfig({ ...config, [s.key]: v === '__default__' ? '' : v })}>
+                                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__default__">跟随默认</SelectItem>
+                                    {llmModels.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <Input className="h-8 text-xs" value={String(config[s.key] || '')} onChange={(e) => setConfig({ ...config, [s.key]: e.target.value })} placeholder="跟随默认" />
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    {config.embed_provider !== 'local' && (
-                      <div className="grid gap-2">
-                        <Label className="flex items-center gap-2 text-sm"><KeyIcon size={14} /> Embedding API Key{config.embed_api_key_configured && !embKey && <Badge className="bg-success/15 px-1.5 py-0 text-[10px] text-success">已配置</Badge>}</Label>
-                        <div className="flex gap-2"><Input className="h-9 flex-1 font-mono text-sm" type={showEmbKey ? 'text' : 'password'} value={embKey} onChange={(e) => setEmbKey(e.target.value)} placeholder={config.embed_api_key_configured ? '留空则保持原 Key 不变' : '请输入 Embedding API Key'} autoComplete="off" /><Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setShowEmbKey(!showEmbKey)}>{showEmbKey ? '隐藏' : '显示'}</Button></div>
+
+                    <div className="border-t border-border-soft" />
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2"><span className="text-sm font-medium text-text-primary">向量数据库</span></div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">类型</Label><Select value={config.vector_db_provider} onValueChange={(v) => setConfig({ ...config, vector_db_provider: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{VDB_PROVIDERS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select></div>
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">URL</Label><Input className="h-9 text-sm" value={config.vector_db_url} onChange={(e) => setConfig({ ...config, vector_db_url: e.target.value })} placeholder="http://qdrant:6333" disabled={config.vector_db_provider === 'memory'} /></div>
+                        <div className="grid gap-1.5"><Label className="text-xs text-text-secondary">Collection</Label><Input className="h-9 text-sm" value={config.vector_db_collection} onChange={(e) => setConfig({ ...config, vector_db_collection: e.target.value })} placeholder="conclave_chunks" disabled={config.vector_db_provider === 'memory'} /></div>
                       </div>
-                    )}
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div className="grid gap-2"><Label className="text-sm">Reranker 模型</Label><Input className="h-9 text-sm" value={config.rerank_model} onChange={(e) => setConfig({ ...config, rerank_model: e.target.value })} placeholder="BAAI/bge-reranker-v2-m3" /></div>
-                      <div className="grid gap-2">
-                        <Label className="flex items-center gap-2 text-sm"><KeyIcon size={14} /> Reranker API Key{config.rerank_api_key_configured && !rrKey && <Badge className="bg-success/15 px-1.5 py-0 text-[10px] text-success">已配置</Badge>}</Label>
-                        <div className="flex gap-2"><Input className="h-9 flex-1 font-mono text-sm" type={showRrKey ? 'text' : 'password'} value={rrKey} onChange={(e) => setRrKey(e.target.value)} placeholder="可选，留空不使用远程 Reranker" autoComplete="off" /><Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setShowRrKey(!showRrKey)}>{showRrKey ? '隐藏' : '显示'}</Button></div>
-                      </div>
-                    </div>
-                    <div className="my-2 border-t border-border-soft" />
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                      <div className="grid gap-2"><Label className="text-sm">向量数据库</Label><Select value={config.vector_db_provider} onValueChange={(v) => setConfig({ ...config, vector_db_provider: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{VDB_PROVIDERS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select></div>
-                      <div className="grid gap-2"><Label className="text-sm">向量库 URL</Label><Input className="h-9 text-sm" value={config.vector_db_url} onChange={(e) => setConfig({ ...config, vector_db_url: e.target.value })} placeholder="http://qdrant:6333" disabled={config.vector_db_provider === 'memory'} /></div>
-                      <div className="grid gap-2"><Label className="text-sm">Collection 名称</Label><Input className="h-9 text-sm" value={config.vector_db_collection} onChange={(e) => setConfig({ ...config, vector_db_collection: e.target.value })} placeholder="conclave_chunks" disabled={config.vector_db_provider === 'memory'} /></div>
                     </div>
                   </CardContent>
                 </Card>
@@ -503,19 +609,19 @@ export default function AdminPage() {
 
       <Dialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen}>
         <DialogContent className="gap-0 p-0 sm:max-w-lg">
-          <DialogHeader className="px-6 pb-2 pt-6"><DialogTitle className="text-base">{editingKey ? '设为默认 Key' : '添加 API Key'}</DialogTitle><DialogDescription className="mt-1 text-xs">{editingKey ? '重新输入 Key 以将其设为默认。设为默认后，同 Provider 下其他 Key 将自动取消默认。' : '添加新的 API Key。支持多 Provider 多 Key 配置，可按系统或团队维度隔离。'}</DialogDescription></DialogHeader>
+          <DialogHeader className="px-6 pb-2 pt-6"><DialogTitle className="text-base">添加 API Key</DialogTitle><DialogDescription className="mt-1 text-xs">添加新的 API Key。支持多 Provider 多 Key 配置，可按系统或团队维度隔离。添加后可在 LLM/Embedding 卡片中通过下拉框切换默认 Key。</DialogDescription></DialogHeader>
           <div className="space-y-4 px-6 py-5">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="grid gap-2"><Label className="text-sm">Provider <span className="text-danger">*</span></Label><Select value={keyForm.provider} onValueChange={(v) => setKeyForm({ ...keyForm, provider: v })} disabled={!!editingKey}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{KEY_PROVIDERS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="grid gap-2"><Label className="text-sm">名称</Label><Input className="h-9 text-sm" value={keyForm.name} onChange={(e) => setKeyForm({ ...keyForm, name: e.target.value })} placeholder="default" disabled={!!editingKey} /></div>
+              <div className="grid gap-2"><Label className="text-sm">Provider <span className="text-danger">*</span></Label><Select value={keyForm.provider} onValueChange={(v) => { const p = findProvider(v); setKeyForm({ ...keyForm, provider: v, base_url: p?.baseUrl || '' }); }}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{PROVIDER_CATALOG.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="grid gap-2"><Label className="text-sm">名称</Label><Input className="h-9 text-sm" value={keyForm.name} onChange={(e) => setKeyForm({ ...keyForm, name: e.target.value })} placeholder="default" /></div>
             </div>
             <div className="grid gap-2"><Label className="text-sm">API Key <span className="text-danger">*</span></Label>
-              <div className="flex gap-2"><Input className="h-9 flex-1 font-mono text-sm" type={showKeyValue ? 'text' : 'password'} value={keyForm.api_key} onChange={(e) => setKeyForm({ ...keyForm, api_key: e.target.value })} placeholder={editingKey ? '重新输入完整 Key 以设为默认' : 'sk-...'} autoComplete="off" /><Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setShowKeyValue(!showKeyValue)}>{showKeyValue ? '隐藏' : '显示'}</Button></div>
+              <div className="flex gap-2"><Input className="h-9 flex-1 font-mono text-sm" type={showKeyValue ? 'text' : 'password'} value={keyForm.api_key} onChange={(e) => setKeyForm({ ...keyForm, api_key: e.target.value })} placeholder="sk-..." autoComplete="off" /><Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setShowKeyValue(!showKeyValue)}>{showKeyValue ? '隐藏' : '显示'}</Button></div>
               <p className="text-[11px] text-text-tertiary">Key 在服务端加密存储，仅返回脱敏形式。</p>
             </div>
             <div className="grid gap-2"><Label className="text-sm">Base URL</Label><Input className="h-9 font-mono text-sm" value={keyForm.base_url} onChange={(e) => setKeyForm({ ...keyForm, base_url: e.target.value })} placeholder="https://api.example.com/v1" /></div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="grid gap-2"><Label className="text-sm">Scope</Label><Select value={keyForm.scope} onValueChange={(v) => setKeyForm({ ...keyForm, scope: v })} disabled={!!editingKey}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="system">系统</SelectItem><SelectItem value="team">团队</SelectItem></SelectContent></Select></div>
+              <div className="grid gap-2"><Label className="text-sm">Scope</Label><Select value={keyForm.scope} onValueChange={(v) => setKeyForm({ ...keyForm, scope: v })}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="system">系统</SelectItem><SelectItem value="team">团队</SelectItem></SelectContent></Select></div>
               <div className="flex items-center justify-between rounded-lg border border-border-soft p-3">
                 <div><Label className="text-sm">设为默认</Label><p className="mt-0.5 text-[11px] text-text-tertiary">同 Provider 下仅一个默认</p></div>
                 <button type="button" aria-label="切换默认" className={`relative h-6 w-11 rounded-full transition-colors ${keyForm.is_default ? 'bg-brand-500' : 'bg-border-default'}`} onClick={() => setKeyForm({ ...keyForm, is_default: !keyForm.is_default })}>
@@ -526,7 +632,7 @@ export default function AdminPage() {
           </div>
           <DialogFooter className="border-t border-border-soft bg-bg-secondary/30 px-6 py-4">
             <Button variant="outline" size="sm" onClick={() => setKeyDialogOpen(false)} disabled={saveKey.isPending}>取消</Button>
-            <Button size="sm" onClick={() => saveKey.mutate()} disabled={saveKey.isPending}>{saveKey.isPending && <SpinnerIcon size={14} className="mr-2 animate-spin" />}{editingKey ? '设为默认' : '保存 Key'}</Button>
+            <Button size="sm" onClick={() => saveKey.mutate()} disabled={saveKey.isPending}>{saveKey.isPending && <SpinnerIcon size={14} className="mr-2 animate-spin" />}保存 Key</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

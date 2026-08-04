@@ -262,7 +262,9 @@ async def get_system_config(request: Request) -> dict[str, Any]:
     if not _is_system_admin(auth):
         raise HTTPException(status_code=403, detail="需要系统管理员权限")
 
-    settings = await config_service.get_all_system_settings()
+    # 使用带缓存的 _load_system_settings，顺带为 LLM 客户端的
+    # get_cached_system_settings() 同步读取填充缓存
+    settings = await config_service._load_system_settings()
     return {
         "settings": settings,
         "overridable_keys": list(SYSTEM_OVERRIDABLE_KEYS),
@@ -290,7 +292,8 @@ async def set_system_config(key: str, request: Request, body: dict[str, Any]) ->
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    config_service.invalidate_config_cache()
+    # 刷新系统配置缓存，使 LLM/Embedding 客户端立即读到新配置
+    await config_service.refresh_system_cache()
     audit("config.system.updated", "success", {"key": key}, user_id=uid)
     return {"key": key, "updated": True}
 
@@ -318,7 +321,11 @@ async def list_api_keys(
 
 @router.post("/keys")
 async def save_api_key(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-    """保存 API Key。"""
+    """保存 API Key。
+
+    api_key 可选：为空时仅更新 is_default/base_url（用于一键切换默认 Key）。
+    新建 Key 时 api_key 必填（由 key_store.save_api_key 校验）。
+    """
     auth = _get_auth(request)
     uid = _get_uid_int(auth)
 
@@ -331,8 +338,6 @@ async def save_api_key(request: Request, body: dict[str, Any]) -> dict[str, Any]
 
     if not provider:
         raise HTTPException(status_code=400, detail="需要 provider")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="需要 api_key")
 
     # 权限检查
     user_id_param = None
@@ -348,14 +353,53 @@ async def save_api_key(request: Request, body: dict[str, Any]) -> dict[str, Any]
     else:
         raise HTTPException(status_code=400, detail="无效 scope")
 
-    result = await key_store.save_api_key(
-        provider=provider,
-        api_key=api_key,
-        name=name,
-        base_url=base_url,
-        is_default=is_default,
-        user_id=user_id_param,
-    )
+    try:
+        result = await key_store.save_api_key(
+            provider=provider,
+            api_key=api_key,
+            name=name,
+            base_url=base_url,
+            is_default=is_default,
+            user_id=user_id_param,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # 系统级默认 Key 同步到 system_config，使 LLM/Embedding 客户端可通过
+    # get_cached_system_settings() 读到（打通 key_store → system_config → LLM 链路）
+    if scope == "system" and is_default:
+        try:
+            sys_settings = await config_service.get_all_system_settings()
+            llm_provider = sys_settings.get("llm_provider", "")
+            embed_provider = sys_settings.get("embed_provider", "")
+            rerank_provider = sys_settings.get("rerank_provider", "")
+
+            # 获取实际 Key 明文（api_key 为空时从 key_store 解密读取）
+            actual_key = api_key
+            if not actual_key:
+                actual_key = await key_store.get_api_key(provider, name)
+
+            if actual_key:
+                if provider == llm_provider:
+                    await config_service.set_system_setting("llm_api_key", actual_key)
+                    if base_url:
+                        await config_service.set_system_setting("llm_base_url", base_url)
+                if provider == embed_provider:
+                    await config_service.set_system_setting("embed_api_key", actual_key)
+                    if base_url:
+                        await config_service.set_system_setting("embed_base_url", base_url)
+                if provider == rerank_provider:
+                    await config_service.set_system_setting("rerank_api_key", actual_key)
+                    if base_url:
+                        await config_service.set_system_setting("rerank_base_url", base_url)
+
+            # 强制刷新系统配置缓存，使 LLM 客户端立即生效
+            await config_service.refresh_system_cache()
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning("同步 Key 到系统配置失败: %s", str(e)[:200])
+
     audit(
         "api_key.saved",
         "success",

@@ -63,12 +63,12 @@ PROVIDERS: dict[str, ProviderConfig] = {
     "deepseek": ProviderConfig(
         id="deepseek",
         name="DeepSeek 官方",
-        base_url="https://api.deepseek.com/v1",
+        base_url="https://api.deepseek.com",
         balance_endpoint="/user/balance",
         balance_response_path=("balance_infos", 0, "total_balance"),
         supports_custom_key=True,
-        pricing_note="DeepSeek-V3 输入¥2/百万，输出¥8/百万",
-        default_model="deepseek-chat",
+        pricing_note="DeepSeek-V4-Flash 输入¥1/百万，输出¥2/百万；V4-Pro 输入¥12/百万，输出¥24/百万",
+        default_model="deepseek-v4-flash",
     ),
     "volcengine": ProviderConfig(
         id="volcengine",

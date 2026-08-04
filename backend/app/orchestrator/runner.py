@@ -242,10 +242,34 @@ class Runner:
                 from app.llm_providers import resolve_models_for_meeting
 
                 old_models = state.resolved_models
+                # 从系统配置读取阶段模型覆盖（admin 通过 UI 配置的 stage_model_*）
+                stage_overrides = None
+                try:
+                    from app.services.config_service import get_cached_system_settings
+
+                    sys_cfg = get_cached_system_settings()
+                    _stage_keys = {
+                        "stage_model_clarify": "@clarify",
+                        "stage_model_intra_team": "@intra_team",
+                        "stage_model_cross_team": "@cross_team",
+                        "stage_model_evidence_check": "@evidence_check",
+                        "stage_model_arbitrate": "@arbitrate",
+                        "stage_model_produce": "@produce",
+                    }
+                    _overrides = {}
+                    for _cfg_key, _stage_key in _stage_keys.items():
+                        _val = sys_cfg.get(_cfg_key, "")
+                        if _val:
+                            _overrides[_stage_key] = _val
+                    if _overrides:
+                        stage_overrides = _overrides
+                except Exception:
+                    pass
+
                 state.resolved_models = resolve_models_for_meeting(
                     role_configs=state.role_configs,
                     meeting_model=state.model_override,
-                    stage_overrides=None,  # 阶段覆盖预留，暂未开放
+                    stage_overrides=stage_overrides,
                 )
                 state.resolved_from_model_override = state.model_override
                 if old_models and old_models != state.resolved_models:
