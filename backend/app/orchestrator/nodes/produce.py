@@ -322,6 +322,363 @@ def _synthesize_evidence_for_produce(state: MeetingState) -> dict[str, Any]:
     }
 
 
+# ==============================================================================
+# 进程内静态安全扫描（regex-based，无外部依赖）
+# 设计原则：
+#   - critical 级规则：100% 确定性匹配，误报率极低，命中即阻断部署
+#   - high 级规则：高危反模式，命中即告警但不阻断（可能存在合理使用场景）
+#   - 不依赖外部工具/LLM/网络，不泄露代码，毫秒级完成
+# ==============================================================================
+
+# 要扫描的文件扩展名
+_CODE_EXTS = {
+    ".py",
+    ".pyi",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".mjs",
+    ".cjs",
+    ".go",
+    ".c",
+    ".cpp",
+    ".cc",
+    ".h",
+    ".hpp",
+    ".hh",
+    ".java",
+    ".rs",
+    ".kt",
+    ".kts",
+    ".rb",
+    ".php",
+    ".sh",
+    ".bash",
+    ".ps1",
+    ".sql",
+}
+
+# critical 级规则（阻断部署）：
+# 每条 (pattern, severity, rule_id, message)
+# pattern 使用 re.search 逐行匹配
+_CRITICAL_PATTERNS: list[tuple[str, str, str, str]] = [
+    # === 命令注入 ===
+    (
+        r"os\.system\s*\(\s*[\"']?[a-zA-Z_]*f?[\"']?\s*[\w\.]*\s*\+",
+        "critical",
+        "cmd-injection-os-system",
+        "os.system() 使用字符串拼接，存在命令注入风险。请使用 subprocess.run(args_list) 并避免 shell=True",
+    ),
+    (
+        r"subprocess\.(?:run|Popen|call|check_output|check_call)\s*\([^)]*shell\s*=\s*True",
+        "critical",
+        "cmd-injection-shell-true",
+        "subprocess 使用 shell=True，存在命令注入风险。请使用 shell=False 并以列表传参",
+    ),
+    # === SQL 注入 ===
+    (
+        r"""(?:execute|executemany|raw|text)\s*\(\s*[f\"]?[\"'][^\"']*\%\s*[sds]""",
+        "critical",
+        "sql-injection-format",
+        "SQL 语句使用 %s/%d 字符串格式化，存在 SQL 注入风险。请使用参数化查询(:name 或 %s 占位符+参数元组)",
+    ),
+    (
+        r"""(?:execute|executemany|raw)\s*\(\s*f[\"']""",
+        "critical",
+        "sql-injection-fstring",
+        "SQL 语句使用 f-string 拼接，存在 SQL 注入风险。请使用参数化查询",
+    ),
+    (
+        r"""(?:execute|executemany|raw)\s*\([^)]*\.format\s*\(""",
+        "critical",
+        "sql-injection-format-method",
+        "SQL 语句使用 .format() 拼接，存在 SQL 注入风险。请使用参数化查询",
+    ),
+    # === 硬编码密钥/密码（明显模式）===
+    (
+        r"""(?:password|passwd|pwd|secret|api_key|apikey|token)\s*=\s*[\"'][^\"']{8,}[\"']""",
+        "critical",
+        "hardcoded-secret",
+        "疑似硬编码密钥/密码。请通过环境变量或配置文件读取，不要直接写在代码中",
+    ),
+    # === 危险反序列化 ===
+    (
+        r"pickle\.loads?\s*\(",
+        "critical",
+        "pickle-deserialization",
+        "使用 pickle.load(s) 反序列化，存在任意代码执行风险。请使用 JSON/YAML 等安全格式",
+    ),
+    (
+        r"marshal\.loads?\s*\(",
+        "critical",
+        "marshal-deserialization",
+        "使用 marshal.load(s) 反序列化，存在任意代码执行风险",
+    ),
+    # === eval/exec 动态执行 ===
+    (
+        r"(?<![\w.])eval\s*\(\s*(?!['\"]const['\"])",
+        "critical",
+        "dangerous-eval",
+        "使用 eval() 执行动态代码，存在任意代码执行风险。请改用 ast.literal_eval 或其他安全方式",
+    ),
+    (
+        r"(?<![\w.])exec\s*\(",
+        "critical",
+        "dangerous-exec",
+        "使用 exec() 执行动态代码，存在任意代码执行风险。请重构避免动态执行",
+    ),
+    # === 路径穿越 ===
+    (
+        r"open\s*\(\s*[^)]*\+\s*(?:request|input|param|args|user_input|data)",
+        "critical",
+        "path-traversal-open",
+        "open() 路径包含用户输入拼接，存在路径穿越风险。请使用 os.path.abspath + 白名单验证",
+    ),
+    # === tarfile 路径穿越 ===
+    (
+        r"tarfile\.(?:open|TarFile)\([^)]*\)[^;]*\.extractall\s*\(",
+        "critical",
+        "tarfile-extractall-traversal",
+        "tarfile.extractall() 未指定 filter='data'，存在路径穿越(CVE-2007-4559)。Python 3.12+ 必须传 filter='data'",
+    ),
+    # === os.popen 命令注入 ===
+    (
+        r"os\.(?:popen|popen2|popen3|popen4|system)\s*\(\s*f?[\"']",
+        "critical",
+        "cmd-injection-popen",
+        "os.popen/system 使用字符串命令，存在命令注入风险。请使用 subprocess.run([args], shell=False)",
+    ),
+]
+
+# high 级规则（告警不阻断）
+_HIGH_PATTERNS: list[tuple[str, str, str, str]] = [
+    # === 不安全的 YAML 加载 ===
+    (
+        r"yaml\.load\s*\([^)]*\)(?!.*Loader)",
+        "high",
+        "yaml-load-unsafe",
+        "yaml.load() 未指定 Loader=yaml.SafeLoader，存在反序列化攻击风险",
+    ),
+    # === 关闭 SSL 验证 ===
+    (
+        r"verify\s*=\s*False",
+        "high",
+        "ssl-verify-disabled",
+        "HTTPS 请求关闭了 SSL 证书验证(verify=False)，存在中间人攻击风险",
+    ),
+    # === 调试模式 ===
+    (
+        r"DEBUG\s*=\s*True|debug\s*=\s*True",
+        "high",
+        "debug-mode-enabled",
+        "DEBUG 模式已开启，生产环境必须关闭",
+    ),
+    # === 全局异常吞掉 ===
+    (
+        r"except\s*:\s*$|except\s+Exception\s*(?:as\s+\w+\s*)?:\s*(?:pass|\.\.\.)\s*$",
+        "high",
+        "bare-except-pass",
+        "空 except 块吞掉了所有异常，可能隐藏严重 bug。请至少记录日志",
+    ),
+    # === CORS 全开放 ===
+    (
+        r"allow_origins\s*=\s*\[\s*[\"']\*[\"']\s*\]",
+        "high",
+        "cors-wildcard",
+        'CORS 允许所有来源("*")，生产环境应限制具体域名',
+    ),
+    # === MD5/SHA1 弱哈希 ===
+    (
+        r"hashlib\.(?:md5|sha1)\s*\(",
+        "high",
+        "weak-hash",
+        "使用 MD5/SHA1 弱哈希算法，安全敏感场景请使用 SHA-256 或 bcrypt/argon2",
+    ),
+    # === 硬编码 IP 地址（非内网）===
+    (
+        r"""(?:host|server|url|endpoint)\s*=\s*[\"']https?://(?:\d{1,3}\.){3}\d{1,3}""",
+        "high",
+        "hardcoded-ip",
+        "硬编码 IP 地址，请通过环境变量或配置文件管理",
+    ),
+    # === HTTP 请求无超时（S113）===
+    (
+        r"(?:requests\.(?:get|post|put|delete|patch|head|options)|httpx\.(?:get|post|put|delete|patch))\s*\([^)]*\)(?![^;]*timeout)",
+        "high",
+        "http-no-timeout",
+        "HTTP 请求未设置 timeout，可能导致请求无限挂起。请添加 timeout= 参数",
+    ),
+    # === 可变默认参数（OCR Python 规则）===
+    (
+        r"def\s+\w+\s*\([^)]*(?:=\s*\[\s*\]|=\s*\{\s*\})",
+        "high",
+        "mutable-default-argument",
+        "函数使用可变默认参数([]或{{}})，Python 中默认参数在函数定义时创建，多次调用共享同一对象。请使用 None 作为默认值",
+    ),
+    # === mktemp 不安全临时文件 ===
+    (
+        r"tempfile\.mktemp\s*\(",
+        "high",
+        "insecure-tempfile",
+        "tempfile.mktemp() 存在竞态条件风险。请使用 tempfile.mkstemp() 或 NamedTemporaryFile()",
+    ),
+    # === Flask/Django debug ===
+    (
+        r"app\.run\s*\([^)]*debug\s*=\s*True",
+        "high",
+        "flask-debug-enabled",
+        "Flask/Debug 模式启用了 debug=True，生产环境存在代码执行风险",
+    ),
+    # === 敏感信息打印到日志 ===
+    (
+        r"""(?:log(?:ger)?|print)\s*\([^)]*(?:password|passwd|secret|token|api_key|credit_card)""",
+        "high",
+        "sensitive-data-logged",
+        "日志中可能包含敏感信息（密码/Token/密钥），生产环境禁止记录敏感数据",
+    ),
+    # === Jinja2 自动转义关闭（XSS）===
+    (
+        r"jinja2\.Environment\s*\([^)]*autoescape\s*=\s*False|Markup\s*\(",
+        "high",
+        "jinja2-autoescape-off",
+        "Jinja2 关闭了 autoescape 或使用 Markup() 标记了不安全字符串，存在 XSS 风险",
+    ),
+    # === TypeScript/React: dangerouslySetInnerHTML ===
+    (
+        r"dangerouslySetInnerHTML",
+        "high",
+        "react-dangerous-html",
+        "React 使用 dangerouslySetInnerHTML，存在 XSS 风险。请确保内容经过消毒（DOMPurify）",
+    ),
+    # === TypeScript/JavaScript: eval ===
+    (
+        r"(?<![\w.])(?:eval|new\s+Function)\s*\(",
+        "high",
+        "js-dynamic-eval",
+        "JavaScript/TypeScript 使用 eval() 或 new Function()，存在代码注入风险",
+    ),
+    # === TypeScript/JavaScript: child_process 非字面量 ===
+    (
+        r"(?:exec|execSync|spawnSync|spawn)\s*\(\s*[^'\"\w]",
+        "high",
+        "js-child-process-injection",
+        "child_process 调用使用变量而非字符串字面量，存在命令注入风险",
+    ),
+]
+
+
+def _scan_file_content(filepath: Path, rel_path: str) -> list[dict[str, Any]]:
+    """扫描单个文件内容，返回发现的问题列表。"""
+    issues: list[dict[str, Any]] = []
+    try:
+        # 限制文件大小，避免扫描超大文件
+        if filepath.stat().st_size > 500_000:  # 500KB
+            return issues
+        lines = filepath.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return issues
+
+    import re as _re
+
+    for lineno, line in enumerate(lines, start=1):
+        # 跳过注释行（简单判断）
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped.startswith("//"):
+            continue
+
+        for pattern, severity, rule_id, message in _CRITICAL_PATTERNS:
+            if _re.search(pattern, line):
+                issues.append(
+                    {
+                        "file": rel_path,
+                        "line": lineno,
+                        "severity": severity,
+                        "rule": rule_id,
+                        "message": message,
+                        "code": line.strip()[:120],
+                    }
+                )
+
+        for pattern, severity, rule_id, message in _HIGH_PATTERNS:
+            if _re.search(pattern, line):
+                issues.append(
+                    {
+                        "file": rel_path,
+                        "line": lineno,
+                        "severity": severity,
+                        "rule": rule_id,
+                        "message": message,
+                        "code": line.strip()[:120],
+                    }
+                )
+
+    return issues
+
+
+async def _run_inprocess_security_scan(
+    meeting_id: str,
+    code_dir: Path,
+) -> dict[str, Any]:
+    """进程内静态安全扫描主函数。
+
+    遍历 code_dir 下所有代码文件，使用正则匹配高危反模式。
+    返回与原 OCR 格式兼容的结果字典。
+    """
+    import asyncio
+
+    issues: list[dict[str, Any]] = []
+    files_scanned = 0
+
+    def _scan_sync() -> list[dict[str, Any]]:
+        nonlocal files_scanned
+        found: list[dict[str, Any]] = []
+        if not code_dir.exists():
+            return found
+        for root, _dirs, files in os.walk(code_dir):
+            # 跳过虚拟环境、node_modules、__pycache__ 等目录
+            root_parts = set(Path(root).parts)
+            if {".venv", "venv", "node_modules", "__pycache__", ".git", ".pytest_cache", "dist", "build"} & root_parts:
+                continue
+            for fname in files:
+                fpath = Path(root) / fname
+                if fpath.suffix.lower() not in _CODE_EXTS:
+                    continue
+                rel = str(fpath.relative_to(code_dir))
+                files_scanned += 1
+                found.extend(_scan_file_content(fpath, rel))
+        return found
+
+    issues = await asyncio.to_thread(_scan_sync)
+
+    critical = sum(1 for i in issues if i["severity"] == "critical")
+    high = sum(1 for i in issues if i["severity"] == "high")
+    medium = sum(1 for i in issues if i["severity"] == "medium")
+    low = sum(1 for i in issues if i["severity"] == "low")
+
+    parts = []
+    if critical > 0:
+        parts.append(f"{critical}个critical")
+    if high > 0:
+        parts.append(f"{high}个high")
+    summary = f"静态安全扫描完成：扫描{files_scanned}个文件，发现{', '.join(parts) if parts else '0个问题'}"
+
+    return {
+        "ok": True,
+        "skipped": False,
+        "critical": critical,
+        "high": high,
+        "medium": medium,
+        "low": low,
+        "summary": summary,
+        "issues": issues[:50],
+        "block_deploy": critical > 0,
+        "scanner": "inprocess-regex",
+        "files_scanned": files_scanned,
+        "error": None,
+    }
+
+
 async def produce_node(state: MeetingState) -> MeetingState:
     """Produce 阶段：根据 deliverable_type 切换模板，生成对应交付物
 
@@ -1078,8 +1435,80 @@ async def health_check():
                 review_passed = True
                 review_summary = f"语法检查通过（{files_written}个文件）"
 
+            # === 确定性静态安全扫描（进程内 regex 检查，无外部依赖）===
+            # 风险说明：原计划集成阿里 OpenCodeReview(OCR)，经调研发现：
+            #   1) OCR 默认需要外部 LLM API Key（OpenAI/Anthropic），会将代码发送到第三方
+            #   2) OCR 内置规则不覆盖 Python（Conclave 后端主语言）
+            #   3) 存在同名 BSL-1.1 协议项目（@opencodereview/cli），商用需付费
+            # 因此采用进程内 regex 扫描方案：确定性、零依赖、不出网、不泄露代码。
+            # 覆盖 critical/high 两类最危险的反模式。code_review.yaml skill 提供 LLM 审查。
+            code_review_info: dict[str, Any] = {
+                "ok": True,
+                "skipped": False,
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "summary": "",
+                "issues": [],
+                "block_deploy": False,
+                "scanner": "inprocess-regex",
+            }
+            try:
+                _lb.info("produce: 开始进程内静态安全扫描...", logger="orchestrator.nodes.produce")
+                await _emit_progress(state, "reviewing", "正在执行静态安全扫描...", 55)
+                code_review_info = await _run_inprocess_security_scan(
+                    meeting_id=state.meeting_id,
+                    code_dir=ws_root,
+                )
+                if code_review_info["critical"] > 0:
+                    code_review_info["block_deploy"] = True
+                    review_passed = False
+                    review_summary += f"；安全扫描发现{code_review_info['critical']}个critical漏洞，阻断部署"
+                    _lb.warning(
+                        "produce: 静态扫描发现critical漏洞，阻断部署",
+                        logger="orchestrator.nodes.produce",
+                        extra={"critical": code_review_info["critical"]},
+                    )
+                elif code_review_info["high"] > 0:
+                    review_summary += f"；安全扫描发现{code_review_info['high']}个high漏洞（告警不阻断）"
+                    _lb.warning(
+                        f"produce: 静态扫描发现{code_review_info['high']}个high漏洞（不阻断部署）",
+                        logger="orchestrator.nodes.produce",
+                    )
+                else:
+                    review_summary += "；安全扫描通过"
+                    _lb.info("produce: 静态安全扫描通过", logger="orchestrator.nodes.produce")
+            except Exception as scan_err:
+                code_review_info["skipped"] = True
+                code_review_info["error"] = str(scan_err)
+                review_summary += "；安全扫描异常跳过（不阻断部署）"
+                _lb.warning(
+                    f"produce: 静态安全扫描异常: {scan_err}",
+                    logger="orchestrator.nodes.produce",
+                    extra={"error": str(scan_err)},
+                )
+
             # === 沙箱部署 ===
             deployment_info: dict[str, Any] = {"ok": False, "error": "not_attempted"}
+
+            if code_review_info.get("block_deploy"):
+                deployment_info = {
+                    "ok": False,
+                    "error": f"安全审查阻断：发现{code_review_info['critical']}个critical漏洞，请修复后重试",
+                    "blocked_by_security": True,
+                }
+                _lb.warning(
+                    "produce: 因critical漏洞阻断部署",
+                    logger="orchestrator.nodes.produce",
+                    extra={"critical": code_review_info["critical"]},
+                )
+                await _emit_agent_spoke(
+                    state,
+                    Role.ENGINEER,
+                    Stage.PRODUCE,
+                    f"[BLOCK] 代码安全扫描发现{code_review_info['critical']}个critical漏洞，部署已阻断。请修复后重试。",
+                )
             try:
                 from app.sandbox import deploy_service
 
@@ -1179,6 +1608,7 @@ async def health_check():
                 "summary": review_summary,
                 "syntax_errors": syntax_errors if not review_passed else [],
             }
+            state.artifact["code_review"] = code_review_info
             state.artifact["deployment"] = deployment_info
             state.artifact["test_results"] = test_results
 
@@ -1202,6 +1632,7 @@ async def health_check():
                     f"代码规模: {total_files}文件, {total_lines}行\n"
                     f"技术栈: {', '.join(ds_artifact.tech_stack[:8])}\n"
                     f"代码审查: {'通过' if review_passed else '未通过'}\n"
+                    f"安全扫描: {code_review_info.get('summary', '未执行')}\n"
                     f"服务部署: {'成功 ✅ ' + deployment_info.get('access_url', '') if deploy_ok else '失败: ' + deployment_info.get('error', '未知错误')}\n"
                     f"测试结果: "
                     + (
