@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
 from app.middleware import is_dangerous_command
@@ -262,24 +263,65 @@ async def write_file(req: FileWriteRequest) -> dict[str, Any]:
 
 
 @router.delete("/files/{file_path:path}")
-async def delete_file(file_path: str) -> dict[str, Any]:
-    """删除文件或空目录"""
+async def delete_file(file_path: str, request: Request, cascade: bool = False) -> dict[str, Any]:
+    """删除文件或目录
+
+    - cascade=false（默认）：仅删除文件或空目录
+    - cascade=true：级联删除目录及其所有内容（适用于清理会议工作区等场景）
+
+    权限要求：
+    - 系统管理员（system_admin/system_owner/admin）可删除任意路径
+    - 会议目录（mtg-*）下的文件：需为会议创建者、Team owner 或 maintainer
+    - 根目录文件：仅系统管理员可删除
+    """
     await _validate_tenant_path_access(file_path)
     target = _resolve_path(file_path)
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"路径不存在: {file_path}")
 
+    # 权限校验：从路径中提取 meeting_id，检查删除权限
+    from app.auth_guard import assert_can_delete_meeting, get_current_user, is_admin
+
+    _uid, _username, role = get_current_user(request)
+    admin_mode = is_admin(role)
+
+    if not admin_mode:
+        # 提取路径首段作为 meeting_id
+        clean = file_path.lstrip("/\\")
+        parts = clean.split("/", 1)
+        if "\\" in parts[0]:
+            parts = parts[0].split("\\", 1) + parts[1:]
+        meeting_id = parts[0] if parts else ""
+
+        if meeting_id.startswith("mtg-"):
+            # 会议目录下的文件：校验会议删除权限
+            from app.dao.meeting_dao import get_meeting
+
+            meeting = await get_meeting(meeting_id)
+            if meeting is None:
+                raise HTTPException(status_code=403, detail="无权删除该会议工作区文件")
+            await assert_can_delete_meeting(request, meeting)
+        else:
+            # 根目录文件：仅系统管理员可删除
+            raise HTTPException(status_code=403, detail="仅系统管理员可删除根目录文件")
+
     try:
         if target.is_file():
             target.unlink()
         elif target.is_dir():
-            # 只允许删除空目录
-            target.rmdir()
+            if cascade:
+                shutil.rmtree(target)
+            else:
+                # 只允许删除空目录
+                target.rmdir()
     except OSError as e:
         raise HTTPException(status_code=400, detail=f"删除失败: {e}") from e
 
-    log_bus.info(f"文件删除: {file_path}", logger="routers.workspace")
-    return {"path": file_path, "deleted": True}
+    log_bus.info(
+        f"文件删除: {file_path} (cascade={cascade})",
+        logger="routers.workspace",
+    )
+    return {"path": file_path, "deleted": True, "cascade": cascade}
 
 
 # ---- 命令执行 ----

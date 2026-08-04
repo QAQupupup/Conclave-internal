@@ -215,29 +215,48 @@ async def list_tags() -> dict[str, Any]:
 
 
 @router.post("/batch-delete")
-async def batch_delete(req: BatchDeleteRequest) -> dict[str, Any]:
+async def batch_delete(req: BatchDeleteRequest, request: Request) -> dict[str, Any]:
     """批量删除会议
 
     - mode=soft：软删除，保留数据用于回归
     - mode=hard：永久删除，不可恢复
     - 运行中的会议会跳过并记入 failed
+    - 无删除权限的会议会跳过并记入 failed
 
+    权限要求：system admin / 会议创建者 / team owner / maintainer 可删除。
     返回 {deleted: [...], failed: [...], mode}
     """
+    from app.auth_guard import assert_can_delete_meeting, get_current_user, is_admin
     from app.context import get_request_id
     from app.observability.log_bus import log_bus
 
-    # 过滤掉运行中的会议
+    # 系统管理员可批量删除任意会议，无需逐条校验
+    _uid, _username, role = get_current_user(request)
+    admin_mode = is_admin(role)
+
+    # 逐条校验权限 + 过滤运行中的会议
     safe_ids: list[str] = []
     skipped: list[str] = []
     for mid in req.meeting_ids:
+        # 运行中的会议跳过
         if mid in _running_tasks and not _running_tasks[mid].done():
             skipped.append(mid)
-        else:
-            safe_ids.append(mid)
+            continue
+        # 非管理员逐条校验删除权限
+        if not admin_mode:
+            meeting = await get_meeting(mid)
+            if meeting is None:
+                skipped.append(mid)
+                continue
+            try:
+                await assert_can_delete_meeting(request, meeting)
+            except HTTPException:
+                skipped.append(mid)
+                continue
+        safe_ids.append(mid)
 
     result = await batch_delete_meetings(safe_ids, mode=req.mode)
-    # 运行中的会议也记入 failed
+    # 运行中/无权限的会议也记入 failed
     result["failed"].extend(skipped)
 
     log_bus.info(
@@ -546,6 +565,7 @@ async def list_meetings_with_status(
     limit: int = 20,
     offset: int = 0,
     tags: str | None = None,
+    include_deleted: bool = False,
 ) -> dict[str, Any]:
     """列出会议（支持搜索、分页、标签过滤）
 
@@ -554,6 +574,7 @@ async def list_meetings_with_status(
     - limit：每页数量（默认 20）
     - offset：偏移量（默认 0）
     - tags：逗号分隔的标签列表，会议需同时拥有所有标签才匹配
+    - include_deleted：是否包含已软删除的会议（默认 false，仅管理员建议使用）
 
     返回 {meetings[], total, concurrent_limit, running_count}：
     - meetings：当前页的会议列表，每个含 meeting_id/topic/stage/status/created_at/is_running/tags
@@ -562,7 +583,7 @@ async def list_meetings_with_status(
     - running_count：当前正在运行的会议数
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-    result = await query_meetings(q=q, limit=limit, offset=offset, tags=tag_list)
+    result = await query_meetings(q=q, limit=limit, offset=offset, tags=tag_list, include_deleted=include_deleted)
     from app.orchestrator.instant import FLOW_STANDARD, normalize_mode
 
     items = []
@@ -600,7 +621,7 @@ async def delete_meeting(meeting_id: str, mode: str = "soft", request: Request =
 
     运行中的会议不允许删除（返回 409）。
     """
-    from app.auth_guard import assert_meeting_access
+    from app.auth_guard import assert_can_delete_meeting
     from app.context import get_request_id
     from app.observability.log_bus import log_bus
 
@@ -609,12 +630,9 @@ async def delete_meeting(meeting_id: str, mode: str = "soft", request: Request =
     if meeting is None:
         raise HTTPException(status_code=404, detail="会议不存在")
 
-    # [SECURITY-FIX] 校验所有权（删除需要 owner 权限）
+    # [SECURITY-FIX] 校验删除权限（支持 system admin / 创建者 / team owner / maintainer）
     if request is not None:
-        state = get_state(meeting_id)
-        if state is None:
-            state = await load_or_create(meeting_id, "")
-        assert_meeting_access(request, state, require_owner=True)
+        await assert_can_delete_meeting(request, meeting)
 
     # 运行中的会议不允许删除
     if meeting_id in _running_tasks and not _running_tasks[meeting_id].done():

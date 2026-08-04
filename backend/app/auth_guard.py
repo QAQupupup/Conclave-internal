@@ -6,11 +6,20 @@
 - owner（创建者）：可完全控制自己创建的会议
 - participant（通过 WS 加入的参与者）：可查看会议状态和接收消息，但不能控制/删除
 - 其他用户：拒绝访问
+
+删除权限额外规则（assert_can_delete_meeting）：
+- system_owner / system_admin：可删除任何会议
+- 会议创建者（owner_username 匹配）：可删除自己创建的会议
+- Team owner / maintainer：可删除所属团队内的任何会议
+- Team member / reporter：不可删除（即使是自己创建的，需由 owner/maintainer 管控）
 """
 
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
+
+# 可删除会议的团队角色（权重 >= 70）
+_DELETE_ALLOWED_TEAM_ROLES = frozenset({"owner", "maintainer"})
 
 
 def get_current_user(request: Request) -> tuple[str | None, str, str | None]:
@@ -100,3 +109,65 @@ def filter_meetings_by_owner(request: Request, meetings: list[dict]) -> list[dic
     if is_admin(role) or not username or username == "anonymous":
         return meetings
     return [m for m in meetings if m.get("owner_username") == username or m.get("owner_username") is None]
+
+
+async def assert_can_delete_meeting(
+    request: Request,
+    meeting: dict,
+) -> tuple[str, str]:
+    """校验当前用户是否有权删除指定会议。
+
+    删除权限层级（从高到低）：
+    1. system_owner / system_admin / admin → 始终允许
+    2. 会议创建者（owner_username == username）→ 允许
+    3. Team owner / maintainer（会议所属团队的管理角色）→ 允许
+    4. 其他 → 403 拒绝
+
+    Args:
+        request: FastAPI Request 对象
+        meeting: 会议记录 dict（来自 DAO get_meeting，含 owner_username / tenant_id）
+
+    Returns:
+        (username, uid) 元组
+
+    Raises:
+        HTTPException 401: 未认证
+        HTTPException 403: 无删除权限
+    """
+    uid, username, role = get_current_user(request)
+
+    # 未认证用户
+    if not username or username == "anonymous":
+        raise HTTPException(status_code=401, detail="未认证，请先登录")
+
+    # 1. 系统管理员始终允许
+    if is_admin(role):
+        return (username, uid or "")
+
+    owner_username = meeting.get("owner_username")
+    tenant_id = meeting.get("tenant_id")
+
+    # 2. 会议创建者允许
+    if owner_username is not None and username == owner_username:
+        return (username, uid or "")
+
+    # 3. 旧数据无 owner，允许访问（数据迁移过渡期）
+    if owner_username is None:
+        return (username, uid or "")
+
+    # 4. 检查团队角色（owner / maintainer 可删除团队内任何会议）
+    if tenant_id is not None and uid:
+        try:
+            from app.rbac.policies import get_user_roles_in_team
+
+            team_roles = await get_user_roles_in_team(uid, tenant_id)
+            if any(r in _DELETE_ALLOWED_TEAM_ROLES for r in team_roles):
+                return (username, uid or "")
+        except Exception:
+            pass  # RBAC 查询失败时不阻断，降级到拒绝
+
+    # 5. 拒绝
+    raise HTTPException(
+        status_code=403,
+        detail="无权删除此会议（仅创建者、Team owner 或 maintainer 可删除）",
+    )
