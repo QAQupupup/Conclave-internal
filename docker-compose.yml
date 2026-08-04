@@ -88,8 +88,8 @@ services:
       dockerfile: Dockerfile
     container_name: conclave-dev-backend
     ports:
-      - "8000:8000"
-      - "6080:6080"   # noVNC Web 远程操作端口（CAPTCHA 值守模式）
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:6080:6080"   # noVNC Web 远程操作端口（CAPTCHA 值守模式，仅本机）
     # [v4 安全加固] entrypoint 以 root 启动完成特权操作后降权到 uid 1000
     # 不再在 compose 中写死 user: "1000:1000"，而是由 entrypoint.sh 处理：
     #   1. root: 配置 docker.sock 权限、预拉取镜像、chown 目录
@@ -314,6 +314,10 @@ services:
       # 禁用注册（Agent 场景不需要自助注册，由管理员创建账号）
       - GITEA__service__DISABLE_REGISTRATION=true
       - GITEA__service__REQUIRE_SIGNIN_VIEW=false
+      # [安全加固] 隐藏 Gitea 版本和指纹信息
+      - GITEA__service__SHOW_FOOTER_VERSION=false
+      - GITEA__service__SHOW_FOOTER_TEMPLATE_LOAD_TIME=false
+      - GITEA__server__DISABLE_ROUTER_LOG=true
       # 自动初始化的管理员账号（首次启动时创建）
       - GITEA_ADMIN_NAME=conclave
       - GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD:-conclave_dev}

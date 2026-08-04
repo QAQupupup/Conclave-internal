@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.dao.agent_role_dao import get_agent_roles_by_ids, list_agent_roles
@@ -185,7 +186,9 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
     # 创建会议工作区目录（确保在工作区立即可见）
     try:
         from pathlib import Path as _Path
+
         from app.config import settings as _settings
+
         _ws_dir = _Path(_settings.workspace_root) / meeting_id
         _ws_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -1510,8 +1513,6 @@ async def delete_key(provider: str, name: str = "default"):
 
 # ---- 议题润色 ----
 
-from pydantic import BaseModel, Field
-
 
 class PolishRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
@@ -1520,10 +1521,10 @@ class PolishRequest(BaseModel):
 @router.post("/polish-topic")
 async def polish_topic(req: PolishRequest, request: Request) -> dict[str, str]:
     """使用 LLM 润色议题描述，使其更清晰、更结构化。"""
-    from app.auth_guard import get_current_user
     from app.agents.llm import get_llm
+    from app.auth_guard import get_current_user
 
-    uid, username, _role = get_current_user(request)
+    _uid, _username, _role = get_current_user(request)
 
     text = req.text.strip()
     if len(text) < 3:

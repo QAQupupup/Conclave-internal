@@ -57,7 +57,7 @@ line-length = 120
 extend-exclude = ["scripts", "eval_v2"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S"]
 ignore = [
     "E501",   # line too long (由格式化处理)
     "B008",   # Do not perform function call in argument defaults (FastAPI Depends 需要)
@@ -66,6 +66,15 @@ ignore = [
     "RUF003", # ambiguous-unicode-character-comment
     "RUF009", # Do not perform function call in dataclass defaults (config.py 的 _env() 模式是故意的)
     "UP038",  # Use X | Y in isinstance (该规则已在 ruff 0.7+ 移除，元组写法完全合法)
+    # S 规则初始宽松配置，后续逐步收紧
+    "S101",   # assert 使用 — 测试代码中 assert 是合法的
+    "S104",   # hardcoded-bind-all-interfaces — Docker 容器绑定 0.0.0.0 是有意设计
+    "S105",   # hardcoded-password-string — 默认管理员密码检测是有意逻辑，后续改用安全比较
+    "S108",   # hardcoded-temp-file — 已知 1 处，后续修复
+    "S110",   # try-except-pass — Conclave 中存在有意的异常吞没，后续逐一审查
+    "S311",   # Standard pseudo-random generators — 非安全场景 random 是合法的
+    "S324",   # hashlib-insecure-hash-function — MD5 用于非安全场景(缓存键等)，后续审查
+    "S608",   # hardcoded-sql-expression — 44处 f-string SQL，部分安全(内部常量)部分需修复，后续逐一审查
 ]
 
 [tool.mypy]

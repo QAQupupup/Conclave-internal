@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth import init_auth as init_jwt_auth  # noqa: F401  # 保留供外部引用，实际初始化由 auth 插件完成
 from app.core.exceptions import AppException
@@ -299,11 +301,19 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """构造 FastAPI 应用"""
+    # [安全加固] 通过环境变量控制是否暴露 API 文档（生产环境默认关闭，避免暴露完整 API schema）
+    _docs_url = "/docs" if os.environ.get("CONCLAVE_ENABLE_DOCS", "0") == "1" else None
+    _redoc_url = "/redoc" if os.environ.get("CONCLAVE_ENABLE_DOCS", "0") == "1" else None
+    _openapi_url = "/openapi.json" if os.environ.get("CONCLAVE_ENABLE_DOCS", "0") == "1" else None
+
     app = FastAPI(
         title="Conclave",
         description="会议型多智能体系统后端",
         version="0.3.0",
         lifespan=lifespan,
+        docs_url=_docs_url,
+        redoc_url=_redoc_url,
+        openapi_url=_openapi_url,
     )
 
     # 插件系统：创建全局注册中心，注册内置 CORE 插件
@@ -346,8 +356,6 @@ def create_app() -> FastAPI:
         if request.method in ("POST", "PUT", "PATCH"):
             content_length = request.headers.get("content-length")
             if content_length and int(content_length) > _max_body_size:
-                from fastapi.responses import JSONResponse
-
                 return JSONResponse(
                     status_code=413,
                     content={
@@ -355,6 +363,24 @@ def create_app() -> FastAPI:
                     },
                 )
         return await call_next(request)
+
+    # [安全加固] 指纹隐藏中间件：剥离 Server/X-Powered-By 头，添加基础安全头
+    @app.middleware("http")
+    async def security_headers_middleware(request: Request, call_next):
+        response: Response = await call_next(request)
+        # 剥离可能暴露后端框架/版本的响应头（MutableHeaders 支持 del）
+        for _h in ("server", "x-powered-by", "x-process-time"):
+            if _h in response.headers:
+                del response.headers[_h]
+        # 不覆盖 nginx 层已设置的安全头（nginx 层更权威）；
+        # 但对直连后端（开发模式）确保基础安全头存在
+        if "x-content-type-options" not in response.headers:
+            response.headers["x-content-type-options"] = "nosniff"
+        if "x-frame-options" not in response.headers:
+            response.headers["x-frame-options"] = "DENY"
+        if "referrer-policy" not in response.headers:
+            response.headers["referrer-policy"] = "strict-origin-when-cross-origin"
+        return response
 
     # 请求追踪中间件（auth 中间件由插件 bootstrap 注册）
     setup_trace_middleware(app)
@@ -367,6 +393,37 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_dict(),
+        )
+
+    # [安全加固] 自定义 404 响应格式，消除 FastAPI/Starlette 默认指纹
+    # 默认 404 返回 {"detail":"Not Found"}，是框架最强指纹之一
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):  # type: ignore[unused-argument]
+        _code_map = {
+            404: ("NOT_FOUND", "资源不存在"),
+            405: ("METHOD_NOT_ALLOWED", "请求方法不允许"),
+            413: ("PAYLOAD_TOO_LARGE", "请求体过大"),
+            429: ("RATE_LIMITED", "请求过于频繁"),
+        }
+        code, message = _code_map.get(exc.status_code, ("HTTP_ERROR", f"HTTP {exc.status_code}"))
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"code": code, "message": message, "details": {}}},
+        )
+
+    # [安全加固] 自定义 422 响应格式，消除 FastAPI 默认校验错误指纹
+    # 默认 422 返回 {"detail":[{...}]}，是 FastAPI 框架最强指纹
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):  # type: ignore[unused-argument]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "请求参数验证失败",
+                    "details": {"errors": exc.errors()},
+                }
+            },
         )
 
     # 挂载业务路由（auth 路由由插件注册）
@@ -389,9 +446,19 @@ def create_app() -> FastAPI:
     app.include_router(admin_router.router)
 
     @app.get("/health", tags=["meta"])
-    async def health() -> dict[str, Any]:
-        """健康检查：检查关键依赖可用性"""
+    async def health(request: Request, detail: str = "0") -> dict[str, Any]:
+        """健康检查：检查关键依赖可用性。
+
+        [安全加固] 默认 detail=0（最小响应），仅返回 {"status": "ok"}，不暴露内部架构信息；
+        detail=1（内网）返回完整 checks 详情。nginx 层根据来源 IP 自动注入 detail=1。
+        直连后端 8000 端口时默认安全，不泄露 PG/Redis/Qdrant 等依赖状态。
+        """
         from app.config import settings
+
+        # 外网最小响应模式：不执行依赖检查，仅返回存活状态
+        # 这避免了通过 health 端点探测内部服务架构（PG/Redis/Qdrant/Docker/LLM）
+        if detail == "0":
+            return {"status": "ok"}
 
         checks: dict[str, str] = {}
         _test_mode = os.environ.get("CONCLAVE_TEST_MODE") == "1"

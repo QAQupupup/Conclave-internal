@@ -98,6 +98,69 @@ def test_health(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_health_default_minimal(client):
+    """health 端点默认返回最小响应，不泄露内部架构信息。
+
+    验证：不带 detail 参数时只返回 {"status": "ok"}，不含 checks 详情。
+    """
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    # 默认模式下不应暴露内部依赖状态
+    assert "checks" not in data
+    assert "postgresql" not in data
+    assert "redis" not in data
+
+
+def test_health_detail_1_returns_checks(client):
+    """health 端点 detail=1 返回完整依赖检查信息。
+
+    验证：带 detail=1 时返回 checks 字段，包含依赖状态。
+    """
+    resp = client.get("/health?detail=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] in ("ok", "degraded")
+    # detail=1 模式下应有 checks 字段
+    assert "checks" in data
+
+
+def test_404_custom_format(client):
+    """404 响应使用自定义格式，消除 FastAPI 默认指纹。
+
+    验证：不存在的路径返回 {"error":{"code":"NOT_FOUND",...}}，而非默认 {"detail":"Not Found"}。
+    """
+    resp = client.get("/nonexistent-path-12345")
+    assert resp.status_code == 404
+    data = resp.json()
+    # 应使用自定义 error 格式，而非 FastAPI 默认的 detail 字段
+    assert "error" in data
+    assert data["error"]["code"] == "NOT_FOUND"
+    assert "message" in data["error"]
+    # 不应包含 FastAPI 默认的 detail 字段
+    assert "detail" not in data
+
+
+def test_422_custom_format(client):
+    """422 校验错误使用自定义格式，消除 FastAPI 默认指纹。
+
+    验证：缺少必填字段时返回 {"error":{"code":"VALIDATION_ERROR",...}}，而非默认 {"detail":[...]}。
+    """
+    # POST /meetings 缺少必填的 topic 字段
+    resp = client.post("/meetings", json={})
+    assert resp.status_code == 422
+    data = resp.json()
+    # 应使用自定义 error 格式
+    assert "error" in data
+    assert data["error"]["code"] == "VALIDATION_ERROR"
+    assert "message" in data["error"]
+    # details 中应包含具体校验错误
+    assert "errors" in data["error"]["details"]
+    # 不应包含 FastAPI 默认的 detail 字段
+    assert "detail" not in data
+
+
 def test_full_meeting_flow(client):
     """完整会议：创建 → 上传文档 → run → 断言六阶段、PRD、OpenAPI、事件"""
     # 1. 创建会议

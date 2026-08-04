@@ -183,7 +183,7 @@ async def list_files(path: str = "") -> dict[str, Any]:
         # 会议目录显示名：mtg-xxx → 会议主题；孤立目录显示缩短 ID
         display_name: str | None = None
         if is_dir and child.name.startswith("mtg-"):
-            if child.name in _meeting_topics and _meeting_topics[child.name]:
+            if _meeting_topics.get(child.name):
                 topic = _meeting_topics[child.name].replace("\n", " ").replace("\r", " ").strip()
                 display_name = topic if len(topic) <= 30 else f"{topic[:28]}…"
             else:
