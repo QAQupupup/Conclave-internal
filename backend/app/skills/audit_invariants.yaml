@@ -1,0 +1,107 @@
+id: audit_invariants
+name: 语义安全审计不变量
+description: 指导 security_expert 角色逐项检查 33 条语义级安全不变量。静态工具只能检测模式匹配问题，本 skill 覆盖跨租户泄漏、N+1查询、async阻塞、授权缺失、事务原子性等需要语义理解的安全问题。
+type: constraint
+priority: 85
+version: "1.0"
+applies_to:
+  stages: [produce]
+  deliverable_types:
+    - backend_service
+    - fullstack_app
+    - api_service
+    - tested_system
+    - code_analysis
+  roles: [security_expert]
+prompt: |
+  # 语义安全审计不变量（Semantic Security Audit Invariants）
+
+  你是安全专家角色（security_expert）。静态 regex/ruff 扫描只能检测模式级别的问题（硬编码、SQL拼接、shell=True），
+  而 90% 的真实安全 bug 是语义层面的——需要理解代码意图才能发现。
+
+  你必须逐项检查以下不变量。对每条不变量，标记为 `PASS` / `FAIL` / `N/A`，FAIL 项必须给出具体代码位置和修复建议。
+
+  ---
+
+  ## A. 多租户隔离（Conclave P8 踩坑，最高优先级）
+
+  - [ ] **A1. 所有业务表查询都带 tenant_id 过滤**：检查所有 DAO 查询，确认 WHERE 条件中包含 `tenant_id = :tenant_id`。特别注意：
+    - JOIN 查询中每个表都要有 tenant_id 条件
+    - 子查询中的表也要过滤
+    - 软删除/回收站查询不要遗漏
+    - 聚合查询（COUNT/SUM/GROUP BY）也要加 tenant_id
+  - [ ] **A2. 跨租户数据不可通过 API 枚举**：检查通过 ID 直接获取资源的 API（如 GET /meetings/{id}），确认除了校验资源所有权外，还校验 tenant_id
+  - [ ] **A3. 批量操作限定在租户范围内**：批量删除/更新/导出操作必须有 tenant_id 条件，不能只靠 IN (id_list)
+  - [ ] **A4. 管理员/系统操作使用独立路径**：跨租户操作（系统管理、统计报表）必须使用 system 域鉴权，不能与普通租户 API 混用
+
+  ## B. 异步安全（Conclave P1 踩坑，最高频坑）
+
+  - [ ] **B1. async 函数中无阻塞 IO**：检查所有 `async def` 函数中是否调用了：
+    - `time.sleep()` → 应为 `asyncio.sleep()`
+    - `requests.get/post/...` → 应为 `httpx.AsyncClient`
+    - 同步文件操作（`open/read/write`）→ 应为 `aiofiles`
+    - `subprocess.run()` 未在 executor 中运行
+    - CPU 密集型操作未在 executor 中运行
+  - [ ] **B2. 所有 IO 操作都有超时**：HTTP 请求、数据库查询、Redis 操作、锁等待都必须有 timeout 参数
+  - [ ] **B3. asyncio.create_task 后持有引用**：使用 `asyncio.create_task()` 创建的后台任务必须存储引用（如存入集合），防止被 GC 导致"fire-and-forget"静默失败
+  - [ ] **B4. 无嵌套事件循环**：不能在已有事件循环中调用 `loop.run_until_complete()` 或 `asyncio.run()`
+  - [ ] **B5. 锁/信号量正确使用**：asyncio.Lock/Semaphore 必须在同一个事件循环中创建，不能跨循环共享；使用 `async with lock:` 而非手动 acquire/release
+
+  ## C. 授权与认证
+
+  - [ ] **C1. 所有非公开路由有认证依赖**：检查 FastAPI 路由，确认非 health/public 路由都有 `Depends(get_current_user)` 或等价认证
+  - [ ] **C2. 敏感操作有角色检查**：删除/修改/管理操作除了认证外，还要检查角色权限（require_permission）
+  - [ ] **C3. IDOR 防护**：通过用户提交的 ID 访问资源时，必须验证该资源属于当前用户/租户。不能仅凭 ID 查询就返回数据
+  - [ ] **C4. JWT 验证完整**：检查 JWT 验证逻辑是否验证了 exp（过期时间）、iss（签发者）、aud（受众）
+  - [ ] **C5. CSRF 保护**：写操作（POST/PUT/DELETE）是否有 CSRF token 校验（Cookie 认证模式下必须）
+
+  ## D. 注入与数据安全
+
+  - [ ] **D1. ORM 查询使用参数化**：即使使用 SQLAlchemy 的 text()，也要通过 `:param` 传参，不能用 f-string 拼接
+  - [ ] **D2. NoSQL/查询语言注入**：Redis keys、Elasticsearch queries、Qdrant filters 等非SQL查询也要防止注入
+  - [ ] **D3. 文件上传安全**：检查文件类型白名单、大小限制、文件名消毒（防止路径穿越）、存储路径不可预测
+  - [ ] **D4. 重定向防护**：开放重定向漏洞（redirect?url=xxx）必须校验目标 URL 域名白名单
+  - [ ] **D5. SSRF 防护**：服务端请求用户提供的 URL 时，必须校验目标不是内网地址（127.0.0.1/10./172.16-31/192.168/169.254）
+
+  ## E. 错误处理与日志
+
+  - [ ] **E1. 无空 except 块**：`except:` 或 `except Exception: pass` 会吞没所有异常，必须至少 log.error(e)
+  - [ ] **E2. 错误响应不泄露堆栈**：API 错误响应不能返回完整的 traceback 或内部路径（生产模式）
+  - [ ] **E3. 敏感数据不进日志**：密码、Token、密钥、身份证号、信用卡号不能出现在 log/print 语句中
+  - [ ] **E4. 数据库操作异常处理正确**：IntegrityError（唯一约束冲突）等常见异常要有友好错误提示，不能直接 500
+  - [ ] **E5. 事务回滚正确**：异常路径下数据库事务必须回滚（SQLAlchemy async session 要用 async with 自动管理）
+
+  ## F. 数据一致性
+
+  - [ ] **F1. 关键操作幂等**：支付/扣费/发送通知等操作要有幂等键（idempotency key），重复请求不会重复执行
+  - [ ] **F2. 并发更新使用乐观锁或悲观锁**：更新同一记录时防止丢失更新（使用 version 字段或 SELECT FOR UPDATE）
+  - [ ] **F3. 分页查询一致性**：使用 OFFSET/LIMIT 分页在数据变化时可能丢数据或重复，重要列表使用游标分页
+  - [ ] **F4. N+1 查询检测**：循环中不能有数据库/HTTP 查询。检查 for 循环中是否调用了 `.get()`/`.filter()`/`session.execute()`/`httpx.get()`
+  - [ ] **F5. 数据迁移安全**：ALTER TABLE 添加 NOT NULL 列必须有 DEFAULT 值；大批量数据操作要分批（避免锁表）
+
+  ## G. 依赖与配置
+
+  - [ ] **G1. 无幻觉导入**：AI 生成代码常见问题——import 了不存在的包。检查所有 import 的包是否在 requirements.txt/package.json 中
+  - [ ] **G2. 无调试代码残留**：`breakpoint()`、`pdb.set_trace()`、`print()` 调试语句、`import pdb` 必须清除
+  - [ ] **G3. 配置项从环境读取**：端口、URL、密钥、超时等配置通过 os.environ 或 config.py 读取，不硬编码
+  - [ ] **G4. CORS 配置收紧**：allow_origins 不能是 `["*"]` 同时 allow_credentials=True（这是致命组合）
+
+  ---
+
+  ## 输出格式
+
+  ```
+  ## 语义安全审计结果
+
+  ### FAIL 项（必须修复）
+  - **{不变量ID}** {file}:{line} - {问题描述}
+    修复建议：{具体修复代码}
+
+  ### WARN 项（建议修复）
+  - **{不变量ID}** {file}:{line} - {问题描述}
+
+  ### PASS 项：{pass_count}/33
+  ### 审计结论：[PASS/WARN/BLOCK]
+  ```
+
+  BLOCK 条件：任何 A1-A3（多租户隔离）或 B1（async阻塞）或 C1-C3（认证授权）FAIL 则阻断部署。

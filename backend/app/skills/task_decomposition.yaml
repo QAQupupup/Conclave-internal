@@ -1,0 +1,126 @@
+id: task_decomposition
+name: "任务分解规范（Specify-Plan-Tasks）"
+description: "produce阶段产出物必须遵循specify→plan→tasks三段式分解：明确规格→制定计划→拆解为可执行任务，确保产出结构化、可追踪、可独立验证"
+version: 1
+type: constraint
+priority: 80
+tags: ["tasks", "decomposition", "spec", "plan", "workbreakdown"]
+
+applies_to:
+  stages: ["produce"]
+  deliverable_types: ["prd_openapi", "design_doc", "deployable_service", "tested_system", "code_analysis"]
+  roles: ["product_architect", "engineer"]
+  complexity: ["standard", "full"]
+
+prompt: |
+  # 任务分解三段式规范（Specify → Plan → Tasks）
+
+  所有 standard/full 复杂度的产出，必须在产出物中包含以下三段式分解结构。simple 复杂度可简化为 tasks 一段。
+
+  ## 第一段：Specify（规格明确）
+
+  在生成产出物之前，先在内部明确以下规格（输出到产出物的 `spec` 字段或章节）：
+
+  - **目标（Goal）**：这个产出物解决什么问题？一句话描述，必须具体可验证
+  - **范围（Scope）**：
+    - In-Scope：包含哪些功能/模块/接口（列表形式）
+    - Out-of-Scope：明确不包含什么（防止范围蔓延，必须列出至少 1 条）
+  - **接口契约（Interface Contract）**：
+    - 输入：接收什么数据？格式？来源？
+    - 输出：返回什么数据？格式？给谁用？
+    - 外部交互点：调用哪些外部 API/服务/数据库？
+  - **约束（Constraints）**：
+    - 技术栈约束：必须使用项目已有技术栈（FastAPI/React/PostgreSQL/Redis）
+    - 性能要求：响应时间、并发数、数据量上限
+    - 安全要求：认证、授权、数据隔离
+    - 兼容性要求：浏览器/API 版本/依赖版本
+  - **验收标准（Acceptance Criteria）**：怎么算做完了？必须与 prd_traceability 的 SMART 标准对齐，格式：
+    ```
+    AC-01: GIVEN ... WHEN ... THEN ...
+    AC-02: ...
+    ```
+
+  ## 第二段：Plan（实现计划）
+
+  在 `plan` 字段或章节中列出实现步骤，每个步骤：
+
+  - 有唯一 ID：`TASK-001`、`TASK-002`...（全局递增，不重用）
+  - 有明确的依赖关系：`depends_on: [TASK-001]` 或 `depends_on: []`（无依赖）
+  - 有预计产出物（artifacts）：`artifacts: ["app/routers/auth.py", "tests/test_auth.py"]`（具体文件路径）
+  - 有对应需求 ID：`references: ["REQ-001"]`（溯源到 PRD 的 REQ-xxx，由 prd_traceability skill 要求）
+  - 有明确的完成定义（DoD）：什么条件下认为这个 task 完成了
+  - 按依赖顺序排列，形成可拓扑执行的 DAG（有向无环图）
+  - **禁止循环依赖**：如果发现 TASK-A 依赖 TASK-B 且 TASK-B 依赖 TASK-A，必须重新拆分
+
+  ## 第三段：Tasks（原子任务）
+
+  将 Plan 拆解为可直接执行的原子任务，每个任务满足以下要求：
+
+  ### 任务粒度要求
+  - **单一职责**：一个任务只做一件事（如"创建用户表 ORM 模型"、"实现登录接口"、"编写认证中间件测试"）
+  - **可独立验证**：完成后能通过测试或明确的手动检查确认，不得出现"完成剩余功能"这类模糊任务
+  - **粒度适中**：
+    - 代码类任务：50-150 行代码量
+    - 文档类任务：1-2 个章节
+    - 配置类任务：1 个配置文件的一组相关设置
+    - 测试类任务：对应一个功能模块的测试用例
+  - **可回滚**：单个任务出错能独立回退，不影响其他任务
+
+  ### 任务标注要求
+  每个任务必须标注：
+  - **类型（type）**：
+    - `MOD`：数据模型（ORM 模型、数据库 schema、迁移脚本）
+    - `API`：接口层（路由、请求/响应 schema、中间件、参数校验）
+    - `SVC`：服务层（业务逻辑、算法、外部集成）
+    - `TST`：测试（单元测试、集成测试、测试数据）
+    - `DOC`：文档（README、API 文档、注释）
+    - `CFG`：配置（Dockerfile、docker-compose、环境变量、CI 配置）
+  - **优先级（priority）**：`P0` / `P1` / `P2`
+  - **预计产出文件**：具体到文件路径
+  - **依赖任务**：depends_on 列表
+
+  ### deployable_service 类型的任务分组顺序
+  对于 deployable_service 产出类型，tasks 必须按以下顺序分组：
+
+  1. **项目脚手架（CFG）**：目录结构、依赖声明（requirements.txt/package.json）、配置文件（.env.example、config.py）
+  2. **数据层（MOD）**：ORM 模型、数据库初始化函数、DAO/Repository 层、索引
+  3. **业务逻辑层（SVC）**：核心算法、service 函数、业务规则校验
+  4. **接口层（API）**：路由定义、请求/响应 Pydantic schema、认证中间件、错误处理
+  5. **测试（TST）**：单元测试（对应 MOD/SVC/API）、集成测试、测试 fixture
+  6. **部署配置（CFG+DOC）**：Dockerfile、docker-compose.yml、README.md（启动步骤/配置说明/API 文档）
+
+  ### prd_openapi 类型的任务分组顺序
+  对于 prd_openapi 产出类型，tasks 按以下顺序分组：
+
+  1. **需求梳理（DOC）**：用户故事、功能需求列表、优先级排序
+  2. **API 设计（API）**：端点清单、请求/响应 schema、错误码定义
+  3. **数据模型（MOD）**：实体关系、字段定义、约束
+  4. **非功能需求（DOC）**：性能/安全/可用性要求
+  5. **开放问题（DOC）**：待澄清事项列表
+
+  ## 任务 ID 编码规范
+  - 格式：`<类型前缀>-<三位序号>`
+  - 类型前缀：`MOD`、`API`、`SVC`、`TST`、`DOC`、`CFG`
+  - 序号全局递增，不按类型分组
+  - 示例：`MOD-001`（用户模型）、`API-003`（登录接口）、`TST-002`（认证测试）
+
+  ## 质量检查清单（每个任务集必须满足）
+
+  - [ ] 所有 P0 任务的依赖都指向已完成或 P0 任务
+  - [ ] 不存在循环依赖
+  - [ ] 每个代码任务（MOD/API/SVC）都有对应的 TST 任务
+  - [ ] 没有"完成剩余功能""优化代码""修复bug"这类模糊任务
+  - [ ] artifacts 中的文件路径具体到文件名
+  - [ ] 任务总数控制在 10-30 个（超过 30 个说明需要拆分阶段）
+  - [ ] P0 任务集独立可交付（仅完成 P0 即可端到端跑通核心流程）
+  - [ ] 每个任务有明确的 DoD（完成定义）
+
+  ## 禁止事项
+
+  - **禁止出现模糊任务**：如"完成剩余功能""优化代码""处理边界情况"——必须拆成具体可执行的任务
+  - **禁止任务之间循环依赖**：A 依赖 B 且 B 依赖 A
+  - **禁止 P0 任务依赖 P1/P2 任务**：P0 必须独立可交付
+  - **禁止遗漏测试任务**：每个 MOD/API/SVC 代码任务必须有对应 TST 任务
+  - **禁止任务粒度过大**：超过 200 行代码或超过 3 个文件的任务必须拆分
+  - **禁止跳过 Specify 直接写 Tasks**：必须先有规格和计划，再拆原子任务
+  - **禁止 artifacts 使用通配符或目录名**：必须列出具体文件路径

@@ -1,0 +1,82 @@
+id: prd_traceability
+name: "PRD溯源与质量约束"
+description: "PRD/OpenAPI产出必须遵守的溯源纪律：输入历史追加不修改、SMART成功标准、P0/P1/P2优先级独立可交付、source_quotes证据溯源"
+version: 1
+type: constraint
+priority: 90
+tags: ["prd", "traceability", "requirements", "smart"]
+
+applies_to:
+  stages: ["clarify", "produce"]
+  deliverable_types: ["prd_openapi"]
+  roles: ["product_architect", "clarifier"]
+  complexity: []
+
+prompt: |
+  # PRD 溯源与质量硬约束（priority 90，最高优先级）
+
+  ## 1. 输入历史只追加（Append-Only History）
+  - 澄清阶段收集的所有用户原始需求、约束、假设，必须完整保留在 PRD 的 `constraints` 和 `assumptions` 章节
+  - **禁止删除或改写**已确认的需求条目；需求变更时使用 `supersedes` 字段标记，旧条目标记 `status: "superseded"` 但保留原文
+  - 每条需求必须有唯一 ID（如 `REQ-001`），后续设计/代码通过此 ID 反向溯源
+  - 用户的原始输入（包括口语化表达、错别字、模糊描述）必须原样保存在 source_quotes 中，不得润色或改写
+
+  ## 2. SMART 成功标准（Success Criteria）
+  - 每个 P0 功能必须附带可验证的成功标准，满足 SMART 原则：
+    - **S**pecific（具体）：明确描述行为，不含"应该""适当""良好""优秀"等模糊词
+    - **M**easurable（可度量）：有量化指标（响应时间 < 200ms、支持并发 100 用户、列表加载 < 1s 等）
+    - **A**chievable（可实现）：在给定技术栈和资源约束内可落地，不得要求超出项目能力范围的功能
+    - **R**elevant（相关）：与产品目标直接关联，不做无关功能
+    - **T**estable（可测试）：能通过自动化测试或明确的手动步骤验证
+  - 成功标准格式使用 BDD 风格：
+    ```
+    GIVEN <前置条件>
+    WHEN <用户操作或系统事件>
+    THEN <期望结果，含可观察的量化指标>
+    ```
+  - **禁止**"用户体验良好""性能优秀""界面美观""系统稳定"等不可验证描述
+
+  ## 3. P0/P1/P2 优先级独立可交付
+  - 所有功能需求必须标注优先级：
+    - **P0（MVP 必须）**：缺少则产品核心流程无法跑通，必须在首个版本交付
+    - **P1（重要增强）**：显著影响用户体验或运营效率，但不阻塞核心流程，可在 P0 稳定后交付
+    - **P2（锦上添花）**：优化类、边缘场景、nice-to-have，资源允许时交付
+  - **P0 功能集必须独立可交付**：仅实现所有 P0 功能时，产品能端到端跑通核心用户旅程（从用户输入到最终产出）
+  - P1/P2 功能不得作为 P0 功能的前置依赖
+  - API 端点清单中每个端点必须标注对应优先级 `[P0]`/`[P1]`/`[P2]`
+  - 优先级标注规则：
+    - 认证、核心业务流程、数据持久化为 P0
+    - 高级搜索、批量操作、导出功能为 P1
+    - 主题切换、快捷键、自定义配置为 P2
+
+  ## 4. source_quotes 证据溯源
+  - PRD 中每个关键决策、功能需求和约束必须有 `source_quotes` 字段，引用原始来源：
+    - 用户原话：`{source: "user_input", quote: "用户原文逐字摘录", msg_id: "msg-xxx"}`
+    - 讨论共识：`{source: "intra_team", speaker: "product_architect", quote: "讨论中的关键论点"}`
+    - 跨组协作：`{source: "cross_team", speaker: "engineer", quote: "技术约束说明"}`
+    - 文档引用：`{source: "document", filename: "xxx.pdf", page: 3, quote: "原文摘录"}`
+    - Web 搜索：`{source: "web", url: "https://...", quote: "关键事实"}`
+    - 推断：`{source: "inference", reason: "基于xxx推断，无直接原话支撑"}`
+  - **禁止无来源声明**。如果某条需求是产品架构师基于专业判断提出，必须标注 `source: "inference"` 并说明推断理由
+  - OpenAPI 规范中每个 endpoint 的 `description` 字段末尾必须标注 `[REQ-xxx]` 对应需求 ID
+  - 数据模型中每个字段的 `description` 必须标注对应的需求来源
+
+  ## 5. PRD 输出格式强制要求
+  PRD 文档必须包含以下章节（按顺序）：
+  1. **产品概述**：一句话目标、目标用户、核心价值主张
+  2. **输入历史（Input History）**：按时间顺序列出所有驱动本 PRD 的用户原始输入，只追加不修改
+  3. **用户故事（User Stories）**：按 P0/P1/P2 分组，每个故事含 ID/作为/我想要/以便于/成功标准(GIVEN-WHEN-THEN)/source_quotes
+  4. **功能需求（Functional Requirements）**：按模块分组，每条含 REQ-xxx ID/描述/优先级/依赖关系/对应用户故事
+  5. **API 端点清单（OpenAPI）**：每个端点含方法/路径/描述[REQ-xxx]/优先级/请求响应 schema
+  6. **数据模型**：实体/字段/类型/约束/描述[REQ-xxx]
+  7. **非功能需求**：性能/安全/可用性/兼容性要求（必须可度量）
+  8. **约束与假设（Constraints & Assumptions）**：技术约束、业务约束、已知限制、前提假设
+  9. **开放问题（Open Questions）**：待澄清事项，标注负责人和截止时间
+  10. **变更日志（Change Log）**：扩展模式下记录每次变更，含日期/变更内容/原因/source_quotes
+
+  ## 禁止事项
+  - 禁止出现"待定""TBD""以后补充"等占位符（开放问题除外，必须在 Open Questions 章节列出）
+  - 禁止在 P0 功能中依赖 P1/P2 功能
+  - 禁止成功标准使用不可度量的形容词
+  - 禁止删除或改写 Input History 中的任何条目
+  - 禁止无 source_quotes 的关键决策

@@ -1,0 +1,188 @@
+id: async_safety
+name: 异步代码安全指南
+description: 指导 engineer 和 security_expert 角色审查异步代码安全。Conclave P1踩坑明确指出asyncio事件循环是项目最高频坑。本skill覆盖阻塞调用、任务泄漏、死锁、异常处理、超时保护等异步代码审查要点。
+type: constraint
+priority: 90
+version: "1.0"
+applies_to:
+  stages: [produce, review]
+  deliverable_types:
+    - backend_service
+    - fullstack_app
+    - api_service
+    - tested_system
+    - code_analysis
+  roles: [engineer, security_expert]
+prompt: |
+  # 异步代码安全审查指南（Async Safety）
+
+  Conclave 项目使用 Python 3.12 + asyncio + SQLAlchemy(async) + FastAPI 全异步架构。
+  根据 P1 踩坑记录，asyncio 事件循环问题是本项目最常见的大坑。你在生成或审查代码时必须遵守以下规则。
+
+  ---
+
+  ## 1. 绝对禁止在 async 函数中调用阻塞 IO
+
+  以下阻塞调用会阻塞整个事件循环，导致所有并发请求卡住：
+
+  | 阻塞调用 | 正确替换 |
+  | ---------|--------- |
+  | `time.sleep(x)` | `await asyncio.sleep(x)` |
+  | `requests.get/post/...` | `httpx.AsyncClient().get/post/...` |
+  | `open()/read()/write()`（同步文件IO） | `aiofiles.open()` |
+  | `subprocess.run()` | `await asyncio.create_subprocess_exec()` |
+  | `json.loads/json.dumps`（CPU密集，非IO） | 数据量大时放入 `loop.run_in_executor()` |
+  | `bcrypt.hashpw`（CPU密集） | `await loop.run_in_executor(None, bcrypt.hashpw, pw, salt)` |
+  | `hashlib`（大文件） | 放入 executor 或使用增量 update
+
+  **例外**：以下场景可以使用同步调用：
+  - 启动时初始化（before server starts）
+  - CLI 命令（非请求上下文）
+  - 小数据量的纯 CPU 计算（<1ms）
+  - 明确在 `run_in_executor()` 中执行
+
+  ## 2. 所有 IO 操作必须有超时保护
+
+  ```python
+  # 错误：无超时，可能无限挂起
+  result = await session.execute(query)
+  response = await client.get(url)
+
+  # 正确：添加超时
+  result = await asyncio.wait_for(session.execute(query), timeout=10)
+  response = await client.get(url, timeout=30)
+  ```
+
+  超时阈值参考：
+  - 数据库查询：默认 10s，复杂查询 30s
+  - 外部 HTTP 请求：默认 30s
+  - 锁等待：最长 60s
+  - LLM 调用：按模型配置，通常 120s
+
+  ## 3. asyncio.create_task 必须持有引用
+
+  ```python
+  # 错误：fire-and-forget，任务可能被 GC 静默取消
+  asyncio.create_task(background_job())
+
+  # 正确：存储引用
+  _background_tasks: set[asyncio.Task] = set()
+  task = asyncio.create_task(background_job())
+  _background_tasks.add(task)
+  task.add_done_callback(_background_tasks.discard)
+  ```
+
+  ## 4. 异常必须被正确处理
+
+  ```python
+  # 错误：未处理异常，task 抛出后被 event loop 吞掉（仅打 warning）
+  task = asyncio.create_task(background_job())
+
+  # 正确：在 task 内部 try/except
+  async def background_job():
+      try:
+          await do_work()
+      except Exception as e:
+          logger.error(f"Background job failed: {e}", exc_info=True)
+  ```
+
+  ## 5. 禁止嵌套事件循环
+
+  ```python
+  # 错误：在已有事件循环中调用 run/run_until_complete
+  loop.run_until_complete(coro)
+  asyncio.run(coro)
+
+  # 正确：在 async 函数中直接 await
+  result = await coro
+  ```
+
+  注意：Jupyter Notebook 和某些测试环境可能有嵌套循环问题，但生产代码绝对禁止。
+
+  ## 6. 锁和同步原语的正确使用
+
+  ```python
+  # 错误：手动 acquire/release，异常时死锁
+  await lock.acquire()
+  await do_something()  # 如果这里抛异常，锁永远不释放
+  lock.release()
+
+  # 正确：使用 async with
+  async with lock:
+      await do_something()
+  ```
+
+  - asyncio.Lock/Semaphore 不能跨事件循环共享
+  - 不要在持有锁期间 await 长时间操作（会阻塞其他等待者）
+  - 信号量用于限制并发数（如外部 API 调用限流）
+
+  ## 7. 数据库会话（session）管理
+
+  ```python
+  # 正确：使用 async with 自动管理 session 生命周期
+  async with async_session_factory() as session:
+      async with session.begin():  # 自动 commit/rollback
+          result = await session.execute(query)
+          # 异常时自动 rollback
+  ```
+
+  - session 不能在多个请求之间共享（每个请求独立 session）
+  - 必须使用 `session.begin()` 或手动 commit/rollback
+  - 查询结果在 session 关闭后不能访问（lazy loading 会失败）
+
+  ## 8. 异步生成器和资源清理
+
+  ```python
+  # 正确：异步上下文管理器确保资源释放
+  async with httpx.AsyncClient() as client:
+      response = await client.get(url)
+  # client 自动关闭
+
+  # 流式响应必须正确关闭
+  async with client.stream("GET", url) as response:
+      async for chunk in response.aiter_bytes():
+          await process(chunk)
+  ```
+
+  ## 9. asyncio.gather 的 return_exceptions
+
+  ```python
+  # 错误：一个任务失败导致所有任务取消
+  results = await asyncio.gather(task1, task2, task3)
+
+  # 正确：根据场景决定是否 return_exceptions
+  results = await asyncio.gather(task1, task2, task3, return_exceptions=True)
+  for i, result in enumerate(results):
+      if isinstance(result, Exception):
+          logger.error(f"Task {i} failed: {result}")
+  ```
+
+  ## 10. FastAPI 依赖注入中的 async
+
+  - FastAPI 自动处理 async def 和普通 def 的区别
+  - async def 依赖中不能有阻塞 IO（同规则1）
+  - 同步依赖（普通 def）FastAPI 会自动放入线程池执行
+  - Database session 依赖必须是 async generator：
+
+  ```python
+  async def get_db():
+      async with async_session_factory() as session:
+          yield session
+  ```
+
+  ---
+
+  ## 审查检查清单
+
+  在审查 async Python 代码时，逐项检查：
+
+  - [ ] 所有 `async def` 中没有同步阻塞 IO 调用？
+  - [ ] 所有网络/数据库/锁操作有 timeout？
+  - [ ] create_task 有引用持有和异常处理？
+  - [ ] 没有嵌套事件循环调用？
+  - [ ] 锁使用 async with 而非手动 acquire/release？
+  - [ ] 数据库 session 使用 async with 管理？
+  - [ ] async with 用于所有异步资源（client/session/lock/stream）？
+  - [ ] gather 使用 return_exceptions=True（当需要部分失败时）？
+  - [ ] FastAPI 依赖正确使用 async generator？
+  - [ ] 没有在循环中进行独立的数据库/HTTP 查询（N+1 问题）？
