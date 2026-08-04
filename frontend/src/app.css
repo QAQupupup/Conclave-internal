@@ -61,7 +61,9 @@
   --color-confidence-low: var(--color-danger);
 
   /* === 字体 === */
-  --font-sans: "Inter", -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Inter 仅用于纯英文数字场景，中文正文使用系统无衬线（Noto Sans SC/PingFang SC） */
+  --font-sans: -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-sans-numeric: "Inter", -apple-system, "Segoe UI", sans-serif;
   --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace;
 
@@ -117,10 +119,11 @@
 
   /* === z-index 层级 === */
   --z-base: 0;
-  --z-dropdown: 100;
   --z-sticky: 200;
   --z-tooltip: 300;
   --z-modal: 1000;
+  /* Select/DropdownMenu 的 Portal 弹出层，需高于 Dialog(modal) 以支持在弹窗内使用 */
+  --z-dropdown: 1050;
   --z-toast: 1100;
 }
 

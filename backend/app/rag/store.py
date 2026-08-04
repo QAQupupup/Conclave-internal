@@ -88,12 +88,30 @@ class SiliconFlowEmbedding:
         return self._client
 
     def _resolve_config(self) -> tuple[str, str, str]:
-        """解析当前生效的 (base_url, api_key, model)。"""
+        """解析当前生效的 (base_url, api_key, model)。
+
+        优先级：租户级覆盖 > 系统配置(DB) > 全局默认（环境变量）
+        """
+        # 系统配置层（admin 通过 UI 配置，优先于环境变量默认）
+        sys_base, sys_key, sys_model = self._base_url, self._api_key, self._model
+        try:
+            from app.services.config_service import get_cached_system_settings
+
+            sys_cfg = get_cached_system_settings()
+            if sys_cfg.get("embed_api_key"):
+                sys_key = sys_cfg["embed_api_key"]
+            if sys_cfg.get("embed_base_url"):
+                sys_base = sys_cfg["embed_base_url"]
+            if sys_cfg.get("embed_model"):
+                sys_model = sys_cfg["embed_model"]
+        except Exception:
+            pass
+
         from app.tenants.context import get_tenant_id
         from app.tenants.settings_override import resolve_embed_config
 
         tid = get_tenant_id()
-        return resolve_embed_config(tid, self._base_url, self._api_key, self._model)
+        return resolve_embed_config(tid, sys_base, sys_key, sys_model)
 
     async def aclose(self) -> None:
         if self._client is not None:
@@ -237,11 +255,30 @@ class SiliconFlowReranker:
         return self._client
 
     def _resolve_config(self) -> tuple[str, str, str]:
+        """解析当前生效的 (base_url, api_key, model)。
+
+        优先级：租户级覆盖 > 系统配置(DB) > 全局默认（环境变量）
+        """
+        # 系统配置层（admin 通过 UI 配置，优先于环境变量默认）
+        sys_base, sys_key, sys_model = self._base_url, self._api_key, self._model
+        try:
+            from app.services.config_service import get_cached_system_settings
+
+            sys_cfg = get_cached_system_settings()
+            if sys_cfg.get("rerank_api_key"):
+                sys_key = sys_cfg["rerank_api_key"]
+            if sys_cfg.get("rerank_base_url"):
+                sys_base = sys_cfg["rerank_base_url"]
+            if sys_cfg.get("rerank_model"):
+                sys_model = sys_cfg["rerank_model"]
+        except Exception:
+            pass
+
         from app.tenants.context import get_tenant_id
         from app.tenants.settings_override import resolve_rerank_config
 
         tid = get_tenant_id()
-        return resolve_rerank_config(tid, self._base_url, self._api_key, self._model)
+        return resolve_rerank_config(tid, sys_base, sys_key, sys_model)
 
     async def aclose(self) -> None:
         if self._client is not None:
