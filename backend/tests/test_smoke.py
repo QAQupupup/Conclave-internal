@@ -566,3 +566,198 @@ def test_loan_defer_without_charter(client):
     loan_msgs = [m for m in state.injected_messages if m.get("signal") == "loan"]
     assert len(loan_msgs) >= 1
     assert loan_msgs[0]["verdict"] == "defer"
+
+
+# ---------- 改造四：删除功能 + 级联删除 + 权限测试 ----------
+
+
+def test_workspace_delete_file(client):
+    """工作区：删除单个文件"""
+    resp = client.post("/meetings", json={"topic": "文件删除测试"})
+    meeting_id = resp.json()["meeting_id"]
+
+    # 写入文件
+    resp = client.post(
+        "/workspace/files",
+        json={"path": f"{meeting_id}/test_delete.py", "content": "print('hello')"},
+    )
+    assert resp.status_code == 200
+
+    # 删除文件
+    resp = client.delete(f"/workspace/files/{meeting_id}/test_delete.py")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["deleted"] is True
+    assert data["cascade"] is False
+
+
+def test_workspace_cascade_delete_directory(client):
+    """工作区：级联删除非空目录（cascade=true）"""
+    resp = client.post("/meetings", json={"topic": "级联删除测试"})
+    meeting_id = resp.json()["meeting_id"]
+
+    # 在会议目录下创建多个文件
+    for fname in ("a.py", "b.py", "sub/c.py"):
+        resp = client.post(
+            "/workspace/files",
+            json={"path": f"{meeting_id}/src/{fname}", "content": "# test"},
+        )
+        assert resp.status_code == 200
+
+    # 不带 cascade 删除非空目录应失败
+    resp = client.delete(f"/workspace/files/{meeting_id}/src")
+    assert resp.status_code == 400
+
+    # 带 cascade=true 删除非空目录应成功
+    resp = client.delete(f"/workspace/files/{meeting_id}/src?cascade=true")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["deleted"] is True
+    assert data["cascade"] is True
+
+    # 验证目录已不存在
+    resp = client.get(f"/workspace/files?path={meeting_id}/src")
+    assert resp.status_code == 404
+
+
+def test_meeting_soft_delete(client):
+    """会议软删除：标记 deleted，保留数据"""
+    resp = client.post("/meetings", json={"topic": "软删除测试"})
+    meeting_id = resp.json()["meeting_id"]
+
+    # 软删除
+    resp = client.delete(f"/meetings/{meeting_id}?mode=soft")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["deleted"] is True
+    assert data["mode"] == "soft"
+
+    # 软删除后默认列表不可见
+    resp = client.get("/meetings")
+    meeting_ids = [m["meeting_id"] for m in resp.json()["meetings"]]
+    assert meeting_id not in meeting_ids
+
+    # 但 include_deleted=true 可见
+    resp = client.get("/meetings?include_deleted=true")
+    meeting_ids = [m["meeting_id"] for m in resp.json()["meetings"]]
+    assert meeting_id in meeting_ids
+
+
+def test_meeting_hard_delete(client):
+    """会议硬删除：永久删除"""
+    resp = client.post("/meetings", json={"topic": "硬删除测试"})
+    meeting_id = resp.json()["meeting_id"]
+
+    # 硬删除
+    resp = client.delete(f"/meetings/{meeting_id}?mode=hard")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["deleted"] is True
+    assert data["mode"] == "hard"
+
+    # 硬删除后 include_deleted 也不可见
+    resp = client.get("/meetings?include_deleted=true")
+    meeting_ids = [m["meeting_id"] for m in resp.json()["meetings"]]
+    assert meeting_id not in meeting_ids
+
+
+def test_meeting_delete_not_found(client):
+    """删除不存在的会议返回 404"""
+    resp = client.delete("/meetings/nonexistent?mode=soft")
+    assert resp.status_code == 404
+
+
+def test_batch_delete_meetings(client):
+    """批量删除会议"""
+    ids = []
+    for topic in ("批量删除A", "批量删除B", "批量删除C"):
+        resp = client.post("/meetings", json={"topic": topic})
+        ids.append(resp.json()["meeting_id"])
+
+    # 批量软删除
+    resp = client.post("/meetings/batch-delete", json={"meeting_ids": ids, "mode": "soft"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "soft"
+    assert len(data["deleted"]) == 3
+    assert len(data["failed"]) == 0
+
+
+def test_batch_delete_with_nonexistent(client):
+    """批量删除包含不存在的会议：失败的计入 failed"""
+    resp = client.post("/meetings", json={"topic": "存在的会议"})
+    real_id = resp.json()["meeting_id"]
+
+    resp = client.post(
+        "/meetings/batch-delete",
+        json={"meeting_ids": [real_id, "nonexistent-1"], "mode": "soft"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert real_id in data["deleted"]
+    assert "nonexistent-1" in data["failed"]
+
+
+def test_assert_can_delete_meeting_admin():
+    """assert_can_delete_meeting: 系统管理员始终允许"""
+
+    class _MockRequest:
+        state = type("S", (), {"auth_user": {"uid": "1", "username": "admin", "role": "system_admin"}})()
+
+    import asyncio
+
+    from app.auth_guard import assert_can_delete_meeting
+
+    meeting = {"owner_username": "someone_else", "tenant_id": 1}
+    username, uid = asyncio.run(assert_can_delete_meeting(_MockRequest(), meeting))
+    assert username == "admin"
+    assert uid == "1"
+
+
+def test_assert_can_delete_meeting_owner():
+    """assert_can_delete_meeting: 会议创建者允许删除"""
+
+    class _MockRequest:
+        state = type("S", (), {"auth_user": {"uid": "2", "username": "alice", "role": "user"}})()
+
+    import asyncio
+
+    from app.auth_guard import assert_can_delete_meeting
+
+    meeting = {"owner_username": "alice", "tenant_id": 1}
+    username, _ = asyncio.run(assert_can_delete_meeting(_MockRequest(), meeting))
+    assert username == "alice"
+
+
+def test_assert_can_delete_meeting_unauthorized():
+    """assert_can_delete_meeting: 无权限用户被拒绝（403）"""
+    from fastapi import HTTPException
+
+    class _MockRequest:
+        state = type("S", (), {"auth_user": {"uid": "3", "username": "bob", "role": "user"}})()
+
+    import asyncio
+
+    from app.auth_guard import assert_can_delete_meeting
+
+    meeting = {"owner_username": "alice", "tenant_id": None}
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(assert_can_delete_meeting(_MockRequest(), meeting))
+    assert exc_info.value.status_code == 403
+
+
+def test_assert_can_delete_meeting_unauthenticated():
+    """assert_can_delete_meeting: 未认证用户被拒绝（401）"""
+    from fastapi import HTTPException
+
+    class _MockRequest:
+        state = type("S", (), {"auth_user": None})()
+
+    import asyncio
+
+    from app.auth_guard import assert_can_delete_meeting
+
+    meeting = {"owner_username": "alice", "tenant_id": 1}
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(assert_can_delete_meeting(_MockRequest(), meeting))
+    assert exc_info.value.status_code == 401
