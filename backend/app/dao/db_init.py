@@ -177,6 +177,70 @@ async def init_db() -> None:
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS raw_content TEXT",
         "CREATE INDEX IF NOT EXISTS idx_documents_space ON documents(space_id)",
         "CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)",
+        # ── GraphRAG-lite 数据底座（知识图谱 + 实体 + 文档关系）──
+        """
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            id TEXT PRIMARY KEY,
+            tenant_id INTEGER,
+            meeting_id TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'claim',
+            source_id TEXT NOT NULL,
+            target_type TEXT NOT NULL DEFAULT 'claim',
+            target_id TEXT NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT 'relates_to',
+            weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+            evidence_id TEXT,
+            note TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_graph_edges_meeting ON graph_edges(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_graph_edges_tenant ON graph_edges(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_graph_edges_relation ON graph_edges(relation_type)",
+        """
+        CREATE TABLE IF NOT EXISTS entities (
+            id TEXT PRIMARY KEY,
+            tenant_id INTEGER,
+            meeting_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            name_norm TEXT NOT NULL,
+            entity_type TEXT NOT NULL DEFAULT 'concept',
+            mention_count INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_entities_meeting ON entities(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_entities_tenant ON entities(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_entities_name_norm ON entities(name_norm)",
+        """
+        CREATE TABLE IF NOT EXISTS chunk_entities (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER,
+            meeting_id TEXT NOT NULL,
+            doc_id TEXT NOT NULL,
+            chunk_id TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            salience DOUBLE PRECISION NOT NULL DEFAULT 0.5
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_chunk_entities_chunk ON chunk_entities(chunk_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chunk_entities_entity ON chunk_entities(entity_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chunk_entities_tenant ON chunk_entities(tenant_id)",
+        """
+        CREATE TABLE IF NOT EXISTS document_relations (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER,
+            src_doc_id TEXT NOT NULL,
+            dst_doc_id TEXT NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT 'similar',
+            score DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            created_by TEXT NOT NULL DEFAULT 'pipeline',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_doc_relations_src ON document_relations(src_doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_doc_relations_dst ON document_relations(dst_doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_doc_relations_tenant ON document_relations(tenant_id)",
     ]
     async with async_session_factory() as session:
         for stmt in ddl_statements:

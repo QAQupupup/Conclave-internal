@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -183,6 +183,23 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
         payload=state.snapshot(),
         owner_username=username,
     )
+    # [临近话题] 议题向量落库（创建时即写入，供其他会议创建时推荐 / 完成后聚类）
+    try:
+        from app.rag.topic_index import get_topic_index
+        from app.tenants.context import get_tenant_id
+
+        tid = get_tenant_id()
+        await get_topic_index().upsert(
+            meeting_id=meeting_id,
+            tenant_id=tid,
+            topic=req.topic,
+            status="running",
+            deliverable_type=state.deliverable_type,
+            summary="",
+            tags=getattr(req, "tags", None) or [],
+        )
+    except Exception as e:
+        log_bus.warning("议题向量写入失败（忽略，不阻塞创建）: %s", str(e)[:150])
     # 发布创建事件
     # 创建会议工作区目录（确保在工作区立即可见）
     try:
@@ -213,6 +230,50 @@ async def list_tags() -> dict[str, Any]:
     """列出所有标签及其使用次数"""
     tags = await list_all_tags()
     return {"tags": tags, "count": len(tags)}
+
+
+@router.get("/related")
+async def suggest_related_meetings(
+    request: Request,
+    topic: str = Query(default="", description="当前输入的议题文本，用于检索相似历史会议"),
+    limit: int = Query(default=5, ge=1, le=20),
+) -> dict[str, Any]:
+    """创建会议时的临近话题推荐：根据议题文本检索语义相似的历史会议。
+
+    返回的会议可被勾选后填充 reference_meeting_ids（复用现有参考上下文全链路）。
+    """
+    from app.rag.topic_index import get_topic_index
+    from app.tenants.context import get_tenant_id
+
+    if not topic.strip():
+        return {"meetings": []}
+    tid = get_tenant_id()
+    try:
+        results = await get_topic_index().search(topic, tid, top_k=limit)
+    except Exception:
+        results = []
+    # 只返回已完成（done）的会议作为可信参考
+    results = [r for r in results if r.get("status") == "done"]
+    return {"meetings": results}
+
+
+@router.get("/{meeting_id}/related")
+async def related_meetings_for(
+    meeting_id: str,
+    request: Request,
+    limit: int = Query(default=5, ge=1, le=20),
+) -> dict[str, Any]:
+    """某会议完成后的相似历史会议（基于议题向量，排除自身）。"""
+    from app.tenants.context import get_tenant_id
+
+    tid = get_tenant_id()
+    try:
+        from app.services.knowledge_graph import get_related_meetings
+
+        results = await get_related_meetings(meeting_id, tid, top_k=limit)
+    except Exception:
+        results = []
+    return {"meetings": results}
 
 
 @router.post("/batch-delete")

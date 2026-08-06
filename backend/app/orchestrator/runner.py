@@ -26,6 +26,7 @@ from app.orchestrator.instant import (
 )
 from app.orchestrator.manager import MeetingManager
 from app.orchestrator.nodes import _inc_loop_count, _let_borrowed_agents_speak, decide_next_stage
+from app.services.knowledge_graph import materialize_meeting_knowledge
 from conclave_core.state import STAGE_ORDER, is_terminal, should_pause  # noqa: F401 (STAGE_ORDER kept for fallback)
 
 from .workflow_templates import get_stage_sequence
@@ -782,6 +783,8 @@ class Runner:
                         )
                         state.status = MeetingStatus.DONE
                         state.completed_at = datetime.now(timezone.utc)
+                        # [GraphRAG-lite] 会议 DONE：物化冲突/证据图谱边 + 议题向量 + 惰性实体抽取
+                        await materialize_meeting_knowledge(state)
                         log_bus.info(
                             f"质量未达标但 auto_iterate=False，设置终态 DONE（需人工确认）: "
                             f"score={state.quality_score}, iterations={state.iteration_count}",
@@ -794,6 +797,8 @@ class Runner:
                         #   2. should_iterate=True but iteration_count >= max_iterations（迭代上限）
                         state.status = MeetingStatus.DONE
                         state.completed_at = datetime.now(timezone.utc)
+                        # [GraphRAG-lite] 会议 DONE：物化冲突/证据图谱边 + 议题向量 + 惰性实体抽取
+                        await materialize_meeting_knowledge(state)
                         log_bus.info(
                             f"质量门禁通过/迭代结束，设置终态 DONE: "
                             f"score={state.quality_score}, iterations={state.iteration_count}",

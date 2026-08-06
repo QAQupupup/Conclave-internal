@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from app.db.engine import async_session_factory
 from app.rbac.enforcer import SYSTEM_DOMAIN
+from app.services.knowledge_graph import get_materialized_graph
 
 logger = logging.getLogger(__name__)
 
@@ -243,5 +244,17 @@ async def get_graph(
                     "relates_to",
                     weight=0.2,
                 )
+
+    # 6. [GraphRAG-lite] 合并物化语义边（conflicts→contradicts、evidence→supports）
+    #    仅在有租户上下文时读取，避免跨租户泄露。seen_nodes/seen_edges 自动去重。
+    if tenant_id is not None or is_system_admin:
+        try:
+            mat_nodes, mat_edges = await get_materialized_graph(meeting_id, tenant_id)
+            for n in mat_nodes:
+                add_node(n["id"], n["type"], n["label"], size=n.get("size", 14), meta=n.get("meta"))
+            for e in mat_edges:
+                add_edge(e["source"], e["target"], e["type"], weight=e.get("weight", 1.0))
+        except Exception as e:
+            logger.debug("Graph: 物化边读取跳过: %s", e)
 
     return {"nodes": nodes, "edges": edges}

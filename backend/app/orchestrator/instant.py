@@ -24,6 +24,7 @@ from app.orchestrator.system_prompt import (
     build_classification_prompt,
     parse_classification_result,
 )
+from app.services.knowledge_graph import materialize_meeting_knowledge
 from conclave_core.state import Stage
 
 logger = get_logger("orchestrator.instant")
@@ -219,6 +220,8 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
             state.stage = Stage.PRODUCE
             state.completed_at = datetime.now(timezone.utc)
             state.flow_plan = FLOW_INSTANT
+            # [GraphRAG-lite] 即时模式 DONE：议题向量落库（无冲突/证据，图谱边为空）
+            await materialize_meeting_knowledge(state)
 
             # 发布事件通知前端
             await bus.publish(

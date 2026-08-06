@@ -10,6 +10,12 @@ from app.db.models.agent_role import AgentRoleModel
 from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
 from app.db.models.document import DocumentModel
 from app.db.models.event import EventModel
+from app.db.models.graph import (
+    ChunkEntityModel,
+    DocumentRelationModel,
+    EntityModel,
+    GraphEdgeModel,
+)
 from app.db.models.meeting import MeetingAuxModel, MeetingModel, MeetingTagModel
 from app.db.models.memory import FeatureMemoryModel, ProfileMemoryModel, RawMemoryModel
 from app.db.models.message import MessageModel
@@ -23,12 +29,16 @@ __all__ = [
     "AgentRoleModel",
     "ApiKeyModel",
     "AuditLogModel",
+    "ChunkEntityModel",
     "CostRecordModel",
     "DockerHostModel",
     "DockerHostSecretModel",
     "DocumentModel",
+    "DocumentRelationModel",
+    "EntityModel",
     "EventModel",
     "FeatureMemoryModel",
+    "GraphEdgeModel",
     "MeetingAuxModel",
     "MeetingModel",
     "MeetingTagModel",
