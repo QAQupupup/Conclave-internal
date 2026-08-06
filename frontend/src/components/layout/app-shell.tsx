@@ -7,7 +7,7 @@ import { CommandPalette } from './command-palette';
 
 export function AppShell() {
   const location = useLocation();
-  const isInMeeting = location.pathname.startsWith('/explore/');
+  const isInMeeting = location.pathname.startsWith('/meeting/');
   return (
     <div className="flex h-screen flex-col bg-bg-primary text-text-primary">
       <TopBar />

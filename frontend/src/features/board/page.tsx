@@ -192,7 +192,7 @@ export default function BoardPage() {
 
       toast({ title: '讨论已启动', description: truncate(topic, 50) });
       resetForm();
-      navigate(`/explore/${meetingId}`);
+      navigate(`/meeting/${meetingId}`);
     } catch (e: any) {
       toast({ title: '启动失败', description: e.message, variant: 'error' });
     } finally {
@@ -457,7 +457,7 @@ export default function BoardPage() {
           </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {activeMeetings.map((m) => (
-              <MeetingCard key={m.id} meeting={m} onClick={() => navigate(`/explore/${m.id}`)} onDelete={(e) => handleDelete(e, m.id, m.title)} />
+              <MeetingCard key={m.id} meeting={m} onClick={() => navigate(`/meeting/${m.id}`)} onDelete={(e) => handleDelete(e, m.id, m.title)} />
             ))}
           </div>
         </section>
@@ -480,7 +480,7 @@ export default function BoardPage() {
               <MeetingRow
                 key={m.id}
                 meeting={m}
-                onClick={() => navigate(`/explore/${m.id}`)}
+                onClick={() => navigate(`/meeting/${m.id}`)}
                 onDelete={(e) => handleDelete(e, m.id, m.title)}
               />
             ))}

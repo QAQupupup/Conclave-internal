@@ -115,7 +115,7 @@ export function TopBar() {
   const openCommandPalette = useUIStore((s) => s.openCommandPalette);
   const navigate = useNavigate();
   const location = useLocation();
-  const isInMeeting = location.pathname.startsWith('/explore/');
+  const isInMeeting = location.pathname.startsWith('/meeting/');
   const { theme, setTheme } = useTheme();
   const meeting = useMeetingStore();
   const user = useAuthStore((s) => s.user);

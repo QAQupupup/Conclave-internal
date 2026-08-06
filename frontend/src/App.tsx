@@ -8,12 +8,10 @@ import { ErrorBoundary } from './components/error-boundary';
 import { TooltipProvider } from '@radix-ui/react-tooltip';
 import { useAuthStore } from './stores';
 
-const LandingPage = React.lazy(() => import('./features/landing/page'));
 const LoginPage = React.lazy(() => import('./features/login/page'));
 const SetupPage = React.lazy(() => import('./features/setup/page'));
 const BoardPage = React.lazy(() => import('./features/board/page'));
 const ExplorePage = React.lazy(() => import('./features/explore/page'));
-const ExploreListPage = React.lazy(() => import('./features/explore/list-page'));
 const WorkspacePage = React.lazy(() => import('./features/workspace/page'));
 const GraphPage = React.lazy(() => import('./features/graph/page'));
 const ReportsPage = React.lazy(() => import('./features/reports/page'));
@@ -148,13 +146,15 @@ function App() {
               {/* Public routes */}
               <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
               <Route path="/setup" element={<SetupPage />} />
-              <Route path="/landing" element={<LandingPage />} />
 
               {/* Protected routes */}
               <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
                 <Route path="/" element={<Navigate to="/board" replace />} />
                 <Route path="/board" element={<BoardPage />} />
-                <Route path="/explore" element={<ExploreListPage />} />
+                {/* 会议视图：/meeting 为正式路由；/explore 旧链接重定向不失效 */}
+                <Route path="/meeting/:id" element={<ExplorePage />} />
+                <Route path="/explore" element={<Navigate to="/board" replace />} />
+                {/* 旧 /explore/:id 链接兼容：复用同一会议视图组件 */}
                 <Route path="/explore/:id" element={<ExplorePage />} />
                 <Route path="/workspace" element={<WorkspacePage />} />
                 <Route path="/workspace/*" element={<WorkspacePage />} />

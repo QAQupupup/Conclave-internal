@@ -2,7 +2,6 @@ import * as React from 'react';
 import { NavLink } from 'react-router';
 import {
   LayoutDashboardIcon,
-  SparklesIcon,
   FolderIcon,
   NetworkIcon,
   FileTextIcon,
@@ -26,7 +25,6 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { to: '/board', icon: LayoutDashboardIcon, label: '看板' },
-  { to: '/explore', icon: SparklesIcon, label: '探索' },
   { to: '/workspace', icon: FolderIcon, label: '工作区' },
   { to: '/teams', icon: BuildingIcon, label: '团队' },
   { to: '/graph', icon: NetworkIcon, label: '图谱' },

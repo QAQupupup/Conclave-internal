@@ -7,7 +7,6 @@ import { useUIStore } from '@/stores';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
   LayoutDashboard,
-  Sparkles,
   FolderKanban,
   Network,
   FileText,
@@ -53,7 +52,7 @@ export function CommandPalette() {
     try {
       const res = await startMeeting.mutateAsync({ topic });
       toast({ title: '已启动讨论', description: topic });
-      navigate(`/explore/${res.meeting_id}`);
+      navigate(`/meeting/${res.meeting_id}`);
     } catch (e: any) {
       toast({ title: '启动失败', description: e.message, variant: 'error' });
     }
@@ -98,9 +97,6 @@ export function CommandPalette() {
             <CommandPrimitive.Group heading="导航">
               <CommandItem onSelect={() => runCommand(() => navigate('/board'))} icon={<LayoutDashboard className="h-4 w-4" />}>
                 看板
-              </CommandItem>
-              <CommandItem onSelect={() => runCommand(() => navigate('/explore'))} icon={<Sparkles className="h-4 w-4" />}>
-                探索
               </CommandItem>
               <CommandItem onSelect={() => runCommand(() => navigate('/workspace'))} icon={<FolderKanban className="h-4 w-4" />}>
                 工作区
