@@ -383,11 +383,13 @@ class InMemoryVectorStore:
     支持原文缓存和惰性展开：存文档原文，按 char_range 按需展开上下文。
     """
 
-    def __init__(self, embedding: Embedding | None = None) -> None:
+    def __init__(self, embedding: Embedding | None = None, meeting_id: str = "") -> None:
         self._embedding = embedding or _build_embedding()
         self._store: dict[str, tuple[Chunk, list[float]]] = {}
         # 原文缓存：doc_id → 原始文本，用于惰性展开
         self._raw_texts: dict[str, str] = {}
+        # 会议作用域：写入时给 chunk 盖章，Qdrant 检索时作为过滤条件
+        self._meeting_id = meeting_id
 
     async def add_chunks(self, chunks: list[Chunk]) -> None:
         """切块入库并计算向量（批量嵌入提升效率）"""
@@ -399,6 +401,7 @@ class InMemoryVectorStore:
         _tid = get_tenant_id()
         for chunk in chunks:
             chunk.tenant_id = _tid
+            chunk.meeting_id = self._meeting_id
         texts = [c.text for c in chunks]
         vecs = await self._embedding.embed_batch(texts)
         for chunk, vec in zip(chunks, vecs, strict=False):
@@ -556,12 +559,22 @@ class QdrantVectorStore(InMemoryVectorStore):
     Qdrant 不可用时自动降级到内存（_build_store 已处理）。
     """
 
-    def __init__(self, url: str, embedding: Embedding | None = None) -> None:
-        super().__init__(embedding)
+    def __init__(self, url: str, embedding: Embedding | None = None, meeting_id: str = "") -> None:
+        super().__init__(embedding, meeting_id=meeting_id)
         self._url = url.rstrip("/")
         self._collection = os.environ.get("CONCLAVE_QDRANT_COLLECTION", "conclave_chunks")
         self._client = None
         self._initialized = False
+
+    @staticmethod
+    def _point_id(chunk_id: str) -> int:
+        """确定性点 ID：sha256(chunk_id) 前 8 字节转 int63。
+
+        旧实现用内置 hash()，Python 字符串 hash 按进程随机加盐（PYTHONHASHSEED），
+        重启后同一 chunk 生成不同点 ID，Qdrant 中会累积重复点。
+        """
+        digest = hashlib.sha256(chunk_id.encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], "big") & (2**63 - 1)
 
     def _get_client(self):
         if self._client is None:
@@ -603,6 +616,13 @@ class QdrantVectorStore(InMemoryVectorStore):
                 field_name="tenant_id",
                 field_schema=PayloadSchemaType.INTEGER,
             )
+        # meeting_id 过滤索引（会议作用域隔离）
+        with contextlib.suppress(Exception):
+            client.create_payload_index(
+                collection_name=self._collection,
+                field_name="meeting_id",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
 
     async def add_chunks(self, chunks: list[Chunk]) -> None:
         """入库：计算向量 + 写 Qdrant"""
@@ -617,6 +637,7 @@ class QdrantVectorStore(InMemoryVectorStore):
         _tid = get_tenant_id()
         for chunk in chunks:
             chunk.tenant_id = _tid
+            chunk.meeting_id = self._meeting_id
         texts = [c.text for c in chunks]
         vecs = await self._embedding.embed_batch(texts)
         client = self._get_client()
@@ -629,7 +650,7 @@ class QdrantVectorStore(InMemoryVectorStore):
             # Qdrant 存 payload
             points.append(
                 PointStruct(
-                    id=hash(chunk.chunk_id) % (2**63),
+                    id=self._point_id(chunk.chunk_id),
                     vector=vec,
                     payload=chunk.to_dict(),
                 )
@@ -655,28 +676,44 @@ class QdrantVectorStore(InMemoryVectorStore):
             from app.tenants.context import get_tenant_id, is_system_tenant
 
             if is_system_tenant():
-                query_filter = None  # 系统租户可检索全部
-            else:
-                _tid = get_tenant_id()
-                if _tid is not None:
+                # 系统租户跨租户可见，但仍限本会议作用域（共享 collection）
+                if self._meeting_id:
                     query_filter = Filter(
                         must=[
                             FieldCondition(
-                                key="tenant_id",
-                                match=MatchValue(value=_tid),
+                                key="meeting_id",
+                                match=MatchValue(value=self._meeting_id),
                             )
                         ]
                     )
                 else:
+                    query_filter = None
+            else:
+                _tid = get_tenant_id()
+                if _tid is not None:
+                    must_conditions = [
+                        FieldCondition(
+                            key="tenant_id",
+                            match=MatchValue(value=_tid),
+                        )
+                    ]
+                else:
                     # fail-closed：未设置租户上下文，用不可能匹配的值
-                    query_filter = Filter(
-                        must=[
-                            FieldCondition(
-                                key="tenant_id",
-                                match=MatchValue(value=-1),
-                            )
-                        ]
+                    must_conditions = [
+                        FieldCondition(
+                            key="tenant_id",
+                            match=MatchValue(value=-1),
+                        )
+                    ]
+                # 会议作用域过滤：共享 collection 下防止跨会议串扰
+                if self._meeting_id:
+                    must_conditions.append(
+                        FieldCondition(
+                            key="meeting_id",
+                            match=MatchValue(value=self._meeting_id),
+                        )
                     )
+                query_filter = Filter(must=must_conditions)
 
             # 1. Qdrant 向量检索
             results = client.search(
@@ -699,6 +736,7 @@ class QdrantVectorStore(InMemoryVectorStore):
                     prev_id=payload.get("prev_id", ""),
                     next_id=payload.get("next_id", ""),
                     tenant_id=payload.get("tenant_id"),
+                    meeting_id=payload.get("meeting_id", ""),
                 )
                 vec_candidates.append((chunk, r.score or 0.0))
 
@@ -759,10 +797,31 @@ class QdrantVectorStore(InMemoryVectorStore):
             return await super().search(query, top_k)
 
     def clear(self) -> None:
-        """清空：删 Qdrant collection + 内存"""
+        """清空本会议作用域的点 + 内存。
+
+        共享 collection 下禁止直接 delete_collection（会误删其他会议/租户的向量），
+        有 meeting_id 时按过滤条件删点；无 meeting_id（测试场景）才允许删整个 collection。
+        """
         try:
             client = self._get_client()
-            client.delete_collection(collection_name=self._collection)
+            if self._meeting_id:
+                from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
+
+                client.delete(
+                    collection_name=self._collection,
+                    points_selector=FilterSelector(
+                        filter=Filter(
+                            must=[
+                                FieldCondition(
+                                    key="meeting_id",
+                                    match=MatchValue(value=self._meeting_id),
+                                )
+                            ]
+                        )
+                    ),
+                )
+            else:
+                client.delete_collection(collection_name=self._collection)
         except Exception:
             pass
         self._store.clear()
@@ -803,7 +862,7 @@ def get_store(meeting_id: str) -> InMemoryVectorStore:
     已全部异步化，Qdrant collection 在首次 IO 时 lazy 初始化。
     """
     if meeting_id not in _stores:
-        _stores[meeting_id] = _build_store()
+        _stores[meeting_id] = _build_store(meeting_id)
     return _stores[meeting_id]
 
 
@@ -827,7 +886,7 @@ def clear_store(meeting_id: str) -> bool:
     return False
 
 
-def _build_store() -> InMemoryVectorStore:
+def _build_store(meeting_id: str = "") -> InMemoryVectorStore:
     """按配置构建向量库：优先 Qdrant，回退内存。
 
     注意：此处不再同步调用 ensure_collection（阻塞事件循环），
@@ -836,12 +895,12 @@ def _build_store() -> InMemoryVectorStore:
     qdrant_url = getattr(settings, "qdrant_url", "") or ""
     if qdrant_url:
         try:
-            store = QdrantVectorStore(url=qdrant_url, embedding=_build_embedding())
+            store = QdrantVectorStore(url=qdrant_url, embedding=_build_embedding(), meeting_id=meeting_id)
             # 不在同步构造阶段调用 ensure_collection，留给首次 async 操作 lazy init
             return store
         except Exception:
             pass  # Qdrant 不可用时回退内存
-    return InMemoryVectorStore(embedding=_build_embedding())
+    return InMemoryVectorStore(embedding=_build_embedding(), meeting_id=meeting_id)
 
 
 # Reranker 进程级单例

@@ -34,6 +34,9 @@ class Chunk:
     relations: list[dict[str, str]] = field(default_factory=list)
     # [Wave 1] 多租户隔离：chunk 所属租户 ID，用于 Qdrant payload 过滤
     tenant_id: int | None = None
+    # 会议作用域：chunk 归属的会议 ID，Qdrant 共享 collection 下的隔离边界
+    # （所有会议共用 conclave_chunks，仅靠 tenant_id 过滤会跨会议串扰）
+    meeting_id: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +53,7 @@ class Chunk:
             "claims": self.claims,
             "relations": self.relations,
             "tenant_id": self.tenant_id,
+            "meeting_id": self.meeting_id,
         }
 
     def summary(self, max_len: int = 200) -> str:
