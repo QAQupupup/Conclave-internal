@@ -560,6 +560,24 @@ async def inject_meeting_reference(meeting_id: str, req: InjectReferenceRequest)
     }
 
 
+@router.get("/{meeting_id}/messages")
+async def get_meeting_messages(meeting_id: str, limit: int = 500, before: int | None = None) -> dict[str, Any]:
+    """获取会议历史发言（REST 兜底）
+
+    前端历史消息恢复的唯一可靠途径：WebSocket 建连失败或页面刷新后，
+    通过本接口拉取已持久化的发言记录，避免"会议页只剩空态"。
+
+    - limit：返回条数上限（默认 500，按创建时间升序取前 N 条）
+    - before：预留分页参数（暂不支持，占位兼容前端调用）
+    """
+    from app.dao.message_dao import list_messages
+
+    rows = await list_messages(meeting_id)
+    if limit and len(rows) > limit:
+        rows = rows[:limit]
+    return {"messages": rows, "count": len(rows)}
+
+
 @router.get("")
 async def list_meetings_with_status(
     q: str | None = None,

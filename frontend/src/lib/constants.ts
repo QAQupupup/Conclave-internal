@@ -55,3 +55,44 @@ export const ROLE_AVATAR_COLORS: Record<string, string> = {
 export const MESSAGE_STREAM_DEBOUNCE_MS = 16; // ~60fps
 export const VIRTUAL_OVERSCAN = 8;
 export const MESSAGE_FETCH_PAGE_SIZE = 50;
+
+// ---------------------------------------------------------------------------
+// 会议创建选项（与 backend/app/schemas/meeting.py CreateMeetingRequest 对齐）
+// ---------------------------------------------------------------------------
+
+export interface CreateOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+/** 产出物类型：与 produce 阶段 deliverable_type 分发一致 */
+export const DELIVERABLE_TYPES: CreateOption[] = [
+  { value: 'prd_openapi', label: 'PRD + OpenAPI', description: '产品需求文档与接口定义' },
+  { value: 'design_doc', label: '设计文档', description: '技术方案与架构设计' },
+  { value: 'research_report', label: '研究报告', description: '调研分析与结论' },
+  { value: 'business_report', label: '商业报告', description: '市场与商业分析' },
+  { value: 'comprehensive', label: '综合报告', description: '多维度综合分析' },
+  { value: 'code_analysis', label: '代码分析', description: '沙箱执行的代码级分析' },
+  { value: 'tested_system', label: '可运行系统', description: '生成并测试可运行系统' },
+  { value: 'deployable_service', label: '可部署服务', description: '生成并部署完整服务' },
+];
+
+/** 执行模式：与 orchestrator flow_plan 一致 */
+export const FLOW_PLANS: CreateOption[] = [
+  { value: 'standard', label: '标准六阶段', description: '澄清→辩论→证据→仲裁→交付' },
+  { value: 'instant', label: '即时回答', description: '跳过辩论，快速给出结论' },
+  { value: 'plan', label: '先计划后执行', description: '先生成执行计划再逐步执行' },
+];
+
+/** 辩论深度 */
+export const DEBATE_DEPTHS: CreateOption[] = [
+  { value: 'light', label: '轻量', description: '单轮观点，速度快' },
+  { value: 'standard', label: '标准', description: '观点碰撞与冲突检验' },
+  { value: 'deep', label: '深度', description: '多轮辩论与充分质证' },
+];
+
+/** 会议附件允许的文件类型（与 backend/app/routers/documents.py 对齐） */
+export const UPLOAD_ACCEPT = '.md,.markdown,.txt';
+export const UPLOAD_MAX_SIZE_MB = 10;
+export const UPLOAD_ALLOWED_EXTENSIONS = ['.md', '.markdown', '.txt'];

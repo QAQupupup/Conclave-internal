@@ -1571,7 +1571,7 @@ export const mockApi = {
       },
       storage: {
         max_upload_size_mb: 50,
-        allowed_extensions: ['.pdf', '.md', '.txt', '.docx', '.xlsx', '.csv', '.png', '.jpg'],
+        allowed_extensions: ['.md', '.markdown', '.txt'], // MR-3：与后端实际上传能力一致，禁止宣称未实现的格式
         object_storage: { provider: 'local', bucket: 'conclave-uploads' },
       },
     };

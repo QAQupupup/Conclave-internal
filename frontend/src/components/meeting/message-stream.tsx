@@ -7,8 +7,9 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { wsClient } from '@/lib/ws';
 import { useEventSource } from '@/hooks/use-realtime';
+import { useMeetingMessages } from '@/hooks/use-meetings';
 import { useParams } from 'react-router';
-import { SendIcon, ArrowDownIcon, GitBranchIcon } from '@/components/ui/svg-icons';
+import { SendIcon, ArrowDownIcon, SpinnerIcon } from '@/components/ui/svg-icons';
 import { toast } from '@/hooks/use-toast';
 
 // 合并消息和工具调用为统一的时间线条目
@@ -36,6 +37,19 @@ export function MessageStream({ className }: { className?: string }) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   useEventSource(meetingId);
+
+  // REST 历史消息兜底：WS 快照缺失/刷新页面时，从已持久化的发言记录恢复。
+  // addMessage 按 id 去重，与 WS 推送和平共存。
+  const { data: historyMessages, isLoading: historyLoading } = useMeetingMessages(meetingId, { limit: 500 });
+  const seededRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!meetingId || !historyMessages || seededRef.current === meetingId) return;
+    seededRef.current = meetingId;
+    const store = useMeetingStore.getState();
+    for (const msg of historyMessages) {
+      store.addMessage(msg);
+    }
+  }, [meetingId, historyMessages]);
 
   // 合并消息和工具调用到时间线（按时间排序）
   const timeline = React.useMemo<TimelineItem[]>(() => {
@@ -96,6 +110,13 @@ export function MessageStream({ className }: { className?: string }) {
       setInput('');
       shouldAutoScroll.current = true;
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    } else {
+      // WS 未连接时明确提示，保留输入内容，避免"以为已发送"
+      toast({
+        title: '发送失败',
+        description: '实时连接已断开，消息未送达。请等待连接恢复后重试。',
+        variant: 'error',
+      });
     }
     setTimeout(() => setIsSending(false), 300);
   };
@@ -112,14 +133,6 @@ export function MessageStream({ className }: { className?: string }) {
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 128) + 'px';
-  };
-
-  const handleBranch = (messageId: string) => {
-    // 分支探索：在原型中展示提示，实际实现需后端支持
-    toast({
-      title: '分支探索',
-      description: '从该消息创建探索分支的功能开发中，敬请期待',
-    });
   };
 
   const handleTakeover = (callId: string, toolName: string) => {
@@ -146,8 +159,17 @@ export function MessageStream({ className }: { className?: string }) {
         className="flex-1 overflow-y-auto py-2"
       >
         {timeline.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-xs text-text-tertiary">
-            {status === 'running' ? '等待 Agent 开始讨论...' : '暂无消息'}
+          <div className="flex h-full items-center justify-center gap-2 text-xs text-text-tertiary">
+            {historyLoading ? (
+              <>
+                <SpinnerIcon size={12} className="animate-spin" />
+                加载历史消息...
+              </>
+            ) : status === 'running' ? (
+              '等待 Agent 开始讨论...'
+            ) : (
+              '暂无消息'
+            )}
           </div>
         ) : (
           <div className="divide-y divide-border-soft/50">
@@ -159,7 +181,6 @@ export function MessageStream({ className }: { className?: string }) {
                     message={item.data}
                     isSelected={selectedMessageId === item.data.id}
                     onSelect={selectMessage}
-                    onBranch={handleBranch}
                   />
                 );
               }

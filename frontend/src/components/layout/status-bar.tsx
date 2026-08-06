@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useWSStore, useMeetingStore } from '@/stores';
 import { cn, formatDurationFromStart } from '@/lib/utils';
 import { STAGE_LABELS } from '@/lib/constants';
+import { isDemoMode } from '@/lib/mock-data';
 import type { StageId } from '@/types';
 
 const STAGE_ORDER: StageId[] = [
@@ -21,9 +22,19 @@ export function StatusBar() {
 
   const isConnected = wsStatus === 'connected';
   const isInMeeting = !!meeting.currentMeetingId;
+  // MR-2：演示模式必须有持久可见标识，避免用户把 mock 数据当成真实数据
+  const demo = isDemoMode();
 
   return (
     <footer className="flex h-6 flex-shrink-0 items-center gap-3 border-t border-border-soft bg-bg-primary px-4 text-[11px] text-text-tertiary">
+      {demo && (
+        <>
+          <span className="rounded-sm bg-warning/15 px-1.5 py-px font-medium text-warning">
+            演示数据
+          </span>
+          <div className="h-3 w-px bg-border-soft" />
+        </>
+      )}
       <div className="flex items-center gap-1.5">
         <span
           className={cn(

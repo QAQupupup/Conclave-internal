@@ -692,6 +692,50 @@ export const api = {
     }),
   delete: <T>(path: string, params?: Record<string, string | boolean | number>) =>
     request<T>(`${path}${buildQueryString(params)}`, { method: 'DELETE' }),
+  /** Authenticated multipart file upload with progress (XMLHttpRequest, fetch 不支持上传进度) */
+  upload: <T = unknown>(
+    path: string,
+    file: File,
+    options: { fieldName?: string; onProgress?: (percent: number) => void } = {},
+  ): Promise<T> => {
+    const { fieldName = 'file', onProgress } = options;
+    return new Promise<T>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}${path}`);
+      xhr.withCredentials = true;
+
+      const token = useAuthStore.getState().token;
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      const csrf = getCsrfToken();
+      if (csrf) xhr.setRequestHeader('X-CSRF-Token', csrf);
+
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+
+      xhr.onload = () => {
+        let body: unknown = null;
+        try {
+          body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch {
+          /* 非 JSON 响应 */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as T);
+        } else {
+          reject(new ApiError(extractErrorMessage(body, xhr.status), xhr.status, body));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError('网络错误，上传失败', 0));
+      xhr.ontimeout = () => reject(new ApiError('上传超时，请稍后重试', 0));
+
+      const form = new FormData();
+      form.append(fieldName, file, file.name);
+      xhr.send(form);
+    });
+  },
   /** Authenticated file download - triggers browser download */
   download: async (path: string, filename?: string) => {
     if (isDemoMode()) {

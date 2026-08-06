@@ -12,7 +12,8 @@ interface MessageBubbleProps {
   message: MeetingMessage;
   isSelected: boolean;
   onSelect: (id: string | null) => void;
-  onBranch: (id: string) => void;
+  /** 可选：传入才显示分支按钮（MR-3：功能未实现时不展示入口） */
+  onBranch?: (id: string) => void;
 }
 
 export function MessageBubble({ message, isSelected, onSelect, onBranch }: MessageBubbleProps) {
@@ -109,7 +110,7 @@ export function MessageBubble({ message, isSelected, onSelect, onBranch }: Messa
             <ToolCallCard key={tc.id} toolCall={tc} onTakeover={handleTakeover} />
           ))}
 
-          {isHovered && !isThinking && message.content && (
+          {isHovered && !isThinking && message.content && onBranch && (
             <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
               <button
                 onClick={(e) => {

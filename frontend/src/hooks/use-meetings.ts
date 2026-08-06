@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { extractArray } from '@/lib/extract';
-import type { Meeting, PaginatedResponse, MeetingStatus, StageId, AgentRole, AgentState } from '@/types';
+import { ROLE_LABELS } from '@/lib/constants';
+import type { Meeting, PaginatedResponse, MeetingStatus, StageId, AgentRole, AgentState, MeetingMessage } from '@/types';
 
 // === Backend Response Types ===
 interface BackendMeetingItem {
@@ -161,6 +162,18 @@ export function useMeeting(id: string | null | undefined) {
   });
 }
 
+/** 后端消息行（messages 表） */
+interface BackendMessageRow {
+  id: string;
+  meeting_id: string;
+  agent_role: string;
+  stage: string;
+  content: string;
+  claim_refs?: unknown[];
+  evidence_refs?: unknown[];
+  created_at: string;
+}
+
 export function useMeetingMessages(
   id: string | null | undefined,
   params: { before?: number; limit?: number } = {}
@@ -168,27 +181,105 @@ export function useMeetingMessages(
   return useQuery({
     queryKey: [...meetingKeys.messages(id!), params],
     queryFn: async () => {
-      const res = await api.get<{ messages: any[] } | any[]>(
-        `/meetings/${id}/messages?limit=${params.limit ?? 50}${
+      const res = await api.get<{ messages: BackendMessageRow[] } | BackendMessageRow[]>(
+        `/meetings/${id}/messages?limit=${params.limit ?? 500}${
           params.before ? `&before=${params.before}` : ''
         }`
       );
       // 标准化：兼容 { messages: [...] } 和裸数组 [...] 两种格式
-      if (Array.isArray(res)) return res;
-      if (res && typeof res === 'object' && Array.isArray(res.messages)) return res.messages;
-      return [];
+      const rows: BackendMessageRow[] = Array.isArray(res)
+        ? res
+        : res && typeof res === 'object' && Array.isArray(res.messages)
+          ? res.messages
+          : [];
+      // 映射为前端 MeetingMessage 结构（REST 历史兜底）
+      return rows.map((r) => ({
+        id: r.id,
+        meeting_id: r.meeting_id,
+        agentRole: r.agent_role as MeetingMessage['agentRole'],
+        agentName: ROLE_LABELS[r.agent_role] || r.agent_role,
+        stage: r.stage as MeetingMessage['stage'],
+        content: r.content,
+        timestamp: r.created_at ? Date.parse(r.created_at) : Date.now(),
+        isUser: r.agent_role === 'user',
+      }));
     },
     enabled: !!id,
   });
 }
 
 // === Mutations ===
+/** 创建会议参数：与 backend CreateMeetingRequest 对齐 */
+export interface StartMeetingPayload {
+  topic: string;
+  deliverable_type?: string;
+  flow_plan?: string;
+  debate_depth?: string;
+  role_ids?: string[];
+  reference_meeting_ids?: string[];
+  model?: string;
+  auto_iterate?: boolean;
+  max_iterations?: number;
+}
+
 export function useStartMeeting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { topic: string; agents?: string[]; deliverable_type?: string }) =>
+    mutationFn: (data: StartMeetingPayload) =>
       api.post<{ meeting_id: string }>('/meetings', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: meetingKeys.lists() }),
+  });
+}
+
+/** 启动会议运行（POST /meetings 只创建不运行，必须显式调用 /run） */
+export function useRunMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/meetings/${id}/run`),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: meetingKeys.lists() });
+      qc.invalidateQueries({ queryKey: meetingKeys.detail(id) });
+    },
+  });
+}
+
+/** 上传会议参考文档（真实 multipart，含进度回调） */
+export function useUploadMeetingDocument() {
+  return useMutation({
+    mutationFn: ({
+      meetingId,
+      file,
+      onProgress,
+    }: {
+      meetingId: string;
+      file: File;
+      onProgress?: (percent: number) => void;
+    }) =>
+      api.upload<{ document_id?: string; chunk_count?: number }>(
+        `/meetings/${meetingId}/documents`,
+        file,
+        { onProgress },
+      ),
+  });
+}
+
+/** 角色列表（创建会议时预选角色用） */
+export interface AgentRoleItem {
+  id: string;
+  display_name: string;
+  perspective?: string;
+  is_active?: boolean;
+  is_builtin?: boolean;
+}
+
+export function useAgentRoles() {
+  return useQuery({
+    queryKey: ['agent-roles', 'list'],
+    queryFn: async () => {
+      const res = await api.get<{ roles: AgentRoleItem[] }>('/agent-roles');
+      return Array.isArray(res?.roles) ? res.roles : [];
+    },
+    staleTime: 60_000,
   });
 }
 

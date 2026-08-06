@@ -1,16 +1,30 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router';
-import { useMeetings, useStartMeeting, useDeleteMeeting } from '@/hooks/use-meetings';
+import {
+  useMeetings,
+  useStartMeeting,
+  useRunMeeting,
+  useDeleteMeeting,
+  useUploadMeetingDocument,
+  useAgentRoles,
+} from '@/hooks/use-meetings';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import type { MeetingStatus } from '@/types';
-import { STAGE_LABELS } from '@/lib/constants';
+import {
+  STAGE_LABELS,
+  DELIVERABLE_TYPES,
+  FLOW_PLANS,
+  DEBATE_DEPTHS,
+  UPLOAD_ACCEPT,
+  UPLOAD_MAX_SIZE_MB,
+  UPLOAD_ALLOWED_EXTENSIONS,
+} from '@/lib/constants';
 import { toast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
 import {
@@ -25,6 +39,9 @@ import {
   TrashIcon,
   WandIcon,
   UndoIcon,
+  UploadIcon,
+  FileIcon,
+  XIcon,
 } from '@/components/ui/svg-icons';
 
 const STATUS_CONFIG: Record<MeetingStatus, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive'; color: string }> = {
@@ -36,6 +53,9 @@ const STATUS_CONFIG: Record<MeetingStatus, { label: string; variant: 'default' |
   aborted: { label: '已终止', variant: 'secondary', color: 'text-text-tertiary' },
 };
 
+/** 启动流程的阶段提示（创建→上传→运行） */
+type LaunchPhase = 'idle' | 'creating' | 'uploading' | 'running';
+
 export default function BoardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -46,12 +66,26 @@ export default function BoardPage() {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const { data: meetingsData, isLoading } = useMeetings({ pageSize: 50 });
   const startMeeting = useStartMeeting();
+  const runMeeting = useRunMeeting();
+  const uploadDoc = useUploadMeetingDocument();
   const deleteMeeting = useDeleteMeeting();
   const [deleteTarget, setDeleteTarget] = React.useState<{ id: string; title: string } | null>(null);
+
+  // 创建配置
+  const [deliverableType, setDeliverableType] = React.useState('prd_openapi');
+  const [flowPlan, setFlowPlan] = React.useState('standard');
+  const [debateDepth, setDebateDepth] = React.useState('standard');
+  const [selectedRoleIds, setSelectedRoleIds] = React.useState<string[]>([]);
+  const [files, setFiles] = React.useState<File[]>([]);
+  const [launchPhase, setLaunchPhase] = React.useState<LaunchPhase>('idle');
+  const [uploadProgress, setUploadProgress] = React.useState<{ name: string; percent: number } | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { data: roles } = useAgentRoles();
 
   const meetings = Array.isArray(meetingsData?.items) ? meetingsData.items : [];
   const activeMeetings = meetings.filter((m) => m.status === 'running' || m.status === 'paused');
   const pastMeetings = meetings.filter((m) => m.status === 'done' || m.status === 'error' || m.status === 'aborted' || m.status === 'pending');
+  const isLaunching = launchPhase !== 'idle';
 
   // Auto-resize textarea
   React.useEffect(() => {
@@ -85,20 +119,96 @@ export default function BoardPage() {
     setTopicHistory((h) => h.slice(0, -1));
   };
 
+  const toggleRole = (id: string) => {
+    setSelectedRoleIds((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
+  };
+
+  const handleFilesSelected = (selected: FileList | null) => {
+    if (!selected) return;
+    const next: File[] = [];
+    for (const f of Array.from(selected)) {
+      const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase();
+      if (!UPLOAD_ALLOWED_EXTENSIONS.includes(ext)) {
+        toast({ title: '不支持的文件类型', description: `${f.name}：当前仅支持 ${UPLOAD_ALLOWED_EXTENSIONS.join(' ')}`, variant: 'error' });
+        continue;
+      }
+      if (f.size > UPLOAD_MAX_SIZE_MB * 1024 * 1024) {
+        toast({ title: '文件过大', description: `${f.name} 超过 ${UPLOAD_MAX_SIZE_MB}MB 上限`, variant: 'error' });
+        continue;
+      }
+      next.push(f);
+    }
+    setFiles((prev) => [...prev, ...next]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const resetForm = () => {
+    setTopic('');
+    setTopicHistory([]);
+    setFiles([]);
+    setSelectedRoleIds([]);
+    setDeliverableType('prd_openapi');
+    setFlowPlan('standard');
+    setDebateDepth('standard');
+    setShowNewForm(false);
+  };
+
   const handleStart = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!topic.trim()) return;
+    if (!topic.trim() || isLaunching) return;
     try {
-      const res = await startMeeting.mutateAsync({ topic: topic.trim() });
+      // 1. 创建会议（POST /meetings 只创建不运行）
+      setLaunchPhase('creating');
+      const res = await startMeeting.mutateAsync({
+        topic: topic.trim(),
+        deliverable_type: deliverableType,
+        flow_plan: flowPlan,
+        debate_depth: debateDepth,
+        role_ids: selectedRoleIds,
+      });
+      const meetingId = res.meeting_id;
+
+      // 2. 上传参考文档（逐个，带进度）
+      if (files.length > 0) {
+        setLaunchPhase('uploading');
+        for (const f of files) {
+          setUploadProgress({ name: f.name, percent: 0 });
+          try {
+            await uploadDoc.mutateAsync({
+              meetingId,
+              file: f,
+              onProgress: (percent) => setUploadProgress({ name: f.name, percent }),
+            });
+          } catch (err: any) {
+            toast({ title: '附件上传失败', description: `${f.name}：${err.message}`, variant: 'error' });
+          }
+        }
+        setUploadProgress(null);
+      }
+
+      // 3. 启动运行
+      setLaunchPhase('running');
+      await runMeeting.mutateAsync(meetingId);
+
       toast({ title: '讨论已启动', description: truncate(topic, 50) });
-      setTopic('');
-      setTopicHistory([]);
-      setShowNewForm(false);
-      navigate(`/explore/${res.meeting_id}`);
+      resetForm();
+      navigate(`/explore/${meetingId}`);
     } catch (e: any) {
       toast({ title: '启动失败', description: e.message, variant: 'error' });
+    } finally {
+      setLaunchPhase('idle');
+      setUploadProgress(null);
     }
   };
+
+  const launchButtonText =
+    launchPhase === 'creating'
+      ? '创建会议...'
+      : launchPhase === 'uploading'
+        ? `上传附件 ${uploadProgress?.percent ?? 0}%`
+        : launchPhase === 'running'
+          ? '启动运行...'
+          : '开始讨论';
 
   const handleDelete = (e: React.MouseEvent, meetingId: string, title: string) => {
     e.stopPropagation();
@@ -142,6 +252,7 @@ export default function BoardPage() {
                 placeholder="描述你想讨论的议题或问题...&#10;例如：分析微服务架构中服务间通信的最佳实践，对比 gRPC 和 REST 的适用场景"
                 className="min-h-[96px] text-[15px] leading-relaxed"
                 autoFocus
+                disabled={isLaunching}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
@@ -149,14 +260,138 @@ export default function BoardPage() {
                   }
                 }}
               />
-              <div className="mt-3 flex items-center justify-between">
+
+              {/* 会议配置 */}
+              <div className="mt-3 grid gap-3 border-t border-border-soft pt-3 sm:grid-cols-3">
+                <OptionSelect
+                  label="产出类型"
+                  value={deliverableType}
+                  onChange={setDeliverableType}
+                  options={DELIVERABLE_TYPES}
+                  disabled={isLaunching}
+                />
+                <OptionSelect
+                  label="执行模式"
+                  value={flowPlan}
+                  onChange={setFlowPlan}
+                  options={FLOW_PLANS}
+                  disabled={isLaunching}
+                />
+                <OptionSelect
+                  label="辩论深度"
+                  value={debateDepth}
+                  onChange={setDebateDepth}
+                  options={DEBATE_DEPTHS}
+                  disabled={isLaunching}
+                />
+              </div>
+
+              {/* 角色选择 */}
+              <div className="mt-3 border-t border-border-soft pt-3">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-xs font-medium text-text-secondary">参与角色</span>
+                  <span className="text-[11px] text-text-tertiary">
+                    {selectedRoleIds.length === 0 ? '不选择则自动配置全部活跃角色' : `已选 ${selectedRoleIds.length} 个`}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(roles ?? []).map((r) => {
+                    const active = selectedRoleIds.includes(r.id);
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        disabled={isLaunching}
+                        onClick={() => toggleRole(r.id)}
+                        title={r.perspective}
+                        className={cn(
+                          'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                          active
+                            ? 'border-brand-500/50 bg-brand-soft text-brand-600'
+                            : 'border-border-default bg-bg-secondary text-text-secondary hover:border-brand-500/30',
+                        )}
+                      >
+                        {r.display_name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 附件 */}
+              <div className="mt-3 border-t border-border-soft pt-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-text-secondary">参考文档</span>
+                  <span className="text-[11px] text-text-tertiary">
+                    支持 {UPLOAD_ALLOWED_EXTENSIONS.join(' ')}，单个 ≤ {UPLOAD_MAX_SIZE_MB}MB
+                  </span>
+                </div>
+                {files.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {files.map((f, i) => (
+                      <li
+                        key={`${f.name}-${i}`}
+                        className="flex items-center gap-2 rounded-md border border-border-soft bg-bg-secondary px-2.5 py-1.5 text-xs"
+                      >
+                        <FileIcon size={12} className="flex-shrink-0 text-text-tertiary" />
+                        <span className="min-w-0 flex-1 truncate text-text-primary">{f.name}</span>
+                        <span className="flex-shrink-0 text-text-tertiary">{(f.size / 1024).toFixed(0)}KB</span>
+                        <button
+                          type="button"
+                          disabled={isLaunching}
+                          onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="flex-shrink-0 rounded p-0.5 text-text-tertiary hover:text-danger"
+                          aria-label={`移除 ${f.name}`}
+                        >
+                          <XIcon size={12} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={UPLOAD_ACCEPT}
+                  className="hidden"
+                  onChange={(e) => handleFilesSelected(e.target.files)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isLaunching}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-2 h-7 gap-1 text-xs"
+                >
+                  <UploadIcon size={12} />
+                  添加文档
+                </Button>
+                {uploadProgress && (
+                  <div className="mt-2">
+                    <div className="mb-1 flex justify-between text-[11px] text-text-tertiary">
+                      <span className="truncate">{uploadProgress.name}</span>
+                      <span>{uploadProgress.percent}%</span>
+                    </div>
+                    <div className="h-1 overflow-hidden rounded-full bg-bg-tertiary">
+                      <div
+                        className="h-full rounded-full bg-brand-500 transition-all"
+                        style={{ width: `${uploadProgress.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 flex items-center justify-between border-t border-border-soft pt-3">
                 <div className="flex items-center gap-1">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={handlePolish}
-                    disabled={!topic.trim() || isPolishing}
+                    disabled={!topic.trim() || isPolishing || isLaunching}
                     className="h-7 gap-1 text-xs"
                   >
                     {isPolishing ? (
@@ -171,7 +406,7 @@ export default function BoardPage() {
                     variant="ghost"
                     size="sm"
                     onClick={handleUndo}
-                    disabled={topicHistory.length === 0}
+                    disabled={topicHistory.length === 0 || isLaunching}
                     className="h-7 gap-1 text-xs"
                   >
                     <UndoIcon size={12} />
@@ -183,16 +418,16 @@ export default function BoardPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-text-tertiary hidden sm:inline">Ctrl+Enter 启动</span>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => { setShowNewForm(false); setTopic(''); setTopicHistory([]); }}>
+                  <Button type="button" variant="ghost" size="sm" disabled={isLaunching} onClick={resetForm}>
                     取消
                   </Button>
-                  <Button type="submit" size="sm" disabled={!topic.trim() || startMeeting.isPending}>
-                    {startMeeting.isPending ? (
+                  <Button type="submit" size="sm" disabled={!topic.trim() || isLaunching}>
+                    {isLaunching ? (
                       <SpinnerIcon size={12} className="mr-1 animate-spin" />
                     ) : (
                       <PlayIcon size={12} className="mr-1" />
                     )}
-                    开始讨论
+                    {launchButtonText}
                   </Button>
                 </div>
               </div>
@@ -263,6 +498,39 @@ export default function BoardPage() {
         onCancel={() => setDeleteTarget(null)}
       />
     </div>
+  );
+}
+
+/** 紧凑下拉选择（创建会议配置项） */
+function OptionSelect({
+  label,
+  value,
+  onChange,
+  options,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string; description: string }[];
+  disabled?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-text-secondary">{label}</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-border-default bg-bg-secondary px-2 py-1.5 text-xs text-text-primary outline-none transition-colors focus:border-brand-500/40 disabled:opacity-50"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value} title={o.description}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
