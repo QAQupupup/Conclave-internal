@@ -140,6 +140,43 @@ async def init_db() -> None:
         "CREATE INDEX IF NOT EXISTS idx_meeting_aux_tenant_id ON meeting_aux(tenant_id)",
         # 联合索引：覆盖多租户会议列表查询（WHERE tenant_id=? AND status!=deleted ORDER BY created_at DESC）
         "CREATE INDEX IF NOT EXISTS idx_meetings_tenant_status_created ON meetings(tenant_id, status, created_at DESC)",
+        # ============================================================
+        # P1 知识资产化（2026-08-06）：知识空间 + 会议文档引用 + 文档资产化列
+        # ============================================================
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_spaces (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '默认空间',
+            tenant_id INTEGER,
+            scope TEXT NOT NULL DEFAULT 'team',
+            kind TEXT NOT NULL DEFAULT 'ephemeral',
+            is_default BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_spaces_tenant ON knowledge_spaces(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_spaces_tenant_default ON knowledge_spaces(tenant_id, is_default)",
+        """
+        CREATE TABLE IF NOT EXISTS meeting_document_refs (
+            id SERIAL PRIMARY KEY,
+            meeting_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            tenant_id INTEGER,
+            added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            added_by TEXT NOT NULL DEFAULT 'system',
+            UNIQUE (meeting_id, document_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_mdr_meeting ON meeting_document_refs(meeting_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mdr_doc ON meeting_document_refs(document_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mdr_tenant ON meeting_document_refs(tenant_id)",
+        # documents 表资产化列迁移（兼容旧库：旧表由 create_all 创建，无这些列）
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS space_id TEXT",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS recycled_at TIMESTAMPTZ",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS raw_content TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_documents_space ON documents(space_id)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)",
     ]
     async with async_session_factory() as session:
         for stmt in ddl_statements:
