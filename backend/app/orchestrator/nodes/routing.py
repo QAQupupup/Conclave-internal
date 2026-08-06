@@ -16,21 +16,21 @@ def _resolve_model_for_routing(state: MeetingState) -> str:
 # 防止无限循环和无效跳转
 _VALID_NEXT_STAGES: dict[Stage, set[Stage]] = {
     Stage.CLARIFY: {Stage.INTRA_TEAM, Stage.PRODUCE},
-    Stage.INTRA_TEAM: {Stage.INTRA_TEAM, Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},
+    # INTRA_TEAM 后可到 CROSS_TEAM（standard/deep）、ARBITRATE（light 快速仲裁）、PRODUCE。
+    # 不允许直接到 EVIDENCE_CHECK（证据校验依赖冲突，而冲突在 CROSS_TEAM 中识别）。
+    # standard/deep 深度下 mandatory_stages 会收窄到 {CROSS_TEAM}，防止跳过跨队辩论。
+    Stage.INTRA_TEAM: {Stage.INTRA_TEAM, Stage.CROSS_TEAM, Stage.ARBITRATE, Stage.PRODUCE},
     Stage.CROSS_TEAM: {
-        Stage.INTRA_TEAM,
-        Stage.CROSS_TEAM,
+        Stage.INTRA_TEAM,  # 门禁 supplement 回流
+        Stage.CROSS_TEAM,  # 门禁 re_examine 重审
         Stage.EVIDENCE_CHECK,
-        Stage.ARBITRATE,
+        Stage.ARBITRATE,  # 无冲突时直接仲裁（由代码层判断）
         Stage.PRODUCE,
-    },  # +回退INTRA_TEAM
-    Stage.EVIDENCE_CHECK: {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},  # +回退CROSS_TEAM
-    Stage.ARBITRATE: {
-        Stage.EVIDENCE_CHECK,
-        Stage.CROSS_TEAM,
-        Stage.ARBITRATE,
-        Stage.PRODUCE,
-    },  # +回退EVIDENCE_CHECK/CROSS_TEAM
+    },
+    # EVIDENCE_CHECK 后可回退到 CROSS_TEAM（证据不足重新辩论）或前进到 ARBITRATE
+    Stage.EVIDENCE_CHECK: {Stage.CROSS_TEAM, Stage.EVIDENCE_CHECK, Stage.ARBITRATE, Stage.PRODUCE},
+    # ARBITRATE 后可回退到 EVIDENCE_CHECK（补充证据）或 CROSS_TEAM（重新辩论）或前进到 PRODUCE
+    Stage.ARBITRATE: {Stage.EVIDENCE_CHECK, Stage.CROSS_TEAM, Stage.ARBITRATE, Stage.PRODUCE},
     Stage.PRODUCE: set(),  # 终态
 }
 
@@ -145,9 +145,11 @@ async def decide_next_stage(state: MeetingState) -> Stage:
             if s.value not in visited_stages:
                 mandatory_stages.add(s)
     elif state.debate_depth == "standard":
-        # 标准辩论：intra_team 必须执行；有冲突时 evidence_check 也必须执行
+        # 标准辩论：intra_team 和 cross_team 必须执行；有冲突时 evidence_check 也必须执行
         if Stage.INTRA_TEAM.value not in visited_stages:
             mandatory_stages.add(Stage.INTRA_TEAM)
+        if Stage.INTRA_TEAM.value in visited_stages and Stage.CROSS_TEAM.value not in visited_stages:
+            mandatory_stages.add(Stage.CROSS_TEAM)
         if state.conflicts and Stage.EVIDENCE_CHECK.value not in visited_stages:
             mandatory_stages.add(Stage.EVIDENCE_CHECK)
     elif state.debate_depth == "light":

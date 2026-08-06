@@ -1,5 +1,6 @@
 export type StageId =
   | 'pending'
+  | 'clarify'
   | 'clarification'
   | 'intra_team'
   | 'cross_team'
@@ -15,11 +16,17 @@ export type MeetingStatus = 'pending' | 'running' | 'paused' | 'done' | 'error' 
 
 export type AgentRole =
   | 'moderator'
+  | 'product_architect'
   | 'architect'
   | 'engineer'
+  | 'security_expert'
   | 'security'
-  | 'ux'
+  | 'data_engineer'
   | 'data'
+  | 'ux_designer'
+  | 'ux'
+  | 'marketing_expert'
+  | 'marketing'
   | 'tech_lead'
   | 'sre'
   | 'pm'
@@ -74,16 +81,20 @@ export interface Meeting {
   status: MeetingStatus;
   stage: StageId;
   createdAt?: number;
+  /** @deprecated Use camelCase `createdAt` (number timestamp). Kept for legacy component compatibility. */
   created_at?: string;
   updatedAt?: number;
+  /** @deprecated Use camelCase `updatedAt`. */
   updated_at?: string;
   startedAt?: number;
   endedAt?: number;
   createdBy?: string;
+  /** @deprecated Use camelCase `createdBy`. */
   created_by?: string;
   deliverableType?: string;
   agents: AgentInfo[];
   messageCount?: number;
+  /** @deprecated Use camelCase `messageCount`. Kept for legacy component compatibility; new code must use `messageCount`. */
   message_count?: number;
   summary?: string | null;
   metadata?: Record<string, unknown>;

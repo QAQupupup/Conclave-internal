@@ -6,6 +6,7 @@ import { ProtectedRoute, PublicOnlyRoute } from './components/auth/protected-rou
 import { AdminRoute } from './components/auth/admin-route';
 import { ErrorBoundary } from './components/error-boundary';
 import { TooltipProvider } from '@radix-ui/react-tooltip';
+import { useAuthStore } from './stores';
 
 const LandingPage = React.lazy(() => import('./features/landing/page'));
 const LoginPage = React.lazy(() => import('./features/login/page'));
@@ -35,40 +36,141 @@ function LoadingFallback() {
   );
 }
 
+/**
+ * AuthInit - waits for zustand persist to finish hydrating, then validates auth.
+ * This is the SOLE entry point for auth initialization on page load.
+ *
+ * Flow:
+ * 1. Wait for zustand persist hydration to complete
+ * 2. If token exists in localStorage → fetchUser() to validate it
+ * 3. If fetchUser fails (token expired) → try silentRefresh() as fallback
+ * 4. If no token → try silentRefresh() (uses HttpOnly refresh_token cookie)
+ * 5. If all fails → mark not authenticated, stop loading
+ */
+function AuthInit() {
+  const [hydrated, setHydrated] = React.useState(false);
+  const initRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const alreadyHydrated = useAuthStore.persist.hasHydrated();
+    if (alreadyHydrated) {
+      setHydrated(true);
+      return;
+    }
+    const unsub = useAuthStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+
+    // Fallback: if persist hydration doesn't complete within the configured
+    // timeout, force proceed. This handles edge cases where zustand persist
+    // gets stuck (browser blocks localStorage, storage quota exceeded, etc.).
+    // The timeout is configurable via VITE_AUTH_HYDRATION_TIMEOUT_MS (default 3000ms).
+    // NOTE: This is a specialized fallback for zustand persist hydration only.
+    // Do NOT copy this pattern to other async init scenarios — use Suspense/loading instead.
+    const HYDRATION_TIMEOUT = Number(import.meta.env.VITE_AUTH_HYDRATION_TIMEOUT_MS) || 3000;
+    const PERSIST_VERSION = 1; // MUST match the `version` in auth-slice.ts persist config
+    const timeout = setTimeout(() => {
+      if (!useAuthStore.persist.hasHydrated()) {
+        let manualLoadSucceeded = false;
+        try {
+          const raw = localStorage.getItem('conclave:auth');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            // Version check: discard stale data if store schema changed,
+            // preventing old malformed data from being injected into the store.
+            if (parsed && parsed.version === PERSIST_VERSION) {
+              const token = parsed?.state?.token;
+              if (typeof token === 'string' && token.length > 0) {
+                useAuthStore.setState({ token });
+                manualLoadSucceeded = true;
+              }
+            }
+          }
+        } catch {
+          // localStorage read/parse errors are non-fatal
+        }
+        if (!manualLoadSucceeded) {
+          // Hydration failed and no valid token could be recovered — clear any
+          // stale auth state so the user sees a clean login redirect instead of
+          // a confusing half-authenticated state.
+          useAuthStore.setState({ token: null, user: null, isAuthenticated: false });
+          // Signal to the login page that this redirect was caused by a
+          // session recovery failure (not an explicit logout), so it can show
+          // a user-visible explanation instead of silently appearing.
+          try { sessionStorage.setItem('conclave:auth-hydration-failed', '1'); } catch { /* ignore */ }
+        }
+        setHydrated(true);
+      }
+    }, HYDRATION_TIMEOUT);
+
+    return () => {
+      unsub();
+      clearTimeout(timeout);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!hydrated || initRef.current) return;
+    initRef.current = true;
+
+    const { token, fetchUser, silentRefresh, setLoading } = useAuthStore.getState();
+
+    const initAuth = async () => {
+      if (token) {
+        const user = await fetchUser();
+        if (user) return;
+
+        const refreshed = await silentRefresh();
+        if (refreshed) return;
+      } else {
+        const refreshed = await silentRefresh();
+        if (refreshed) return;
+      }
+
+      setLoading(false);
+    };
+
+    initAuth();
+  }, [hydrated]);
+
+  return null;
+}
+
 function App() {
   return (
     <AppProviders>
       <TooltipProvider>
         <ErrorBoundary>
           <BrowserRouter>
-          <React.Suspense fallback={<LoadingFallback />}>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
-            <Route path="/setup" element={<SetupPage />} />
-            <Route path="/landing" element={<LandingPage />} />
+            <AuthInit />
+            <React.Suspense fallback={<LoadingFallback />}>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
+              <Route path="/setup" element={<SetupPage />} />
+              <Route path="/landing" element={<LandingPage />} />
 
-            {/* Protected routes */}
-            <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
-              <Route path="/" element={<Navigate to="/board" replace />} />
-              <Route path="/board" element={<BoardPage />} />
-              <Route path="/explore" element={<ExploreListPage />} />
-              <Route path="/explore/:id" element={<ExplorePage />} />
-              <Route path="/workspace" element={<WorkspacePage />} />
-              <Route path="/workspace/*" element={<WorkspacePage />} />
-              <Route path="/graph" element={<GraphPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/agents" element={<AgentsPage />} />
-              <Route path="/models" element={<ModelsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/teams" element={<TeamsPage />} />
-              <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
-              <Route path="/operations" element={<OperationsPage />} />
-            </Route>
+              {/* Protected routes */}
+              <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
+                <Route path="/" element={<Navigate to="/board" replace />} />
+                <Route path="/board" element={<BoardPage />} />
+                <Route path="/explore" element={<ExploreListPage />} />
+                <Route path="/explore/:id" element={<ExplorePage />} />
+                <Route path="/workspace" element={<WorkspacePage />} />
+                <Route path="/workspace/*" element={<WorkspacePage />} />
+                <Route path="/graph" element={<GraphPage />} />
+                <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/models" element={<ModelsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/teams" element={<TeamsPage />} />
+                <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
+                <Route path="/operations" element={<OperationsPage />} />
+              </Route>
 
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-          </React.Suspense>
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+            </React.Suspense>
           </BrowserRouter>
         </ErrorBoundary>
       </TooltipProvider>

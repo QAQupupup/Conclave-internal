@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ---- 配置 ----
 JWT_SECRET = os.environ.get("CONCLAVE_JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_JWT_EXPIRE", "86400"))  # 默认24小时（access token）
+JWT_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_JWT_EXPIRE", "900"))  # 默认15分钟（access token），配合前端自动刷新
 REFRESH_TOKEN_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_REFRESH_TOKEN_EXPIRE", str(7 * 86400)))  # 默认7天
 
 # [H-04 修复] PBKDF2 迭代次数：OWASP 2023+ 推荐 SHA-256 最低 600,000 次
@@ -98,11 +98,16 @@ def _check_production_security() -> None:
 
 
 def _ensure_jwt_secret() -> str:
-    """确保 JWT_SECRET 存在：若未通过环境变量设置，则生成并持久化到 .jwt_secret 文件"""
+    """确保 JWT_SECRET 存在：若未通过环境变量设置，则生成并持久化到 .jwt_secret 文件
+
+    支持 CONCLAVE_SECRET_DIR 环境变量指定持久化目录（用于 Docker 容器内将密钥保存到 volume）。
+    """
     global JWT_SECRET
     if JWT_SECRET:
         return JWT_SECRET
-    secret_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".jwt_secret")
+    # 优先使用 CONCLAVE_SECRET_DIR 环境变量（Docker 部署时指向 volume 挂载目录）
+    secret_dir = os.environ.get("CONCLAVE_SECRET_DIR", os.path.dirname(os.path.dirname(__file__)))
+    secret_path = os.path.join(secret_dir, ".jwt_secret")
     try:
         if os.path.exists(secret_path):
             with open(secret_path, encoding="utf-8") as f:
@@ -114,6 +119,7 @@ def _ensure_jwt_secret() -> str:
     # 生成新 secret
     JWT_SECRET = secrets.token_urlsafe(48)
     try:
+        os.makedirs(secret_dir, exist_ok=True)
         with open(secret_path, "w", encoding="utf-8") as f:
             f.write(JWT_SECRET)
         # [L-03 修复] Windows 上 os.chmod 行为不同，跳过权限设置

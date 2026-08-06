@@ -15,7 +15,7 @@ from app.dao.meeting_dao import save_meeting
 from app.events import DomainEvent, bus, make_event
 from app.lazy_asyncio import LazyLock
 from app.middleware import _check_rate_limit, verify_ws_token
-from app.orchestrator.runner import get_state, set_state
+from app.orchestrator.runner import get_state, load_or_create, set_state
 from conclave_core.state import apply_signal
 
 logger = logging.getLogger("ws")
@@ -155,6 +155,7 @@ async def _ws_close_error(ws: WebSocket, code: int, reason: str, payload: dict) 
 
 
 @router.websocket("/ws/meetings/{meeting_id}")
+@router.websocket("/ws/{meeting_id}")
 async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
     """会议 WebSocket
 
@@ -332,6 +333,12 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         )
     else:
         state = get_state(meeting_id)
+        if state is None:
+            # 内存未命中（后端重启），从数据库恢复
+            try:
+                state = await load_or_create(meeting_id, "")
+            except Exception:
+                state = None
         snapshot_seq = await bus.last_seq(meeting_id)
         snapshot: dict[str, Any] = state.snapshot() if state else {}
         await _send_json(ws, {"type": "snapshot", "meeting_id": meeting_id, "payload": snapshot})

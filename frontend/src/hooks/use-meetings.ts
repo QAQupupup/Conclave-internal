@@ -24,7 +24,31 @@ interface BackendMeetingsResponse {
   running_count?: number;
 }
 
+// 会议详情接口返回格式
+interface BackendMeetingDetail {
+  meeting_id: string;
+  topic: string;
+  stage: string;
+  status: string;
+  clarified_topic?: string;
+  key_questions?: string[];
+  team_config?: Record<string, unknown>;
+  role_configs?: Array<{ id: string; name: string; role: string; description?: string }>;
+  claims?: unknown[];
+  conflicts?: unknown[];
+  evidence_set?: unknown[];
+  decision_record?: unknown;
+  artifact?: Record<string, unknown>;
+  messages?: unknown[];
+  intervention_messages?: unknown[];
+  created_at?: string;
+}
+
 // === Normalization ===
+// NOTE: snake_case fields (message_count, created_at, etc.) are marked @deprecated
+// in the Meeting type. They are populated here ONLY for legacy component compatibility.
+// New components must use the camelCase versions (messageCount, createdAt, etc.).
+// Plan: remove snake_case fields once all legacy components are migrated.
 function normalizeMeeting(raw: BackendMeetingItem): Meeting {
   return {
     id: raw.meeting_id,
@@ -49,6 +73,36 @@ function normalizeMeeting(raw: BackendMeetingItem): Meeting {
   };
 }
 
+function normalizeMeetingDetail(raw: BackendMeetingDetail): Meeting {
+  const agents = Array.isArray(raw.role_configs)
+    ? raw.role_configs.map((rc) => ({
+        id: rc.id,
+        name: rc.name,
+        role: rc.role as AgentRole,
+        state: 'idle' as AgentState,
+      }))
+    : [];
+  const messageCount = Array.isArray(raw.messages) ? raw.messages.length : undefined;
+  return {
+    id: raw.meeting_id,
+    title: raw.clarified_topic || raw.topic || '未命名讨论',
+    topic: raw.topic,
+    status: (raw.status || 'pending') as MeetingStatus,
+    stage: (raw.stage || 'pending') as StageId,
+    created_at: raw.created_at,
+    createdAt: raw.created_at ? Date.parse(raw.created_at) : undefined,
+    messageCount,
+    message_count: messageCount,
+    agents,
+    summary: raw.artifact?.summary as string | null | undefined,
+    metadata: {
+      key_questions: raw.key_questions,
+      artifact: raw.artifact,
+      team_config: raw.team_config,
+    },
+  };
+}
+
 // === Query Keys ===
 export const meetingKeys = {
   all: ['meetings'] as const,
@@ -60,14 +114,20 @@ export const meetingKeys = {
 };
 
 // === Queries ===
-export function useMeetings(params: { page?: number; pageSize?: number; status?: string } = {}) {
+export function useMeetings(params: { page?: number; pageSize?: number; status?: string; q?: string } = {}) {
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 20;
+  const offset = (page - 1) * pageSize;
   return useQuery({
     queryKey: meetingKeys.list(params),
     queryFn: async () => {
+      const queryParams = new URLSearchParams();
+      queryParams.set('limit', String(pageSize));
+      queryParams.set('offset', String(offset));
+      if (params.status) queryParams.set('status', params.status);
+      if (params.q) queryParams.set('q', params.q);
       const res = await api.get<BackendMeetingsResponse | PaginatedResponse<Meeting>>(
-        `/meetings?page=${params.page ?? 1}&page_size=${params.pageSize ?? 20}${
-          params.status ? `&status=${params.status}` : ''
-        }`
+        `/meetings?${queryParams.toString()}`
       );
       // 兼容两种格式：后端 { meetings: [...] } 和 前端 { items: [...] }
       const rawMeetings = extractArray<BackendMeetingItem | Meeting>(res, ['meetings', 'items']);
@@ -80,8 +140,8 @@ export function useMeetings(params: { page?: number; pageSize?: number; status?:
       return {
         items: meetings,
         total: (res as unknown as Record<string, unknown>)?.total as number ?? meetings.length,
-        page: params.page ?? 1,
-        pageSize: params.pageSize ?? 20,
+        page,
+        pageSize,
       } as PaginatedResponse<Meeting>;
     },
   });
@@ -90,7 +150,13 @@ export function useMeetings(params: { page?: number; pageSize?: number; status?:
 export function useMeeting(id: string | null | undefined) {
   return useQuery({
     queryKey: meetingKeys.detail(id!),
-    queryFn: () => api.get<Meeting>(`/meetings/${id}`),
+    queryFn: async () => {
+      const raw = await api.get<BackendMeetingDetail | Meeting>(`/meetings/${id}`);
+      // 如果已经是前端格式（有 id + title），直接返回
+      if ((raw as Meeting).id && (raw as Meeting).agents) return raw as Meeting;
+      // 否则从后端详情格式规范化
+      return normalizeMeetingDetail(raw as BackendMeetingDetail);
+    },
     enabled: !!id,
   });
 }
@@ -156,6 +222,9 @@ export function useDeleteMeeting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/meetings/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: meetingKeys.lists() }),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: meetingKeys.lists() });
+      qc.removeQueries({ queryKey: meetingKeys.detail(id) });
+    },
   });
 }

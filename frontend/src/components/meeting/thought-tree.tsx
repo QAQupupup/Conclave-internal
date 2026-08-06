@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useMeetingStore } from '@/stores';
 import { cn } from '@/lib/utils';
-import { ROLE_LABELS } from '@/lib/constants';
+import { ROLE_LABELS, ROLE_AVATAR_COLORS } from '@/lib/constants';
 import type { AgentInfo, AgentState, BorrowRequest } from '@/types';
 import { AgentAvatar, StatusDot } from '@/components/ui/svg-icons';
 
@@ -115,6 +115,8 @@ function AgentCard({
     done: 'done',
     paused: 'idle',
   };
+  const roleLabel = agent.role ? ROLE_LABELS[agent.role] : '';
+  const roleColor = agent.role ? ROLE_AVATAR_COLORS[agent.role] : undefined;
 
   return (
     <div
@@ -134,7 +136,14 @@ function AgentCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-xs font-medium text-text-primary">{agent.name}</span>
-            <span className="text-[10px] text-text-tertiary">{ROLE_LABELS[agent.role]}</span>
+            {roleLabel && (
+              <span
+                className="inline-flex flex-shrink-0 items-center rounded px-1.5 py-px text-[10px] font-medium leading-tight"
+                style={roleColor ? { color: roleColor, backgroundColor: `color-mix(in srgb, ${roleColor} 10%, transparent)` } : { color: 'var(--color-text-tertiary)' }}
+              >
+                {roleLabel}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1 text-[10px] text-text-tertiary">

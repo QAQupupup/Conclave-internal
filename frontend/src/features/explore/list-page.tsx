@@ -1,8 +1,5 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
-import { extractArray } from '@/lib/extract';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +16,7 @@ import {
   UsersIcon,
 } from '@/components/ui/svg-icons';
 import { STAGE_LABELS } from '@/lib/constants';
+import { useMeetings } from '@/hooks/use-meetings';
 import type { Meeting } from '@/types';
 
 const STATUS_CONFIG: Record<string, { label: string; className: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
@@ -27,6 +25,7 @@ const STATUS_CONFIG: Record<string, { label: string; className: string; icon: Re
   done: { label: '已完成', className: 'bg-success/15 text-success', icon: CheckCircleIcon },
   error: { label: '已失败', className: 'bg-danger/15 text-danger', icon: ClockIcon },
   aborted: { label: '已终止', className: 'bg-danger/15 text-danger', icon: ClockIcon },
+  deleted: { label: '已删除', className: 'bg-bg-tertiary text-text-tertiary', icon: ClockIcon },
   pending: { label: '等待中', className: 'bg-bg-tertiary text-text-secondary', icon: ClockIcon },
 };
 
@@ -35,20 +34,16 @@ export default function ExploreListPage() {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['meetings', 'explore'],
-    queryFn: () => api.get<{ items: Meeting[]; meetings?: Meeting[] }>('/meetings?limit=50'),
-    retry: false,
-  });
+  const { data, isLoading } = useMeetings({ pageSize: 50 });
+  const items = data?.items ?? [];
 
   const meetings = React.useMemo(() => {
-    const items = extractArray<Meeting>(data, ['meetings', 'items']);
     let filtered = items;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (m: Meeting) =>
-          m.title.toLowerCase().includes(q) ||
+          (m.title || '').toLowerCase().includes(q) ||
           (m.description || '').toLowerCase().includes(q)
       );
     }
@@ -58,7 +53,7 @@ export default function ExploreListPage() {
     return filtered.sort((a: Meeting, b: Meeting) =>
       (b.createdAt || 0) - (a.createdAt || 0)
     );
-  }, [data, searchQuery, statusFilter]);
+  }, [items, searchQuery, statusFilter]);
 
   const formatTime = (timestamp?: number) => {
     if (!timestamp) return '--';

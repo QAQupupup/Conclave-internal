@@ -59,7 +59,6 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
         )
 
     tasks: list[SubTask] = []
-    task_ids: list[str] = []
     seen_normalized_roles: set[str] = set()
     for idx, role_def in enumerate(team_roles):
         raw_role = role_def.get("role", "agent")
@@ -75,7 +74,6 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
             continue
         stance = role_def.get("stance", "")
         task_id = f"intra-{role}-{idx}"
-        task_ids.append(task_id)
         description = f"从 {role} 视角发表队内观点与 claims"
         if is_supplement:
             description = supplement_desc
@@ -89,13 +87,8 @@ def plan_intra_team(state: MeetingState, baseline: TaskBaseline) -> ExecutionPla
             )
         )
 
-    # supplement 模式下不做反应性思考（只补充论点），且不强制最后角色依赖
-    if len(tasks) > 1 and not is_supplement:
-        # 最后一个角色依赖前 N-1 个角色，做反应性思考
-        last_task = tasks[-1]
-        last_task.dependencies = task_ids[:-1]
-        last_task.payload["react"] = True
-        last_task.description = f"{last_task.role} 基于前序角色结论做反应性思考"
+    # ADR-010: 所有角色全并发独立思考，不设 react 依赖（消除锚定偏误）
+    # 与 intra_team_node (legacy) 的 "砍掉最后 1 反应" 决策保持一致
 
     # 兜底：至少保证一个任务，避免 Scheduler 空跑
     if not tasks:

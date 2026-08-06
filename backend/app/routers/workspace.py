@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -138,7 +139,7 @@ async def list_files(path: str = "") -> dict[str, Any]:
                     "path": path.replace("\\", "/"),
                     "type": "file",
                     "size": stat.st_size,
-                    "modified": stat.st_mtime,
+                    "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                     "child_count": 0,
                     "expanded": False,
                 }
@@ -199,7 +200,7 @@ async def list_files(path: str = "") -> dict[str, Any]:
                 "path": str(child.relative_to(WORKSPACE_ROOT)).replace("\\", "/"),
                 "type": "directory" if is_dir else "file",
                 "size": stat.st_size if not is_dir else 0,
-                "modified": stat.st_mtime,
+                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                 "child_count": child_count,
                 "children_count": child_count,
                 "expanded": False,
@@ -315,7 +316,13 @@ async def delete_file(file_path: str, request: Request, cascade: bool = False) -
                 # 只允许删除空目录
                 target.rmdir()
     except OSError as e:
-        raise HTTPException(status_code=400, detail=f"删除失败: {e}") from e
+        import errno as _errno
+
+        if e.errno == _errno.ENOTEMPTY:
+            msg = "文件夹不为空，请使用级联删除（cascade=true）删除包含内容的文件夹"
+        else:
+            msg = f"删除失败: {e}"
+        raise HTTPException(status_code=400, detail=msg) from e
 
     log_bus.info(
         f"文件删除: {file_path} (cascade={cascade})",

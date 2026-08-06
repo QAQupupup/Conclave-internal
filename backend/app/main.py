@@ -395,20 +395,47 @@ def create_app() -> FastAPI:
             content=exc.to_dict(),
         )
 
-    # [安全加固] 自定义 404 响应格式，消除 FastAPI/Starlette 默认指纹
+    # [安全加固] 自定义 HTTP 异常响应格式，消除 FastAPI/Starlette 默认指纹
     # 默认 404 返回 {"detail":"Not Found"}，是框架最强指纹之一
+    # 保留 exc.detail 作为用户可见的错误消息，避免覆盖路由中设置的具体信息
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):  # type: ignore[unused-argument]
+        import json as _json
+
         _code_map = {
+            400: ("BAD_REQUEST", "请求错误"),
+            401: ("UNAUTHENTICATED", "未认证，请先登录"),
+            403: ("ACCESS_DENIED", "访问被拒绝"),
             404: ("NOT_FOUND", "资源不存在"),
             405: ("METHOD_NOT_ALLOWED", "请求方法不允许"),
+            409: ("CONFLICT", "资源状态冲突"),
             413: ("PAYLOAD_TOO_LARGE", "请求体过大"),
             429: ("RATE_LIMITED", "请求过于频繁"),
         }
-        code, message = _code_map.get(exc.status_code, ("HTTP_ERROR", f"HTTP {exc.status_code}"))
+
+        # 从 exc.detail 提取用户可见消息
+        detail = exc.detail
+        if isinstance(detail, str):
+            message = detail
+        elif isinstance(detail, (dict, list)):
+            message = _json.dumps(detail, ensure_ascii=False)
+        else:
+            message = str(detail) if detail else ""
+
+        # 如果 detail 为空（None/空字符串），使用默认消息
+        default_code, default_msg = _code_map.get(exc.status_code, ("HTTP_ERROR", f"HTTP {exc.status_code}"))
+        code = default_code
+        if not message:
+            message = default_msg
+
+        # 提取 details（如果 detail 是 dict）
+        details: dict[str, Any] = {}
+        if isinstance(detail, dict):
+            details = detail
+
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": {"code": code, "message": message, "details": {}}},
+            content={"error": {"code": code, "message": message, "details": details}},
         )
 
     # [安全加固] 自定义 422 响应格式，消除 FastAPI 默认校验错误指纹

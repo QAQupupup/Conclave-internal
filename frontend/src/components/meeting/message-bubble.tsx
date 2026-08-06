@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { cn, formatRelativeTime } from '@/lib/utils';
-import { ROLE_LABELS } from '@/lib/constants';
+import { ROLE_LABELS, ROLE_AVATAR_COLORS, STAGE_LABELS } from '@/lib/constants';
 import type { MeetingMessage } from '@/types';
 import { useMeetingStore } from '@/stores';
 import { Markdown } from '@/components/ui/markdown';
@@ -40,6 +40,8 @@ export function MessageBubble({ message, isSelected, onSelect, onBranch }: Messa
 
   const name = message.agentName || 'Agent';
   const roleLabel = message.agentRole ? ROLE_LABELS[message.agentRole] : '';
+  const roleColor = message.agentRole ? ROLE_AVATAR_COLORS[message.agentRole] : undefined;
+  const stageLabel = message.stage ? STAGE_LABELS[message.stage] : '';
   const isStreaming = isThinking && !message.content;
 
   const handleTakeover = (callId: string, toolName: string) => {
@@ -75,10 +77,18 @@ export function MessageBubble({ message, isSelected, onSelect, onBranch }: Messa
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium text-text-primary">{name}</span>
             {roleLabel && (
-              <span className="text-[10px] text-text-tertiary">{roleLabel}</span>
+              <span
+                className="inline-flex items-center rounded px-1.5 py-px text-[10px] font-medium leading-tight"
+                style={roleColor ? { color: roleColor, backgroundColor: `color-mix(in srgb, ${roleColor} 10%, transparent)` } : { color: 'var(--color-text-tertiary)' }}
+              >
+                {roleLabel}
+              </span>
+            )}
+            {stageLabel && (
+              <span className="text-[10px] text-text-tertiary">· {stageLabel}</span>
             )}
             <span className="ml-auto text-[10px] text-text-tertiary opacity-0 transition-opacity group-hover:opacity-100">
               {formatRelativeTime(message.timestamp)}

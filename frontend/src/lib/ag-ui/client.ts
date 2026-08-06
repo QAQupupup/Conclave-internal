@@ -1,4 +1,5 @@
 import { useMeetingStore } from '@/stores';
+import { ROLE_LABELS } from '@/lib/constants';
 import type {
   AGUIEvent,
   TextMessageStartEvent,
@@ -71,6 +72,80 @@ class AGUIClient {
     const events: AGUIEvent[] = [];
 
     switch (type) {
+      // ---- Snapshot: 后端重启/首次连接时发送的完整状态快照 ----
+      case 'snapshot': {
+        const payload = (raw.payload as Record<string, unknown>) || {};
+        // 从 snapshot 中恢复会议状态
+        const sStage = payload.stage as string | undefined;
+        const sStatus = payload.status as string | undefined;
+        const sMessages = (payload.messages as Record<string, unknown>[]) || [];
+        const sAgents = payload.agents as Record<string, unknown>[] | undefined;
+        const sTopic = payload.topic as string | undefined;
+
+        // 1. 恢复 stage 和 status
+        if (sStage || sStatus || sTopic) {
+          events.push({
+            type: 'STATE_DELTA',
+            timestamp: ts,
+            stage: sStage,
+            status: sStatus,
+            title: sTopic,
+            agents: sAgents,
+          } as StateDeltaEvent);
+        }
+
+        // 2. 将每条历史消息转换为 TEXT_MESSAGE 事件
+        // 后端消息字段: id, role, stage, content, created_at, claim_refs, evidence_refs
+        // 前端需要: agentId, agentName, agentRole
+        // 使用 constants.ROLE_LABELS 统一映射，覆盖所有后端角色
+
+        const allSnapshotMessages = [
+          ...sMessages,
+          ...((payload.injected_messages as Record<string, unknown>[]) || []),
+        ];
+
+        for (let i = 0; i < allSnapshotMessages.length; i++) {
+          const msg = allSnapshotMessages[i];
+          const msgId = (msg.id as string) || `snap-msg-${i}`;
+          const agentRole = (msg.agent_role as string) || (msg.role as string) || '';
+          const agentName = (msg.agent_name as string) || ROLE_LABELS[agentRole] || agentRole || 'Agent';
+          const agentId = (msg.agent_id as string) || agentRole || `agent-${i}`;
+          const msgStage = (msg.stage as string) || '';
+          const content = (msg.content as string) || '';
+          const createdAt = (msg.created_at as string) || ts;
+          const claimRefs = (msg.claim_refs as string[]) || [];
+          const evidenceRefs = (msg.evidence_refs as string[]) || [];
+
+          events.push({
+            type: 'TEXT_MESSAGE_START',
+            timestamp: typeof createdAt === 'string' ? new Date(createdAt).getTime() : ts,
+            messageId: msgId,
+            agentId,
+            agentName,
+            agentRole: agentRole as any,
+            stage: msgStage as any,
+          } as TextMessageStartEvent);
+          events.push({
+            type: 'TEXT_MESSAGE_END',
+            timestamp: typeof createdAt === 'string' ? new Date(createdAt).getTime() : ts,
+            messageId: msgId,
+            content,
+          } as TextMessageEndEvent);
+        }
+        break;
+      }
+
+      // ---- replay.done: 后端回放完成标记，前端可用于触发 UI 刷新 ----
+      case 'replay.done': {
+        events.push({
+          type: 'CUSTOM',
+          timestamp: ts,
+          eventType: 'replay.done',
+          payload: raw,
+        } as CustomEvent);
+        break;
+      }
+
       case 'stage.changed': {
         events.push({
           type: 'STATE_DELTA',
@@ -181,6 +256,34 @@ class AGUIClient {
           } as TextMessageEndEvent);
           this.activeMessages.delete(msgId);
         }
+        break;
+      }
+
+      // 后端实际发布的事件类型是 agent.spoke（过去式），payload 包含完整发言
+      case 'agent.spoke': {
+        const p = (raw.payload as Record<string, unknown>) || raw;
+        const agentRole = (p.role as string) || (p.agent_role as string) || '';
+        const agentName = (p.agent_name as string) || ROLE_LABELS[agentRole] || agentRole || 'Agent';
+        const agentId = (p.agent_id as string) || agentRole || `agent-${ts}`;
+        const stage = (p.stage as string) || '';
+        const content = (p.content as string) || '';
+        const msgId = (p.message_id as string) || `msg-${agentId}-${ts}`;
+
+        events.push({
+          type: 'TEXT_MESSAGE_START',
+          timestamp: ts,
+          messageId: msgId,
+          agentId,
+          agentName,
+          agentRole,
+          stage,
+        } as TextMessageStartEvent);
+        events.push({
+          type: 'TEXT_MESSAGE_END',
+          timestamp: ts,
+          messageId: msgId,
+          content,
+        } as TextMessageEndEvent);
         break;
       }
 

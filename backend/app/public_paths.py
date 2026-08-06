@@ -18,6 +18,7 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         "/openapi.json",
         "/debug/auth-info",
         "/auth/login",
+        "/auth/refresh",
         "/auth/csrf-token",
         "/setup",
         "/setup/status",

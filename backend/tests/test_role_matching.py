@@ -18,7 +18,7 @@ def test_match_english_role_names():
 def test_match_chinese_role_names():
     """中文角色名模糊匹配（真实 LLM 返回的场景）"""
     assert _match_role("产品经理") == Role.PRODUCT_ARCHITECT
-    assert _match_role("后端架构师") == Role.PRODUCT_ARCHITECT  # "架构" 优先匹配
+    assert _match_role("后端架构师") == Role.ENGINEER  # "后端" 优先于 "架构"（修复贪婪匹配）
     assert _match_role("工程师") == Role.ENGINEER
     assert _match_role("后端开发") == Role.ENGINEER
     assert _match_role("前端开发者") == Role.ENGINEER
@@ -147,9 +147,9 @@ def test_intra_team_with_chinese_role_names(client):
     assert state.status == MeetingStatus.DONE, f"Runner.run 后状态应为 DONE，实际: {state.status}"
     assert state.stage == Stage.PRODUCE, f"Runner.run 后阶段应为 PRODUCE，实际: {state.stage}"
 
-    # 4 个角色都应被匹配（产品经理→product_architect、后端架构师→product_architect、
+    # 4 个角色都应被匹配（产品经理→product_architect、后端架构师→engineer、
     # 前端开发者→engineer、安全专家→security_expert）
-    # 注意: 产品经理和后端架构师都映射到 product_architect，去重后为 3 个唯一角色
+    # 注意: 后端架构师和前端开发者都映射到 engineer，去重后为 3 个唯一角色
     assert len(state.team_conclusions) >= 3, "至少3个角色应被匹配"
     roles = [tc["role"] for tc in state.team_conclusions]
     # 安全专家应匹配为 security_expert（枚举值，非中文名）

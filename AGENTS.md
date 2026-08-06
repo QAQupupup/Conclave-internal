@@ -94,6 +94,7 @@
 - [ ] **若修改了配对函数（hash/verify、encode/decode、create/verify），确认有往返测试**（§5.7.3）
 - [ ] **若修改了认证/安全代码，确认 `test_password_hash.py` 通过 + 手动 curl 登录返回 200**（§5.7.4）
 - [ ] **确认新增测试无反模式**：无逻辑副本、无 `try/except:pass`、无空断言、无被测函数自身被 mock（§5.7）
+- [ ] **确认测试不是纯快乐路径**：每个测试文件至少 1 个非正向测试（异常/边界/越权/并发/极限/降级，§5.7.9）
 
 ### 2.2 前端
 - [ ] `cd frontend && npx eslint .` → 无新增 error（warnings 遵循现有宽松策略）
@@ -296,6 +297,45 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 | `git commit` 前 | pre-commit hook（ruff/mypy/tsc/eslint） | 0 errors |
 | `git push` 前 | pre-push hook（Docker CI 一致性） | 0 failed |
 | 后端代码变更后部署 | `docker compose up -d --build backend`（必须重建镜像） | 容器 healthy |
+
+#### 5.7.9 禁止"快乐路径唯一测试"（多维度测试强制要求）
+
+> 大模型和 Agent 天然擅长写正向测试——给定正常输入，断言正常输出。
+> 但正向测试通过 ≠ 功能正确。项目的系统性 bug（阶段跳过、角色丢失、并发竞争、
+> 证据缺失）全部发生在正向测试覆盖的"正常路径"之外。
+> **只写快乐路径的测试等同于没有测试。**
+
+**强制维度覆盖**：每个新增/修改的函数或模块，除正向测试外，必须至少覆盖以下维度中的 **2 项**（安全/认证类函数必须覆盖"异常 + 越权"）：
+
+| 维度 | 含义 | 典型场景 |
+|------|------|---------|
+| 边界值 | 输入在极限/临界点 | 空列表、单元素、最大长度、off-by-one、零/负数 |
+| 异常路径 | 被测代码应抛错或降级 | LLM 返回 `success=False`、网络超时、格式错误、缺字段 |
+| 权限/越权 | 跨用户/跨租户数据隔离 | 用户 A 访问用户 B 的会议、未认证请求、过期 token |
+| 并发竞争 | 多线程/协程同时访问 | `asyncio.gather` 并发写 `shared_state`、`compute` 单例竞态 |
+| 极限条件 | 超大输入或高负载 | 100+ claims、50+ conflicts、10K 字符 topic、空 `team_config` |
+| 回退/降级 | 主流程失败后的兜底路径 | LLM 不可用走 StubLLM、RAG 检索失败走空证据、Cython `.so` 缺失走 `.py` |
+
+**判定标准**（Code Review 时逐项检查）：
+
+1. **每个测试文件至少 1 个非正向测试**。纯 happy-path 测试文件禁止合并。
+2. **Stub/Mock 必须有失败分支**。StubCompute 不能只返回 `success=True`，必须覆盖 `success=False` 和格式异常。
+3. **状态机/路由测试必须验证非法跳转被拒绝**。不能只测"正确跳转"，必须测"非法跳转被拦截"（如 INTRA_TEAM 不能直接到 EVIDENCE_CHECK）。
+4. **并发模块必须有并发测试**。使用 `asyncio.gather` 或 `ThreadPoolExecutor` 模拟并发，断言结果一致性或竞态安全。
+5. **有兜底逻辑的函数必须测兜底分支**。`try/except`、`if not x: fallback`、`or default` 等兜底路径必须有对应测试。
+
+**反模式（禁止）**：
+- 只测正常输入 + 正常输出，不测异常输入
+- Stub 只返回成功，不返回失败
+- 只测"能跳到下一阶段"，不测"不能跳过阶段"
+- 并发模块只有串行测试
+- `assert result is not None` 作为唯一断言（§5.7.2 已禁止，这里重申）
+
+**正面模式（鼓励）**：
+- 参数化测试覆盖边界值：`@pytest.mark.parametrize("input,expected", [...])`
+- Stub 支持 `mode` 参数切换成功/失败/超时
+- 测试非法操作被拒绝：`with pytest.raises(...)` 或断言返回错误码
+- 并发测试：`await asyncio.gather(*[worker() for _ in range(N)])` + 断言最终状态一致
 
 ### 5.8 回退策略
 

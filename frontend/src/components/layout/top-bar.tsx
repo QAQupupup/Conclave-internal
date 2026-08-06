@@ -1,8 +1,10 @@
 import * as React from 'react';
 import { useNavigate, useLocation } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUIStore, useAuthStore, useMeetingStore } from '@/stores';
 import { useTheme } from '@/providers/theme-provider';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { wsClient } from '@/lib/ws';
 import { STAGE_LABELS } from '@/lib/constants';
+import { useDeleteMeeting } from '@/hooks/use-meetings';
 import {
   Logo,
   SearchIcon,
@@ -34,6 +37,7 @@ import {
   BuildingIcon,
   ChevronRightIcon,
   ShieldIcon,
+  TrashIcon,
 } from '@/components/ui/svg-icons';
 import type { TenantInfo } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -116,6 +120,13 @@ export function TopBar() {
   const meeting = useMeetingStore();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const deleteMeeting = useDeleteMeeting();
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+
+  // 控制按钮仅在运行中/暂停中显示；删除按钮始终显示（不再互斥）
+  const isRunningOrPaused = isInMeeting && ['running', 'paused'].includes(meeting.status);
 
   // 全局快捷键：Cmd/Ctrl+K 打开命令面板
   React.useEffect(() => {
@@ -139,6 +150,24 @@ export function TopBar() {
 
   const handleSkip = () => wsClient.sendControl('skip_stage');
 
+  const handleDelete = async () => {
+    if (!meeting.currentMeetingId) return;
+    try {
+      await deleteMeeting.mutateAsync(meeting.currentMeetingId);
+      toast({ title: '已删除', description: '讨论已删除' });
+      qc.invalidateQueries({ queryKey: ['meetings'] });
+      navigate('/board');
+    } catch (err: unknown) {
+      toast({
+        title: '删除失败',
+        description: err instanceof Error ? err.message : '未知错误',
+        variant: 'error',
+      });
+    } finally {
+      setDeleteDialogOpen(false);
+    }
+  };
+
   const displayName = user?.display_name || user?.username || '用户';
 
   return (
@@ -157,40 +186,54 @@ export function TopBar() {
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <h1 className="truncate text-sm font-medium text-text-primary">{meeting.title || '探索中...'}</h1>
             <div className="flex items-center gap-1.5 text-xs text-text-tertiary">
-              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-stage-running animate-pulse" />
-              <span>{STAGE_LABELS[meeting.stage] || meeting.stage}</span>
+              <span className={`inline-flex h-1.5 w-1.5 rounded-full ${['running', 'paused'].includes(meeting.status) ? 'bg-stage-running animate-pulse' : meeting.status === 'done' ? 'bg-stage-done' : meeting.status === 'error' ? 'bg-danger' : 'bg-text-tertiary'}`} />
+              <span>{STAGE_LABELS[meeting.stage] || meeting.status}</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {isRunningOrPaused && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handlePauseResume}
+                  title={meeting.status === 'paused' ? '继续' : '暂停'}
+                  aria-label={meeting.status === 'paused' ? '继续' : '暂停'}
+                >
+                  {meeting.status === 'paused' ? <PlayIcon size={14} /> : <PauseIcon size={14} />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleSkip}
+                  title="跳过当前阶段"
+                  aria-label="跳过当前阶段"
+                >
+                  <SkipForwardIcon size={14} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-danger"
+                  onClick={() => wsClient.sendControl('stop')}
+                  title="终止会议"
+                  aria-label="终止会议"
+                >
+                  <StopCircleIcon size={14} />
+                </Button>
+              </>
+            )}
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
-              onClick={handlePauseResume}
-              title={meeting.status === 'paused' ? '继续' : '暂停'}
-              aria-label={meeting.status === 'paused' ? '继续' : '暂停'}
+              className="h-7 w-7 text-danger hover:bg-danger/10"
+              onClick={() => setDeleteDialogOpen(true)}
+              title="删除讨论"
+              aria-label="删除讨论"
             >
-              {meeting.status === 'paused' ? <PlayIcon size={14} /> : <PauseIcon size={14} />}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleSkip}
-              title="跳过当前阶段"
-              aria-label="跳过当前阶段"
-            >
-              <SkipForwardIcon size={14} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-danger"
-              onClick={() => wsClient.sendControl('stop')}
-              title="终止会议"
-              aria-label="终止会议"
-            >
-              <StopCircleIcon size={14} />
+              <TrashIcon size={14} />
             </Button>
           </div>
         </React.Fragment>
@@ -303,6 +346,19 @@ export function TopBar() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="删除讨论"
+        description={
+          isRunningOrPaused
+            ? `「${meeting.title || '该讨论'}」正在运行中，删除将终止会议并移除相关文件和记录，该操作不可撤销。`
+            : `确定要删除「${meeting.title || '该讨论'}」吗？该操作不可撤销，相关文件和记录将被移除。`
+        }
+        destructive={true}
+        confirmText="删除"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
     </header>
   );
 }

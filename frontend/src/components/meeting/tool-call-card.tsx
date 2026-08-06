@@ -66,7 +66,14 @@ function getResultSummary(call: ToolCallRecord): React.ReactNode {
     );
   }
   if (call.status === 'failed') {
-    return <span className="text-danger">{call.error?.slice(0, 80) || '执行失败'}</span>;
+    const errMsg = call.error || '';
+    // 开发模式显示原始错误前 120 字符，生产模式显示友好提示
+    const displayMsg = import.meta.env.DEV && errMsg ? errMsg.slice(0, 120) : '执行失败';
+    return (
+      <span className="text-danger" title={import.meta.env.DEV ? errMsg.slice(0, 300) : ''}>
+        {displayMsg}
+      </span>
+    );
   }
   if (call.summary) {
     const s = call.summary as Record<string, unknown>;

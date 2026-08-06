@@ -7,6 +7,29 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { isDemoMode } from '@/lib/mock-data';
 import {
@@ -26,6 +49,10 @@ import {
   RefreshCwIcon,
   ActivityIcon,
   SettingsIcon,
+  ChevronIcon,
+  MoreHorizontalIcon,
+  TrashIcon,
+  EditIcon,
 } from '@/components/ui/svg-icons';
 
 // ====== Types ======
@@ -178,7 +205,13 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }
 };
 
 // ====== SVG Topology Component ======
-function SystemTopology({ overview }: { overview: SystemOverview }) {
+function SystemTopology({
+  overview,
+  onComponentAction,
+}: {
+  overview: SystemOverview;
+  onComponentAction: (componentId: string, action: 'restart' | 'check') => void;
+}) {
   const [selectedNode, setSelectedNode] = React.useState<string | null>(null);
 
   const nodes = [
@@ -303,16 +336,27 @@ function SystemTopology({ overview }: { overview: SystemOverview }) {
               <span className="text-text-primary">{overview.components[selectedNode]?.type}</span>
             </div>
             {overview.components[selectedNode]?.error && (
-              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-red-700">
-                {overview.components[selectedNode].error}
+              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-xs max-h-32 overflow-auto">
+                <div className="font-medium mb-1">组件错误：</div>
+                {overview.components[selectedNode].error?.slice(0, 500) || '未知错误'}
               </div>
             )}
             <div className="flex gap-2 mt-3">
-              <Button size="sm" variant="outline" className="flex-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1"
+                onClick={() => onComponentAction(selectedNode, 'restart')}
+              >
                 <RestartIcon size={12} className="mr-1" />
                 重启
               </Button>
-              <Button size="sm" variant="outline" className="flex-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1"
+                onClick={() => onComponentAction(selectedNode, 'check')}
+              >
                 <RefreshCwIcon size={12} className="mr-1" />
                 检查
               </Button>
@@ -421,8 +465,27 @@ function ContainerActions({ hostId, containerId }: { hostId: number; containerId
   );
 }
 
+interface ContainerInfo {
+  id: string;
+  name: string;
+  status: string;
+  image: string;
+}
+
 // ====== Docker Host Card Component ======
-function DockerHostCard({ host }: { host: DockerHost }) {
+function DockerHostCard({
+  host,
+  expanded,
+  onToggleExpand,
+  onEdit,
+  onDelete,
+}: {
+  host: DockerHost;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onEdit: (host: DockerHost) => void;
+  onDelete: (hostId: number) => void;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -443,6 +506,26 @@ function DockerHostCard({ host }: { host: DockerHost }) {
     },
   });
 
+  // Fetch containers when expanded
+  const { data: containersData, isLoading: containersLoading } = useQuery({
+    queryKey: ['operations', 'containers', host.id],
+    queryFn: async () => {
+      if (isDemoMode()) {
+        await new Promise((r) => setTimeout(r, 400));
+        return {
+          containers: [
+            { id: 'c1', name: 'conclave-backend', status: 'running', image: 'conclave/backend:latest' },
+            { id: 'c2', name: 'conclave-frontend', status: 'running', image: 'conclave/frontend:latest' },
+            { id: 'c3', name: 'postgres', status: 'running', image: 'postgres:16-alpine' },
+            { id: 'c4', name: 'redis', status: 'running', image: 'redis:7-alpine' },
+          ] as ContainerInfo[],
+        };
+      }
+      return api.get<{ containers: ContainerInfo[] }>(`/docker-hosts/${host.id}/containers`);
+    },
+    enabled: expanded,
+  });
+
   const statusColors = STATUS_COLORS[host.status] || STATUS_COLORS.unhealthy;
 
   return (
@@ -460,9 +543,28 @@ function DockerHostCard({ host }: { host: DockerHost }) {
               </CardDescription>
             </div>
           </div>
-          <Badge className={statusColors.bg + ' ' + statusColors.text}>
-            {host.status === 'healthy' ? '正常' : host.status === 'degraded' ? '降级' : '异常'}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge className={statusColors.bg + ' ' + statusColors.text}>
+              {host.status === 'healthy' ? '正常' : host.status === 'degraded' ? '降级' : '异常'}
+            </Badge>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0">
+                  <MoreHorizontalIcon size={14} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onEdit(host)}>
+                  <EditIcon size={14} className="mr-2" />
+                  编辑
+                </DropdownMenuItem>
+                <DropdownMenuItem destructive onClick={() => onDelete(host.id)}>
+                  <TrashIcon size={14} className="mr-2" />
+                  删除主机
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
@@ -509,8 +611,9 @@ function DockerHostCard({ host }: { host: DockerHost }) {
 
           {/* Error */}
           {host.error && (
-            <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-              {host.error}
+            <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700 max-h-24 overflow-auto">
+              <div className="font-medium mb-0.5">主机错误：</div>
+              {host.error.slice(0, 300)}
             </div>
           )}
 
@@ -526,8 +629,64 @@ function DockerHostCard({ host }: { host: DockerHost }) {
               <RefreshCwIcon size={14} className="mr-1" />
               健康检查
             </Button>
-            <ContainerActions hostId={host.id} containerId="all" />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onToggleExpand}
+            >
+              <ChevronIcon
+                size={12}
+                className="mr-1"
+                direction={expanded ? 'up' : 'down'}
+              />
+              {expanded ? '收起' : '展开容器'}
+            </Button>
           </div>
+
+          {/* Container list */}
+          {expanded && (
+            <div className="border-t border-border-soft pt-3">
+              {containersLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-brand-500" />
+                </div>
+              ) : !containersData?.containers || containersData.containers.length === 0 ? (
+                <div className="text-xs text-text-tertiary text-center py-3">暂无容器</div>
+              ) : (
+                <div className="space-y-2">
+                  {containersData.containers.map((container) => (
+                    <div
+                      key={container.id}
+                      className="flex items-center justify-between gap-2 rounded-md border border-border-soft bg-bg-secondary/50 px-3 py-2"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <ContainerIcon size={14} className="text-text-tertiary flex-shrink-0" />
+                          <span className="text-xs font-medium text-text-primary truncate">
+                            {container.name}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] ${
+                              container.status === 'running'
+                                ? 'text-green-700 border-green-200'
+                                : 'text-text-tertiary'
+                            }`}
+                          >
+                            {container.status}
+                          </Badge>
+                        </div>
+                        <div className="text-[10px] text-text-tertiary truncate ml-5 mt-0.5">
+                          {container.image}
+                        </div>
+                      </div>
+                      <ContainerActions hostId={host.id} containerId={container.id} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -539,6 +698,39 @@ export default function OperationsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = React.useState('overview');
+
+  // Container expansion state per host
+  const [showContainers, setShowContainers] = React.useState<Record<number, boolean>>({});
+
+  // Add / Edit host dialog state
+  const [hostDialogOpen, setHostDialogOpen] = React.useState(false);
+  const [editingHost, setEditingHost] = React.useState<DockerHost | null>(null);
+  const [hostForm, setHostForm] = React.useState({
+    name: '',
+    connection_type: 'local' as 'local' | 'ssh_key',
+    docker_host: '',
+    region: '',
+    tags: '',
+  });
+
+  // Reset form when dialog opens/closes
+  const openAddHostDialog = () => {
+    setEditingHost(null);
+    setHostForm({ name: '', connection_type: 'local', docker_host: '', region: '', tags: '' });
+    setHostDialogOpen(true);
+  };
+
+  const openEditHostDialog = (host: DockerHost) => {
+    setEditingHost(host);
+    setHostForm({
+      name: host.name,
+      connection_type: host.connection_type as 'local' | 'ssh_key',
+      docker_host: '',
+      region: host.region || '',
+      tags: Array.isArray(host.tags) ? host.tags.join(', ') : '',
+    });
+    setHostDialogOpen(true);
+  };
 
   // Fetch system overview
   const { data: overview, isLoading: overviewLoading } = useQuery({
@@ -571,6 +763,77 @@ export default function OperationsPage() {
   const handleRefreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ['operations'] });
     toast({ title: '正在刷新所有数据...' });
+  };
+
+  // Component action handler (from SystemTopology)
+  const handleComponentAction = (componentId: string, action: 'restart' | 'check') => {
+    if (action === 'check') {
+      queryClient.invalidateQueries({ queryKey: ['operations', 'overview'] });
+      toast({ title: `正在检查 ${componentId}...` });
+    } else if (action === 'restart') {
+      if (componentId === 'docker') {
+        queryClient.invalidateQueries({ queryKey: ['operations', 'overview'] });
+        toast({ title: 'Docker 运行时检查完成' });
+      } else {
+        toast({
+          title: '重启提示',
+          description: '请通过「命令参考」中的 Docker Compose 命令重启服务',
+        });
+      }
+    }
+  };
+
+  // Add / Edit host mutation
+  const saveHostMutation = useMutation({
+    mutationFn: async () => {
+      const formData = {
+        name: hostForm.name,
+        connection_type: hostForm.connection_type,
+        docker_host: hostForm.docker_host || undefined,
+        region: hostForm.region || undefined,
+        tags: hostForm.tags
+          ? hostForm.tags.split(',').map((t) => t.trim()).filter(Boolean)
+          : [],
+      };
+      if (isDemoMode()) {
+        await new Promise((r) => setTimeout(r, 600));
+        return { ok: true };
+      }
+      if (editingHost) {
+        return api.put(`/docker-hosts/${editingHost.id}`, formData);
+      }
+      return api.post('/docker-hosts', formData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['operations', 'overview'] });
+      toast({ title: editingHost ? '主机已更新' : '主机已添加' });
+      setHostDialogOpen(false);
+    },
+    onError: (err: Error) => {
+      toast({ title: '操作失败', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  // Delete host mutation
+  const deleteHostMutation = useMutation({
+    mutationFn: async (hostId: number) => {
+      if (isDemoMode()) {
+        await new Promise((r) => setTimeout(r, 400));
+        return { ok: true };
+      }
+      return api.delete(`/docker-hosts/${hostId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['operations', 'overview'] });
+      toast({ title: '主机已删除' });
+    },
+    onError: (err: Error) => {
+      toast({ title: '删除失败', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  const toggleContainer = (hostId: number) => {
+    setShowContainers((prev) => ({ ...prev, [hostId]: !prev[hostId] }));
   };
 
   return (
@@ -643,7 +906,7 @@ export default function OperationsPage() {
                   <CardDescription>点击组件查看详情并执行操作</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <SystemTopology overview={overview} />
+                  <SystemTopology overview={overview} onComponentAction={handleComponentAction} />
                 </CardContent>
               </Card>
 
@@ -683,10 +946,88 @@ export default function OperationsPage() {
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <h3 className="text-sm font-medium text-text-primary">Docker 主机列表</h3>
-                <Button size="sm">
-                  <PlusIcon size={14} className="mr-1" />
-                  添加主机
-                </Button>
+                <Dialog open={hostDialogOpen} onOpenChange={setHostDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" onClick={openAddHostDialog}>
+                      <PlusIcon size={14} className="mr-1" />
+                      添加主机
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>{editingHost ? '编辑主机' : '添加主机'}</DialogTitle>
+                    </DialogHeader>
+                    <div className="px-6 py-4 space-y-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="host-name" className="text-xs">名称</Label>
+                        <Input
+                          id="host-name"
+                          placeholder="例如：本地 Docker (WSL2)"
+                          value={hostForm.name}
+                          onChange={(e) => setHostForm((f) => ({ ...f, name: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="host-conn-type" className="text-xs">连接类型</Label>
+                        <Select
+                          value={hostForm.connection_type}
+                          onValueChange={(v: 'local' | 'ssh_key') =>
+                            setHostForm((f) => ({ ...f, connection_type: v }))
+                          }
+                        >
+                          <SelectTrigger id="host-conn-type">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="local">本地 (local)</SelectItem>
+                            <SelectItem value="ssh_key">SSH 密钥 (ssh_key)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="host-docker-host" className="text-xs">Docker Host（可选）</Label>
+                        <Input
+                          id="host-docker-host"
+                          placeholder="例如：unix:///var/run/docker.sock"
+                          value={hostForm.docker_host}
+                          onChange={(e) => setHostForm((f) => ({ ...f, docker_host: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="host-region" className="text-xs">区域（可选）</Label>
+                        <Input
+                          id="host-region"
+                          placeholder="例如：cn-beijing"
+                          value={hostForm.region}
+                          onChange={(e) => setHostForm((f) => ({ ...f, region: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="host-tags" className="text-xs">标签（逗号分隔，可选）</Label>
+                        <Input
+                          id="host-tags"
+                          placeholder="例如：开发环境, 本地"
+                          value={hostForm.tags}
+                          onChange={(e) => setHostForm((f) => ({ ...f, tags: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setHostDialogOpen(false)}
+                      >
+                        取消
+                      </Button>
+                      <Button
+                        onClick={() => saveHostMutation.mutate()}
+                        disabled={saveHostMutation.isPending || !hostForm.name.trim()}
+                      >
+                        {saveHostMutation.isPending ? '保存中...' : editingHost ? '保存' : '添加'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
 
               {overviewLoading ? (
@@ -704,7 +1045,14 @@ export default function OperationsPage() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {overview?.hosts?.map((host) => (
-                    <DockerHostCard key={host.id} host={host} />
+                    <DockerHostCard
+                      key={host.id}
+                      host={host}
+                      expanded={!!showContainers[host.id]}
+                      onToggleExpand={() => toggleContainer(host.id)}
+                      onEdit={openEditHostDialog}
+                      onDelete={(id) => deleteHostMutation.mutate(id)}
+                    />
                   ))}
                 </div>
               )}

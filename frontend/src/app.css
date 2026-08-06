@@ -47,6 +47,7 @@
   --color-role-security: #b05050;
   --color-role-ux: #9b6bb5;
   --color-role-data: #6b5b95;
+  --color-role-marketing: #c0844a;
 
   /* === 阶段状态色 === */
   --color-stage-pending: var(--color-text-tertiary);
@@ -151,6 +152,15 @@
 
   --color-accent-purple: #a78bfa;
   --color-accent-purple-bg: rgba(167, 139, 250, 0.08);
+
+  /* 暗色模式角色色提亮，保证小标签可见性 */
+  --color-role-moderator: #8b9eff;
+  --color-role-architect: #9b7fc0;
+  --color-role-engineer: #5dba80;
+  --color-role-security: #d07070;
+  --color-role-ux: #bb8bd5;
+  --color-role-data: #9b8bb5;
+  --color-role-marketing: #e0a060;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);

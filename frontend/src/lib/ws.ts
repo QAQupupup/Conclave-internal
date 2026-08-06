@@ -64,7 +64,7 @@ export class WsClient {
     };
 
     this.ws.onerror = () => {
-      useWSStore.getState().setError('WebSocket error');
+      useWSStore.getState().setError('连接异常');
     };
 
     this.ws.onclose = (event) => {

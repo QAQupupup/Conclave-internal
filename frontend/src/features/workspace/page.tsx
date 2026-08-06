@@ -35,7 +35,7 @@ interface FileItem {
   display_name?: string;
   type: 'file' | 'directory';
   size?: number;
-  modified?: string;
+  modified?: string | number;
   children_count?: number;
   child_count?: number;
 }
@@ -67,10 +67,22 @@ function formatFileSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return '--';
+function formatDate(dateVal?: string | number): string {
+  if (!dateVal) return '--';
   try {
-    const d = new Date(dateStr);
+    let d: Date;
+    if (typeof dateVal === 'number') {
+      // 后端返回 ISO 字符串，兼容旧版秒级时间戳
+      d = dateVal < 1e12 ? new Date(dateVal * 1000) : new Date(dateVal);
+    } else {
+      // 纯数字字符串（秒级时间戳）
+      if (/^\d+(\.\d+)?$/.test(dateVal)) {
+        const n = Number(dateVal);
+        d = n < 1e12 ? new Date(n * 1000) : new Date(n);
+      } else {
+        d = new Date(dateVal);
+      }
+    }
     if (isNaN(d.getTime())) return '--';
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   } catch {
@@ -140,6 +152,7 @@ export default function WorkspacePage() {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<{ name: string; path: string; type: string } | null>(null);
+  const [deleteCascade, setDeleteCascade] = React.useState(true);
 
   const uploadInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -204,11 +217,11 @@ export default function WorkspacePage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (filePath: string) => {
+    mutationFn: ({ filePath, cascade }: { filePath: string; cascade: boolean }) => {
       const encoded = encodeURIComponent(filePath);
-      return api.delete(`/workspace/files/${encoded}`);
+      return api.delete(`/workspace/files/${encoded}`, { cascade });
     },
-    onSuccess: () => {
+    onSuccess: (_data, _variables) => {
       queryClient.invalidateQueries({ queryKey: ['workspace', 'files'] });
       if (selectedFile === deleteTarget?.path) {
         setSelectedFile(null);
@@ -218,7 +231,11 @@ export default function WorkspacePage() {
       setDeleteTarget(null);
     },
     onError: (err: Error) => {
-      toast({ title: '删除失败', description: err.message, variant: 'error' });
+      toast({
+        title: '删除失败',
+        description: err.message || '未知错误',
+        variant: 'error',
+      });
     },
   });
 
@@ -244,7 +261,7 @@ export default function WorkspacePage() {
 
   const handleDelete = () => {
     if (!deleteTarget) return;
-    deleteMutation.mutate(deleteTarget.path);
+    deleteMutation.mutate({ filePath: deleteTarget.path, cascade: deleteTarget.type === 'directory' ? deleteCascade : false });
   };
 
   const handleUploadClick = () => {
@@ -295,6 +312,8 @@ export default function WorkspacePage() {
       path: joinPath(currentPath, item.name),
       type: item.type,
     });
+    // 目录默认勾选级联删除，文件不需要
+    setDeleteCascade(item.type === 'directory');
     setDeleteDialogOpen(true);
   };
 
@@ -631,13 +650,32 @@ export default function WorkspacePage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>确认删除</DialogTitle>
-            <DialogDescription>
-              确定要删除 {deleteTarget?.type === 'directory' ? '文件夹' : '文件'}{' '}
-              <span className="font-mono font-medium text-text-primary">{deleteTarget?.name}</span> 吗？
-              {deleteTarget?.type === 'directory' && (
-                <span className="mt-1 block text-warning">注意：只能删除空文件夹。</span>
-              )}
-              此操作不可撤销。
+            <DialogDescription asChild>
+              <div>
+                <p>
+                  确定要删除 {deleteTarget?.type === 'directory' ? '文件夹' : '文件'}{' '}
+                  <span className="font-mono font-medium text-text-primary">{deleteTarget?.name}</span> 吗？
+                </p>
+                {deleteTarget?.type === 'directory' && (
+                  <label className="mt-3 flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={deleteCascade}
+                      onChange={(e) => setDeleteCascade(e.target.checked)}
+                      className="h-4 w-4 rounded border-border-default text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="text-sm text-text-secondary">
+                      级联删除（删除文件夹及其所有子文件和子文件夹）
+                    </span>
+                  </label>
+                )}
+                {deleteTarget?.type === 'directory' && !deleteCascade && (
+                  <p className="mt-1 text-xs text-warning">
+                    未勾选级联删除时，只能删除空文件夹。
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-text-tertiary">此操作不可撤销。</p>
+              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -654,7 +692,7 @@ export default function WorkspacePage() {
                 <SpinnerIcon size={14} className="animate-spin" />
               )}
               <TrashIcon size={14} />
-              删除
+              删除{deleteTarget?.type === 'directory' && deleteCascade ? '（含子内容）' : ''}
             </Button>
           </DialogFooter>
         </DialogContent>

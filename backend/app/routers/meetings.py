@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import time
 import uuid
@@ -591,6 +592,15 @@ async def list_meetings_with_status(
         mid = m["id"]
         is_running = mid in _running_tasks and not _running_tasks[mid].done()
         raw_flow = m.get("payload", {}).get("flow_plan", FLOW_STANDARD)
+        # 从 payload 中提取消息数和 Agent 列表
+        payload = m.get("payload", {}) or {}
+        messages_list = payload.get("messages", [])
+        role_configs = payload.get("role_configs", [])
+        agents_summary = [
+            {"id": rc.get("id", ""), "name": rc.get("name", ""), "role": rc.get("role", "")}
+            for rc in role_configs
+            if isinstance(rc, dict)
+        ]
         items.append(
             {
                 "meeting_id": mid,
@@ -601,6 +611,8 @@ async def list_meetings_with_status(
                 "is_running": is_running,
                 "tags": m.get("tags", []),
                 "flow_plan": normalize_mode(raw_flow),
+                "message_count": len(messages_list) if isinstance(messages_list, list) else 0,
+                "agents": agents_summary,
             }
         )
     return {
@@ -612,7 +624,7 @@ async def list_meetings_with_status(
 
 
 @router.delete("/{meeting_id}")
-async def delete_meeting(meeting_id: str, mode: str = "soft", request: Request = None) -> dict[str, Any]:
+async def delete_meeting(meeting_id: str, request: Request, mode: str = "soft") -> dict[str, Any]:
     """删除会议
 
     - mode=soft（默认）：软删除，标记 status='deleted'，保留全部数据用于回归测试
@@ -631,12 +643,18 @@ async def delete_meeting(meeting_id: str, mode: str = "soft", request: Request =
         raise HTTPException(status_code=404, detail="会议不存在")
 
     # [SECURITY-FIX] 校验删除权限（支持 system admin / 创建者 / team owner / maintainer）
-    if request is not None:
-        await assert_can_delete_meeting(request, meeting)
+    await assert_can_delete_meeting(request, meeting)
 
-    # 运行中的会议不允许删除
+    # 运行中的会议：先停止后台任务再删除（而非直接拒绝 409）
+    # 旧版返回 409 导致卡在 running 的会议永远无法清理，用户无处下手。
     if meeting_id in _running_tasks and not _running_tasks[meeting_id].done():
-        raise HTTPException(status_code=409, detail="会议正在运行，无法删除")
+        task = _running_tasks.pop(meeting_id, None)
+        if task and not task.done():
+            task.cancel()
+            # 超时/取消后强制继续删除流程
+            with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                await asyncio.wait_for(task, timeout=3.0)
+        _run_locks.pop(meeting_id, None)
 
     if mode == "soft":
         ok = await soft_delete_meeting(meeting_id)

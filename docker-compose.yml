@@ -125,6 +125,7 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - CONCLAVE_WORKSPACE_DIR=/workspace
       - CONCLAVE_DB_PATH=/app/data/conclave.db
+      - CONCLAVE_SECRET_DIR=/app/data
       - CONCLAVE_SECRET_KEY=${CONCLAVE_SECRET_KEY:-}
       - CONCLAVE_SANDBOX_MODE=auto
       - CONCLAVE_QDRANT_URL=http://qdrant:6333

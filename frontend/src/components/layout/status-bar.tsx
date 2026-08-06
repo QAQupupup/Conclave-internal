@@ -55,7 +55,7 @@ export function StatusBar() {
                 meeting.status === 'error' && 'bg-stage-error'
               )}
             />
-            {meeting.status === 'running' ? '运行中' : meeting.status === 'paused' ? '已暂停' : meeting.status === 'done' ? '已结束' : meeting.status}
+            {meeting.status === 'running' ? '运行中' : meeting.status === 'paused' ? '已暂停' : meeting.status === 'done' ? '已结束' : meeting.status === 'error' ? '异常' : meeting.status === 'aborted' ? '已终止' : meeting.status === 'pending' ? '等待中' : meeting.status}
           </span>
           <div className="h-3 w-px bg-border-soft" />
           <span>阶段: {STAGE_LABELS[meeting.stage] || meeting.stage}</span>

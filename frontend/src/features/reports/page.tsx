@@ -581,7 +581,8 @@ export default function ReportsPage() {
     if (isError && error) {
       toast({
         title: '加载报告列表失败',
-        description: error instanceof Error ? error.message : '未知错误',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'error',
       });
     }
   }, [isError, error]);

@@ -894,6 +894,11 @@ function generateGenericMessages(meetingId: string, meeting: Meeting): MeetingMe
 
   // Generate more realistic messages based on stage
   const stageContents: Record<StageId, string[]> = {
+    clarify: [
+      '让我先梳理一下这个议题的核心问题和约束条件。',
+      '从我的专业角度来看，这个议题涉及几个关键维度需要分析。',
+      '在深入讨论前，我们需要明确几个前提假设。',
+    ],
     clarification: [
       '让我先梳理一下这个议题的核心问题和约束条件。',
       '从我的专业角度来看，这个议题涉及几个关键维度需要分析。',
@@ -1557,7 +1562,7 @@ export const mockApi = {
         reranker_model: 'bge-reranker-v2-m3',
       },
       security: {
-        jwt_expire_minutes: 60,
+        jwt_expire_minutes: 15,
         refresh_token_expire_days: 7,
         max_login_attempts: 5,
         lockout_minutes: 15,

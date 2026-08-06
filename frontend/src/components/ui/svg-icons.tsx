@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ROLE_AVATAR_COLORS } from '@/lib/constants';
 
 // ===== Conclave Logo SVG =====
 interface LogoProps {
@@ -50,27 +51,23 @@ export interface AgentAvatarProps {
   color?: string;
 }
 
-// 角色 → 形状映射
+// 角色 → 形状映射（使用后端 Role 枚举值）
 const ROLE_SHAPE: Record<string, AgentAvatarShape> = {
   moderator: 'hexagon',
-  clarifier: 'diamond',
-  intra_team: 'circle',
-  cross_team: 'triangle',
-  evidence_check: 'pentagon',
-  arbitrate: 'square',
-  produce: 'hexagon',
+  product_architect: 'diamond',
+  architect: 'diamond',
+  engineer: 'circle',
+  security_expert: 'pentagon',
+  security: 'pentagon',
+  data_engineer: 'triangle',
+  data: 'triangle',
+  ux_designer: 'square',
+  ux: 'square',
+  marketing_expert: 'hexagon',
+  marketing: 'hexagon',
 };
 
-// 角色 → 颜色映射（品牌色系低饱和版）
-const ROLE_COLOR: Record<string, string> = {
-  moderator: '#335c8e',
-  clarifier: '#5b7fb5',
-  intra_team: '#6b8cc7',
-  cross_team: '#7a6b9e',
-  evidence_check: '#4a8a6c',
-  arbitrate: '#a05a5a',
-  produce: '#8b6aa8',
-};
+// 角色 → 颜色统一使用 constants.ROLE_AVATAR_COLORS（CSS 变量），保证头像与标签配色一致
 
 // 从字符串生成稳定的色相
 function hashStringToColor(str: string): string {
@@ -102,7 +99,7 @@ export function AgentAvatar({
   color: colorProp,
 }: AgentAvatarProps) {
   const shape = shapeProp || (role ? ROLE_SHAPE[role] : undefined) || hashToShape(agentId || agentName || '?');
-  const color = colorProp || (role ? ROLE_COLOR[role] : undefined) || hashStringToColor(agentId || agentName || '?');
+  const color = colorProp || (role ? ROLE_AVATAR_COLORS[role] : undefined) || hashStringToColor(agentId || agentName || '?');
   const initial = (agentName || '?').charAt(0).toUpperCase();
   const c = size / 2;
   const r = c - 1;

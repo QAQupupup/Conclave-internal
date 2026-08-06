@@ -30,6 +30,24 @@ export default function LoginPage() {
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/board';
 
+  // If the user was redirected here because session recovery (hydration) failed,
+  // show a toast explaining what happened instead of silently dropping them on
+  // the login form.
+  React.useEffect(() => {
+    try {
+      if (sessionStorage.getItem('conclave:auth-hydration-failed') === '1') {
+        sessionStorage.removeItem('conclave:auth-hydration-failed');
+        toast({
+          title: '会话恢复失败',
+          description: '登录状态无法自动恢复，请重新登录',
+          variant: 'destructive',
+        });
+      }
+    } catch {
+      // sessionStorage unavailable (private mode, etc.) — skip silently
+    }
+  }, [toast]);
+
   // Demo/Dev mode login with mock data
   const handleDemoLogin = () => {
     const mockUser: UserInfo = {
@@ -81,7 +99,7 @@ export default function LoginPage() {
           }
         } catch {
           if (res.status === 502 || res.status === 504) {
-            msg = '无法连接到服务器，请确认后端服务已启动';
+            msg = import.meta.env.DEV ? '无法连接到服务器，请确认后端服务已启动' : '无法连接到服务，请稍后重试';
           } else if (res.status >= 500) {
             msg = '服务器内部错误，请稍后重试';
           }
@@ -133,7 +151,7 @@ export default function LoginPage() {
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof TypeError && err.message.includes('fetch')) {
-        setError('无法连接到服务器，请确认后端服务已启动');
+        setError(import.meta.env.DEV ? '无法连接到服务器，请确认后端服务已启动' : '无法连接到服务，请检查网络连接');
       } else {
         setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
       }

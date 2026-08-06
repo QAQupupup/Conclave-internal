@@ -6,7 +6,7 @@ import type { StageId } from '@/types';
 import { CheckIcon, CircleIcon, SpinnerIcon } from '@/components/ui/svg-icons';
 
 const STAGE_ORDER: StageId[] = [
-  'clarification',
+  'clarify',
   'intra_team',
   'cross_team',
   'evidence_check',
@@ -18,7 +18,9 @@ export function StageTimeline({ className }: { className?: string }) {
   const currentStage = useMeetingStore((s) => s.stage);
   const status = useMeetingStore((s) => s.status);
 
-  const currentIdx = STAGE_ORDER.indexOf(currentStage);
+  // 兼容 clarify / clarification 两种写法
+  const normalizedStage = currentStage === 'clarification' ? 'clarify' : currentStage;
+  const currentIdx = STAGE_ORDER.indexOf(normalizedStage as StageId);
 
   return (
     <div className={cn('flex h-full flex-col bg-bg-primary', className)}>

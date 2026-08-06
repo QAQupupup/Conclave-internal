@@ -51,6 +51,15 @@ class MeetingManager:
         if stage == "produce":
             return await reduce_stage_results(state, stage, {})
 
+        # evidence_check 阶段：需要 RAG 检索 + ReactLoop 多轮工具调用，
+        # 新的 Scheduler 路径（AgentRuntime.execute）暂不支持证据检索，
+        # 回退到 legacy 节点 evidence_check_node（含并行 RAG 检索 + 一致性自检）。
+        # 后续 AgentRuntime 支持工具调用后再迁移到统一路径。
+        if stage == "evidence_check":
+            from app.orchestrator.nodes.evidence_check import evidence_check_node
+
+            return await evidence_check_node(state)
+
         baseline = baseline or self.select_baseline(
             state.topic if hasattr(state, "topic") else "",
             state.domain_hint if hasattr(state, "domain_hint") else "",

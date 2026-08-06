@@ -222,7 +222,7 @@ export default function BoardPage() {
           </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {activeMeetings.map((m) => (
-              <MeetingCard key={m.id} meeting={m} onClick={() => navigate(`/explore/${m.id}`)} />
+              <MeetingCard key={m.id} meeting={m} onClick={() => navigate(`/explore/${m.id}`)} onDelete={(e) => handleDelete(e, m.id, m.title)} />
             ))}
           </div>
         </section>
@@ -266,7 +266,7 @@ export default function BoardPage() {
   );
 }
 
-function MeetingCard({ meeting, onClick }: { meeting: any; onClick: () => void }) {
+function MeetingCard({ meeting, onClick, onDelete }: { meeting: any; onClick: () => void; onDelete: (e: React.MouseEvent) => void }) {
   const statusConf = STATUS_CONFIG[meeting.status as MeetingStatus];
   return (
     <Card
@@ -276,9 +276,19 @@ function MeetingCard({ meeting, onClick }: { meeting: any; onClick: () => void }
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="line-clamp-2 text-sm font-medium leading-snug">{meeting.title}</CardTitle>
-          <Badge variant={statusConf.variant} className={cn('flex-shrink-0 text-[10px]', statusConf.color)}>
-            {statusConf.label}
-          </Badge>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            <Badge variant={statusConf.variant} className={cn('text-[10px]', statusConf.color)}>
+              {statusConf.label}
+            </Badge>
+            <button
+              onClick={onDelete}
+              className="rounded p-1 text-text-tertiary transition-colors hover:bg-danger-bg hover:text-danger"
+              title="删除"
+              aria-label="删除"
+            >
+              <TrashIcon size={12} />
+            </button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pb-3">
@@ -333,7 +343,7 @@ function MeetingRow({ meeting, onClick, onDelete }: { meeting: any; onClick: () 
       </button>
       <button
         onClick={onDelete}
-        className="rounded p-1 text-text-tertiary opacity-0 transition-all hover:bg-danger-bg hover:text-danger group-hover:opacity-100"
+        className="rounded p-1 text-text-tertiary transition-all hover:bg-danger-bg hover:text-danger"
         title="删除"
         aria-label="删除"
       >

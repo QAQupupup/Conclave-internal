@@ -94,7 +94,12 @@ export default function ExplorePage() {
   if (error || !meeting) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-bg-secondary">
-        <div className="text-sm text-danger">加载失败：{(error as Error)?.message || '会议不存在'}</div>
+        <div className="text-sm text-danger">
+          加载失败，讨论可能已被删除或您没有访问权限
+          {import.meta.env.DEV && (error as Error)?.message && (
+            <div className="mt-1 text-xs text-text-tertiary">{(error as Error).message}</div>
+          )}
+        </div>
         <Button variant="outline" onClick={() => navigate('/board')}>返回看板</Button>
       </div>
     );
