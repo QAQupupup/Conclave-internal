@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { StageTimeline } from '@/components/meeting/stage-timeline';
 import { MessageStream } from '@/components/meeting/message-stream';
 import { ThoughtTree } from '@/components/meeting/thought-tree';
+import { InsightsPanel } from '@/components/meeting/insights-panel';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores';
@@ -163,12 +164,25 @@ export default function ExplorePage() {
             className="flex flex-shrink-0 flex-col border-l border-border-soft"
             style={{ width: thoughtTreeWidth }}
           >
-            <div className="flex h-8 items-center justify-start border-b border-border-soft px-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠 Agent 树" aria-label="折叠 Agent 树">
+            <div className="flex h-8 items-center justify-between border-b border-border-soft px-1">
+              <span className="px-1 text-[11px] font-medium text-text-tertiary">侧栏</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠侧栏" aria-label="折叠侧栏">
                 <PanelRightCloseIcon size={13} />
               </Button>
             </div>
-            <ThoughtTree className="min-h-0 flex-1" />
+            <div className="flex min-h-0 flex-1 flex-col">
+              {/* Agent 状态树（上半） */}
+              <div className="flex min-h-0 flex-1 flex-col border-b border-border-soft">
+                <div className="flex h-7 flex-shrink-0 items-center border-b border-border-soft px-2 text-[11px] font-medium text-text-tertiary">
+                  Agent 状态树
+                </div>
+                <ThoughtTree className="min-h-0 flex-1" />
+              </div>
+              {/* 可观测性面板（下半）：冲突/证据、相关会议、关键指标 */}
+              <div className="flex min-h-0 flex-1 flex-col">
+                <InsightsPanel meetingId={id!} />
+              </div>
+            </div>
           </div>
         </>
       )}

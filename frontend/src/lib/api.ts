@@ -760,4 +760,22 @@ export const api = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
+  /** 临近话题推荐：创建会议时按议题文本检索相似历史会议 */
+  relatedMeetings: (topic: string, limit = 5) =>
+    request<{ meetings: Array<{ meeting_id: string; topic: string; status: string; deliverable_type?: string; score?: number }> }>(
+      `/meetings/related${buildQueryString({ topic, limit })}`,
+      { method: 'GET' },
+    ),
+  /** 某会议的相似历史会议（基于议题向量，排除自身） */
+  meetingRelated: (id: string, limit = 5) =>
+    request<{ meetings: Array<{ meeting_id: string; topic: string; status: string; deliverable_type?: string; score?: number }> }>(
+      `/meetings/${id}/related${buildQueryString({ limit })}`,
+      { method: 'GET' },
+    ),
+  /** 知识图谱：物化语义边（supports/contradicts）+ 节点 */
+  graphOverview: (meetingId?: string) =>
+    request<{ nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> }>(
+      `/graph/overview${buildQueryString(meetingId ? { meeting_id: meetingId } : {})}`,
+      { method: 'GET' },
+    ),
 };

@@ -162,6 +162,15 @@ export function useMeeting(id: string | null | undefined) {
   });
 }
 
+/** 原始会议详情（含 conflicts / evidence_set / decision_record，供可观测性面板） */
+export function useMeetingDetailRaw(id: string | null | undefined) {
+  return useQuery({
+    queryKey: [...meetingKeys.detail(id!), 'raw'],
+    queryFn: () => api.get<BackendMeetingDetail>(`/meetings/${id}`),
+    enabled: !!id,
+  });
+}
+
 /** 后端消息行（messages 表） */
 interface BackendMessageRow {
   id: string;

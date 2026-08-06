@@ -42,6 +42,9 @@ import {
   UploadIcon,
   FileIcon,
   XIcon,
+  LinkIcon,
+  CheckCircleIcon,
+  SearchIcon,
 } from '@/components/ui/svg-icons';
 
 const STATUS_CONFIG: Record<MeetingStatus, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive'; color: string }> = {
@@ -81,6 +84,50 @@ export default function BoardPage() {
   const [uploadProgress, setUploadProgress] = React.useState<{ name: string; percent: number } | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { data: roles } = useAgentRoles();
+
+  // 临近话题推荐：创建会议时按议题文本检索相似历史会议
+  const [relatedIds, setRelatedIds] = React.useState<string[]>([]);
+  const [relatedSuggestions, setRelatedSuggestions] = React.useState<
+    Array<{ meeting_id: string; topic: string; status: string; deliverable_type?: string; score?: number }>
+  >([]);
+  const [relatedLoading, setRelatedLoading] = React.useState(false);
+  const [showRelatedPopover, setShowRelatedPopover] = React.useState(false);
+  const relatedQueryToken = React.useRef(0);
+  const relatedContainerRef = React.useRef<HTMLDivElement>(null);
+  const relatedTopicMap = React.useRef<Record<string, string>>({});
+
+  const toggleRelated = (id: string) => {
+    setRelatedIds((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
+  };
+
+  // 议题输入防抖（500ms）-> 检索相似历史会议；推荐为非关键路径，失败静默
+  React.useEffect(() => {
+    const q = topic.trim();
+    if (!showNewForm || q.length < 4) {
+      setRelatedSuggestions([]);
+      setShowRelatedPopover(false);
+      return;
+    }
+    setRelatedLoading(true);
+    const token = ++relatedQueryToken.current;
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.relatedMeetings(q, 5);
+        if (token !== relatedQueryToken.current) return;
+        const items = Array.isArray(res?.meetings) ? res.meetings : [];
+        items.forEach((i) => {
+          relatedTopicMap.current[i.meeting_id] = i.topic;
+        });
+        setRelatedSuggestions(items);
+        setShowRelatedPopover(items.length > 0);
+      } catch {
+        // 推荐为非关键路径，失败静默
+      } finally {
+        if (token === relatedQueryToken.current) setRelatedLoading(false);
+      }
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [topic, showNewForm]);
 
   const meetings = Array.isArray(meetingsData?.items) ? meetingsData.items : [];
   const activeMeetings = meetings.filter((m) => m.status === 'running' || m.status === 'paused');
@@ -147,6 +194,9 @@ export default function BoardPage() {
     setTopicHistory([]);
     setFiles([]);
     setSelectedRoleIds([]);
+    setRelatedIds([]);
+    setRelatedSuggestions([]);
+    setShowRelatedPopover(false);
     setDeliverableType('prd_openapi');
     setFlowPlan('standard');
     setDebateDepth('standard');
@@ -165,6 +215,7 @@ export default function BoardPage() {
         flow_plan: flowPlan,
         debate_depth: debateDepth,
         role_ids: selectedRoleIds,
+        reference_meeting_ids: relatedIds,
       });
       const meetingId = res.meeting_id;
 
@@ -245,21 +296,111 @@ export default function BoardPage() {
         <div className="mt-5">
           {showNewForm ? (
             <form onSubmit={handleStart} className="rounded-lg border border-border-default bg-bg-primary p-4 shadow-sm">
-              <Textarea
-                ref={textareaRef}
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="描述你想讨论的议题或问题...&#10;例如：分析微服务架构中服务间通信的最佳实践，对比 gRPC 和 REST 的适用场景"
-                className="min-h-[96px] text-[15px] leading-relaxed"
-                autoFocus
-                disabled={isLaunching}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    handleStart();
-                  }
-                }}
-              />
+              {/* 议题输入 + 临近话题推荐 */}
+              <div className="relative" ref={relatedContainerRef}>
+                <Textarea
+                  ref={textareaRef}
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  placeholder="描述你想讨论的议题或问题...&#10;例如：分析微服务架构中服务间通信的最佳实践，对比 gRPC 和 REST 的适用场景"
+                  className="min-h-[96px] text-[15px] leading-relaxed"
+                  autoFocus
+                  disabled={isLaunching}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      handleStart();
+                    }
+                  }}
+                />
+
+                {/* 近似历史会议推荐（非关键路径，失败静默） */}
+                {showRelatedPopover && (
+                  <div
+                    className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-border-default bg-bg-primary shadow-md"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="flex items-center justify-between border-b border-border-soft px-2.5 py-1.5">
+                      <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
+                        <SearchIcon size={12} />
+                        相似历史会议（点击关联）
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowRelatedPopover(false)}
+                        className="rounded p-0.5 text-text-tertiary hover:text-text-secondary"
+                        aria-label="关闭推荐"
+                      >
+                        <XIcon size={12} />
+                      </button>
+                    </div>
+                    <ul className="max-h-56 overflow-y-auto py-1">
+                      {relatedSuggestions.map((m) => {
+                        const checked = relatedIds.includes(m.meeting_id);
+                        return (
+                          <li key={m.meeting_id}>
+                            <button
+                              type="button"
+                              onClick={() => toggleRelated(m.meeting_id)}
+                              className={cn(
+                                'flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors',
+                                checked ? 'bg-brand-soft' : 'hover:bg-bg-secondary',
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  'flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border',
+                                  checked ? 'border-brand-500 bg-brand-500' : 'border-border-default',
+                                )}
+                              >
+                                {checked && <CheckCircleIcon size={12} className="text-white" />}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-xs text-text-primary">{m.topic}</span>
+                              {typeof m.score === 'number' && (
+                                <span className="flex-shrink-0 rounded bg-brand-soft px-1 text-[10px] text-brand-600">
+                                  {(m.score * 100).toFixed(0)}%
+                                </span>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {relatedLoading && (
+                      <div className="flex items-center gap-1.5 border-t border-border-soft px-2.5 py-1.5 text-[11px] text-text-tertiary">
+                        <SpinnerIcon size={11} className="animate-spin" />
+                        检索相似会议中...
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 已关联的相似会议 */}
+              {relatedIds.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {relatedIds.map((id) => {
+                    const label = relatedTopicMap.current[id] ?? '关联会议';
+                    return (
+                      <span
+                        key={id}
+                        className="flex items-center gap-1 rounded-full border border-brand-500/40 bg-brand-soft px-2 py-0.5 text-[11px] text-brand-600"
+                      >
+                        <LinkIcon size={11} />
+                        <span className="max-w-[200px] truncate">{label}</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleRelated(id)}
+                          className="rounded-full p-0.5 hover:text-brand-500"
+                          aria-label="取消关联"
+                        >
+                          <XIcon size={10} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* 会议配置 */}
               <div className="mt-3 grid gap-3 border-t border-border-soft pt-3 sm:grid-cols-3">
