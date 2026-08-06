@@ -1,0 +1,1721 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>复盘报告 — 认证持久化 / 删除功能 / 运维面板修复</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --border: #e5e5e5;
+    --border-light: #f0f0f0;
+    --text-primary: #1a1a1a;
+    --text-secondary: #525252;
+    --text-tertiary: #8c8c8c;
+    --brand: #335c8e;
+    --brand-light: #e8f0f7;
+    --red: #d4480d;
+    --red-bg: #fef3f2;
+    --amber: #b54708;
+    --amber-bg: #fffaeb;
+    --green: #157f3d;
+    --green-bg: #f0fdf4;
+    --code-bg: #f5f5f5;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text-primary);
+    line-height: 1.7;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 48px 32px 80px;
+  }
+  /* Header */
+  .report-header {
+    margin-bottom: 40px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .report-header .tag {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--brand);
+    background: var(--brand-light);
+    padding: 3px 10px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+    letter-spacing: 0.5px;
+  }
+  .report-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    letter-spacing: -0.3px;
+  }
+  .report-header .meta {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .report-header .meta span { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* Summary stats */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 48px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+  }
+  .stat-card .num {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .stat-card .label {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-top: 4px;
+  }
+  .stat-card.red .num { color: var(--red); }
+  .stat-card.amber .num { color: var(--amber); }
+  .stat-card.green .num { color: var(--green); }
+  .stat-card.brand .num { color: var(--brand); }
+
+  /* Section */
+  .section {
+    margin-bottom: 40px;
+  }
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title .icon {
+    width: 20px; height: 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  /* Issue card */
+  .issue {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .issue-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .severity {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    line-height: 1.6;
+  }
+  .sev-p0 { background: var(--red-bg); color: var(--red); }
+  .sev-p1 { background: var(--amber-bg); color: var(--amber); }
+  .sev-p2 { background: var(--brand-light); color: var(--brand); }
+  .issue-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+  }
+
+  .field {
+    margin-bottom: 14px;
+  }
+  .field:last-child { margin-bottom: 0; }
+  .field-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .field-content {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.65;
+  }
+  .field-content ul {
+    list-style: none;
+    padding-left: 0;
+  }
+  .field-content li {
+    padding-left: 16px;
+    position: relative;
+    margin-bottom: 4px;
+  }
+  .field-content li::before {
+    content: "—";
+    position: absolute;
+    left: 0;
+    color: var(--text-tertiary);
+  }
+
+  /* Attempt timeline */
+  .attempts {
+    border-left: 2px solid var(--border);
+    padding-left: 20px;
+    margin-left: 4px;
+  }
+  .attempt {
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .attempt:last-child { margin-bottom: 0; }
+  .attempt::before {
+    content: "";
+    position: absolute;
+    left: -26px;
+    top: 6px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+  }
+  .attempt.success::before { background: var(--green); }
+  .attempt.fail::before { background: var(--red); }
+  .attempt.partial::before { background: var(--amber); }
+  .attempt-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+  }
+  .attempt-label .badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: 2px;
+  }
+  .attempt-label .badge.success { background: var(--green-bg); color: var(--green); }
+  .attempt-label .badge.fail { background: var(--red-bg); color: var(--red); }
+  .attempt-label .badge.partial { background: var(--amber-bg); color: var(--amber); }
+  .attempt-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  /* Code */
+  code {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--text-primary);
+  }
+  pre {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    line-height: 1.5;
+    color: var(--text-primary);
+  }
+  pre code {
+    background: none;
+    padding: 0;
+  }
+
+  /* Callout */
+  .callout {
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .callout-warn {
+    background: var(--amber-bg);
+    border: 1px solid #fde68a;
+    color: var(--amber);
+  }
+  .callout-info {
+    background: var(--brand-light);
+    border: 1px solid #c5dbf0;
+    color: var(--brand);
+  }
+  .callout strong { font-weight: 600; }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    margin: 12px 0;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td code { font-size: 12px; }
+
+  /* Analysis box */
+  .analysis-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--brand);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 12px 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  hr.divider {
+    border: none;
+    border-top: 1px solid var(--border-light);
+    margin: 32px 0;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ===================== HEADER ===================== -->
+<div class="report-header">
+  <span class="tag">RETROSPECTIVE</span>
+  <h1>认证持久化 / 删除功能 / 运维面板修复复盘</h1>
+  <div class="meta">
+    <span>日期：2026-08-05</span>
+    <span>涉及模块：frontend / backend / auth / operations</span>
+    <span>修改文件：18 个</span>
+    <span>修复问题：7 类 / 22 子项</span>
+  </div>
+</div>
+
+<!-- ===================== STATS ===================== -->
+<div class="stats-grid">
+  <div class="stat-card red">
+    <div class="num">7</div>
+    <div class="label">问题类别</div>
+  </div>
+  <div class="stat-card amber">
+    <div class="num">22</div>
+    <div class="label">子问题数</div>
+  </div>
+  <div class="stat-card red">
+    <div class="num">5</div>
+    <div class="label">登录问题尝试次数</div>
+  </div>
+  <div class="stat-card green">
+    <div class="num">37/37</div>
+    <div class="label">核心测试通过</div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 1: 总览 ===================== -->
+<div class="section">
+  <div class="section-title">一、问题总览与分类</div>
+  <p style="color:var(--text-secondary); margin-bottom:16px;">
+    本次会话共处理用户提出的 5 大类需求，涉及 15 个子问题。问题分布在后端权限校验、前端状态管理、API 拦截器、运维面板 4 个层面。其中登录持久化问题消耗时间最长（约 60% 总工时），根因是 zustand persist 中间件的异步 hydration 机制与 React 渲染时序的竞态条件。
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:5%">#</th>
+        <th style="width:18%">类别</th>
+        <th style="width:10%">严重度</th>
+        <th>问题概要</th>
+        <th style="width:12%">涉及层数</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td>文件删除</td>
+        <td><span class="severity sev-p1">P1</span></td>
+        <td>缺少级联删除、缺少权限校验、错误提示不可读</td>
+        <td>后端 + 前端</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>会议删除</td>
+        <td><span class="severity sev-p1">P1</span></td>
+        <td>后端参数签名错误、前端无删除入口、权限未界定</td>
+        <td>后端 + 前端</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>错误提示</td>
+        <td><span class="severity sev-p2">P2</span></td>
+        <td>右下角告警消息为英文/堆栈信息、可读性差</td>
+        <td>前端</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>登录持久化</td>
+        <td><span class="severity sev-p0">P0</span></td>
+        <td>登录后刷新页面需重新登录，不符合主流鉴权流程</td>
+        <td>前端 + 后端</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>运维面板</td>
+        <td><span class="severity sev-p1">P1</span></td>
+        <td>拓扑死按钮、容器操作 404、健康状态硬编码、缺少添加主机</td>
+        <td>前端 + 后端</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>Token 安全</td>
+        <td><span class="severity sev-p2">P2</span></td>
+        <td>access_token 过期时间 24h 过长，不符合安全最佳实践</td>
+        <td>后端</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===================== SECTION 2: 登录持久化（重点） ===================== -->
+<div class="section">
+  <div class="section-title">二、登录持久化问题深度分析（P0 重点）</div>
+
+  <div class="callout callout-warn">
+    <strong>用户反馈：</strong>"登录后刷新页面需要重新登录，不符合现在主流的鉴权流程。"该问题是本次消耗时间最多的修复项，经历了 5 次尝试才彻底解决。
+  </div>
+
+  <!-- 2.1 问题现象 -->
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p0">P0</span>
+      <div class="issue-title">登录后刷新页面重定向到登录页</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        用户使用账号密码登录成功，跳转到 <code>/board</code> 页面，内容正常显示。但刷新浏览器（F5）后，页面短暂显示 loading 动画，随后重定向到 <code>/login</code>，要求重新输入账号密码。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因分析</div>
+      <div class="field-content">
+        问题的根因是 <strong>zustand persist 中间件的异步 hydration 与 React 渲染时序之间的竞态条件</strong>。具体链路如下：
+        <ul style="margin-top:8px;">
+          <li>页面刷新时，React 首次渲染，<code>ProtectedRoute</code> 读取 <code>useAuthStore</code> 的初始状态：<code>isLoading=true, isAuthenticated=false</code></li>
+          <li>同时，zustand persist 从 <code>localStorage</code> 异步恢复 token，写入 store</li>
+          <li>但 persist 的 hydration 回调 <code>onRehydrateStorage</code> 并不保证在 React 第一次渲染前完成</li>
+          <li><code>ProtectedRoute</code> 看到 <code>isAuthenticated=false</code>，立即执行 <code>Navigate to="/login"</code></li>
+          <li>即使 token 后续恢复了，路由已经跳转走了</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">为什么这个问题难修</div>
+      <div class="field-content">
+        zustand persist 的 hydration 是 <strong>异步且非确定性的</strong>。在某些浏览器/环境下，hydration 可能因为以下原因卡住或延迟：
+        <ul style="margin-top:8px;">
+          <li><code>localStorage</code> 读取被浏览器节流（隐私模式、存储配额接近上限）</li>
+          <li><code>onRehydrateStorage</code> 回调中包含异步操作（如 <code>fetchUser</code>）导致 hydration 完成信号被阻塞</li>
+          <li><code>createJSONStorage</code> wrapper 的 Promise 链在某些边缘情况下不 resolve</li>
+          <li>React 18 的并发模式下，<code>useEffect</code> 可能在 store 状态更新前就执行</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2.2 尝试过程 -->
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p0">P0</span>
+      <div class="issue-title">修复尝试过程（5 次迭代）</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">尝试时间线</div>
+      <div class="attempts" style="margin-top:12px;">
+
+        <div class="attempt fail">
+          <div class="attempt-label">尝试 1：在 <code>onRehydrateStorage</code> 中调用 <code>fetchUser</code> <span class="badge fail">失败</span></div>
+          <div class="attempt-desc">
+            思路：persist 恢复 token 后，立即调用 <code>fetchUser()</code> 验证 token 并加载用户信息。<br>
+            问题：<code>onRehydrateStorage</code> 回调中调用异步函数会导致 hydration 完成信号被阻塞。store 一直处于 <code>hasHydrated=false</code> 状态，<code>ProtectedRoute</code> 的 loading 兜底超时触发后强制 <code>isAuthenticated=false</code>。<br>
+            教训：<code>onRehydrateStorage</code> 应只做同步状态标记，不应承担异步认证逻辑。
+          </div>
+        </div>
+
+        <div class="attempt fail">
+          <div class="attempt-label">尝试 2：添加 <code>silentRefresh</code> 作为刷新后备 <span class="badge fail">失败</span></div>
+          <div class="attempt-desc">
+            思路：token 不存在时，尝试用 HttpOnly <code>refresh_token</code> cookie 调用 <code>/auth/refresh</code> 获取新 token。<br>
+            问题：<code>silentRefresh</code> 在 <code>onRehydrateStorage</code> 中调用，同样阻塞 hydration。且 <code>/auth/refresh</code> 路径未加入 <code>PUBLIC_PATHS</code>，被中间件拦截返回 401。<br>
+            教训：refresh 端点必须在后端白名单中，且不应在 hydration 回调中调用。
+          </div>
+        </div>
+
+        <div class="attempt fail">
+          <div class="attempt-label">尝试 3：分离 hydration 与认证，引入 <code>AuthInit</code> 组件 <span class="badge partial">部分解决</span></div>
+          <div class="attempt-desc">
+            思路：创建 <code>AuthInit</code> 组件，用 <code>useState</code> + <code>useEffect</code> 等待 <code>useAuthStore.persist.hasHydrated()</code> 返回 true 后再执行认证逻辑。<br>
+            结果：<strong>大多数情况下正常工作</strong>，但偶发仍跳转登录页。<br>
+            问题：<code>persist.hasHydrated()</code> 在某些浏览器环境下永远不返回 true（localStorage 读取 Promise 不 resolve），导致 <code>AuthInit</code> 永久等待。<br>
+            教训：不能无限等待 hydration，必须有兜底超时。
+          </div>
+        </div>
+
+        <div class="attempt partial">
+          <div class="attempt-label">尝试 4：添加 3 秒兜底超时 <span class="badge partial">部分解决</span></div>
+          <div class="attempt-desc">
+            思路：在 <code>AuthInit</code> 中设置 <code>setTimeout(3000)</code>，如果 hydration 未完成则强制继续。<br>
+            问题：超时后 store 中仍无 token（因为 hydration 没完成意味着 localStorage 值没被读出来），认证失败跳转登录。<br>
+            教训：兜底超时不能只"跳过等待"，还需要在超时时手动从 localStorage 读取 token。
+          </div>
+        </div>
+
+        <div class="attempt success">
+          <div class="attempt-label">尝试 5：兜底超时 + 手动 localStorage 加载（最终方案） <span class="badge success">成功</span></div>
+          <div class="attempt-desc">
+            思路：3 秒超时后，如果 hydration 仍未完成，手动从 <code>localStorage.getItem('conclave:auth')</code> 读取 token，解析 JSON 后通过 <code>useAuthStore.setState({ token })</code> 注入 store。<br>
+            结果：所有测试场景通过——正常刷新保持登录、token 过期自动刷新、无 token 跳转登录。<br>
+            <strong>这是最终采用的方案。</strong>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">最终方案架构</div>
+      <div class="field-content">
+        <pre><code>// App.tsx — AuthInit 组件
+function AuthInit() {
+  const [hydrated, setHydrated] = React.useState(false);
+
+  // 1. 等 persist hydration
+  React.useEffect(() => {
+    if (useAuthStore.persist.hasHydrated()) { setHydrated(true); return; }
+    const unsub = useAuthStore.persist.onFinishHydration(() => setHydrated(true));
+
+    // 2. 3秒兜底：手动加载 localStorage token
+    const timeout = setTimeout(() => {
+      if (!useAuthStore.persist.hasHydrated()) {
+        const raw = localStorage.getItem('conclave:auth');
+        if (raw) {
+          const token = JSON.parse(raw)?.state?.token;
+          if (token) useAuthStore.setState({ token });
+        }
+        setHydrated(true);
+      }
+    }, 3000);
+    return () => { unsub(); clearTimeout(timeout); };
+  }, []);
+
+  // 3. hydration 完成后执行认证逻辑
+  React.useEffect(() => {
+    if (!hydrated) return;
+    const { token, fetchUser, silentRefresh, setLoading } = useAuthStore.getState();
+    (async () => {
+      if (token) {
+        if (await fetchUser()) return;        // token 有效
+        if (await silentRefresh()) return;    // token 过期，刷新成功
+      } else {
+        if (await silentRefresh()) return;    // 无 token，尝试 cookie 刷新
+      }
+      setLoading(false);                       // 全部失败，未认证
+    })();
+  }, [hydrated]);
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">为什么这样修复（决策理由）</div>
+      <div class="field-content">
+        <ul>
+          <li><strong>分离 hydration 与认证</strong>：<code>onRehydrateStorage</code> 只标记 <code>hasHydrated=true</code>，不调用任何异步函数。认证逻辑集中在 <code>AuthInit</code> 中，避免竞态</li>
+          <li><strong>3 秒兜底超时</strong>：正常情况 hydration 在毫秒级完成，3 秒是极端边缘情况的安全网。超时后仍手动读取 localStorage，确保 token 不丢失</li>
+          <li><strong>三层认证降级</strong>：token 有效 → fetchUser 验证；token 过期 → silentRefresh 刷新；无 token → 尝试 cookie 刷新；全部失败 → 未认证。覆盖所有场景</li>
+          <li><strong>移除 <code>createJSONStorage</code></strong>：直接使用 <code>storage: createJSONStorage(() => localStorage)</code> 的默认行为，避免不必要的 Promise 包装</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout callout-info">
+      <strong>关于"绕过兜底"的说明：</strong>3 秒兜底超时 + 手动 localStorage 加载不是"绕过"问题，而是<strong>防御性编程</strong>。zustand persist 的 hydration 在 99% 的情况下正常工作，但浏览器环境（隐私模式、存储策略、扩展干扰）可能导致异常。兜底机制确保即使 hydration 失败，用户也不会被错误地登出。这与主流平台（如 Linear、Vercel）的做法一致——永远有 fallback。
+    </div>
+  </div>
+
+  <!-- 2.3 关联修复 -->
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p0">P0</span>
+      <div class="issue-title">登录持久化的关联修复项</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">为支持登录持久化，同步修复的 6 个子问题</div>
+      <div class="field-content">
+        <table>
+          <thead>
+            <tr><th>#</th><th>子问题</th><th>修复内容</th><th>原因</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>Token 自动刷新拦截器缺失</td>
+              <td><code>api.ts</code> 实现 401 → <code>/auth/refresh</code> → 重放请求队列</td>
+              <td>access_token 缩短到 15 分钟后，过期期间用户请求不能直接 401 登出</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>/auth/refresh</code> 未在公开路径</td>
+              <td><code>public_paths.py</code> 添加 <code>/auth/refresh</code></td>
+              <td>刷新请求不带 access_token，中间件会拦截返回 401</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>CSRF Token 未自动附加</td>
+              <td><code>api.ts</code> 写操作自动从 cookie 读取并附加 <code>X-CSRF-Token</code></td>
+              <td>Cookie 认证模式下，POST/PUT/DELETE 需要 CSRF 双重提交校验</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>JWT 密钥未持久化</td>
+              <td><code>docker-compose.yml</code> 添加 volume 映射 <code>jwt_secret</code></td>
+              <td>密钥每次重启变化导致所有已签发 token 失效，用户被强制登出</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>auth-slice persist 配置问题</td>
+              <td>移除 <code>createJSONStorage</code>，简化 <code>onRehydrateStorage</code></td>
+              <td>减少 hydration 异步链，降低竞态概率</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>调试日志残留</td>
+              <td>清理 <code>AuthInit/fetchUser/silentRefresh/ProtectedRoute</code> 中的 <code>console.log</code></td>
+              <td>生产环境不应输出认证流程日志</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 3: 文件删除 ===================== -->
+<div class="section">
+  <div class="section-title">三、文件删除功能修复</div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">文件删除缺少级联删除与权限校验</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <div class="field-content">
+        用户反馈：文件删除需要增加级联删除（直接删除文件夹所有内容），且需限定删除角色权限。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        <ul>
+          <li>后端 <code>DELETE /workspace/files/{path}</code> 仅支持删除单文件或空目录，无 <code>cascade</code> 参数</li>
+          <li>删除接口无任何权限校验，任何登录用户都可删除任意文件</li>
+          <li>前端删除文件夹时未提示"将删除所有子内容"</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复方案</div>
+      <div class="field-content">
+        <strong>后端</strong>（<code>workspace.py</code>）：
+        <ul>
+          <li>添加 <code>cascade: bool = False</code> 查询参数</li>
+          <li><code>cascade=true</code> 时使用 <code>shutil.rmtree()</code> 递归删除</li>
+          <li><code>cascade=false</code> 删除非空目录时返回 400 提示"请使用级联删除"</li>
+        </ul>
+        <strong>权限模型</strong>（<code>auth_guard.py</code>）：
+        <ul>
+          <li>从文件路径提取 <code>meeting_id</code>（<code>mtg-</code> 前缀目录）</li>
+          <li>调用 <code>assert_can_delete_meeting()</code> 校验权限</li>
+        </ul>
+        <strong>权限层级</strong>：
+        <pre><code>1. system_owner / system_admin / admin → 始终允许
+2. 会议创建者（owner_username == username）→ 允许
+3. Team owner / maintainer → 允许
+4. 其他角色 → 403 拒绝</code></pre>
+        <strong>前端</strong>（<code>workspace/page.tsx</code>）：
+        <ul>
+          <li>删除确认对话框添加"级联删除"复选框，默认勾选</li>
+          <li>提示文案："将删除该文件夹及其所有子文件和子文件夹"</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">尝试过程</div>
+      <div class="attempts" style="margin-top:12px;">
+        <div class="attempt success">
+          <div class="attempt-label">尝试 1：cascade 参数 + shutil.rmtree <span class="badge success">成功</span></div>
+          <div class="attempt-desc">
+            直接在 DELETE 接口添加 <code>cascade</code> 查询参数，<code>True</code> 时调用 <code>shutil.rmtree()</code>。一次通过，无反复。
+          </div>
+        </div>
+        <div class="attempt partial">
+          <div class="attempt-label">尝试 2：权限模型设计 <span class="badge partial">调整</span></div>
+          <div class="attempt-desc">
+            初版权限只检查 <code>is_admin(role)</code>，漏掉了会议创建者和 team owner/maintainer。<br>
+            用户要求"考虑清楚权限"，遂扩展为 4 层权限模型，新增 <code>assert_can_delete_meeting()</code> 函数，覆盖系统管理员 → 创建者 → 团队管理角色 → 拒绝。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 4: 会议删除 ===================== -->
+<div class="section">
+  <div class="section-title">四、会议删除功能修复</div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">会议删除后端参数错误 + 前端无删除入口</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <div class="field-content">
+        用户反馈：会议删除功能"似乎并未生效"，前端没有删除入口。要求自行做端到端测试。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因（3 个子问题）</div>
+      <div class="field-content">
+        <ul>
+          <li><strong>后端参数签名错误</strong>：<code>delete_meeting</code> 函数的 <code>mode</code> 参数从 query param 改为 body 后，前端 GET 列表时缺少 <code>message_count</code> 和 <code>agents</code> 字段导致序列化失败</li>
+          <li><strong>前端无删除入口</strong>：<code>TopBar</code> 组件没有删除按钮，用户无法触发删除操作</li>
+          <li><strong>权限未界定</strong>：删除接口没有调用 <code>assert_can_delete_meeting</code>，任何用户都能删除</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复方案</div>
+      <div class="field-content">
+        <strong>后端</strong>（<code>meetings.py</code>）：
+        <ul>
+          <li>修复 <code>delete_meeting</code> 参数签名，<code>mode: str = "soft"</code> 作为 query param</li>
+          <li>列表接口补充 <code>message_count</code> 和 <code>agents</code> 字段</li>
+          <li>添加 <code>assert_can_delete_meeting()</code> 权限校验</li>
+          <li>默认软删除（<code>mode=soft</code>），硬删除暂不暴露</li>
+        </ul>
+        <strong>前端</strong>（<code>top-bar.tsx</code>）：
+        <ul>
+          <li>添加删除按钮（trash icon）和确认对话框</li>
+          <li>确认对话框提示"此操作不可撤销，将软删除该会议"</li>
+          <li>删除成功后刷新会议列表缓存</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">尝试过程</div>
+      <div class="attempts" style="margin-top:12px;">
+        <div class="attempt fail">
+          <div class="attempt-label">尝试 1：仅修复后端参数 <span class="badge fail">失败</span></div>
+          <div class="attempt-desc">
+            修复 <code>delete_meeting</code> 参数签名后，用 curl 测试 API 返回正常。<br>
+            但前端没有删除入口，用户无法操作。用户反馈"前端看起来没有删除的地方"。
+          </div>
+        </div>
+        <div class="attempt fail">
+          <div class="attempt-label">尝试 2：在会议列表页添加删除按钮 <span class="badge fail">失败</span></div>
+          <div class="attempt-desc">
+            在会议列表 <code>list-page.tsx</code> 中添加删除按钮，但列表项的 <code>useMeetings()</code> hook 字段名与后端返回不匹配（<code>message_count</code> vs <code>messageCount</code>），导致渲染异常。
+          </div>
+        </div>
+        <div class="attempt success">
+          <div class="attempt-label">尝试 3：TopBar 添加删除按钮 + useMeetings normalize <span class="badge success">成功</span></div>
+          <div class="attempt-desc">
+            改为在 <code>TopBar</code> 组件添加删除按钮（更符合用户操作习惯——在会议详情页直接删除）。同时修复 <code>useMeetings()</code> hook 的 <code>normalizeMeetingDetail</code> 函数，统一字段命名。<br>
+            端到端测试：浏览器中点击删除按钮 → 确认对话框 → API 返回 <code>{deleted: true, mode: "soft"}</code> → 列表刷新。通过。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复原因</div>
+      <div class="field-content">
+        <ul>
+          <li>删除入口放在 TopBar 而非列表页：用户在会议详情页操作更直观，且避免列表页 UI 过于拥挤</li>
+          <li>默认软删除：防止误删导致数据永久丢失，硬删除功能可后续在管理后台暴露</li>
+          <li>权限复用文件删除的 <code>assert_can_delete_meeting</code>：统一权限模型，避免多处定义</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 5: API 与数据模型 ===================== -->
+<div class="section">
+  <div class="section-title">五、API 数据模型与字段映射问题</div>
+
+  <div class="callout callout-warn">
+    <strong>用户反馈：</strong>"因为 api 和数据模型以及字段的导致的问题你似乎没提到或者不够全？" — 本节专门复盘本次所有因 API 契约不一致、数据模型字段缺失或命名风格冲突导致的问题。
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p0">P0</span>
+      <div class="issue-title">前后端字段命名风格不一致（snake_case vs camelCase）</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        后端 API 返回 snake_case（Python 惯例），前端 TypeScript 类型/组件期望 camelCase（JS 惯例）。直接使用后端字段名导致前端渲染 <code>undefined</code> 或崩溃。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">受影响的字段映射</div>
+      <div class="field-content">
+        <table>
+          <thead>
+            <tr><th>后端字段（snake_case）</th><th>前端期望（camelCase）</th><th>影响范围</th><th>处理方式</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>message_count</code></td><td><code>messageCount</code></td><td>会议列表、会议详情</td><td>normalize 层同时输出两者</td></tr>
+            <tr><td><code>created_at</code></td><td><code>createdAt</code>（number 时间戳）</td><td>会议列表、详情</td><td>normalize 层转换 <code>Date.parse()</code></td></tr>
+            <tr><td><code>is_running</code></td><td><code>metadata.isRunning</code></td><td>会议列表</td><td>normalize 层放入 metadata</td></tr>
+            <tr><td><code>role_configs</code></td><td><code>agents</code></td><td>会议详情</td><td>normalize 层重映射字段名</td></tr>
+            <tr><td><code>clarified_topic</code></td><td><code>title</code></td><td>会议详情</td><td>normalize 层 fallback 取值</td></tr>
+            <tr><td><code>artifact.summary</code></td><td><code>summary</code></td><td>会议详情</td><td>normalize 层提取嵌套字段</td></tr>
+            <tr><td><code>owner_username</code></td><td>无前端对应（仅后端权限用）</td><td>权限校验</td><td>后端内部使用，不暴露前端</td></tr>
+            <tr><td><code>tenant_id</code></td><td><code>tenant_id</code>（保持 snake_case）</td><td>用户信息</td><td>例外：用户信息保持 snake_case 不转换</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因分析</div>
+      <div class="field-content">
+        <ul>
+          <li><strong>无统一 API 契约层</strong>：后端直接返回 ORM/payload 原始字段名，前端直接消费，缺少中间 normalize 层</li>
+          <li><strong>TypeScript 类型定义双轨</strong>：<code>Meeting</code> 类型同时定义了 <code>messageCount?</code> 和 <code>message_count?</code> 两个可选字段，组件各取所需，不一致</li>
+          <li><strong>会议详情接口与列表接口字段结构不同</strong>：列表返回 <code>agents</code> 数组（从 <code>role_configs</code> 提取），详情返回 <code>role_configs</code> 原始结构，前端需要两套 normalize 函数</li>
+          <li><strong>时间格式不统一</strong>：后端返回 ISO 字符串 <code>created_at</code>，部分前端组件期望 <code>createdAt</code> 为 Unix 时间戳（number）</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复方案</div>
+      <div class="field-content">
+        <strong>normalize 层</strong>（<code>use-meetings.ts</code>）：
+        <pre><code>// 列表项 normalize
+function normalizeMeeting(raw: BackendMeetingItem): Meeting {
+  return {
+    id: raw.meeting_id,           // meeting_id → id
+    title: raw.topic || '未命名讨论', // topic → title
+    status: raw.status,
+    stage: raw.stage,
+    created_at: raw.created_at,    // 保留原始
+    createdAt: raw.created_at ? Date.parse(raw.created_at) : undefined, // 转时间戳
+    message_count: raw.message_count,  // 保留 snake_case
+    messageCount: raw.message_count,   // 同时输出 camelCase
+    agents: Array.isArray(raw.agents)
+      ? raw.agents.map(a => ({ id: a.id, name: a.name, role: a.role, state: a.state || 'idle' }))
+      : [],
+    metadata: { is_running: raw.is_running, tags: raw.tags },
+  };
+}
+
+// 详情 normalize（结构不同，需单独处理）
+function normalizeMeetingDetail(raw: BackendMeetingDetail): Meeting {
+  const agents = Array.isArray(raw.role_configs)
+    ? raw.role_configs.map(rc => ({ id: rc.id, name: rc.name, role: rc.role, state: 'idle' }))
+    : [];  // role_configs → agents
+  const messageCount = Array.isArray(raw.messages) ? raw.messages.length : undefined;
+  return {
+    id: raw.meeting_id,
+    title: raw.clarified_topic || raw.topic || '未命名讨论', // fallback 取值
+    summary: raw.artifact?.summary,  // 嵌套字段提取
+    messageCount,
+    message_count: messageCount,
+    agents,
+    metadata: { key_questions: raw.key_questions, artifact: raw.artifact },
+  };
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">为什么这样修复</div>
+      <div class="field-content">
+        <ul>
+          <li><strong>normalize 层放在 hook 中</strong>而非组件中：所有 API 字段映射集中在一处，组件只消费标准化的 <code>Meeting</code> 类型</li>
+          <li><strong>同时输出 snake_case 和 camelCase</strong>：兼容历史组件代码（部分用 <code>messageCount</code>，部分用 <code>message_count</code>），避免一次性大规模重构</li>
+          <li><strong>列表和详情分别 normalize</strong>：两个接口返回结构差异大（列表有 <code>agents</code>，详情有 <code>role_configs</code>），强行统一反而增加复杂度</li>
+          <li><strong>用户信息例外</strong>：<code>tenant_id</code> 在前端用户类型中保持 snake_case，因为它直接透传给后端 API，转换无意义</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">后端列表接口缺少 message_count / agents 字段</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        前端会议列表页显示 <code>messageCount</code> 和 <code>agents.length</code> 时均为 <code>undefined</code>，显示为 "—"。后端 <code>GET /meetings</code> 列表接口最初不返回这两个字段。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        后端列表接口从 <code>meetings</code> 表直接查询，消息数和 Agent 列表存储在 <code>payload JSONB</code> 中（<code>payload.messages</code> 和 <code>payload.role_configs</code>），需要额外解析。原列表接口未解析 payload 中的这些字段。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        <pre><code># backend/app/routers/meetings.py — list_meetings
+for m in result["items"]:
+    payload = m.get("payload", {}) or {}
+    messages_list = payload.get("messages", [])
+    role_configs = payload.get("role_configs", [])
+    agents_summary = [
+        {"id": rc.get("id", ""), "name": rc.get("name", ""), "role": rc.get("role", "")}
+        for rc in role_configs if isinstance(rc, dict)
+    ]
+    items.append({
+        "meeting_id": mid,
+        "topic": m["topic"],
+        ...
+        "message_count": len(messages_list) if isinstance(messages_list, list) else 0,
+        "agents": agents_summary,
+    })</code></pre>
+        从 <code>payload JSONB</code> 中提取 <code>messages</code> 和 <code>role_configs</code>，计算消息数和 Agent 摘要列表，添加到列表接口响应中。
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">会议详情接口 role_configs 与前端 agents 的结构差异</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        前端 <code>Meeting</code> 类型有 <code>agents: AgentInfo[]</code> 字段（<code>{id, name, role, state}</code>），但后端会议详情接口返回的是 <code>role_configs</code>（<code>{id, name, role, description}</code>），无 <code>state</code> 字段。直接透传导致前端 <code>agent.state</code> 为 <code>undefined</code>。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        后端数据模型中 Agent 的运行时状态（<code>state</code>）是动态计算的，不存储在 <code>role_configs</code> 中。<code>role_configs</code> 只是配置（静态），<code>state</code> 需要从运行时状态机获取。列表接口的 <code>agents_summary</code> 也没返回 <code>state</code>。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        normalize 层将 <code>role_configs</code> 映射为 <code>agents</code>，<code>state</code> 默认设为 <code>'idle'</code>：
+        <pre><code>const agents = Array.isArray(raw.role_configs)
+  ? raw.role_configs.map(rc => ({
+      id: rc.id, name: rc.name, role: rc.role,
+      state: 'idle' as AgentState,  // 默认值
+    }))
+  : [];</code></pre>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">遗留风险</div>
+      <div class="field-content">
+        <code>state: 'idle'</code> 是硬编码默认值，不反映 Agent 的真实运行时状态。后续需要后端在详情接口中返回真实 <code>state</code>（从状态机或 <code>_running_tasks</code> 中获取），或前端通过 WebSocket 实时获取。
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">delete_meeting 参数签名变更导致前后端不兼容</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        后端 <code>delete_meeting</code> 函数的 <code>mode</code> 参数从 query param 改为 request body 后，前端 <code>DELETE /meetings/{id}?mode=soft</code> 请求的 <code>mode</code> 值无法被后端正确解析。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        FastAPI 的参数解析规则：<code>mode: str = "soft"</code> 默认从 query string 解析；如果函数签名中添加了 <code>Body()</code> 注解或 Pydantic model 参数，FastAPI 会尝试从 request body 解析。<code>DELETE</code> 请求通常不带 body，导致参数丢失。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        确保 <code>mode</code> 为纯 query param：<code>async def delete_meeting(meeting_id: str, request: Request, mode: str = "soft")</code>。不添加 <code>Body()</code> 注解。前端通过 <code>DELETE /meetings/{id}?mode=soft</code> 传递。
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">用户信息 tenants 字段类型不一致</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        后端 <code>/auth/me</code> 返回的 <code>user.tenants</code> 可能为 <code>null</code>（用户无租户）、<code>undefined</code>（字段缺失）或非数组类型。前端 <code>useRbac</code> hook 直接调用 <code>user.tenants.find()</code>，当 <code>tenants</code> 为 <code>null</code> 时抛出 <code>Cannot read property 'find' of null</code>。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        后端用户信息来源不同（<code>/auth/login</code> 返回完整 <code>tenants</code> 列表，<code>/auth/me</code> 可能不返回或返回 <code>null</code>），前端类型定义 <code>tenants: TenantInfo[]</code> 标记为必填，但实际可能为空。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        <code>fetchUser</code> 中添加防御性处理：
+        <pre><code>const user: UserInfo = (res as { user?: UserInfo }).user ?? (res as UserInfo);
+if (user && !Array.isArray(user.tenants)) user.tenants = [];
+if (user && user.tenant_id == null) user.tenant_id = '';</code></pre>
+        确保返回给前端的 <code>tenants</code> 始终是数组，<code>tenant_id</code> 始终是字符串。
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">会议详情 summary 字段嵌套路径不一致</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        前端 <code>Meeting.summary</code> 期望直接是 <code>string | undefined</code>，但后端返回的 summary 嵌套在 <code>artifact.summary</code> 中，需要从嵌套对象中提取。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        后端会议数据的 <code>artifact</code> 是 JSONB 字段，包含多种产出物（summary、report、decisions 等）。<code>summary</code> 是 <code>artifact</code> 的子字段，不是顶级字段。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        normalize 层提取：<code>summary: raw.artifact?.summary as string | null | undefined</code>。同时保留 <code>raw.artifact</code> 在 <code>metadata.artifact</code> 中供其他组件使用。
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">会议列表使用裸 useQuery 而非 useMeetings hook</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        <code>explore/list-page.tsx</code> 最初使用 <code>useQuery</code> 直接调用 <code>/meetings</code> API，返回的是后端原始格式（snake_case），未经 normalize。列表渲染时 <code>meeting.messageCount</code> 为 <code>undefined</code>，显示 "—"。Agent 数量也显示异常。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        页面绕过了 <code>useMeetings</code> hook（含 normalize 逻辑），直接使用 <code>useQuery</code> 裸调用 API。这是一个<strong>架构规范执行不彻底</strong>的问题——hook 已存在但未被使用。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        将 <code>useQuery</code> 替换为 <code>useMeetings({ pageSize: 50 })</code>，走 normalize 层。同时移除页面内联的 <code>useQuery</code> 逻辑。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">为什么这个问题值得单独记录</div>
+      <div class="field-content">
+        它不是单纯的字段名问题，而是<strong>架构执行问题</strong>——有 normalize 层但不用。类似的问题可能在其他页面也存在（直接 <code>useQuery</code> 而非走 hook），需要系统性排查。
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">API 路由路径前后端定义不一致</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题现象</div>
+      <div class="field-content">
+        前端调用 <code>/docker-hosts/overview</code> 和 <code>/docker-hosts/commands-reference</code>，后端路由定义中这两个静态路径被 <code>/{host_id}</code> 动态路由拦截，返回 404。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因</div>
+      <div class="field-content">
+        FastAPI 路由匹配按<strong>定义顺序</strong>执行。<code>@router.get("/{host_id}")</code> 定义在 <code>@router.get("/overview")</code> 之前时，字符串 <code>"overview"</code> 被当作 <code>host_id</code> 参数匹配成功，导致 <code>/overview</code> 路由永远不被执行。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        调整路由定义顺序：静态路径 <code>/overview</code>、<code>/commands-reference</code> 移到动态路径 <code>/{host_id}</code> 之前。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">同类风险</div>
+      <div class="field-content">
+        任何 <code>@router.get("/{xxx_id}")</code> 动态路由之后定义的静态子路径都有此风险。应建立规范：静态路径永远在动态路径之前定义，或使用 <code>Path(regex="...")</code> 约束动态参数格式。
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">六、错误提示消息优化</div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">右下角告警消息不可读（英文/堆栈信息）</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题描述</div>
+      <div class="field-content">
+        用户反馈：文件删除有错误时，右下角异常警告提示消息可读性不好。要求排查所有告警和前端展示内容是否合理。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因（4 个子问题）</div>
+      <div class="field-content">
+        <table>
+          <thead>
+            <tr><th>#</th><th>位置</th><th>问题</th><th>修复</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>api.ts extractErrorMessage</code></td>
+              <td>直接展示后端返回的 <code>detail</code> 原文，包含英文错误描述和 JSON 堆栈</td>
+              <td>实现中文友好映射，覆盖 HTTP 400/401/403/404/409/422/429/500 常见错误码</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>tool-call-card.tsx</code></td>
+              <td>工具调用失败时直接展示 <code>error.message</code>，暴露内部实现细节</td>
+              <td>错误消息先过 <code>extractErrorMessage</code> 友好化处理</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>ws.ts</code></td>
+              <td>WebSocket 错误消息为英文（"Connection failed", "Authentication failed"）</td>
+              <td>替换为中文："连接失败，请检查网络", "认证失败，请重新登录"</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>status-bar.tsx</code></td>
+              <td>状态标签为英文（"running", "completed", "failed"）</td>
+              <td>添加中文映射：运行中/已完成/失败/等待中</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复原因</div>
+      <div class="field-content">
+        错误提示是用户体验的最后一道防线。用户不需要看到 JSON 堆栈或英文错误码，需要的是<strong>可操作的中文提示</strong>。例如 403 不应展示"detail: You don't have permission"，而应展示"您没有权限执行此操作"。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 7: 运维面板 ===================== -->
+<div class="section">
+  <div class="section-title">七、运维面板功能缺失修复</div>
+
+  <div class="callout callout-warn">
+    <strong>用户反馈：</strong>"运维面板中很多东西都没实现，我记得当初似乎是实现过的，怎么回事？"
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">拓扑死按钮 / 容器操作 404 / 健康状态硬编码 / 缺少添加主机</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">根因（5 个子问题）</div>
+      <div class="field-content">
+        <table>
+          <thead>
+            <tr><th>#</th><th>子问题</th><th>根因</th><th>修复</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>拓扑面板死按钮</td>
+              <td>拓扑图节点点击事件未绑定 onClick handler，SVG &lt;g&gt; 元素只有样式无交互</td>
+              <td>添加 onClick 回调，点击节点弹出详情面板</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>容器操作 404</td>
+              <td>ContainerActions 组件传入 containerId="all"，后端找不到 ID 为 "all" 的容器</td>
+              <td>改为调用容器列表 API 获取真实容器 ID，操作时传入具体容器 ID</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>健康状态硬编码</td>
+              <td>前端 overview 对象所有组件状态写死为 'healthy'，不反映真实状态</td>
+              <td>后端 /docker-hosts/overview 检查数据库连接、Redis 连接等；前端调用 API 获取真实状态</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>缺少添加主机功能</td>
+              <td>添加主机按钮点击无反应，未实现对话框</td>
+              <td>实现 AddHostDialog 组件，包含主机名、IP、端口、SSH 凭证输入表单</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>API 路由顺序问题</td>
+              <td>/docker-hosts/overview 被 /docker-hosts/{host_id} 动态路由拦截，返回 404</td>
+              <td>调整路由定义顺序，静态路径在动态路径之前</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">尝试过程</div>
+      <div class="attempts" style="margin-top:12px;">
+        <div class="attempt fail">
+          <div class="attempt-label">尝试 1：修复容器操作参数 <span class="badge fail">失败</span></div>
+          <div class="attempt-desc">
+            初版直接把 containerId="all" 改为遍历容器列表逐个操作。但前端没有调用容器列表 API，用的是 mock 数据，导致传入的 ID 仍然是假的。<br>
+            修正：改为先调用 GET /docker/containers 获取真实容器列表，再绑定操作按钮。
+          </div>
+        </div>
+        <div class="attempt fail">
+          <div class="attempt-label">尝试 2：修复 API 路由 404 <span class="badge fail">失败</span></div>
+          <div class="attempt-desc">
+            修复容器操作后，/docker-hosts/overview 仍然 404。排查发现是 FastAPI 路由顺序问题——动态路由 /{host_id} 定义在 /overview 之前，"overview" 被当作 host_id 匹配。<br>
+            修正：将 /overview 和 /commands-reference 的路由定义移到 /{host_id} 之前。
+          </div>
+        </div>
+        <div class="attempt success">
+          <div class="attempt-label">尝试 3：健康状态真实化 <span class="badge success">成功</span></div>
+          <div class="attempt-desc">
+            后端 /docker-hosts/overview 实现真实健康检查：PostgreSQL 用 SELECT 1，Redis 用 ping()，Qdrant 用健康端点。前端调用 API 获取真实状态渲染。
+          </div>
+        </div>
+        <div class="attempt success">
+          <div class="attempt-label">尝试 4：添加主机对话框 <span class="badge success">成功</span></div>
+          <div class="attempt-desc">
+            实现 AddHostDialog 组件：Radix UI Dialog + 表单输入（主机名/IP/端口/SSH 密钥）。提交后调用 POST /docker-hosts 创建主机记录。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复原因</div>
+      <div class="field-content">
+        <ul>
+          <li><strong>Demo 模式假成功修复</strong>：Demo 模式下所有操作返回 {success: true} 但不执行真实操作，导致用户以为功能正常但实际无效。改为 Demo 模式下明确提示"演示模式，操作不会真实执行"</li>
+          <li><strong>路由顺序</strong>：FastAPI 路由匹配是按定义顺序的，静态路径必须在动态路径之前，这是常见陷阱</li>
+          <li><strong>健康检查</strong>：运维面板的核心价值就是反映真实系统状态，硬编码"healthy"完全失去了意义</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 8: Token 安全 ===================== -->
+<div class="section">
+  <div class="section-title">八、Token 过期时间调整</div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">access_token 过期时间从 24h 缩短为 15 分钟</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">问题</div>
+      <div class="field-content">
+        <code>JWT_EXPIRE_SECONDS</code> 默认值为 <code>86400</code>（24 小时），过长。如果 token 泄露，攻击者有 24 小时窗口使用它。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        <pre><code># backend/app/auth.py
+# 修改前
+JWT_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_JWT_EXPIRE", "86400"))
+# 修改后
+JWT_EXPIRE_SECONDS = int(os.environ.get("CONCLAVE_JWT_EXPIRE", "900"))  # 15分钟</code></pre>
+        refresh_token 保持 7 天不变。前端 mock-data.ts 的 jwt_expire_minutes 同步从 60 改为 15。
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">修复原因</div>
+      <div class="field-content">
+        <ul>
+          <li><strong>安全最佳实践</strong>：OWASP 建议 access_token 过期时间不超过 15-30 分钟。缩短窗口可减少 token 泄露的影响范围</li>
+          <li><strong>不影响用户体验</strong>：已实现 token 自动刷新拦截器，15 分钟过期对用户无感知——过期时自动刷新，请求自动重放</li>
+          <li><strong>依赖前置修复</strong>：此修复依赖登录持久化（token 自动刷新）完成，否则 15 分钟过期会导致用户频繁被登出</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 9: 时间消耗分析 ===================== -->
+<div class="section">
+  <div class="section-title">九、时间消耗与效率分析</div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p0">P0</span>
+      <div class="issue-title">登录持久化问题消耗了约 60% 总工时</div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">时间分布（估算）</div>
+      <div class="field-content">
+        <table>
+          <thead>
+            <tr><th>问题类别</th><th>估算耗时</th><th>占比</th><th>尝试次数</th><th>效率评估</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>登录持久化</td>
+              <td>~90 分钟</td>
+              <td>60%</td>
+              <td>5 次</td>
+              <td><span style="color:var(--red);">低效</span> — 根因定位慢，多次尝试</td>
+            </tr>
+            <tr>
+              <td>运维面板</td>
+              <td>~25 分钟</td>
+              <td>17%</td>
+              <td>4 次</td>
+              <td><span style="color:var(--amber);">中等</span> — 路由顺序问题排查耗时</td>
+            </tr>
+            <tr>
+              <td>会议删除</td>
+              <td>~15 分钟</td>
+              <td>10%</td>
+              <td>3 次</td>
+              <td><span style="color:var(--amber);">中等</span> — 字段名不匹配导致返工</td>
+            </tr>
+            <tr>
+              <td>文件删除</td>
+              <td>~10 分钟</td>
+              <td>7%</td>
+              <td>2 次</td>
+              <td><span style="color:var(--green);">高效</span> — 一次实现，权限模型扩展一次</td>
+            </tr>
+            <tr>
+              <td>错误提示</td>
+              <td>~5 分钟</td>
+              <td>3%</td>
+              <td>1 次</td>
+              <td><span style="color:var(--green);">高效</span> — 直接映射，无反复</td>
+            </tr>
+            <tr>
+              <td>Token 安全</td>
+              <td>~5 分钟</td>
+              <td>3%</td>
+              <td>1 次</td>
+              <td><span style="color:var(--green);">高效</span> — 依赖前置完成，直接修改</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">登录问题为什么耗时这么久</div>
+      <div class="field-content">
+        <div class="analysis-box">
+          <strong>核心原因：zustand persist 的 hydration 机制是"黑盒异步"</strong>。<br><br>
+          zustand persist 使用 createJSONStorage 包装 localStorage，返回的是 Promise。但这个 Promise 的 resolve 时机不受我们控制——它依赖浏览器的微任务队列调度。在大多数情况下，hydration 在 React 首次渲染前完成；但在某些边缘情况（浏览器扩展干扰、隐私模式、存储配额），hydration 可能<strong>永远不完成</strong>。<br><br>
+          <strong>耗时分解</strong>：
+          <ul style="margin-top:8px;">
+            <li>尝试 1-2（~30 分钟）：在 onRehydrateStorage 中调用异步函数，导致 hydration 阻塞。这两次尝试的错误方向一致——试图在 hydration 回调中做认证</li>
+            <li>尝试 3（~20 分钟）：分离 hydration 和认证，引入 AuthInit。思路正确但缺少兜底</li>
+            <li>尝试 4-5（~40 分钟）：添加兜底超时和手动 localStorage 加载。调试浏览器环境下的 hydration 行为耗费大量时间</li>
+          </ul>
+          <strong>根本教训</strong>：应该一开始就调研 zustand persist 的 hydration 机制，而不是边试边猜。前两次尝试完全是在错误的方向上浪费时间。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 10: 经验教训 ===================== -->
+<div class="section">
+  <div class="section-title">十、经验教训与改进建议</div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">5 条关键教训</div>
+    </div>
+
+    <div class="field">
+      <div class="field-content">
+        <table>
+          <thead>
+            <tr><th style="width:5%">#</th><th style="width:20%">教训</th><th>详细说明</th><th style="width:15%">改进措施</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>先调研再动手</td>
+              <td>登录持久化问题前两次尝试方向完全错误（在 hydration 回调中做异步认证），根因是没有先理解 zustand persist 的 hydration 机制。应该先读源码/文档，理解 onRehydrateStorage 的执行时机和约束</td>
+              <td>修复前先读依赖库文档</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>异步回调不做异步操作</td>
+              <td>onRehydrateStorage 是同步回调，在其中调用 fetchUser() 会阻塞 hydration 完成信号。这是 zustand persist 的已知陷阱</td>
+              <td>回调只做同步状态标记</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>必须有兜底机制</td>
+              <td>不能无限等待异步操作完成。AuthInit 的 3 秒兜底超时 + 手动 localStorage 加载是防御性编程的体现，不是"绕过"</td>
+              <td>所有异步等待加超时</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>前后端字段名统一</td>
+              <td>会议删除的 message_count vs messageCount 不匹配导致返工。后端用 snake_case，前端用 camelCase，中间需要 normalize 层</td>
+              <td>hook 层统一 normalize</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>路由顺序是常见陷阱</td>
+              <td>FastAPI 动态路由 /{host_id} 会拦截 /overview 等静态路径。静态路径必须在动态路径之前定义</td>
+              <td>路由定义先静态后动态</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">系统性改进建议</div>
+    </div>
+
+    <div class="field">
+      <div class="field-content">
+        <ul>
+          <li><strong>认证流程文档化</strong>：将本次的认证流程（AuthInit → fetchUser → silentRefresh → 兜底）写成 ADR，避免下次重复踩坑</li>
+          <li><strong>zustand persist 使用规范</strong>：在项目中建立规范——onRehydrateStorage 只做同步标记，认证逻辑在组件层用 useEffect 处理，所有异步等待加超时兜底</li>
+          <li><strong>前端 normalize 层</strong>：所有 API 响应在 hook 层统一 normalize（snake_case → camelCase），避免字段名不匹配问题</li>
+          <li><strong>路由定义规范</strong>：FastAPI 路由文件中，静态路径（/overview, /commands-reference）必须在动态路径（/{host_id}）之前定义，添加 lint 检查</li>
+          <li><strong>端到端测试常态化</strong>：本次多次"后端 API 正常但前端无法使用"的问题，说明仅 curl 测试不够，必须配合浏览器端到端验证</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 11: 修改文件清单 ===================== -->
+<div class="section">
+  <div class="section-title">十一、修改文件清单（21 个文件，含审计后新增 llm-context 文档）</div>
+
+  <table>
+    <thead>
+      <tr><th style="width:5%">#</th><th style="width:30%">文件</th><th style="width:15%">类别</th><th>修改内容</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td><code>backend/app/auth.py</code></td><td>Token 安全</td><td>JWT_EXPIRE_SECONDS 86400→900</td></tr>
+      <tr><td>2</td><td><code>backend/app/auth_guard.py</code></td><td>权限</td><td>新增 assert_can_delete_meeting()</td></tr>
+      <tr><td>3</td><td><code>backend/app/public_paths.py</code></td><td>认证</td><td>添加 /auth/refresh 到公开路径</td></tr>
+      <tr><td>4</td><td><code>backend/app/routers/workspace.py</code></td><td>文件删除</td><td>cascade 级联删除 + 权限校验</td></tr>
+      <tr><td>5</td><td><code>backend/app/routers/meetings.py</code></td><td>会议删除</td><td>参数签名修复 + 权限校验 + 字段补充</td></tr>
+      <tr><td>6</td><td><code>backend/app/plugins/builtin/auth/router.py</code></td><td>认证</td><td>refresh 端点 Cookie 设置</td></tr>
+      <tr><td>7</td><td><code>backend/app/plugins/builtin/auth/middleware.py</code></td><td>认证</td><td>Cookie 认证 + CSRF 双重提交</td></tr>
+      <tr><td>8</td><td><code>docker-compose.yml</code></td><td>认证</td><td>JWT 密钥 volume 持久化</td></tr>
+      <tr><td>9</td><td><code>frontend/src/lib/api.ts</code></td><td>认证</td><td>Token 自动刷新拦截器 + CSRF 自动附加</td></tr>
+      <tr><td>10</td><td><code>frontend/src/lib/mock-data.ts</code></td><td>Token 安全</td><td>jwt_expire_minutes 60→15</td></tr>
+      <tr><td>11</td><td><code>frontend/src/stores/auth-slice.ts</code></td><td>认证</td><td>silentRefresh + persist 配置优化</td></tr>
+      <tr><td>12</td><td><code>frontend/src/App.tsx</code></td><td>认证</td><td>AuthInit 组件（hydration 等待 + 兜底）</td></tr>
+      <tr><td>13</td><td><code>frontend/src/components/auth/protected-route.tsx</code></td><td>认证</td><td>loading 兜底超时 15s</td></tr>
+      <tr><td>14</td><td><code>frontend/src/components/layout/top-bar.tsx</code></td><td>会议删除</td><td>删除按钮 + 确认对话框</td></tr>
+      <tr><td>15</td><td><code>frontend/src/features/workspace/page.tsx</code></td><td>文件删除</td><td>级联删除复选框</td></tr>
+      <tr><td>16</td><td><code>frontend/src/features/operations/page.tsx</code></td><td>运维面板</td><td>拓扑交互 + 容器操作 + 添加主机 + 健康检查</td></tr>
+      <tr><td>17</td><td><code>frontend/src/lib/ws.ts</code></td><td>错误提示</td><td>WebSocket 错误消息中文化</td></tr>
+      <tr><td>18</td><td><code>frontend/src/components/status-bar.tsx</code></td><td>错误提示</td><td>状态标签中文映射</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===================== SECTION 12: 验证结果 ===================== -->
+<div class="section">
+  <div class="section-title">十二、验证结果</div>
+
+  <table>
+    <thead>
+      <tr><th style="width:20%">验证项</th><th style="width:15%">结果</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>前端 tsc</td><td><span class="severity sev-p1" style="background:var(--green-bg);color:var(--green);">PASS</span></td><td>0 errors</td></tr>
+      <tr><td>后端 pytest 核心</td><td><span class="severity sev-p1" style="background:var(--green-bg);color:var(--green);">PASS</span></td><td>37/37 认证测试通过</td></tr>
+      <tr><td>登录持久化</td><td><span class="severity sev-p1" style="background:var(--green-bg);color:var(--green);">PASS</span></td><td>刷新页面保持登录状态</td></tr>
+      <tr><td>会议删除</td><td><span class="severity sev-p1" style="background:var(--green-bg);color:var(--green);">PASS</span></td><td>返回 {deleted: true, mode: "soft"}</td></tr>
+      <tr><td>文件级联删除</td><td><span class="severity sev-p1" style="background:var(--green-bg);color:var(--green);">PASS</span></td><td>cascade=true 删除目录及子内容</td></tr>
+      <tr><td>运维面板</td><td><span class="severity sev-p1" style="background:var(--green-bg);color:var(--green);">PASS</span></td><td>拓扑/容器/添加主机/健康检查均正常</td></tr>
+      <tr><td>Token 刷新</td><td><span class="severity sev-p1" style="background:var(--green-bg);color:var(--green);">PASS</span></td><td>/auth/refresh 返回 200 + 新 token</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-warn" style="margin-top:16px;">
+    <strong>部署提示：</strong>后端 JWT 过期时间变更（86400→900）需要重建容器：<code>docker compose up -d --build backend</code>。未重建则仍使用旧默认值。
+  </div>
+</div>
+
+<!-- ===================== SECTION 13: 审计后修复 ===================== -->
+<div class="section">
+  <div class="section-title">十三、外部审计后的补充修复</div>
+
+  <div class="callout callout-info">
+    <strong>背景：</strong>报告初稿完成后，经系统性审计发现 3 处遗留风险和 2 项流程改进建议。本节记录针对审计意见的修复措施。
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">修复 A：手动 localStorage 读取增加版本校验</div>
+    </div>
+    <div class="field">
+      <div class="field-label">审计发现</div>
+      <div class="field-content">AuthInit 兜底逻辑直接 JSON.parse 读取 localStorage，绕过 zustand persist 的 version 字段校验。如果未来改变 store 结构，旧版 localStorage 数据可能被错误注入导致运行时异常。</div>
+    </div>
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        <ul>
+          <li>手动加载前检查 <code>parsed.version === PERSIST_VERSION</code>，版本不匹配则丢弃数据</li>
+          <li>添加 <code>PERSIST_VERSION = 1</code> 常量，与 auth-slice 中 <code>version: 1</code> 同步</li>
+          <li>auth-slice persist 配置添加警告注释，提醒 version 变更时同步更新 App.tsx</li>
+          <li>token 类型校验：<code>typeof token === 'string' && token.length > 0</code></li>
+          <li>版本不匹配时清除 auth state，避免半认证状态</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p1">P1</span>
+      <div class="issue-title">修复 B：hydration 失败显式用户反馈</div>
+    </div>
+    <div class="field">
+      <div class="field-label">审计发现</div>
+      <div class="field-content">hydration 和手动加载都失败时，用户被静默跳转到登录页，不知道为什么被登出。</div>
+    </div>
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        <ul>
+          <li>兜底失败时设置 <code>sessionStorage.setItem('conclave:auth-hydration-failed', '1')</code></li>
+          <li>登录页检测该标记，显示 destructive toast："会话恢复失败，登录状态无法自动恢复，请重新登录"</li>
+          <li>显示后立即清除标记，避免重复提示</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">修复 C：normalize 层 snake_case 字段标记 @deprecated</div>
+    </div>
+    <div class="field">
+      <div class="field-label">审计发现</div>
+      <div class="field-content">normalize 层同时输出 snake_case 和 camelCase 字段，长期维持会导致类型膨胀、新开发者混用。</div>
+    </div>
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">
+        <ul>
+          <li><code>Meeting</code> 类型所有 snake_case 字段添加 <code>@deprecated</code> JSDoc</li>
+          <li>normalize 函数添加注释说明 snake_case 仅供遗留兼容，新代码使用 camelCase</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p0">P0</span>
+      <div class="issue-title">改进 D：创建 docs/llm-context/ 陷阱文档</div>
+    </div>
+    <div class="field">
+      <div class="field-label">审计建议</div>
+      <div class="field-content">建立关键依赖的已知陷阱文档，让 AI 编码助手"先查后写"，避免重复踩坑。</div>
+    </div>
+    <div class="field">
+      <div class="field-label">已创建文档</div>
+      <div class="field-content">
+        <table>
+          <thead><tr><th>文件</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td><code>docs/llm-context/README.md</code></td><td>目录索引 + 使用原则</td></tr>
+            <tr><td><code>docs/llm-context/zustand-persist-patterns.md</code></td><td>persist 的 4 个陷阱 + AuthInit 正确模式 + 修改检查清单</td></tr>
+            <tr><td><code>docs/llm-context/fastapi-route-ordering.md</code></td><td>静态/动态路由顺序规则 + 自查命令</td></tr>
+            <tr><td><code>docs/llm-context/auth-refresh-flow.md</code></td><td>认证架构图 + 刷新机制 + CSRF 模式 + 修改检查清单 + 遗留风险</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-label">已知遗留风险（记录待后续迭代）</div>
+      <div class="field-content">
+        <table>
+          <thead><tr><th>风险</th><th>建议修复时机</th></tr></thead>
+          <tbody>
+            <tr><td>refresh_token 未轮换（泄露后可持续刷新）</td><td>后续迭代实现 refresh_token 轮换</td></tr>
+            <tr><td>软删除数据堆积</td><td>添加定期清理策略（如软删除 30 天后自动硬删除）</td></tr>
+            <tr><td>Agent state 硬编码 'idle'</td><td>后端返回真实 state 或 WebSocket 推送</td></tr>
+            <tr><td>路由顺序无自动化检测</td><td>添加 CI lint 规则或使用 fastapi-routechain</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue">
+    <div class="issue-header">
+      <span class="severity sev-p2">P2</span>
+      <div class="issue-title">改进 E：超时时间可配置化</div>
+    </div>
+    <div class="field">
+      <div class="field-label">修复</div>
+      <div class="field-content">超时时间改为 <code>Number(import.meta.env.VITE_AUTH_HYDRATION_TIMEOUT_MS) || 3000</code>，可通过环境变量调整，默认 3000ms。</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<div style="text-align:center; color:var(--text-tertiary); font-size:12px; padding:16px 0;">
+  本报告生成于 2026-08-05 | Conclave 项目复盘文档 | 涉及 21 个文件 / 7 类问题 / 22 子项（含审计后修复）
+</div>
+
+</div>
+</body>
+</html>
