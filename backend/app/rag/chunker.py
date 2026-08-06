@@ -220,11 +220,14 @@ def chunk_markdown(text: str, doc_id: str) -> list[Chunk]:
                 }
             )
 
-    # 碎块合并：不足 MIN_CHUNK_SIZE 的块并入前块（首块则并入后块）
+    # 碎块合并：不足 MIN_CHUNK_SIZE 的块并入前块。
+    # 关键约束：仅在属于「同一标题章节」时才合并（即超长章节被二次切分后的尾段碎片），
+    # 绝不在不同标题之间合并——否则会丢失标题维度的语义切分，破坏 RAG 检索与可观测性。
     merged: list[dict[str, Any]] = []
     for rc in raw_chunks:
         if (
             merged
+            and rc["section"] == merged[-1]["section"]
             and len(rc["text"]) < MIN_CHUNK_SIZE
             and len(merged[-1]["text"]) + len(rc["text"]) <= MAX_CHUNK_SIZE * 2
         ):

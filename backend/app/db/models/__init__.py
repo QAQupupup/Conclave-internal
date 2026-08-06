@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from app.db.models.agent_role import AgentRoleModel
 from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
-from app.db.models.document import DocumentModel
+from app.db.models.document import (
+    DocumentModel,
+    KnowledgeSpaceModel,
+    MeetingDocumentRefModel,
+)
 from app.db.models.event import EventModel
 from app.db.models.graph import (
     ChunkEntityModel,
@@ -39,7 +43,9 @@ __all__ = [
     "EventModel",
     "FeatureMemoryModel",
     "GraphEdgeModel",
+    "KnowledgeSpaceModel",
     "MeetingAuxModel",
+    "MeetingDocumentRefModel",
     "MeetingModel",
     "MeetingTagModel",
     "MessageModel",

@@ -170,13 +170,6 @@ async def init_db() -> None:
         "CREATE INDEX IF NOT EXISTS idx_mdr_meeting ON meeting_document_refs(meeting_id)",
         "CREATE INDEX IF NOT EXISTS idx_mdr_doc ON meeting_document_refs(document_id)",
         "CREATE INDEX IF NOT EXISTS idx_mdr_tenant ON meeting_document_refs(tenant_id)",
-        # documents 表资产化列迁移（兼容旧库：旧表由 create_all 创建，无这些列）
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS space_id TEXT",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS recycled_at TIMESTAMPTZ",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS raw_content TEXT",
-        "CREATE INDEX IF NOT EXISTS idx_documents_space ON documents(space_id)",
-        "CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)",
         # ── GraphRAG-lite 数据底座（知识图谱 + 实体 + 文档关系）──
         """
         CREATE TABLE IF NOT EXISTS graph_edges (
@@ -242,7 +235,25 @@ async def init_db() -> None:
         "CREATE INDEX IF NOT EXISTS idx_doc_relations_dst ON document_relations(dst_doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_doc_relations_tenant ON document_relations(tenant_id)",
     ]
+    # documents 表资产化列迁移（兼容旧库：旧表由 ORM create_all 创建，无这些列）。
+    # 注意：documents 由 Base.metadata.create_all() 创建（见 conftest / app lifespan），
+    # 而非本 legacy DDL。在 fresh DB 上 init_db 可能先于 create_all 执行，此时 documents
+    # 尚不存在，直接 ALTER 会报 UndefinedTable。因此仅在表已存在时才执行迁移——
+    # 若 create_all 已带列创建则此处为 no-op，若旧库升级则照常补列。
+    documents_migration = [
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS space_id TEXT",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS recycled_at TIMESTAMPTZ",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS raw_content TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_documents_space ON documents(space_id)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)",
+    ]
     async with async_session_factory() as session:
         for stmt in ddl_statements:
             await session.execute(text(stmt))
         await session.commit()
+        documents_exists = await session.scalar(text("SELECT to_regclass('public.documents') IS NOT NULL"))
+        if documents_exists:
+            for stmt in documents_migration:
+                await session.execute(text(stmt))
+            await session.commit()
