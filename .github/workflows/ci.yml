@@ -64,7 +64,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          # Windows 生成的 lockfile 缺 Linux rollup 原生二进制（npm/cli#4828），
+          # 与 frontend/Dockerfile 的 npm ci + npm install @rollup/rollup-linux-x64-gnu 保持一致。
+          npm install --no-save @rollup/rollup-linux-x64-gnu
 
       - name: Lint with ESLint
         run: npm run lint -- --max-warnings=0
@@ -91,7 +95,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm install --no-save @rollup/rollup-linux-x64-gnu
 
       - name: Run frontend unit tests
         run: npm run test
