@@ -33,6 +33,41 @@ _ws_event_lock = LazyLock()
 # 批量发送配置：同一帧内到达的事件最多等待 BATCH_MAX_WAIT 秒后合并发送
 WS_BATCH_MAX_WAIT = float(os.environ.get("CONCLAVE_WS_BATCH_WAIT", "0.05"))  # 50ms
 
+# 连接去重：同一用户+会议只保留最新连接，旧连接自动关闭
+# 防止客户端 bug 或旧缓存导致连接堆积（每个连接后端保持 while True 循环，不关闭会泄漏）
+_active_ws: dict[str, WebSocket] = {}
+# 每用户最大并发 WS 连接数（跨所有会议）
+WS_MAX_CONN_PER_USER = int(os.environ.get("CONCLAVE_WS_MAX_CONN_PER_USER", "5"))
+
+
+def _ws_conn_key(username: str, meeting_id: str) -> str:
+    """生成连接去重 key"""
+    return f"{username}:{meeting_id}"
+
+
+async def _displace_old_connection(key: str, new_ws: WebSocket) -> None:
+    """关闭并替换同一 key 的旧连接，防止连接堆积
+
+    Starlette ws.close() 会 await 客户端关闭确认，客户端不响应会永久阻塞。
+    因此用 create_task fire-and-forget，不阻塞新连接。
+    """
+    old = _active_ws.get(key)
+    if old is None:
+        logger.warning("WS displace: no old connection for key=%s", key)
+        return
+    # fire-and-forget：不等待旧连接的关闭握手完成（断线清理尽力而为，不保存 task 引用）
+    try:
+        asyncio.create_task(old.close(code=1000, reason="superseded"))  # noqa: RUF006
+        logger.warning("WS displace: closing old connection for key=%s", key)
+    except Exception as e:
+        logger.warning("WS displace: failed to close old connection for key=%s: %s", key, e)
+
+
+def _count_user_connections(username: str) -> int:
+    """统计用户当前活跃连接数"""
+    prefix = f"{username}:"
+    return sum(1 for k in _active_ws if k.startswith(prefix))
+
 
 def _ws_client_ip(ws: WebSocket) -> str:
     """提取 WebSocket 客户端 IP"""
@@ -234,6 +269,7 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         return
 
     await ws.accept()
+    logger.warning("WS accept: meeting=%s ip=%s user=%s", meeting_id, client_ip, user.get("username"))
 
     # 审计：WS 连接建立
     try:
@@ -272,6 +308,33 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
         )
     except Exception:
         pass
+
+    # ---- 连接去重：同一用户+会议只保留最新连接 ----
+    _ws_username = user.get("username", "unknown")
+    _dedup_key = _ws_conn_key(_ws_username, meeting_id)
+    _user_conn_count = _count_user_connections(_ws_username)
+    if _user_conn_count >= WS_MAX_CONN_PER_USER:
+        logger.warning(
+            "WS conn_limit: user=%s meeting=%s active=%d max=%d",
+            _ws_username,
+            meeting_id,
+            _user_conn_count,
+            WS_MAX_CONN_PER_USER,
+        )
+        await _send_json(
+            ws,
+            {
+                "type": "error",
+                "meeting_id": meeting_id,
+                "message": f"连接数超限（{_user_conn_count}/{WS_MAX_CONN_PER_USER}），请关闭其他标签页后重试",
+            },
+        )
+        await ws.close(code=1013, reason="too many connections")
+        return
+    # 关闭同一 key 的旧连接（防止堆积）
+    await _displace_old_connection(_dedup_key, ws)
+    _active_ws[_dedup_key] = ws
+    logger.warning("WS store: key=%s active_ws_size=%d", _dedup_key, len(_active_ws))
 
     # 连接 key（IP + meeting_id 用于出站限流）
     conn_key = f"{client_ip}:{meeting_id}"
@@ -386,6 +449,10 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                     continue
                 msg = json.loads(raw)
                 if msg.get("type") == "pong":
+                    continue
+                # 心跳协议：收到 ping 回复 pong（与前端 ws.ts 心跳匹配）
+                if msg.get("type") == "ping":
+                    await _send_json(ws, {"type": "pong"})
                     continue
 
                 # [P3] WS 入站消息 Pydantic 校验
@@ -534,11 +601,22 @@ async def meeting_ws(ws: WebSocket, meeting_id: str, from_seq: int = 0) -> None:
                     continue
                 await _send_json(ws, {"type": "error", "meeting_id": meeting_id, "message": "无效的 JSON"})
     except WebSocketDisconnect:
-        pass
+        logger.warning("WS disconnect: meeting=%s ip=%s", meeting_id, client_ip)
     except Exception as e:
+        logger.warning("WS exception: meeting=%s ip=%s error=%s: %s", meeting_id, client_ip, type(e).__name__, e)
         with contextlib.suppress(Exception):
             await _send_json(ws, {"type": "error", "meeting_id": meeting_id, "message": str(e)})
     finally:
+        logger.warning(
+            "WS finally: meeting=%s ip=%s dropped=%d active_ws_size=%d",
+            meeting_id,
+            client_ip,
+            _dropped_count,
+            len(_active_ws),
+        )
+        # 从连接注册表中移除（仅当当前 ws 仍是注册的那个，防止竞态）
+        if _active_ws.get(_dedup_key) is ws:
+            _active_ws.pop(_dedup_key, None)
         heartbeat_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
@@ -670,6 +748,10 @@ async def system_ws(ws: WebSocket) -> None:
                     continue
                 msg = json.loads(raw) if raw else {}
                 if msg.get("type") == "pong":
+                    continue
+                # 心跳协议：收到 ping 回复 pong
+                if msg.get("type") == "ping":
+                    await _send_json(ws, {"type": "pong"})
                     continue
                 # [P3] 入站校验
                 try:
