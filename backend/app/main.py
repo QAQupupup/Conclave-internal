@@ -31,6 +31,7 @@ from app.routers import admin as admin_router
 from app.routers import agent_roles as agent_roles_router
 from app.routers import audit_logs as audit_router
 from app.routers import captcha as captcha_router
+from app.routers import code as code_router
 from app.routers import config as config_router
 from app.routers import docker_hosts as docker_hosts_router
 from app.routers import documents as documents_router
@@ -458,6 +459,7 @@ def create_app() -> FastAPI:
     app.include_router(captcha_router.router)
     app.include_router(meetings_router.router)
     app.include_router(documents_router.router)
+    app.include_router(code_router.router)
     app.include_router(metrics_router.router)
     app.include_router(workspace_router.router)
     app.include_router(ws_router.router)

@@ -157,11 +157,11 @@ class TopicIndex:
             return []
         try:
             if not await self.ensure_collection():
-                return
-            from qdrant_client.models import FieldCondition, Filter, MatchValue
+                return []
+            from qdrant_client.models import Condition, FieldCondition, Filter, MatchValue
 
             tid = tenant_id if tenant_id is not None else -1
-            must_conditions = [FieldCondition(key="tenant_id", match=MatchValue(value=tid))]
+            must_conditions: list[Condition] = [FieldCondition(key="tenant_id", match=MatchValue(value=tid))]
             query_filter = Filter(must=must_conditions)
             vec = await self._embedding.embed(query)
             results = self._get_client().search(

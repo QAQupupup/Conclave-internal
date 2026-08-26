@@ -102,6 +102,10 @@ async def tool_list_files(args: dict[str, Any]) -> dict[str, Any]:
             "size": stat.st_size,
         }
 
+    # 相对路径基准：有会议上下文时以会议目录为基准，否则以工作区根为基准。
+    # 与 fs.read 的 _resolve_path 语义对齐，保证 list 返回的 path 能直接回传 fs.read。
+    scope_base = (WORKSPACE_ROOT / meeting_id).resolve() if meeting_id else WORKSPACE_ROOT
+
     items = []
     for child in sorted(target.iterdir()):
         if child.name.startswith(".") or child.name == "__pycache__":
@@ -111,7 +115,7 @@ async def tool_list_files(args: dict[str, Any]) -> dict[str, Any]:
         except OSError:
             continue
         is_dir = child.is_dir()
-        rel = str(child.relative_to(WORKSPACE_ROOT)).replace("\\", "/")
+        rel = str(child.relative_to(scope_base)).replace("\\", "/")
         items.append(
             {
                 "name": child.name,

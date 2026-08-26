@@ -18,6 +18,13 @@ beautifulsoup4==4.14.3
 pyyaml==6.0.2
 psutil==7.2.2
 
+# 代码知识图谱（ADR-016）：tree-sitter 多语言 AST 解析
+# grammar 与 core 版本经 win/linux cp312 实证 ABI 兼容（Language 加载 + 真实 parse 通过）
+tree-sitter==0.26.0
+tree-sitter-python==0.23.6
+tree-sitter-javascript==0.23.1
+tree-sitter-typescript==0.23.2
+
 # 中文分词
 jieba==0.42.1
 

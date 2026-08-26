@@ -671,7 +671,7 @@ class QdrantVectorStore(InMemoryVectorStore):
             qvec = await self._embedding.embed(query)
 
             # [Wave 1] 构建租户过滤条件
-            from qdrant_client.models import FieldCondition, Filter, MatchValue
+            from qdrant_client.models import Condition, FieldCondition, Filter, MatchValue
 
             from app.tenants.context import get_tenant_id, is_system_tenant
 
@@ -690,21 +690,14 @@ class QdrantVectorStore(InMemoryVectorStore):
                     query_filter = None
             else:
                 _tid = get_tenant_id()
-                if _tid is not None:
-                    must_conditions = [
-                        FieldCondition(
-                            key="tenant_id",
-                            match=MatchValue(value=_tid),
-                        )
-                    ]
-                else:
-                    # fail-closed：未设置租户上下文，用不可能匹配的值
-                    must_conditions = [
-                        FieldCondition(
-                            key="tenant_id",
-                            match=MatchValue(value=-1),
-                        )
-                    ]
+                # fail-closed：未设置租户上下文时用不可能匹配的值（-1）
+                tid_filter = _tid if _tid is not None else -1
+                must_conditions: list[Condition] = [
+                    FieldCondition(
+                        key="tenant_id",
+                        match=MatchValue(value=tid_filter),
+                    )
+                ]
                 # 会议作用域过滤：共享 collection 下防止跨会议串扰
                 if self._meeting_id:
                     must_conditions.append(

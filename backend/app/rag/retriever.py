@@ -5,6 +5,7 @@ import asyncio
 from typing import Any
 
 from app.logging_config import get_logger
+from app.rag.graph_expand import get_graph
 from app.rag.hyde import hyde_retrieve
 from app.rag.query_rewriter import rewrite_query
 from app.rag.store import get_reranker, get_store
@@ -213,5 +214,104 @@ async def retrieve_for_conflict(
         "retrieve_for_conflict 完成: 返回 %d 条证据 (meeting_id=%s)",
         len(results),
         meeting_id,
+    )
+    return results
+
+
+async def retrieve_code(
+    meeting_id: str,
+    query: str,
+    top_k: int = 5,
+    max_hops: int = 1,
+) -> list[dict[str, Any]]:
+    """代码检索：向量入口 + N 跳图扩展，扩展结果与向量候选统一交 reranker（ADR-016 Phase C）。
+
+    向量管「语义入口」（召回种子符号 chunk），图管「结构扩展」（沿 CALLS/INHERITS
+    做 N 跳遍历，回答"谁调用它 / 它依赖谁"），两者级联而非替代（ADR-016 D4）。
+
+    降级策略：
+    - 会议无图索引 → 退化为纯向量检索（等价 `retrieve`）。
+    - 种子 chunk 非图节点（如纯文本 chunk）→ 跳过图扩展，仍作为向量候选返回。
+
+    与 `retrieve`/`retrieve_for_conflict` 的区别：返回项中图扩展命中的 chunk 携带
+    `graph_hit` 字段（hop/edge_type/via），供审计与解释性展示。
+    """
+    store = get_store(meeting_id)
+    if not store.all_chunks():
+        logger.debug("retrieve_code: store 无 chunk，返回空列表 (meeting_id=%s)", meeting_id)
+        return []
+
+    graph = get_graph(meeting_id)
+
+    # 1. 向量召回种子（取更多候选，给图扩展 + reranker 留空间）
+    search_k = max(top_k * 2, 10)
+    seeds = await store.search(query, top_k=search_k)
+    if not seeds:
+        return []
+
+    # 候选池：种子打底，图扩展追加（按 chunk_id 去重，种子优先）
+    pool: dict[str, dict[str, Any]] = {chunk.chunk_id: _build_chunk_dict(chunk, score, store) for chunk, score in seeds}
+
+    # 2. 图扩展：仅对命中图节点的种子沿 CALLS/INHERITS 做双向 N 跳扩展
+    if graph is not None:
+        for chunk, _score in seeds:
+            if not graph.has_node(chunk.chunk_id):
+                continue
+            for hit in graph.expand(
+                [chunk.chunk_id],
+                max_hops=max_hops,
+                edge_types={"CALLS", "INHERITS"},
+                incoming=True,
+                outgoing=True,
+                include_seeds=False,
+            ):
+                if hit.node_id in pool:
+                    continue
+                related = store.get_chunk(hit.node_id)
+                if related is None:
+                    # file/doc 节点无对应 chunk（只有 symbol 有 chunk），跳过
+                    continue
+                d = _build_chunk_dict(related, 0.0, store)
+                d["graph_hit"] = {
+                    "hop": hit.hop,
+                    "edge_type": hit.edge_type,
+                    "via": hit.via,
+                }
+                pool[hit.node_id] = d
+
+    base = list(pool.values())
+    if not base:
+        return []
+
+    # 排序为 reranker 提供稳定输入（图扩展项初始分 0，排在种子之后）
+    base.sort(key=lambda x: x["score"], reverse=True)
+
+    # 3. reranker 融合（与 retrieve_for_conflict 一致性：真实 Reranker 失败回退初始分）
+    reranker = get_reranker()
+    documents = [c["text"] for c in base]
+    try:
+        reranked = await reranker.rerank(query, documents, top_n=top_k)
+    except Exception as e:
+        logger.error(
+            "retrieve_code: reranker 重排异常，回退初始分排序: %s: %s",
+            type(e).__name__,
+            e,
+        )
+        return base[:top_k]
+
+    results: list[dict[str, Any]] = []
+    for idx, rel_score in reranked:
+        if 0 <= idx < len(base):
+            item = base[idx].copy()
+            item["score"] = round(rel_score, 4)
+            results.append(item)
+
+    logger.info(
+        "retrieve_code 完成: meeting_id=%s, 候选=%d(图扩展 %d), 返回=%d, max_hops=%d",
+        meeting_id,
+        len(base),
+        sum(1 for c in base if "graph_hit" in c),
+        len(results),
+        max_hops,
     )
     return results
