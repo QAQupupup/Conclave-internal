@@ -2,7 +2,9 @@
 
 将 llm_trace、evidence_set 等大字段从 payload 中分离单独存储，
 并提供 payload 精简工具函数。
-原迁移自 app/db_legacy.py，逻辑未做任何修改。
+
+统一 ORM 访问：读写走 MeetingAuxModel + 显式 select / pg_insert upsert，
+不使用 relationship，不使用手写 SQL 字符串（见 docs/sql-development-rules.md）。
 
 多租户：写入时自动填充 tenant_id；读取通过 meeting_id 间接隔离。
 """
@@ -11,13 +13,15 @@ from __future__ import annotations
 
 import contextlib
 import json
-from datetime import datetime
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.base import utcnow
 from app.db.engine import async_session_factory
+from app.db.models import MeetingAuxModel
 from app.tenants import current_tenant_id
 
 # 需要从 payload 中分离的 aux 字段名列表
@@ -32,7 +36,7 @@ async def save_meeting_aux(
     """将 aux 大字段单独持久化到 meeting_aux 表。
 
     每个 aux key 对应一行，value_json 存 JSON 序列化后的值。
-    使用 INSERT ... ON CONFLICT DO UPDATE 实现 upsert。
+    使用 INSERT ... ON CONFLICT (meeting_id, key) DO UPDATE 实现原子 upsert。
 
     Args:
         meeting_id: 会议 ID
@@ -42,48 +46,26 @@ async def save_meeting_aux(
     """
     if not aux:
         return
-    now = datetime.now().isoformat()
+    now = utcnow()
     tid = current_tenant_id()
 
     async def _execute_in_session(sess: AsyncSession) -> None:
         for key, value in aux.items():
-            if tid is not None:
-                await sess.execute(
-                    text(
-                        """
-                        INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at, tenant_id)
-                        VALUES (:meeting_id, :key, :value_json, :updated_at, :tenant_id)
-                        ON CONFLICT(meeting_id, key) DO UPDATE SET
-                            value_json=excluded.value_json,
-                            updated_at=excluded.updated_at
-                        """
-                    ),
-                    {
-                        "meeting_id": meeting_id,
-                        "key": key,
-                        "value_json": json.dumps(value, ensure_ascii=False, default=str),
-                        "updated_at": now,
-                        "tenant_id": tid,
-                    },
-                )
-            else:
-                await sess.execute(
-                    text(
-                        """
-                        INSERT INTO meeting_aux (meeting_id, key, value_json, updated_at)
-                        VALUES (:meeting_id, :key, :value_json, :updated_at)
-                        ON CONFLICT(meeting_id, key) DO UPDATE SET
-                            value_json=excluded.value_json,
-                            updated_at=excluded.updated_at
-                        """
-                    ),
-                    {
-                        "meeting_id": meeting_id,
-                        "key": key,
-                        "value_json": json.dumps(value, ensure_ascii=False, default=str),
-                        "updated_at": now,
-                    },
-                )
+            stmt = pg_insert(MeetingAuxModel).values(
+                meeting_id=meeting_id,
+                key=key,
+                value_json=json.dumps(value, ensure_ascii=False, default=str),
+                updated_at=now,
+                tenant_id=tid,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["meeting_id", "key"],
+                set_={
+                    "value_json": stmt.excluded.value_json,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            await sess.execute(stmt)
 
     if session is not None:
         await _execute_in_session(session)
@@ -108,13 +90,12 @@ async def get_meeting_aux(meeting_id: str) -> dict[str, Any]:
     try:
         async with async_session_factory() as session:
             result = await session.execute(
-                text("SELECT key, value_json FROM meeting_aux WHERE meeting_id = :meeting_id"),
-                {"meeting_id": meeting_id},
+                select(MeetingAuxModel.key, MeetingAuxModel.value_json).where(MeetingAuxModel.meeting_id == meeting_id)
             )
-            rows = result.mappings().all()
-            for row in rows:
+            rows = result.all()
+            for key, value_json in rows:
                 with contextlib.suppress(json.JSONDecodeError, KeyError):
-                    aux[row["key"]] = json.loads(row["value_json"])
+                    aux[key] = json.loads(value_json)
     except Exception:
         # 表可能不存在（旧数据库），静默返回空 dict
         pass

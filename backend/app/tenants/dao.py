@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import false, true
+
 from app.tenants.context import get_tenant_id, is_system_tenant
 
 
@@ -73,3 +75,24 @@ def require_tenant_id() -> int:
     if tid is None:
         raise RuntimeError("当前操作需要在租户上下文中执行，但未设置 tenant_id")
     return tid
+
+
+def tenant_filter_expr(column: Any) -> Any:
+    """ORM 版租户过滤表达式（等价 raw SQL 版 `tenant_filter_clause`）。
+
+    - 系统租户：返回 ``true()``（不过滤）
+    - 已设置 tenant_id：返回 ``column == tid``
+    - 未设置 tenant_id：返回 ``false()``（匹配不到任何行，防数据泄露）
+
+    Args:
+        column: ORM 模型列（如 ``MeetingModel.tenant_id``）
+
+    Returns:
+        可直接传入 ``select().where(...)`` / ``update().where(...)`` 的布尔表达式。
+    """
+    if is_system_tenant():
+        return true()
+    tid = get_tenant_id()
+    if tid is None:
+        return false()
+    return column == tid

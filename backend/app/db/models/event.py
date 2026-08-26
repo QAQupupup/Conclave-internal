@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     String,
@@ -28,9 +27,11 @@ class EventModel(Base, TenantScopeMixin):
     __tablename__ = "events"
 
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # 注意：不声明 ForeignKey("meetings.id")。events 还承载系统级事件，
+    # 其 meeting_id 使用哨兵值 "*"（如 system.meetings.changed），并不指向真实会议，
+    # 外键约束会与哨兵设计冲突且历史 init_db 手写 DDL 也从未建过该外键。
     meeting_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("meetings.id", ondelete="CASCADE"),
         nullable=False,
     )
     type: Mapped[str] = mapped_column(String(50), nullable=False)

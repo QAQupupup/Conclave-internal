@@ -6,7 +6,7 @@
 设计原则：
 - 硬错误（抛异常）：ORM 声明的列在 DB 中不存在、NOT NULL 约束不匹配
 - 软警告（仅日志）：NOT NULL 列无 server_default（raw SQL INSERT 需显式赋值）
-- 只检查有 ORM 模型的表；纯 raw SQL legacy 表（meetings/messages 等）不检查
+- 只检查有 ORM 模型的表；无 ORM 模型的 raw SQL 表（第三方/插件自建表）不检查
 - 此模块是"预警系统"，不是迁移工具——发现不一致直接报错，让开发者修
 """
 
@@ -23,15 +23,11 @@ from app.db.engine import async_session_factory
 logger = logging.getLogger(__name__)
 
 
-# 已知无需 ORM 模型的 raw SQL 表（legacy 表 / 第三方自建表）
+# 已知无需 ORM 模型的 raw SQL 表（第三方/插件自建表，无 ORM 模型）
+# 注：meetings/messages/events/user_preferences/meeting_tags/agent_roles/meeting_aux
+#     均已迁移到 ORM 模型（见 app/db/models/），不再列入本白名单。
 _LEGACY_RAW_TABLES: set[str] = {
-    "meetings",
-    "messages",
-    "events",
-    "user_preferences",
-    "meeting_tags",
-    "agent_roles",
-    "meeting_aux",
+    # net_auth / notifications 由各自模块 raw SQL 建表
     "net_auth_requests",
     "notifications",
     "alembic_version",
