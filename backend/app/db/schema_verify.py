@@ -152,11 +152,11 @@ async def verify_schema_consistency(raise_on_error: bool = True) -> dict[str, li
 
     if errors:
         logger.error("Schema 校验发现 %d 个硬错误:", len(errors))
-        for e in errors:
-            logger.error("  [ERROR] %s", e)
+        for err in errors:
+            logger.error("  [ERROR] %s", err)
         if raise_on_error:
             raise RuntimeError(
-                f"DB Schema 与 ORM 模型不一致（{len(errors)} 个错误）:\n" + "\n".join(f"  - {e}" for e in errors)
+                f"DB Schema 与 ORM 模型不一致（{len(errors)} 个错误）:\n" + "\n".join(f"  - {err}" for err in errors)
             )
     elif not warnings:
         logger.info("Schema 一致性校验通过")

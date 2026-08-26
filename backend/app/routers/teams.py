@@ -38,7 +38,7 @@ router = APIRouter(prefix="/api", tags=["teams"])
 
 
 def _get_auth(request: Request) -> dict[str, Any]:
-    auth_user = getattr(request.state, "auth_user", None)
+    auth_user: dict[str, Any] | None = getattr(request.state, "auth_user", None)
     if not auth_user:
         raise HTTPException(status_code=401, detail="未登录")
     return auth_user
@@ -67,7 +67,7 @@ def _get_current_role(auth_user: dict[str, Any], tid: int) -> str:
         if sys_role in ("system_admin", "admin"):
             return "maintainer"  # system_admin 在 team 中视为 maintainer
     if roles:
-        return roles[0]
+        return str(roles[0])
     return ""
 
 

@@ -39,7 +39,7 @@ router = APIRouter(prefix="/api", tags=["config"])
 
 
 def _get_auth(request: Request) -> dict[str, Any]:
-    auth_user = getattr(request.state, "auth_user", None)
+    auth_user: dict[str, Any] | None = getattr(request.state, "auth_user", None)
     if not auth_user:
         raise HTTPException(status_code=401, detail="未登录")
     return auth_user

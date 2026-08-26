@@ -14,6 +14,7 @@ P1 知识资产化改造（2026-08-06）：
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -61,7 +62,7 @@ class MeetingDocumentRefModel(Base, TenantScopeMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meeting_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     document_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     added_by: Mapped[str] = mapped_column(String(100), nullable=False, default="system")
 
     __table_args__ = (
@@ -97,7 +98,7 @@ class DocumentModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin)
     raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 生命周期：active（可用/可检索）| recycled（回收箱，原文保留但检索不命中）
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    recycled_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recycled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     meeting: Mapped[MeetingModel | None] = relationship()
 

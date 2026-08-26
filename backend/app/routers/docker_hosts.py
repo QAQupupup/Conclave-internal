@@ -529,25 +529,37 @@ async def system_overview() -> dict[str, Any]:
 
     # Qdrant
     try:
-        import aiohttp
+        import httpx
 
         qdrant_url = os.environ.get("CONCLAVE_QDRANT_URL", "http://qdrant:6333")
-        async with (
-            aiohttp.ClientSession() as session_http,
-            session_http.get(f"{qdrant_url}/healthz", timeout=aiohttp.ClientTimeout(total=5)) as resp,
-        ):
-            if resp.status == 200:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{qdrant_url}/healthz")
+            if resp.status_code == 200:
                 components["qdrant"] = {"status": "healthy", "type": "vector_db"}
             else:
                 components["qdrant"] = {"status": "degraded", "type": "vector_db"}
     except Exception as e:
         components["qdrant"] = {"status": "unhealthy", "type": "vector_db", "error": str(e)[:100]}
 
-    # Docker / Sandbox
+    # Docker / Sandbox — 优先通过 HTTP 检测 socket proxy，避免依赖 docker CLI
     try:
+        import httpx
+
         sandbox_status = await get_sandbox_status()
+        docker_host_env = os.environ.get("DOCKER_HOST", "")
+        docker_reachable = False
+        if docker_host_env.startswith("tcp://"):
+            # socket proxy 模式：直接 HTTP 检测 /version 端点
+            proxy_url = docker_host_env.replace("tcp://", "http://")
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{proxy_url}/version")
+                docker_reachable = resp.status_code == 200
+        elif os.path.exists("/var/run/docker.sock"):
+            # 本地 socket 模式：通过 sandbox 模块检测
+            docker_reachable = bool(sandbox_status.get("docker_available"))
+
         components["docker"] = {
-            "status": "healthy" if sandbox_status.get("docker_available") else "unhealthy",
+            "status": "healthy" if docker_reachable else "unhealthy",
             "type": "runtime",
             "sandbox_mode": sandbox_status.get("mode", "unknown"),
             "active_containers": sandbox_status.get("active", 0),
@@ -571,13 +583,11 @@ async def system_overview() -> dict[str, Any]:
 
     # Frontend: 通过 nginx 检查前端服务是否可达
     try:
-        import aiohttp
+        import httpx
 
-        async with (
-            aiohttp.ClientSession() as session_http,
-            session_http.get("http://frontend/health", timeout=aiohttp.ClientTimeout(total=5)) as resp,
-        ):
-            if resp.status == 200:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get("http://frontend/health")
+            if resp.status_code == 200:
                 components["frontend"] = {"status": "healthy", "type": "application"}
             else:
                 components["frontend"] = {"status": "degraded", "type": "application"}
@@ -587,13 +597,11 @@ async def system_overview() -> dict[str, Any]:
 
     # Gitea
     try:
-        import aiohttp
+        import httpx
 
-        async with (
-            aiohttp.ClientSession() as session_http,
-            session_http.get("http://gitea:3000/", timeout=aiohttp.ClientTimeout(total=5)) as resp,
-        ):
-            if resp.status == 200:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get("http://gitea:3000/")
+            if resp.status_code == 200:
                 components["gitea"] = {"status": "healthy", "type": "git"}
             else:
                 components["gitea"] = {"status": "degraded", "type": "git"}

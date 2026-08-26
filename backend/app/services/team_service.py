@@ -770,7 +770,8 @@ async def get_user_role_in_team(user_id: int, team_id: int) -> str | None:
         row = result.first()
         if not row:
             return None
-        role, is_banned = row[0], row[1]
+        role: str | None = row[0]
+        is_banned: bool = row[1]
         if is_banned:
             return ROLE_BANNED
         return role

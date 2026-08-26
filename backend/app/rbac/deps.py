@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def _get_auth_user(request: Request) -> dict[str, Any]:
     """从 request.state 获取认证用户信息。"""
-    user = getattr(request.state, "auth_user", None)
+    user: dict[str, Any] | None = getattr(request.state, "auth_user", None)
     if not user:
         raise HTTPException(status_code=401, detail="未授权")
     return user

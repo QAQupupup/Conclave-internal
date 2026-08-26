@@ -69,14 +69,20 @@ async def list_notifications(
     if uid is None:
         return {"notifications": [], "unread_count": 0}
 
+    # uid 在 auth 层为字符串（users.id 为 BIGINT），转 int 供 DB 精确比较
+    try:
+        user_id = int(uid)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="无效用户") from None
+
     await _ensure_table()
 
     # 同步会议状态为通知（如果最近 7 天的会议有未同步的状态变更）
-    await _sync_meeting_notifications(uid)
+    await _sync_meeting_notifications(user_id)
 
     async with async_session_factory() as session:
         where = "n.user_id = :uid"
-        params: dict[str, Any] = {"uid": uid, "limit": limit}
+        params: dict[str, Any] = {"uid": user_id, "limit": limit}
         if unread_only:
             where += " AND n.is_read = FALSE"
 
@@ -98,9 +104,9 @@ async def list_notifications(
 
         unread_result = await session.execute(
             text("SELECT COUNT(*) as c FROM notifications WHERE user_id = :uid AND is_read = FALSE"),
-            {"uid": uid},
+            {"uid": user_id},
         )
-        unread_count = unread_result.mappings().first()["c"] or 0
+        unread_count = unread_result.scalar() or 0
 
     notifications = []
     for row in rows:

@@ -71,6 +71,8 @@ class LLMClient(Protocol):
         on_token: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]: ...
 
+    async def complete_text(self, prompt: str, temperature: float = 0.1) -> str: ...
+
 
 class StubLLM:
     """桩 LLM：无 API key 时返回符合各阶段 JSON schema 的假数据

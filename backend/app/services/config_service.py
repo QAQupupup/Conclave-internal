@@ -24,7 +24,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 from app.config import settings as _settings
 from app.tenants.settings_override import (
@@ -417,7 +417,7 @@ async def set_personal_setting(user_id: int, key: str, value: Any, value_type: s
 
 async def delete_personal_setting(user_id: int, key: str) -> bool:
     """删除个人配置项，返回是否删除了记录。"""
-    from sqlalchemy import text
+    from sqlalchemy import CursorResult, text
 
     from app.db.engine import async_session_factory
 
@@ -427,7 +427,7 @@ async def delete_personal_setting(user_id: int, key: str) -> bool:
             {"uid": user_id, "key": key},
         )
         await session.commit()
-        deleted = result.rowcount > 0
+        deleted = cast(CursorResult, result).rowcount > 0
 
     if deleted:
         _invalidate_user_cache(user_id)

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import cast
 
-from sqlalchemy import text
+from sqlalchemy import CursorResult, text
 
 from app.db.engine import async_session_factory
 from app.tenants.models import TenantCreate, TenantInfo, TenantMember
@@ -555,7 +556,7 @@ async def add_user_to_tenant(user_id: int, tenant_id: int, role: str = ROLE_MEMB
             text("UPDATE users SET tenant_id = :tid WHERE id = :uid"),
             {"tid": tenant_id, "uid": user_id},
         )
-        changed = (result.rowcount or 0) > 0
+        changed = (cast(CursorResult, result).rowcount or 0) > 0
 
         # 2. 确保 tenant_members 有记录（upsert）
         # 先检查租户是否存在

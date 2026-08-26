@@ -362,7 +362,8 @@ async def _extract_chunk_entities(llm: Any, chunk_text: str) -> dict[str, Any] |
         m = re.search(r"\{.*\}", out, re.DOTALL)
         if not m:
             return None
-        return json.loads(m.group(0))
+        entities: dict[str, Any] = json.loads(m.group(0))
+        return entities
     except Exception:
         return None
 

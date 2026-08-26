@@ -189,7 +189,7 @@ async def add_user_to_team_role(user_id: int | str, tenant_id: int, role: str) -
     uid = str(user_id)
     # 先移除该用户在该域的所有现有角色（避免角色叠加）
     await _remove_user_roles_in_domain(e, uid, dom)
-    ok = await e.add_grouping_policy(uid, role, dom)
+    ok: bool = await e.add_grouping_policy(uid, role, dom)
     if ok:
         await e.save_policy()
     return ok
@@ -199,7 +199,7 @@ async def add_user_to_system_role(user_id: int | str, role: str) -> bool:
     """将用户添加到系统域指定角色。"""
     e = get_enforcer()
     uid = str(user_id)
-    ok = await e.add_grouping_policy(uid, role, SYSTEM_DOMAIN)
+    ok: bool = await e.add_grouping_policy(uid, role, SYSTEM_DOMAIN)
     if ok:
         await e.save_policy()
     return ok
@@ -217,7 +217,7 @@ async def remove_user_role_in_team(user_id: int | str, role: str, tenant_id: int
     """移除用户在指定 Team 的特定角色。"""
     e = get_enforcer()
     dom = team_domain(tenant_id)
-    ok = await e.remove_grouping_policy(str(user_id), role, dom)
+    ok: bool = await e.remove_grouping_policy(str(user_id), role, dom)
     if ok:
         await e.save_policy()
     return ok

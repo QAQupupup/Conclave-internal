@@ -157,7 +157,7 @@ def reset_plugin_name(token: contextvars.Token[str]) -> None:
     _plugin_name.reset(token)
 
 
-def get_trace_context() -> dict[str, str]:
+def get_trace_context() -> dict[str, str | tuple[str, ...]]:
     """获取当前追踪上下文快照（用于日志注入）"""
     return {
         "request_id": _request_id.get(),

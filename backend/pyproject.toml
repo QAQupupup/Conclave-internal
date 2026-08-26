@@ -65,7 +65,6 @@ ignore = [
     "RUF002", # ambiguous-unicode-character-docstring
     "RUF003", # ambiguous-unicode-character-comment
     "RUF009", # Do not perform function call in dataclass defaults (config.py 的 _env() 模式是故意的)
-    "UP038",  # Use X | Y in isinstance (该规则已在 ruff 0.7+ 移除，元组写法完全合法)
     # S 规则初始宽松配置，后续逐步收紧
     "S101",   # assert 使用 — 测试代码中 assert 是合法的
     "S104",   # hardcoded-bind-all-interfaces — Docker 容器绑定 0.0.0.0 是有意设计

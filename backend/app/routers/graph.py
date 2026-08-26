@@ -252,8 +252,8 @@ async def get_graph(
             mat_nodes, mat_edges = await get_materialized_graph(meeting_id, tenant_id)
             for n in mat_nodes:
                 add_node(n["id"], n["type"], n["label"], size=n.get("size", 14), meta=n.get("meta"))
-            for e in mat_edges:
-                add_edge(e["source"], e["target"], e["type"], weight=e.get("weight", 1.0))
+            for edge in mat_edges:
+                add_edge(edge["source"], edge["target"], edge["type"], weight=edge.get("weight", 1.0))
         except Exception as e:
             logger.debug("Graph: 物化边读取跳过: %s", e)
 
