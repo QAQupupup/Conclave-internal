@@ -81,6 +81,14 @@
       "dst": "README.md"
     },
     {
+      "src": "README.en.md",
+      "dst": "README.en.md"
+    },
+    {
+      "src": "doc-public",
+      "dst": "doc-public"
+    },
+    {
       "src": "ARCHITECTURE.md",
       "dst": "ARCHITECTURE.md"
     },

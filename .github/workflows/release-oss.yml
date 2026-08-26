@@ -84,7 +84,27 @@ jobs:
             --version "${{ github.sha }}" \
             --branch auto-sync \
             --skip-core-build \
+            --prune \
             --push
+
+      - name: Verify OSS tree is consistent with manifest
+        env:
+          OSS_REPO_URL: ${{ secrets.OSS_REPO_URL }}
+        run: |
+          # dry-run 二次校验：若清单与已同步内容不一致，dry-run 会列出待同步/待删除项
+          OUTPUT=$(python scripts/publish_open_source.py \
+            --dev-repo . \
+            --oss-repo ../Conclave-OSS \
+            --branch auto-sync \
+            --skip-core-build \
+            --prune \
+            --dry-run 2>&1)
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -qE "新增/更新文件数: [1-9]|删除目录/文件数: [1-9]"; then
+            echo "::error::OSS tree is not in sync with manifest. Check deviation above."
+            exit 1
+          fi
+          echo "OSS tree is consistent with manifest."
 
       - name: Summary
         if: always()
