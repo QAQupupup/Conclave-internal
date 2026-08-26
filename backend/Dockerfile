@@ -38,6 +38,7 @@ RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list && \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl ca-certificates gnupg tzdata \
+        git \
         xvfb x11vnc websockify novnc \
         fonts-wqy-zenhei fonts-noto-cjk \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
@@ -82,14 +83,15 @@ FROM system-deps AS work
 
 WORKDIR /app
 
-# 从 playwright 层复制 Playwright 包 + 浏览器
-COPY --from=playwright /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=playwright /usr/local/bin /usr/local/bin
-COPY --from=playwright /root/.cache/ms-playwright /root/.cache/ms-playwright
-
-# 从 builder 层复制 Python 依赖（已安装完毕，无需重复 pip install）
+# 从 builder 层复制全部 Python 依赖（已安装完毕，无需重复 pip install）。
+# 注：builder 继承自 playwright 且 requirements.lock 含 playwright==1.61.0，
+# 故 playwright 的 Python 包与命令行入口已含在 builder 的 site-packages / bin 中，
+# 无需再从 playwright 层单独复制，省掉一次 ~600MB 的大层拷贝。
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 从 playwright 层复制浏览器二进制（builder 未执行 playwright install，仅在 playwright 阶段安装）
+COPY --from=playwright /root/.cache/ms-playwright /root/.cache/ms-playwright
 
 # 创建 app 用户（uid 1000），用于降权运行（提前创建，避免 COPY 后 chown）
 RUN groupadd -g 1000 app 2>/dev/null || true && \
