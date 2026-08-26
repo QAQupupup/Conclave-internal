@@ -1,13 +1,10 @@
 """会议相关 ORM 模型：meetings / meeting_tags / meeting_aux。
 
-跨模块 relationship（MeetingModel -> MessageModel / EventModel）使用字符串前向
-引用，由 SQLAlchemy 在 mapper 配置阶段通过共享 Base 注册表惰性解析，无需在此
-导入目标模型类，从而避免循环导入。
+跨模块关联一律通过显式 join 实现，不使用 relationship（见 docs/sql-development-rules.md
+§1.2 红线）。历史 relationship 声明已注释保留、未删除。
 """
 
 from __future__ import annotations
-
-from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     ForeignKey,
@@ -17,7 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import (
     Base,
@@ -28,9 +25,8 @@ from app.db.base import (
     UUIDPrimaryKeyMixin,
 )
 
-if TYPE_CHECKING:
-    from app.db.models.event import EventModel
-    from app.db.models.message import MessageModel
+# 注：MessageModel / EventModel 仅供历史 relationship 注解引用，已一并注释，
+# 故不再需要 TYPE_CHECKING 前向导入。
 
 
 # ============================================================
@@ -55,19 +51,20 @@ class MeetingModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     # 数据格式版本号（用于未来 schema 演进时的数据迁移）
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    # 关系
-    messages: Mapped[list[MessageModel]] = relationship(
-        back_populates="meeting",
-        cascade="all, delete-orphan",
-    )
-    events: Mapped[list[EventModel]] = relationship(
-        back_populates="meeting",
-        cascade="all, delete-orphan",
-    )
-    tags: Mapped[list[MeetingTagModel]] = relationship(
-        back_populates="meeting",
-        cascade="all, delete-orphan",
-    )
+    # 关系（历史 relationship 已按 docs/sql-development-rules.md §1.2 红线注释，
+    # 跨模块关联改用显式 join；保留注释以便追溯，不可重新启用）
+    # messages: Mapped[list[MessageModel]] = relationship(
+    #     back_populates="meeting",
+    #     cascade="all, delete-orphan",
+    # )
+    # events: Mapped[list[EventModel]] = relationship(
+    #     back_populates="meeting",
+    #     cascade="all, delete-orphan",
+    # )
+    # tags: Mapped[list[MeetingTagModel]] = relationship(
+    #     back_populates="meeting",
+    #     cascade="all, delete-orphan",
+    # )
 
     __table_args__ = (
         Index("idx_meetings_status", "status"),
@@ -88,7 +85,7 @@ class MeetingTagModel(Base, IntegerPrimaryKeyMixin, CreatedAtMixin, TenantScopeM
     )
     tag: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    meeting: Mapped[MeetingModel] = relationship(back_populates="tags")
+    # meeting: Mapped[MeetingModel] = relationship(back_populates="tags")  # 历史 relationship，已注释
 
     __table_args__ = (
         UniqueConstraint("meeting_id", "tag", name="uq_meeting_tag"),

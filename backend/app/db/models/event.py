@@ -1,14 +1,12 @@
 """事件溯源 ORM 模型：events。
 
-跨模块 relationship（EventModel -> MeetingModel）使用字符串前向引用，
-由 SQLAlchemy 在 mapper 配置阶段通过共享 Base 注册表惰性解析，无需导入
-MeetingModel，从而避免循环导入。
+跨模块关联一律通过显式 join 实现，不使用 relationship（见 docs/sql-development-rules.md
+§1.2 红线）。历史 relationship 声明已注释保留、未删除。
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     DateTime,
@@ -18,12 +16,9 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TenantScopeMixin
-
-if TYPE_CHECKING:
-    from app.db.models.meeting import MeetingModel
 
 
 # ============================================================
@@ -47,7 +42,7 @@ class EventModel(Base, TenantScopeMixin):
     )
     trace_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
-    meeting: Mapped[MeetingModel] = relationship(back_populates="events")
+    # meeting: Mapped[MeetingModel] = relationship(back_populates="events")  # 历史 relationship，已注释
 
     __table_args__ = (
         Index("idx_events_meeting", "meeting_id"),

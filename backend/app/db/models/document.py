@@ -1,7 +1,7 @@
 """上传文档元数据 ORM 模型：documents / knowledge_spaces / meeting_document_refs。
 
-跨模块 relationship 使用字符串前向引用，由 SQLAlchemy 在 mapper 配置阶段通过
-共享 Base 注册表惰性解析，避免循环导入。
+跨模块关联一律通过显式 join 实现，不使用 relationship（见 docs/sql-development-rules.md
+§1.2 红线）。历史 relationship 声明已注释保留、未删除。
 
 P1 知识资产化改造（2026-08-06）：
 - documents 不再强绑会议（meeting_id 改为可空，表示"首次上传来源"）；
@@ -15,7 +15,6 @@ P1 知识资产化改造（2026-08-06）：
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -26,12 +25,9 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, CreatedAtMixin, TenantScopeMixin, UUIDPrimaryKeyMixin, utcnow
-
-if TYPE_CHECKING:
-    from app.db.models.meeting import MeetingModel
 
 
 # ============================================================
@@ -100,7 +96,7 @@ class DocumentModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     recycled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    meeting: Mapped[MeetingModel | None] = relationship()
+    # meeting: Mapped[MeetingModel | None] = relationship()  # 历史 relationship，已注释
 
     __table_args__ = (
         Index("idx_documents_space", "space_id"),
