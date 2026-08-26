@@ -713,8 +713,9 @@ function RoleFormDialog({
 
           {/* 名称 */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">角色名称</label>
+            <label htmlFor="role-name" className="text-sm font-medium text-text-secondary">角色名称</label>
             <Input
+              id="role-name"
               className="h-9 text-sm"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -725,8 +726,9 @@ function RoleFormDialog({
 
           {/* 角色类型 */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">角色类型</label>
+            <label htmlFor="role-type" className="text-sm font-medium text-text-secondary">角色类型</label>
             <select
+              id="role-type"
               value={roleType}
               onChange={(e) => setRoleType(e.target.value as RoleType)}
               disabled={isEdit && role?.is_builtin}
@@ -742,8 +744,8 @@ function RoleFormDialog({
 
           {/* 颜色 */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">标识颜色</label>
-            <div className="flex items-center gap-2">
+            <span id="role-color-label" className="text-sm font-medium text-text-secondary">标识颜色</span>
+            <div role="group" aria-labelledby="role-color-label" className="flex items-center gap-2">
               {COLOR_PRESETS.map((c) => (
                 <button
                   key={c.value}
@@ -757,6 +759,8 @@ function RoleFormDialog({
                   )}
                   style={{ backgroundColor: c.value }}
                   title={c.name}
+                  aria-label={c.name}
+                  aria-pressed={color === c.value}
                 />
               ))}
             </div>
@@ -764,8 +768,9 @@ function RoleFormDialog({
 
           {/* 专业领域 */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">专业领域（逗号分隔）</label>
+            <label htmlFor="role-domains" className="text-sm font-medium text-text-secondary">专业领域（逗号分隔）</label>
             <Input
+              id="role-domains"
               className="h-9 text-sm"
               value={domainsText}
               onChange={(e) => setDomainsText(e.target.value)}
@@ -775,8 +780,9 @@ function RoleFormDialog({
 
           {/* 描述 */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">角色描述</label>
+            <label htmlFor="role-description" className="text-sm font-medium text-text-secondary">角色描述</label>
             <Textarea
+              id="role-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="描述这个角色的核心视角和职责..."
@@ -787,8 +793,9 @@ function RoleFormDialog({
 
           {/* System Prompt */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">系统提示词 (System Prompt)</label>
+            <label htmlFor="role-system-prompt" className="text-sm font-medium text-text-secondary">系统提示词 (System Prompt)</label>
             <Textarea
+              id="role-system-prompt"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               placeholder="定义该角色的完整系统提示词..."

@@ -1,12 +1,12 @@
 import * as React from 'react';
 import { useMeetingStore } from '@/stores';
 import { cn } from '@/lib/utils';
-import { STAGE_LABELS, STAGE_DESCRIPTIONS } from '@/lib/constants';
+import { STAGE_LABELS, STAGE_DESCRIPTIONS, normalizeStageId } from '@/lib/constants';
 import type { StageId } from '@/types';
 import { CheckIcon, CircleIcon, SpinnerIcon } from '@/components/ui/svg-icons';
 
 const STAGE_ORDER: StageId[] = [
-  'clarify',
+  'clarification',
   'intra_team',
   'cross_team',
   'evidence_check',
@@ -18,8 +18,8 @@ export function StageTimeline({ className }: { className?: string }) {
   const currentStage = useMeetingStore((s) => s.stage);
   const status = useMeetingStore((s) => s.status);
 
-  // 兼容 clarify / clarification 两种写法
-  const normalizedStage = currentStage === 'clarification' ? 'clarify' : currentStage;
+  // 兼容 clarify / clarification 两种写法（边界已统一为 clarification，此处兜底）
+  const normalizedStage = normalizeStageId(currentStage);
   const currentIdx = STAGE_ORDER.indexOf(normalizedStage as StageId);
 
   return (

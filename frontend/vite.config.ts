@@ -20,8 +20,6 @@ export default defineConfig({
           '/net-auth/', '/docker-hosts/', '/regression/', '/admin/',
           '/graph/', '/llm/', '/vnc.html', '/vnc/', '/meetings/',
         ];
-        // WebSocket 路径
-        const WS_PATHS = ['/ws', '/vnc', '/websockify'];
         server.middlewares.use((req, _res, next) => {
           const url = req.url || '/';
           const method = (req.method || 'GET').toUpperCase();

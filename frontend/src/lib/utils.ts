@@ -51,9 +51,9 @@ export function getInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+export function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
   let timer: ReturnType<typeof setTimeout>;
-  return ((...args: any[]) => {
+  return ((...args: unknown[]) => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   }) as T;
@@ -71,10 +71,10 @@ export function randomId(prefix = 'id'): string {
 /**
  * 对消息流增量渲染做 rAF 节流，避免打字机效果引起过度重渲染
  */
-export function rafThrottle<T extends (...args: any[]) => void>(fn: T): T {
+export function rafThrottle<T extends (...args: unknown[]) => void>(fn: T): T {
   let rafId: number | null = null;
-  let lastArgs: any[] | null = null;
-  return ((...args: any[]) => {
+  let lastArgs: unknown[] | null = null;
+  return ((...args: unknown[]) => {
     lastArgs = args;
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => {

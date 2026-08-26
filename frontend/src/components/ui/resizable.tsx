@@ -49,9 +49,38 @@ export function ResizableHandle({
     document.body.style.userSelect = 'none';
   };
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step = 16;
+    let delta = 0;
+    if (isHorizontal) {
+      if (e.key === 'ArrowRight') delta = step;
+      else if (e.key === 'ArrowLeft') delta = -step;
+    } else {
+      if (e.key === 'ArrowDown') delta = step;
+      else if (e.key === 'ArrowUp') delta = -step;
+    }
+    if (delta === 0) return;
+    e.preventDefault();
+    const base = currentSize ?? (isHorizontal ? 260 : 200);
+    const adjustedDelta = reverse ? -delta : delta;
+    const newSize = Math.max(minSize, Math.min(maxSize, base + adjustedDelta));
+    onResize(newSize);
+  };
+
   return (
+    // 窗口分割条（window splitter）采用 W3C ARIA 规范的可聚焦 separator 模式：
+    // role="separator" + tabIndex + aria-orientation/valuenow + 鼠标/方向键处理器。
+    // jsx-a11y 未将 separator 归为 widget，故针对该交互处理器做局部放行。
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
+      role="separator"
+      aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
+      aria-valuemin={minSize}
+      aria-valuemax={maxSize}
+      aria-valuenow={currentSize ?? (isHorizontal ? 260 : 200)}
+      tabIndex={0}
       className={cn(
         'group relative flex-shrink-0 z-10',
         isHorizontal ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',

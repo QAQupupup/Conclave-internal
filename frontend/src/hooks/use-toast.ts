@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from '@/components/ui/toast';
 import type { ToastProps } from '@/components/ui/toast';
 
 type ToasterToast = ToastProps & {
@@ -75,30 +74,4 @@ export function useToast() {
       }
     },
   };
-}
-
-export function Toaster() {
-  const [state, setState] = React.useState<State>(memoryState);
-  React.useEffect(() => {
-    listeners.push(setState);
-    return () => {
-      const idx = listeners.indexOf(setState);
-      if (idx > -1) listeners.splice(idx, 1);
-    };
-  }, []);
-
-  return (
-    <ToastProvider swipeDirection="right">
-      {state.toasts.map(({ id, title, description, ...props }) => (
-        <Toast key={id} {...props}>
-          <div className="flex-1 space-y-1">
-            {title && <ToastTitle>{title}</ToastTitle>}
-            {description && <ToastDescription>{description}</ToastDescription>}
-          </div>
-          <ToastClose />
-        </Toast>
-      ))}
-      <ToastViewport />
-    </ToastProvider>
-  );
 }

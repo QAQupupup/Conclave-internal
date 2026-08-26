@@ -18,7 +18,7 @@ import {
   Plus,
   Shield,
 } from 'lucide-react';
-import { useTheme } from '@/providers/theme-provider';
+import { useTheme } from '@/providers/theme-context';
 import { cn } from '@/lib/utils';
 import { useStartMeeting } from '@/hooks/use-meetings';
 import { toast } from '@/hooks/use-toast';
@@ -53,8 +53,8 @@ export function CommandPalette() {
       const res = await startMeeting.mutateAsync({ topic });
       toast({ title: '已启动讨论', description: topic });
       navigate(`/meeting/${res.meeting_id}`);
-    } catch (e: any) {
-      toast({ title: '启动失败', description: e.message, variant: 'error' });
+    } catch (e: unknown) {
+      toast({ title: '启动失败', description: (e as Error).message, variant: 'error' });
     }
   };
 
@@ -74,7 +74,6 @@ export function CommandPalette() {
               value={query}
               onValueChange={setQuery}
               className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-text-tertiary disabled:cursor-not-allowed disabled:opacity-50"
-              autoFocus
             />
           </div>
           <CommandPrimitive.List className="max-h-[340px] overflow-y-auto p-2">

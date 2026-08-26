@@ -20,7 +20,7 @@ import {
 import { useAuthStore } from '@/stores/auth-slice';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import { useTheme } from '@/providers/theme-provider';
+import { useTheme } from '@/providers/theme-context';
 import { sha256Hash } from '@/lib/crypto';
 
 // ===== Form data types =====

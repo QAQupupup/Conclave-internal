@@ -17,7 +17,7 @@ import {
   type GraphData,
 } from './lib/types';
 import { forceLayout, getEdgePath } from './lib/force-layout';
-import { isDemoMode, mockApi } from '@/lib/mock-data';
+import { isDemoMode } from '@/lib/mock-data';
 
 // --- Inline SVG Icons ---
 function SvgIcon({ children, size = 14, className }: { children: React.ReactNode; size?: number; className?: string }) {
@@ -58,9 +58,6 @@ function SourceIcon({ size = 12, className }: { size?: number; className?: strin
 function AgentIcon({ size = 12, className }: { size?: number; className?: string }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}><polygon points="12,2 21,7 21,17 12,22 3,17 3,7" /></svg>;
 }
-function ConflictIcon({ size = 12, className }: { size?: number; className?: string }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}><polygon points="12,2 22,20 2,20" /></svg>;
-}
 
 // 渲染节点形状
 function NodeShape({ node, selected, hovered, onMouseDown, onMouseEnter, onMouseLeave, onClick }: {
@@ -78,8 +75,8 @@ function NodeShape({ node, selected, hovered, onMouseDown, onMouseEnter, onMouse
   const r = size / 2;
   const c = 12;
 
-  const renderShape = (fill: string, opacity?: number, stroke?: string, strokeWidth?: number, extraProps?: Record<string, any>) => {
-    const commonProps = { fill, opacity, stroke, strokeWidth, ...extraProps };
+  const renderShape = (fill: string, opacity?: number, stroke?: string, strokeWidth?: number) => {
+    const commonProps = { fill, opacity, stroke, strokeWidth };
     switch (style.shape) {
       case 'diamond': {
         const pts = `${c},${c - r} ${c + r},${c} ${c},${c + r} ${c - r},${c}`;
@@ -190,6 +187,14 @@ const NODE_TYPE_ITEMS: { type: NodeType; label: string; Icon: typeof TopicIcon }
   { type: 'agent', label: 'Agent', Icon: AgentIcon },
 ];
 
+// 会议选择器使用的后端返回形状（snake_case meeting_id + 可选 title/topic）
+interface MeetingOption {
+  id?: string;
+  meeting_id?: string;
+  topic?: string;
+  title?: string;
+}
+
 export default function GraphPage() {
   const [zoom, setZoom] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
@@ -207,11 +212,11 @@ export default function GraphPage() {
   // Fetch meetings list for selector
   const { data: meetingsData } = useQuery({
     queryKey: ['meetings', 'graph'],
-    queryFn: () => api.get<{ items: any[]; meetings?: any[] }>('/meetings?limit=20'),
+    queryFn: () => api.get<{ items: MeetingOption[]; meetings?: MeetingOption[] }>('/meetings?limit=20'),
     retry: false,
   });
 
-  const meetings = extractArray<any>(meetingsData, ['items', 'meetings']);
+  const meetings = extractArray<MeetingOption>(meetingsData, ['items', 'meetings']);
 
   // Selected meeting
   const [selectedMeetingId, setSelectedMeetingId] = React.useState<string | null>(null);
@@ -428,7 +433,7 @@ export default function GraphPage() {
           className="h-7 rounded-md border border-border-soft bg-bg-secondary px-2 text-xs text-text-primary outline-none focus:border-brand-500"
         >
           <option value="">全部会议</option>
-          {meetings.map((m: any) => (
+          {meetings.map((m: MeetingOption) => (
             <option key={m.meeting_id || m.id} value={m.meeting_id || m.id}>{(m.topic || m.title || m.id)?.slice(0, 40)}</option>
           ))}
         </select>

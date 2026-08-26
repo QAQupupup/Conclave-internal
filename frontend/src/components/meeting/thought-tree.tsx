@@ -5,33 +5,11 @@ import { ROLE_LABELS, ROLE_AVATAR_COLORS } from '@/lib/constants';
 import type { AgentInfo, AgentState, BorrowRequest } from '@/types';
 import { AgentAvatar, StatusDot } from '@/components/ui/svg-icons';
 
-const STATE_CONFIG: Record<AgentState, { pulse?: boolean }> = {
-  idle: {},
-  thinking: { pulse: true },
-  speaking: { pulse: true },
-  waiting: {},
-  done: {},
-  paused: {},
-};
-
 export function ThoughtTree({ className }: { className?: string }) {
   const agents = useMeetingStore((s) => s.agents);
   const messages = useMeetingStore((s) => s.messages);
   const selectedMessageId = useMeetingStore((s) => s.selectedMessageId);
   const borrowRequest = useMeetingStore((s) => s.borrowRequest);
-
-  // Group recent messages by agent
-  const recentByAgent = React.useMemo(() => {
-    const map = new Map<string, typeof messages>();
-    for (const msg of messages) {
-      if (!msg.agentId || msg.isThinking) continue;
-      if (!map.has(msg.agentId)) map.set(msg.agentId, []);
-      map.get(msg.agentId)!.push(msg);
-    }
-    // keep last 3 per agent
-    map.forEach((arr, key) => map.set(key, arr.slice(-3)));
-    return map;
-  }, [messages]);
 
   // Build agent ID -> name lookup map
   const agentNameMap = React.useMemo(() => {
@@ -64,7 +42,6 @@ export function ThoughtTree({ className }: { className?: string }) {
                 <AgentCard
                   key={agent.id}
                   agent={agent}
-                  recentMessages={recentByAgent.get(agent.id) || []}
                   isHighlighted={
                     selectedMessageId
                       ? messages?.find((m) => m.id === selectedMessageId)?.agentId === agent.id
@@ -92,11 +69,9 @@ export function ThoughtTree({ className }: { className?: string }) {
 
 function AgentCard({
   agent,
-  recentMessages,
   isHighlighted,
 }: {
   agent: AgentInfo;
-  recentMessages: any[];
   isHighlighted: boolean;
 }) {
   const stateLabel: Record<AgentState, string> = {

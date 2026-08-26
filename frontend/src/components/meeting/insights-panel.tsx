@@ -15,6 +15,27 @@ interface RelatedMeeting {
   score?: number;
 }
 
+interface ConflictItem {
+  summary?: string;
+  conflict_type?: string;
+  side_a?: string;
+  side_b?: string;
+}
+
+interface EvidenceSetItem {
+  assessments?: unknown[];
+}
+
+interface ObservabilityDetail {
+  topic?: string;
+  stage?: string;
+  status?: string;
+  artifact?: { title?: string };
+  decision_record?: { quality_score?: number };
+  quality_score?: number;
+  key_questions?: string[];
+}
+
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'conflicts', label: '冲突与证据' },
   { key: 'related', label: '相关会议' },
@@ -37,8 +58,8 @@ export function InsightsPanel({ meetingId }: { meetingId: string }) {
     enabled: !!meetingId,
   });
 
-  const conflicts = Array.isArray(detail.data?.conflicts) ? detail.data!.conflicts : [];
-  const evidenceSet = Array.isArray(detail.data?.evidence_set) ? detail.data!.evidence_set : [];
+  const conflicts = (Array.isArray(detail.data?.conflicts) ? detail.data!.conflicts : []) as ConflictItem[];
+  const evidenceSet = (Array.isArray(detail.data?.evidence_set) ? detail.data!.evidence_set : []) as EvidenceSetItem[];
   const edges = Array.isArray(graph.data?.edges) ? graph.data!.edges : [];
   const supportsCount = edges.filter((e) => e.type === 'supports').length;
   const contradictsCount = edges.filter((e) => e.type === 'contradicts').length;
@@ -74,15 +95,15 @@ export function InsightsPanel({ meetingId }: { meetingId: string }) {
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {tab === 'conflicts' && (
           <ConflictsTab
-            conflicts={conflicts as any[]}
-            evidenceSet={evidenceSet as any[]}
+            conflicts={conflicts}
+            evidenceSet={evidenceSet}
             supportsCount={supportsCount}
             contradictsCount={contradictsCount}
             loading={detail.isLoading && graph.isLoading}
           />
         )}
         {tab === 'related' && <RelatedTab related={related.data?.meetings as RelatedMeeting[]} loading={related.isLoading} />}
-        {tab === 'observability' && <ObservabilityTab detail={detail.data as any} loading={detail.isLoading} />}
+        {tab === 'observability' && <ObservabilityTab detail={detail.data as unknown as ObservabilityDetail | undefined} loading={detail.isLoading} />}
       </div>
     </div>
   );
@@ -95,8 +116,8 @@ function ConflictsTab({
   contradictsCount,
   loading,
 }: {
-  conflicts: any[];
-  evidenceSet: any[];
+  conflicts: ConflictItem[];
+  evidenceSet: EvidenceSetItem[];
   supportsCount: number;
   contradictsCount: number;
   loading: boolean;
@@ -185,7 +206,7 @@ function RelatedTab({ related, loading }: { related?: RelatedMeeting[]; loading:
   );
 }
 
-function ObservabilityTab({ detail, loading }: { detail?: any; loading: boolean }) {
+function ObservabilityTab({ detail, loading }: { detail?: ObservabilityDetail; loading: boolean }) {
   if (loading) return <CenterSpinner />;
   if (!detail) return <EmptyHint icon={<CheckIcon size={18} />} text="暂无可观测数据。" />;
   const artifact = detail.artifact || {};

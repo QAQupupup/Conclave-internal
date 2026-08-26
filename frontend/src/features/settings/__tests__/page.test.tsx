@@ -16,7 +16,7 @@ import { renderWithProviders, makeUserInfo } from '@/test/test-utils';
 import SettingsPage from '@/features/settings/page';
 
 // Mock theme provider
-vi.mock('@/providers/theme-provider', () => ({
+vi.mock('@/providers/theme-context', () => ({
   useTheme: () => ({ theme: 'light', setTheme: vi.fn(), resolvedTheme: 'light' }),
 }));
 

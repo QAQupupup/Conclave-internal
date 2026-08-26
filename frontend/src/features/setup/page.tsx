@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Logo } from '@/components/ui/svg-icons';
 import { api } from '@/lib/api';
-import { useAuthStore } from '@/stores';
 import { sha256Hash } from '@/lib/crypto';
 
 interface SetupStatus {
@@ -17,7 +16,7 @@ export default function SetupPage() {
   const [username, setUsername] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
-  const [setupToken, setSetupToken] = React.useState('');
+  const [setupToken] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
   const [checking, setChecking] = React.useState(true);
   const [needsSetup, setNeedsSetup] = React.useState(false);
@@ -98,18 +97,19 @@ export default function SetupPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-xs text-text-secondary">管理员用户名</label>
+              <label htmlFor="setup-username" className="text-xs text-text-secondary">管理员用户名</label>
               <Input
+                id="setup-username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
-                autoFocus
                 disabled={isLoading}
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-text-secondary">密码</label>
+              <label htmlFor="setup-password" className="text-xs text-text-secondary">密码</label>
               <Input
+                id="setup-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -118,8 +118,9 @@ export default function SetupPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-text-secondary">确认密码</label>
+              <label htmlFor="setup-confirm-password" className="text-xs text-text-secondary">确认密码</label>
               <Input
+                id="setup-confirm-password"
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

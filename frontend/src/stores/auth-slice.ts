@@ -46,7 +46,7 @@ export const useAuthStore = create<AuthStore>()(
           set({ user, isAuthenticated: true, isLoading: false });
           return user;
         } catch {
-          set({ isAuthenticated: false, isLoading: false });
+          set({ token: null, user: null, isAuthenticated: false, isLoading: false });
           return null;
         }
       },

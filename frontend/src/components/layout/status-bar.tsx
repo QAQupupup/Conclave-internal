@@ -3,16 +3,6 @@ import { useWSStore, useMeetingStore } from '@/stores';
 import { cn, formatDurationFromStart } from '@/lib/utils';
 import { STAGE_LABELS } from '@/lib/constants';
 import { isDemoMode } from '@/lib/mock-data';
-import type { StageId } from '@/types';
-
-const STAGE_ORDER: StageId[] = [
-  'clarification',
-  'intra_team',
-  'cross_team',
-  'evidence_check',
-  'arbitrate',
-  'produce',
-];
 
 export function StatusBar() {
   const wsStatus = useWSStore((s) => s.status);

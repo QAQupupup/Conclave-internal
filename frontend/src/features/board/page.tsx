@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
-import type { MeetingStatus } from '@/types';
+import type { Meeting, MeetingStatus } from '@/types';
 import {
   STAGE_LABELS,
   DELIVERABLE_TYPES,
@@ -152,8 +152,8 @@ export default function BoardPage() {
         setTopic(res.polished);
         toast({ title: '已润色', description: '议题描述已优化' });
       }
-    } catch (e: any) {
-      toast({ title: '润色失败', description: e.message, variant: 'error' });
+    } catch (e: unknown) {
+      toast({ title: '润色失败', description: (e as Error).message, variant: 'error' });
     } finally {
       setIsPolishing(false);
     }
@@ -230,8 +230,8 @@ export default function BoardPage() {
               file: f,
               onProgress: (percent) => setUploadProgress({ name: f.name, percent }),
             });
-          } catch (err: any) {
-            toast({ title: '附件上传失败', description: `${f.name}：${err.message}`, variant: 'error' });
+          } catch (err: unknown) {
+            toast({ title: '附件上传失败', description: `${f.name}：${(err as Error).message}`, variant: 'error' });
           }
         }
         setUploadProgress(null);
@@ -244,8 +244,8 @@ export default function BoardPage() {
       toast({ title: '讨论已启动', description: truncate(topic, 50) });
       resetForm();
       navigate(`/meeting/${meetingId}`);
-    } catch (e: any) {
-      toast({ title: '启动失败', description: e.message, variant: 'error' });
+    } catch (e: unknown) {
+      toast({ title: '启动失败', description: (e as Error).message, variant: 'error' });
     } finally {
       setLaunchPhase('idle');
       setUploadProgress(null);
@@ -272,8 +272,8 @@ export default function BoardPage() {
       await deleteMeeting.mutateAsync(deleteTarget.id);
       toast({ title: '已删除', description: '讨论已删除' });
       queryClient.invalidateQueries({ queryKey: ['meetings'] });
-    } catch (err: any) {
-      toast({ title: '删除失败', description: err.message, variant: 'error' });
+    } catch (err: unknown) {
+      toast({ title: '删除失败', description: (err as Error).message, variant: 'error' });
     } finally {
       setDeleteTarget(null);
     }
@@ -304,7 +304,6 @@ export default function BoardPage() {
                   onChange={(e) => setTopic(e.target.value)}
                   placeholder="描述你想讨论的议题或问题...&#10;例如：分析微服务架构中服务间通信的最佳实践，对比 gRPC 和 REST 的适用场景"
                   className="min-h-[96px] text-[15px] leading-relaxed"
-                  autoFocus
                   disabled={isLaunching}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -318,7 +317,7 @@ export default function BoardPage() {
                 {showRelatedPopover && (
                   <div
                     className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-border-default bg-bg-primary shadow-md"
-                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => e.preventDefault()}
                   >
                     <div className="flex items-center justify-between border-b border-border-soft px-2.5 py-1.5">
                       <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
@@ -675,7 +674,7 @@ function OptionSelect({
   );
 }
 
-function MeetingCard({ meeting, onClick, onDelete }: { meeting: any; onClick: () => void; onDelete: (e: React.MouseEvent) => void }) {
+function MeetingCard({ meeting, onClick, onDelete }: { meeting: Meeting; onClick: () => void; onDelete: (e: React.MouseEvent) => void }) {
   const statusConf = STATUS_CONFIG[meeting.status as MeetingStatus];
   return (
     <Card
@@ -704,7 +703,7 @@ function MeetingCard({ meeting, onClick, onDelete }: { meeting: any; onClick: ()
         <div className="flex items-center gap-3 text-[11px] text-text-tertiary">
           <span className="flex items-center gap-1">
             <ClockIcon size={12} />
-            {formatRelativeTime(meeting.createdAt || meeting.created_at)}
+            {formatRelativeTime(meeting.createdAt ?? meeting.created_at ?? Date.now())}
           </span>
           {(meeting.messageCount ?? meeting.message_count) !== undefined && (
             <span className="flex items-center gap-1">
@@ -729,7 +728,7 @@ function MeetingCard({ meeting, onClick, onDelete }: { meeting: any; onClick: ()
   );
 }
 
-function MeetingRow({ meeting, onClick, onDelete }: { meeting: any; onClick: () => void; onDelete: (e: React.MouseEvent) => void }) {
+function MeetingRow({ meeting, onClick, onDelete }: { meeting: Meeting; onClick: () => void; onDelete: (e: React.MouseEvent) => void }) {
   const statusConf = STATUS_CONFIG[meeting.status as MeetingStatus];
   return (
     <div className="group flex w-full items-center gap-3 rounded-lg border border-transparent bg-bg-primary px-4 py-2.5 transition-all hover:border-border-default hover:shadow-sm">
@@ -742,7 +741,7 @@ function MeetingRow({ meeting, onClick, onDelete }: { meeting: any; onClick: () 
             </Badge>
           </div>
           <div className="mt-0.5 flex items-center gap-3 text-[11px] text-text-tertiary">
-            <span>{formatRelativeTime(meeting.createdAt || meeting.created_at)}</span>
+            <span>{formatRelativeTime(meeting.createdAt ?? meeting.created_at ?? Date.now())}</span>
             {(meeting.messageCount ?? meeting.message_count) !== undefined && (
               <span>{meeting.messageCount ?? meeting.message_count} 条消息</span>
             )}

@@ -17,7 +17,7 @@ import { useAuthStore } from '@/stores/auth-slice';
 import { renderWithProviders, makeUserInfo } from '@/test/test-utils';
 
 // Mock useTheme（避免 ThemeProvider 依赖）
-vi.mock('@/providers/theme-provider', () => ({
+vi.mock('@/providers/theme-context', () => ({
   useTheme: () => ({ theme: 'light', setTheme: vi.fn() }),
 }));
 
@@ -35,14 +35,14 @@ vi.mock('@/hooks/use-toast', () => ({
 // 这样可以直接测试 IIFE 和 TenantSwitcher 中的 .find() 代码路径
 vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuContent: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuItem: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuLabel: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuTrigger: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuContent: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuItem: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuLabel: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
   DropdownMenuSeparator: () => <hr />,
   DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuSubContent: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuSubTrigger: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuSubContent: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuSubTrigger: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
 }));
 
 describe('TopBar', () => {

@@ -272,8 +272,8 @@ function getMockResponse<T>(path: string, method: string, body?: unknown): T | n
   if (method === 'GET' && /^\/docker-hosts\/[^/]+\/containers$/.test(path)) {
     const hostId = path.split('/')[2];
     const hosts = mockApi.getDockerHosts();
-    const host = hosts.find((h: any) => h.id === hostId) || hosts[0];
-    const running = (host as any)?.containers?.running ?? 3;
+    const host = hosts.find((h) => h.id === hostId) || hosts[0];
+    const running = host?.containers?.running ?? 3;
     const containers = [
       { id: 'c-backend', name: 'conclave-backend', image: 'conclave/backend:latest', status: 'running', state: 'running', created: '2 days ago', ports: '0.0.0.0:8000->8000/tcp', cpu: '2.3%', memory: '312MiB' },
       { id: 'c-frontend', name: 'conclave-frontend', image: 'conclave/frontend:latest', status: 'running', state: 'running', created: '2 days ago', ports: '0.0.0.0:3000->80/tcp', cpu: '0.8%', memory: '48MiB' },
@@ -282,11 +282,11 @@ function getMockResponse<T>(path: string, method: string, body?: unknown): T | n
       { id: 'c-qdrant', name: 'conclave-qdrant', image: 'qdrant/qdrant:latest', status: 'running', state: 'running', created: '2 days ago', ports: '6333/tcp', cpu: '0.5%', memory: '64MiB' },
     ];
     // Add stopped containers if host has them
-    if ((host as any)?.containers?.stopped > 0) {
+    if ((host?.containers?.stopped ?? 0) > 0) {
       containers.push({ id: 'c-old-worker', name: 'conclave-worker-old', image: 'conclave/worker:v1', status: 'exited (0) 3 hours ago', state: 'exited', created: '5 days ago', ports: '', cpu: '0%', memory: '0B' });
     }
     // Trim to match running count + stopped
-    return { containers: containers.slice(0, running + ((host as any)?.containers?.stopped ?? 0)) } as unknown as T;
+    return { containers: containers.slice(0, running + (host?.containers?.stopped ?? 0)) } as unknown as T;
   }
 
   // Docker hosts - create (POST /docker-hosts)
@@ -323,8 +323,8 @@ function getMockResponse<T>(path: string, method: string, body?: unknown): T | n
   if (method === 'GET' && path.startsWith('/docker-hosts')) {
     // System overview endpoint
     if (path.includes('/overview')) {
-      const health = mockApi.getSystemHealth() as any;
-      const healthComponents = health?.components || health || {};
+      const health = mockApi.getSystemHealth();
+      const healthComponents = (health.components as Record<string, unknown> | undefined) || health;
       // Transform health data to match SystemOverview components format
       const typeMap: Record<string, string> = {
         postgres: 'database', redis: 'cache', qdrant: 'vector_db',

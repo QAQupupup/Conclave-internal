@@ -60,11 +60,20 @@ export function MessageBubble({ message, isSelected, onSelect, onBranch }: Messa
   return (
     <>
       <div
+        role="button"
+        tabIndex={0}
         className={cn(
           'group flex gap-2.5 px-4 py-2 transition-colors message-enter',
           isSelected && 'bg-brand-soft'
         )}
         onClick={() => onSelect(message.id)}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelect(message.id);
+          }
+        }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >

@@ -200,6 +200,37 @@ describe('meeting-slice', () => {
       expect(state.status).toBe('pending');
       expect(state.stage).toBe('clarification');
     });
+
+    it('重进同一会议时不清空消息与状态', () => {
+      // 模拟已进入会议并积累了消息/状态
+      useMeetingStore.getState().setMeeting('m-x', '会议X');
+      useMeetingStore.getState().addMessage({ id: 'msgA', content: 'hi', timestamp: 1 });
+      useMeetingStore.getState().setStage('produce');
+      useMeetingStore.getState().setStatus('done');
+
+      // 重进同一会议（id 相同）
+      useMeetingStore.getState().setMeeting('m-x', '会议X');
+
+      const state = useMeetingStore.getState();
+      expect(state.currentMeetingId).toBe('m-x');
+      expect(state.messages).toHaveLength(1); // 消息保留
+      expect(state.stage).toBe('produce'); // 阶段保留
+      expect(state.status).toBe('done'); // 状态保留
+    });
+
+    it('切换到不同会议时清空消息并复位状态', () => {
+      useMeetingStore.getState().setMeeting('m-x', '会议X');
+      useMeetingStore.getState().addMessage({ id: 'msgA', content: 'hi', timestamp: 1 });
+      useMeetingStore.getState().setStage('produce');
+
+      useMeetingStore.getState().setMeeting('m-y', '会议Y');
+
+      const state = useMeetingStore.getState();
+      expect(state.currentMeetingId).toBe('m-y');
+      expect(state.messages).toHaveLength(0); // 切换清空
+      expect(state.stage).toBe('clarification'); // 复位
+      expect(state.status).toBe('running'); // 复位
+    });
   });
 
   // ===== 消息选择 =====

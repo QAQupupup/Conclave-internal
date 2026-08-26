@@ -29,6 +29,48 @@ function minsAgo(m: number): number {
   return Date.now() - m * 60_000;
 }
 
+/** 演示模式下的报告分段（content/items/headers/rows 按 section.type 二选一或多选） */
+interface MockReportSection {
+  type: string;
+  level?: number;
+  content?: string;
+  items?: string[];
+  headers?: string[];
+  rows?: string[][];
+  label?: string;
+  value?: string;
+  sublabel?: string;
+}
+
+/** 演示模式下的报告 */
+interface MockReport {
+  id: string;
+  title: string;
+  meeting_id: string;
+  created_at: string;
+  status: string;
+  summary: string;
+  sections: MockReportSection[];
+}
+
+/** 演示模式下的 Docker 主机摘要 */
+export interface DockerHostSummary {
+  id: string;
+  name: string;
+  host: string;
+  status: string;
+  is_default: boolean;
+  os: string;
+  arch: string;
+  cpus: number;
+  memory: string;
+  docker_version: string;
+  containers: { running: number; paused: number; stopped: number };
+  images_count: number;
+  disk_usage: { total: string; used: string; available: string };
+  last_seen?: string;
+}
+
 // Mock meetings - expanded to 10 meetings with diverse scenarios
 const MOCK_MEETINGS: Meeting[] = [
   {
@@ -1024,7 +1066,7 @@ export const mockApi = {
     return { success: true };
   },
 
-  getAgents(): { roles: any[]; total: number } {
+  getAgents(): { roles: Record<string, unknown>[]; total: number } {
     const roles = [
       { id: 'moderator', display_name: '主持人', perspective: '引导讨论方向，确保各方观点得到充分表达', expertise_domains: ['会议主持', '决策 facilitation'], risk_appetite: 'balanced', default_stance: 'neutral', evidence_preference: 'balanced', model_override: '', background_brief: '负责引导会议流程', prompt_template: '', is_builtin: true, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
       { id: 'product_architect', display_name: '产品架构师', perspective: '从产品架构角度审视方案可行性', expertise_domains: ['系统架构', '技术选型', '架构评审'], risk_appetite: 'balanced', default_stance: '', evidence_preference: 'balanced', model_override: '', background_brief: '系统架构设计和技术选型', prompt_template: '', is_builtin: true, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -1038,7 +1080,7 @@ export const mockApi = {
     return { roles, total: roles.length };
   },
 
-  getGraphData(_meetingId?: string): any {
+  getGraphData(_meetingId?: string): Record<string, unknown> {
     return {
       nodes: [
         { id: 't1', type: 'topic', label: 'RAG 优化', x: 400, y: 100, vx: 0, vy: 0, weight: 10 },
@@ -1070,7 +1112,7 @@ export const mockApi = {
     };
   },
 
-  getReports(): any[] {
+  getReports(): MockReport[] {
     return [
       {
         id: 'r1',
@@ -1174,7 +1216,7 @@ export const mockApi = {
     ];
   },
 
-  getAdminStats(): any {
+  getAdminStats(): Record<string, unknown> {
     return {
       users: { total: 12, active: 8, new_today: 2, by_role: { admin: 2, user: 10 } },
       meetings: { total: 47, running: 2, today: 3, this_week: 12, by_status: { done: 35, running: 4, paused: 5, pending: 3 } },
@@ -1312,7 +1354,7 @@ export const mockApi = {
     };
   },
 
-  getDockerHosts(): Record<string, unknown>[] {
+  getDockerHosts(): DockerHostSummary[] {
     return [
       {
         id: 'host-local',
@@ -1577,7 +1619,7 @@ export const mockApi = {
     };
   },
 
-  getTenants(): any[] {
+  getTenants(): Record<string, unknown>[] {
     return [
       { id: 'tenant-default', name: '默认组织', slug: 'default', role: 'owner', plan: 'pro', member_count: 8, created_at: new Date(daysAgo(30)).toISOString() },
       { id: 'tenant-research', name: '研究团队', slug: 'research', role: 'admin', plan: 'team', member_count: 4, created_at: new Date(daysAgo(15)).toISOString() },
@@ -1585,7 +1627,7 @@ export const mockApi = {
     ];
   },
 
-  getAttachments(_meetingId: string): any[] {
+  getAttachments(_meetingId: string): Record<string, unknown>[] {
     return [
       { id: 'att-1', name: '架构决策记录.md', type: 'document', size: 24576, created_at: new Date(hoursAgo(5)).toISOString() },
       { id: 'att-2', name: '性能测试报告.pdf', type: 'document', size: 1048576, created_at: new Date(hoursAgo(3)).toISOString() },
@@ -1593,7 +1635,7 @@ export const mockApi = {
     ];
   },
 
-  getMetricHistory(_params?: { period?: string }): any[] {
+  getMetricHistory(_params?: { period?: string }): Record<string, unknown>[] {
     return [
       { time: hoursAgo(24), meetings: 3, tokens: 45000, cost: 12.5, latency_p50: 1200, latency_p95: 3400 },
       { time: hoursAgo(23), meetings: 2, tokens: 32000, cost: 8.9, latency_p50: 1100, latency_p95: 3200 },

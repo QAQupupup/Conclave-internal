@@ -23,7 +23,7 @@ vi.mock('@/lib/api', () => ({
   isDemoMode: () => false,
 }));
 
-vi.mock('@/providers/theme-provider', () => ({
+vi.mock('@/providers/theme-context', () => ({
   useTheme: () => ({ theme: 'light', setTheme: vi.fn() }),
 }));
 
@@ -38,14 +38,14 @@ vi.mock('@/hooks/use-toast', () => ({
 // Mock DropdownMenu：在 jsdom 中始终渲染 children，不依赖 pointer events
 vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuContent: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuItem: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuLabel: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuTrigger: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuContent: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuItem: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuLabel: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
   DropdownMenuSeparator: () => <hr />,
   DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuSubContent: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
-  DropdownMenuSubTrigger: ({ children, asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuSubContent: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
+  DropdownMenuSubTrigger: ({ children, _asChild, ...props }: Record<string, unknown>) => <div {...props}>{children as React.ReactNode}</div>,
 }));
 
 const mockApiGet = vi.mocked(api.get);

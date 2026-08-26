@@ -20,7 +20,7 @@ export interface ListMembersParams {
   include_banned?: boolean;
 }
 
-export interface ListMembersResult extends TeamMemberListResponse {}
+export type ListMembersResult = TeamMemberListResponse;
 
 export const teamsApi = {
   // ========== Team CRUD ==========

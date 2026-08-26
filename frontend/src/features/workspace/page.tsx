@@ -599,10 +599,11 @@ export default function WorkspacePage() {
           </DialogHeader>
           <div className="px-6 py-5 space-y-4">
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-text-secondary">
+              <label htmlFor="new-entity-name" className="block text-sm font-medium text-text-secondary">
                 名称
               </label>
               <Input
+                id="new-entity-name"
                 className="h-9 text-sm"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -610,15 +611,15 @@ export default function WorkspacePage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && newDialogType === 'directory') handleCreate();
                 }}
-                autoFocus
               />
             </div>
             {newDialogType === 'file' && (
               <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-text-secondary">
+                <label htmlFor="new-file-content" className="block text-sm font-medium text-text-secondary">
                   内容（可选）
                 </label>
                 <Textarea
+                  id="new-file-content"
                   value={newContent}
                   onChange={(e) => setNewContent(e.target.value)}
                   placeholder="输入文件初始内容..."

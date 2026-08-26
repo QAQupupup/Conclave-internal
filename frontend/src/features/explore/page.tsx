@@ -7,7 +7,7 @@ import { InsightsPanel } from '@/components/meeting/insights-panel';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores';
-import { useMeeting, useControlMeeting } from '@/hooks/use-meetings';
+import { useMeeting } from '@/hooks/use-meetings';
 import { useMeetingStore } from '@/stores';
 import {
   PanelLeftCloseIcon,
@@ -16,13 +16,11 @@ import {
   PanelRightOpenIcon,
   SpinnerIcon,
 } from '@/components/ui/svg-icons';
-import { wsClient } from '@/lib/ws';
 
 export default function ExplorePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: meeting, isLoading, error } = useMeeting(id);
-  const controlMeeting = useControlMeeting();
   const timelineWidth = useUIStore((s) => s.timelineWidth);
   const thoughtTreeWidth = useUIStore((s) => s.thoughtTreeWidth);
   const timelineCollapsed = useUIStore((s) => s.timelineCollapsed);
@@ -75,10 +73,6 @@ export default function ExplorePage() {
 
   const handleThoughtTreeResize = (newSize: number) => {
     setThoughtTreeWidth(Math.max(240, Math.min(480, newSize)));
-  };
-
-  const handleStop = () => {
-    if (id) controlMeeting.mutate({ id, signal: 'stop' });
   };
 
   if (isLoading) {

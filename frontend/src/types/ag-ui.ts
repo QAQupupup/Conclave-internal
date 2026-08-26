@@ -1,4 +1,4 @@
-import type { MeetingMessage, Meeting, AgentInfo, StageId, MeetingStatus, BorrowRequest, ToolCallRecord, ToolStep } from './meeting';
+import type { AgentInfo, StageId, MeetingStatus, BorrowRequest } from './meeting';
 
 export type AGUIEventType =
   | 'RUN_STARTED'

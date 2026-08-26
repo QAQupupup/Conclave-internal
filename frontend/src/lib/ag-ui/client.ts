@@ -1,5 +1,5 @@
 import { useMeetingStore } from '@/stores';
-import { ROLE_LABELS } from '@/lib/constants';
+import { ROLE_LABELS, normalizeStageId } from '@/lib/constants';
 import type {
   AGUIEvent,
   TextMessageStartEvent,
@@ -14,6 +14,9 @@ import type {
   StateDeltaEvent,
   InterruptEvent,
   CustomEvent,
+  AgentRole,
+  BorrowRequest,
+  StageId,
 } from '@/types';
 
 type EventListener = (event: AGUIEvent) => void;
@@ -87,7 +90,7 @@ class AGUIClient {
           events.push({
             type: 'STATE_DELTA',
             timestamp: ts,
-            stage: sStage,
+            stage: sStage ? normalizeStageId(sStage) : undefined,
             status: sStatus,
             title: sTopic,
             agents: sAgents,
@@ -113,8 +116,6 @@ class AGUIClient {
           const msgStage = (msg.stage as string) || '';
           const content = (msg.content as string) || '';
           const createdAt = (msg.created_at as string) || ts;
-          const claimRefs = (msg.claim_refs as string[]) || [];
-          const evidenceRefs = (msg.evidence_refs as string[]) || [];
 
           events.push({
             type: 'TEXT_MESSAGE_START',
@@ -122,8 +123,8 @@ class AGUIClient {
             messageId: msgId,
             agentId,
             agentName,
-            agentRole: agentRole as any,
-            stage: msgStage as any,
+            agentRole,
+            stage: msgStage ? normalizeStageId(msgStage) : undefined,
           } as TextMessageStartEvent);
           events.push({
             type: 'TEXT_MESSAGE_END',
@@ -150,7 +151,7 @@ class AGUIClient {
         events.push({
           type: 'STATE_DELTA',
           timestamp: ts,
-          stage: raw.stage,
+          stage: raw.stage ? normalizeStageId(raw.stage as string) : undefined,
         } as StateDeltaEvent);
         break;
       }
@@ -400,8 +401,8 @@ class AGUIClient {
           id: e.messageId,
           agentId: e.agentId,
           agentName: e.agentName,
-          agentRole: e.agentRole as any,
-          stage: e.stage as any,
+          agentRole: e.agentRole as AgentRole | undefined,
+          stage: e.stage ? (normalizeStageId(e.stage) as StageId) : undefined,
           content: '',
           thinking: '',
           timestamp: e.timestamp,
@@ -464,7 +465,7 @@ class AGUIClient {
         const e = event as StateDeltaEvent;
         if (e.stage) store.setStage(e.stage);
         if (e.status) store.setStatus(e.status);
-        if (e.agents) store.setAgents(e.agents as any);
+        if (e.agents) store.setAgents(e.agents);
         if (e.title) {
           // 不直接 setMeeting，只更新 title
           useMeetingStore.setState({ title: e.title });
@@ -488,10 +489,10 @@ class AGUIClient {
       case 'INTERRUPT': {
         const e = event as InterruptEvent;
         if (e.interruptType === 'borrow' && e.data) {
-          store.setBorrowRequest(e.data as any);
+          store.setBorrowRequest(e.data as BorrowRequest);
         }
         if (e.interruptType === 'takeover' && e.data) {
-          store.setTakeoverRequest(e.data as any);
+          store.setTakeoverRequest(e.data as { callId: string; toolName: string });
         }
         break;
       }

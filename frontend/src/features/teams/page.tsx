@@ -93,7 +93,7 @@ function CreateTeamDialog({ open, onOpenChange, onCreated }: {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="t-name">名称</Label>
-            <Input id="t-name" placeholder="例如：产品团队" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} autoFocus />
+            <Input id="t-name" placeholder="例如：产品团队" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="t-slug">标识（可选）</Label>
@@ -487,7 +487,7 @@ export default function TeamsPage() {
     queryFn: () => teamsApi.listMyTeams(),
     staleTime: 30_000,
   });
-  const teams = teamsData?.items ?? [];
+  const teams = React.useMemo(() => teamsData?.items ?? [], [teamsData?.items]);
 
   React.useEffect(() => {
     if (selectedTeamId === null && teams.length > 0) {

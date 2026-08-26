@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { extractArray } from '@/lib/extract';
-import { ROLE_LABELS } from '@/lib/constants';
+import { ROLE_LABELS, normalizeStageId } from '@/lib/constants';
 import type { Meeting, PaginatedResponse, MeetingStatus, StageId, AgentRole, AgentState, MeetingMessage } from '@/types';
 
 // === Backend Response Types ===
@@ -56,7 +56,7 @@ function normalizeMeeting(raw: BackendMeetingItem): Meeting {
     title: raw.topic || '未命名讨论',
     topic: raw.topic,
     status: (raw.status || 'pending') as MeetingStatus,
-    stage: (raw.stage || 'pending') as StageId,
+    stage: normalizeStageId(raw.stage || 'pending') as StageId,
     created_at: raw.created_at,
     createdAt: raw.created_at ? Date.parse(raw.created_at) : undefined,
     summary: raw.summary,
@@ -89,7 +89,7 @@ function normalizeMeetingDetail(raw: BackendMeetingDetail): Meeting {
     title: raw.clarified_topic || raw.topic || '未命名讨论',
     topic: raw.topic,
     status: (raw.status || 'pending') as MeetingStatus,
-    stage: (raw.stage || 'pending') as StageId,
+    stage: normalizeStageId(raw.stage || 'pending') as StageId,
     created_at: raw.created_at,
     createdAt: raw.created_at ? Date.parse(raw.created_at) : undefined,
     messageCount,

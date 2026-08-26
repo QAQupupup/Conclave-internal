@@ -1,13 +1,12 @@
-import { useWSStore, useMeetingStore, useAuthStore } from '@/stores';
+import { useWSStore, useAuthStore } from '@/stores';
 import { agUIClient } from './ag-ui/client';
 import {
   WS_HEARTBEAT_INTERVAL,
   WS_RECONNECT_BASE_DELAY,
   WS_RECONNECT_MAX_DELAY,
 } from './constants';
-import type { AgentState } from '@/types';
 
-type WsEventMap = Record<string, (...args: any[]) => void>;
+type WsEventMap = Record<string, (...args: unknown[]) => void>;
 
 export class WsClient {
   private ws: WebSocket | null = null;
@@ -15,7 +14,7 @@ export class WsClient {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = true;
-  private eventListeners: Map<string, Set<(...args: any[]) => void>> = new Map();
+  private eventListeners: Map<string, Set<(...args: unknown[]) => void>> = new Map();
   private lastSeq: number = 0;
 
   constructor(url: string) {
@@ -29,6 +28,13 @@ export class WsClient {
   }
 
   private createConnection(meetingId: string) {
+    // 安全关闭已有连接（防止旧连接泄漏）
+    if (this.ws) {
+      this.stopHeartbeat();
+      try { this.ws.close(1000, 'reconnect'); } catch { /* ignore */ }
+      this.ws = null;
+    }
+
     const wsStore = useWSStore.getState();
     wsStore.setStatus('connecting');
 
@@ -39,14 +45,18 @@ export class WsClient {
     if (this.lastSeq > 0) wsUrl.searchParams.set('seq', String(this.lastSeq));
     if (token) wsUrl.searchParams.set('token', token);
 
+    let ws: WebSocket;
     try {
-      this.ws = new WebSocket(wsUrl.toString());
-    } catch (e) {
+      ws = new WebSocket(wsUrl.toString());
+      this.ws = ws;
+    } catch {
       this.scheduleReconnect(meetingId);
       return;
     }
 
-    this.ws.onopen = () => {
+    // 用闭包变量 ws 做竞态防护：旧连接的延迟 onclose/onopen 不会干扰新连接
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
       const s = useWSStore.getState();
       s.setStatus('connected');
       s.resetReconnectCount();
@@ -54,7 +64,8 @@ export class WsClient {
       this.emit('open');
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
       try {
         const msg = JSON.parse(event.data);
         this.handleMessage(msg);
@@ -63,11 +74,14 @@ export class WsClient {
       }
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
+      if (this.ws !== ws) return;
       useWSStore.getState().setError('连接异常');
     };
 
-    this.ws.onclose = (event) => {
+    ws.onclose = (event) => {
+      // 忽略旧连接的延迟 close 事件——只处理当前活跃连接
+      if (this.ws !== ws) return;
       this.stopHeartbeat();
       useWSStore.getState().setStatus('disconnected');
       this.emit('close', event);
@@ -80,8 +94,12 @@ export class WsClient {
   private handleMessage(msg: Record<string, unknown>) {
     const type = msg.type as string;
 
-    // Handle pong
+    // 心跳协议：收到 ping 回复 pong，收到 pong 忽略
     if (type === 'pong') return;
+    if (type === 'ping') {
+      this.send({ type: 'pong' });
+      return;
+    }
 
     // Update lastSeq
     if (typeof msg.seq === 'number') {
@@ -174,7 +192,7 @@ export class WsClient {
     this.eventListeners.get(event)?.delete(handler);
   }
 
-  private emit(event: string, ...args: any[]) {
+  private emit(event: string, ...args: unknown[]) {
     this.eventListeners.get(event)?.forEach((h) => {
       try {
         h(...args);

@@ -3,7 +3,6 @@ export const WS_RECONNECT_BASE_DELAY = 1000;
 export const WS_RECONNECT_MAX_DELAY = 30_000;
 
 export const STAGE_LABELS: Record<string, string> = {
-  clarify: '问题澄清',
   clarification: '问题澄清',
   intra_team: '内部讨论',
   cross_team: '跨组辩论',
@@ -13,7 +12,6 @@ export const STAGE_LABELS: Record<string, string> = {
 };
 
 export const STAGE_DESCRIPTIONS: Record<string, string> = {
-  clarify: '主持人引导澄清问题范围与目标',
   clarification: '主持人引导澄清问题范围与目标',
   intra_team: '各小组内部展开讨论，形成初步观点',
   cross_team: '不同小组之间进行观点碰撞与辩论',
@@ -21,6 +19,17 @@ export const STAGE_DESCRIPTIONS: Record<string, string> = {
   arbitrate: '主持人综合各方意见，进行裁决',
   produce: '生成最终交付物',
 };
+
+/**
+ * 规范化阶段 ID。
+ *
+ * 后端编排器使用 `clarify` 作为首阶段 ID，前端统一以 `clarification` 为规范拼写
+ * （与 STAGE_LABELS / STAGE_DESCRIPTIONS / mock 数据保持一致）。
+ * 在接收后端 stage 的边界点统一调用，避免维护两份标签。
+ */
+export function normalizeStageId(stage: string): string {
+  return stage === 'clarify' ? 'clarification' : stage;
+}
 
 export const ROLE_LABELS: Record<string, string> = {
   moderator: '主持人',

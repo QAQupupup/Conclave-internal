@@ -1,7 +1,7 @@
 // Mock 知识图谱数据生成器
 // 在后端提供 graph API 之前，提供合理的演示数据
 
-import type { GraphData, GraphNode, NodeType, EdgeType } from './types';
+import type { GraphData, GraphNode } from './types';
 
 // 生成演示图谱数据
 export function generateMockGraph(meetingTitle?: string): GraphData {

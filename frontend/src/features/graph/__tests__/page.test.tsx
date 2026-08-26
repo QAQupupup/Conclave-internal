@@ -89,8 +89,8 @@ describe('GraphPage - .find() 崩溃路径', () => {
       expect(screen.getByText('知识图谱')).toBeDefined();
     });
 
-    // 应显示演示图谱（默认选中"演示图谱"）
-    expect(screen.getByText('演示图谱')).toBeDefined();
+    // 默认会议选择器渲染为"全部会议"
+    expect(screen.getByText('全部会议')).toBeDefined();
   });
 
   it('API 返回有 meetings 数据 → meetings 下拉列表显示会议标题', async () => {
@@ -137,8 +137,8 @@ describe('GraphPage - .find() 崩溃路径', () => {
       expect(screen.getByText('知识图谱')).toBeDefined();
     });
 
-    // 应正常显示演示图谱
-    expect(screen.getByText('演示图谱')).toBeDefined();
+    // 应正常显示默认"全部会议"选择器
+    expect(screen.getByText('全部会议')).toBeDefined();
   });
 
   it('API 返回 meetings 使用 meetings 字段（而非 items）→ 也能正确解析', async () => {
@@ -164,16 +164,25 @@ describe('GraphPage - .find() 崩溃路径', () => {
     });
   });
 
-  it('API 请求失败 → meetings 为 []，页面仍正常渲染演示图谱', async () => {
-    mockApiGet.mockRejectedValue(new Error('Network error'));
+  it('meetings API 失败但 graph API 正常 → meetings 为 []，页面仍正常渲染', async () => {
+    mockApiGet.mockImplementation((path: string) => {
+      if (path.startsWith('/graph')) {
+        return Promise.resolve({
+          nodes: [{ id: 't1', type: 'topic', label: '测试主题', x: 400, y: 100, vx: 0, vy: 0 }],
+          edges: [],
+        });
+      }
+      // meetings 接口失败 → meetings 回退为 []
+      return Promise.reject(new Error('Network error'));
+    });
 
     renderWithProviders(<GraphPage />);
 
-    // In demo mode, network errors fall back to mock data via api.ts
-    // The page should still render
     await waitFor(() => {
       expect(screen.getByText('知识图谱')).toBeDefined();
     }, { timeout: 5000 });
+
+    expect(screen.getByText('全部会议')).toBeDefined();
   });
 
   it('图谱渲染后 → 节点和关系统计显示正确格式', async () => {

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { StageId, MeetingStatus, MeetingMessage, BorrowRequest, AgentInfo, ToolCallRecord, ToolStep } from '@/types';
+import { normalizeStageId } from '@/lib/constants';
 
 interface MeetingState {
   currentMeetingId: string | null;
@@ -54,20 +55,30 @@ const initialState = {
 export const useMeetingStore = create<MeetingState>((set, get) => ({
   ...initialState,
 
-  setMeeting: (id, title) =>
+  // 进入/切换会议时初始化 store。
+  // 关键修复：仅当切换到「不同」会议(id 变化)时才清空消息历史并复位状态机；
+  // 重进同一个会议(id 相同)时只更新标题，保留已有的消息与状态，
+  // 避免全局 store 跨路由仍保留的消息被清空，导致对话流白屏/阶段闪烁错态。
+  setMeeting: (id, title) => {
+    const prev = get();
+    if (prev.currentMeetingId === id) {
+      set({ title });
+      return;
+    }
     set({
       ...initialState,
       currentMeetingId: id,
       title,
       status: 'running',
       startedAt: Date.now(),
-    }),
+    });
+  },
 
   resetMeeting: () => set(initialState),
 
   setStatus: (status) => set({ status }),
 
-  setStage: (stage) => set({ stage }),
+  setStage: (stage) => set({ stage: normalizeStageId(stage) as StageId }),
 
   setPaused: (paused) => set({ paused }),
 

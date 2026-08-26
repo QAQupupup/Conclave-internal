@@ -177,9 +177,38 @@ function AgentAvatarGroup({ agents }: { agents?: AgentLite[] }) {
 
 // ===== 报告布局渲染器 =====
 
+interface BlockData {
+  text?: string;
+  content?: string;
+  items?: unknown[];
+  ordered?: boolean;
+  label?: string;
+  value?: string | number;
+  code?: string;
+  count?: number;
+  number?: number;
+  headers?: string[];
+  rows?: unknown[][];
+}
+
+interface FindingItem {
+  num?: number;
+  topic?: string;
+  detail?: string;
+  sources?: string[];
+  trace?: string;
+}
+
+interface AttachmentItem {
+  filename?: string;
+  name?: string;
+  size?: number;
+  path?: string;
+}
+
 interface LayoutBlock {
   type: string;
-  data: Record<string, any>;
+  data: BlockData;
 }
 
 interface LayoutSection {
@@ -195,7 +224,7 @@ interface LayoutSpec {
   sections?: LayoutSection[];
 }
 
-function ReportBlockRenderer({ block }: { block: LayoutBlock }) {
+function ReportBlockRenderer({ block, meetingId }: { block: LayoutBlock; meetingId?: string }) {
   const { type, data } = block;
   switch (type) {
     case 'paragraph':
@@ -203,7 +232,7 @@ function ReportBlockRenderer({ block }: { block: LayoutBlock }) {
     case 'heading':
       return <h4 className="mb-1 mt-3 text-sm font-semibold text-text-primary">{data.text}</h4>;
     case 'list': {
-      const items: string[] = Array.isArray(data.items) ? data.items : [];
+      const items: string[] = Array.isArray(data.items) ? (data.items as string[]) : [];
       if (items.length === 0) return null;
       const ListTag = data.ordered ? 'ol' : 'ul';
       return (
@@ -236,7 +265,7 @@ function ReportBlockRenderer({ block }: { block: LayoutBlock }) {
     }
     case 'table': {
       const headers: string[] = Array.isArray(data.headers) ? data.headers : [];
-      const rows: any[][] = Array.isArray(data.rows) ? data.rows : [];
+      const rows: unknown[][] = Array.isArray(data.rows) ? data.rows : [];
       return (
         <div className="mb-2 overflow-x-auto">
           <table className="w-full text-xs">
@@ -260,6 +289,74 @@ function ReportBlockRenderer({ block }: { block: LayoutBlock }) {
     }
     case 'raw':
       return <p className="mb-2 text-xs text-text-tertiary font-mono break-all">{String(data.text ?? JSON.stringify(data))}</p>;
+    case 'findings': {
+      const items: FindingItem[] = Array.isArray(data.items) ? (data.items as FindingItem[]) : [];
+      if (items.length === 0) return null;
+      return (
+        <div className="mb-2 space-y-2">
+          {items.map((item, i) => (
+            <div key={item.num ?? i} className="rounded-md border border-border-soft bg-bg-secondary/40 p-2.5">
+              <div className="flex items-start gap-2">
+                <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-brand-500/10 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
+                  {item.num ?? String(i + 1).padStart(2, '0')}
+                </span>
+                <div className="min-w-0 flex-1">
+                  {item.topic && (
+                    <div className="text-sm font-medium text-text-primary">{item.topic}</div>
+                  )}
+                  {item.detail && (
+                    <p className="mt-0.5 text-xs leading-relaxed text-text-secondary">{item.detail}</p>
+                  )}
+                  {Array.isArray(item.sources) && item.sources.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {item.sources.map((s: string, si: number) => (
+                        <span key={si} className="rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-tertiary">{s}</span>
+                      ))}
+                    </div>
+                  )}
+                  {item.trace && (
+                    <p className="mt-1 text-[10px] text-text-tertiary">溯源: {String(item.trace)}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case 'attachments': {
+      const items: AttachmentItem[] = Array.isArray(data.items) ? (data.items as AttachmentItem[]) : [];
+      if (items.length === 0) return <p className="mb-2 text-xs text-text-tertiary">暂无附件</p>;
+      return (
+        <div className="mb-2 space-y-1">
+          {items.map((item, i) => {
+            const filename: string = item.filename ?? item.name ?? '';
+            const size = item.size;
+            return (
+              <div
+                key={item.path ?? filename ?? i}
+                className="flex items-center gap-2 rounded-md border border-border-soft bg-bg-secondary/40 px-2.5 py-1.5"
+              >
+                <FileIcon size={14} className="flex-shrink-0 text-text-tertiary" />
+                <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">{filename}</span>
+                {size != null && <span className="text-[10px] text-text-tertiary">{formatFileSize(Number(size))}</span>}
+                {meetingId && filename && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      api.download(`/meetings/${meetingId}/attachments/${encodeURIComponent(filename)}`, filename)
+                    }
+                    className="flex-shrink-0 text-xs text-brand-500 hover:underline"
+                  >
+                    下载
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
     default:
       if (data.text || data.content) {
         return <p className="mb-2 text-sm text-text-secondary">{data.text || data.content}</p>;
@@ -268,7 +365,7 @@ function ReportBlockRenderer({ block }: { block: LayoutBlock }) {
   }
 }
 
-function ReportLayoutRenderer({ layout }: { layout: LayoutSpec | null }) {
+function ReportLayoutRenderer({ layout, meetingId }: { layout: LayoutSpec | null; meetingId?: string }) {
   if (!layout) return null;
   const sections = Array.isArray(layout.sections) ? layout.sections : [];
   if (sections.length === 0) {
@@ -287,7 +384,7 @@ function ReportLayoutRenderer({ layout }: { layout: LayoutSpec | null }) {
           </h4>
           <div>
             {(section.blocks ?? []).map((block, i) => (
-              <ReportBlockRenderer key={i} block={block} />
+              <ReportBlockRenderer key={i} block={block} meetingId={meetingId} />
             ))}
           </div>
         </div>
@@ -406,7 +503,7 @@ function ReportDialog({ meeting, open, onOpenChange }: ReportDialogProps) {
                 <Skeleton className="h-3 w-2/3 rounded" />
               </div>
             ) : layoutData ? (
-              <ReportLayoutRenderer layout={layoutData as LayoutSpec} />
+              <ReportLayoutRenderer layout={layoutData as LayoutSpec} meetingId={meeting?.id} />
             ) : (
               <div className="rounded-md border border-dashed border-border-default p-4 text-center text-xs text-text-tertiary">
                 报告数据未就绪
@@ -444,15 +541,16 @@ function AttachmentDropdown({ meetingId }: { meetingId: string }) {
     try {
       await api.download(`/meetings/${meetingId}/attachments/${encodeURIComponent(filename)}`, filename);
       toast({ title: '下载完成', description: filename });
-    } catch (err: any) {
-      toast({ title: '下载失败', description: err.message, variant: 'destructive' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '下载失败';
+      toast({ title: '下载失败', description: message, variant: 'destructive' });
     }
   };
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-1 text-xs">
+        <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={(e) => e.stopPropagation()}>
           <DownloadIcon size={13} />
           下载附件
         </Button>
@@ -526,7 +624,6 @@ function TagFilterDropdown({
 // ===== 主页面 =====
 
 export default function ReportsPage() {
-  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedTag, setSelectedTag] = React.useState<string | null>(null);
   const [selectedMeeting, setSelectedMeeting] = React.useState<MeetingReport | null>(null);
@@ -635,11 +732,20 @@ export default function ReportsPage() {
               return (
                 <div
                   key={meeting.id}
+                  role="button"
+                  tabIndex={0}
                   className={cn(
                     'flex items-start gap-3 px-4 py-4 transition-colors hover:bg-bg-secondary cursor-pointer',
                     idx > 0 && 'border-t border-border-soft'
                   )}
                   onClick={() => handleViewReport(meeting)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleViewReport(meeting);
+                    }
+                  }}
                 >
                   {/* Agent 头像组 */}
                   <div className="flex-shrink-0 pt-0.5">
@@ -715,9 +821,7 @@ export default function ReportsPage() {
                       <FileIcon size={13} />
                       查看报告
                     </Button>
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <AttachmentDropdown meetingId={meeting.id} />
-                    </div>
+                    <AttachmentDropdown meetingId={meeting.id} />
                   </div>
                 </div>
               );

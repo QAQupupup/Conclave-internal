@@ -11,12 +11,6 @@ import { useToast } from '@/hooks/use-toast';
 import { sha256Hash } from '@/lib/crypto';
 import type { UserInfo } from '@/types';
 
-interface LoginResponse {
-  access_token: string;
-  refresh_token?: string;
-  token_type: string;
-}
-
 export default function LoginPage() {
   const [username, setUsername] = React.useState(import.meta.env.DEV ? 'admin' : '');
   const [password, setPassword] = React.useState(import.meta.env.DEV ? 'admin123' : '');
@@ -93,7 +87,7 @@ export default function LoginPage() {
           if (typeof errData.detail === 'string') {
             msg = errData.detail;
           } else if (Array.isArray(errData.detail)) {
-            msg = errData.detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ');
+            msg = errData.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join('; ');
           } else if (errData.message) {
             msg = errData.message;
           }
@@ -173,18 +167,19 @@ export default function LoginPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-xs text-text-secondary">用户名</label>
+              <label htmlFor="login-username" className="text-xs text-text-secondary">用户名</label>
               <Input
+                id="login-username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
-                autoFocus
                 disabled={isLoading}
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-text-secondary">密码</label>
+              <label htmlFor="login-password" className="text-xs text-text-secondary">密码</label>
               <Input
+                id="login-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

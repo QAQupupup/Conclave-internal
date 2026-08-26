@@ -21,11 +21,22 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // [P1 修复] 启用 jsx-a11y 无障碍规则，但降级为 warning 以避免阻塞预存代码
+      // [P1 修复] 启用 jsx-a11y 无障碍规则，但降级 error→warn 以避免阻塞预存代码。
+      // 同时保留 plugin 官方的 off 规则（已废弃的 label-has-for、默认关闭的
+      // control-has-associated-label）及各规则选项，避免把其误开为 warn。
       ...Object.fromEntries(
-        Object.entries(jsxA11y.configs.recommended.rules).map(([k, v]) => [k, 'warn'])
+        Object.entries(jsxA11y.configs.recommended.rules).map(([k, v]) => {
+          if (v === 'off') return [k, 'off'];
+          if (Array.isArray(v) && v[0] === 'off') return [k, v];
+          if (Array.isArray(v) && v[0] === 'error') return [k, ['warn', v[1]]];
+          return [k, 'warn'];
+        })
       ),
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      // 窗口分割条（window splitter）是合法的可聚焦 separator 角色：
+      // role="separator" + tabIndex + aria-orientation + aria-valuenow + 方向键。
+      // jsx-a11y 未将 separator 归为 widget，故在此显式放行该角色，而非关闭规则。
+      'jsx-a11y/no-noninteractive-tabindex': ['warn', { roles: ['separator'] }],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-empty-object-type': 'warn',
