@@ -67,13 +67,15 @@ export function TakeoverPanel({ open, onClose, meetingId, toolName, callId }: Ta
   };
 
   const handleTakeover = () => {
-    sendControlSignal('intervene', { call_id: callId, action: 'takeover' });
+    // 接管 = 暂停 Agent，避免 Agent 与用户争夺浏览器控制权
+    sendControlSignal('pause', { call_id: callId, reason: 'browser_takeover' });
     setMode('controlling');
     setVncConnected(true);
   };
 
   const handleRelease = () => {
-    sendControlSignal('intervene', { call_id: callId, action: 'release' });
+    // 释放控制权 = 恢复 Agent 继续执行
+    sendControlSignal('resume', { call_id: callId, reason: 'browser_release' });
     setMode('watching');
     setVncConnected(false);
   };

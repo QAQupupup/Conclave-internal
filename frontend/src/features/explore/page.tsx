@@ -4,6 +4,7 @@ import { StageTimeline } from '@/components/meeting/stage-timeline';
 import { MessageStream } from '@/components/meeting/message-stream';
 import { ThoughtTree } from '@/components/meeting/thought-tree';
 import { InsightsPanel } from '@/components/meeting/insights-panel';
+import { OperationReplay } from '@/components/meeting/operation-replay';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores';
@@ -15,6 +16,7 @@ import {
   PanelRightCloseIcon,
   PanelRightOpenIcon,
   SpinnerIcon,
+  ClockIcon,
 } from '@/components/ui/svg-icons';
 
 export default function ExplorePage() {
@@ -30,6 +32,7 @@ export default function ExplorePage() {
   const toggleTimeline = useUIStore((s) => s.toggleTimeline);
   const toggleThoughtTree = useUIStore((s) => s.toggleThoughtTree);
   const setMeeting = useMeetingStore((s) => s.setMeeting);
+  const [replayOpen, setReplayOpen] = React.useState(false);
 
   // Initialize store from API data when loaded
   React.useEffect(() => {
@@ -160,9 +163,14 @@ export default function ExplorePage() {
           >
             <div className="flex h-8 items-center justify-between border-b border-border-soft px-1">
               <span className="px-1 text-[11px] font-medium text-text-tertiary">侧栏</span>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠侧栏" aria-label="折叠侧栏">
-                <PanelRightCloseIcon size={13} />
-              </Button>
+              <div className="flex items-center">
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setReplayOpen(true)} title="操作回放" aria-label="操作回放">
+                  <ClockIcon size={13} />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠侧栏" aria-label="折叠侧栏">
+                  <PanelRightCloseIcon size={13} />
+                </Button>
+              </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col">
               {/* Agent 状态树（上半） */}
@@ -192,6 +200,9 @@ export default function ExplorePage() {
           <PanelRightOpenIcon size={14} className="text-text-tertiary group-hover:text-text-secondary" />
         </button>
       )}
+
+      {/* 操作回放播放器（会议级工具调用轨迹） */}
+      <OperationReplay meetingId={id!} open={replayOpen} onClose={() => setReplayOpen(false)} />
     </div>
   );
 }

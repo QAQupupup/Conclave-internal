@@ -1,4 +1,4 @@
-import { useAuthStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth-slice';
 import { isDemoMode, mockApi } from './mock-data';
 
 const API_BASE = '';
@@ -778,4 +778,21 @@ export const api = {
       `/graph/overview${buildQueryString(meetingId ? { meeting_id: meetingId } : {})}`,
       { method: 'GET' },
     ),
+  /** 会议事件历史（审计/回放）。from_seq=0 返回全部，>0 返回增量（seq > from_seq） */
+  getMeetingEvents: (meetingId: string, fromSeq = 0) =>
+    request<{ meeting_id: string; from_seq: number; last_seq: number; count: number; events: Array<RawMeetingEvent> }>(
+      `/meetings/${meetingId}/events${buildQueryString({ from_seq: fromSeq })}`,
+      { method: 'GET' },
+    ),
+};
+
+/** 后端 /events 端点返回的领域事件信封（tool.started/step/completed/failed 等） */
+export type RawMeetingEvent = {
+  type: string;
+  meeting_id: string;
+  payload: Record<string, unknown>;
+  schema_version?: string;
+  ts: string;
+  trace_id?: string | null;
+  seq: number;
 };

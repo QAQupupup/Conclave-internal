@@ -1,4 +1,5 @@
-import { useWSStore, useAuthStore } from '@/stores';
+import { useWSStore } from '@/stores/ws-slice';
+import { useAuthStore } from '@/stores/auth-slice';
 import { agUIClient } from './ag-ui/client';
 import {
   WS_HEARTBEAT_INTERVAL,
@@ -42,7 +43,7 @@ export class WsClient {
     const wsUrl = new URL(this.url, window.location.origin);
     wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
     wsUrl.pathname = `/ws/${meetingId}`;
-    if (this.lastSeq > 0) wsUrl.searchParams.set('seq', String(this.lastSeq));
+    if (this.lastSeq > 0) wsUrl.searchParams.set('from_seq', String(this.lastSeq));
     if (token) wsUrl.searchParams.set('token', token);
 
     let ws: WebSocket;
