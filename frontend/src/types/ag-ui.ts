@@ -93,6 +93,7 @@ export interface ToolCallStepEvent extends AGUIEvent {
   label: string;
   data?: Record<string, unknown>;
   screenshot?: string;
+  screenshotRef?: string;
   url?: string;
   status?: 'running' | 'completed' | 'failed';
 }

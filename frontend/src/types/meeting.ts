@@ -149,7 +149,8 @@ export interface ToolStep {
   stepType: string;       // 'search_started' | 'results_found' | 'page_navigated' | 'content_extracted' | 'captcha_detected' | 'screenshot_taken' | 'error' | 'info'
   label: string;          // 人类可读的步骤描述
   data?: Record<string, unknown>;
-  screenshot?: string;    // base64 截图（可选）
+  screenshot?: string;    // base64 截图（可选，降级路径）
+  screenshotRef?: string; // 截图落盘后的相对 URL 路径引用（如 /meetings/{id}/recordings/{file}.png）
   url?: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
   timestamp: string;

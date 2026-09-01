@@ -760,6 +760,19 @@ export const api = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
+  /** 带鉴权拉取图片并返回 object URL（用于操作回放截图等需 Bearer 头的 <img> 资源） */
+  imageBlobUrl: async (path: string): Promise<string> => {
+    if (isDemoMode()) return '';
+    const token = useAuthStore.getState().token;
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}${path}`, { method: 'GET', headers, credentials: 'include' });
+    if (!res.ok) {
+      throw new ApiError(HTTP_STATUS_MESSAGES[res.status] || '加载截图失败', res.status);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
   /** 临近话题推荐：创建会议时按议题文本检索相似历史会议 */
   relatedMeetings: (topic: string, limit = 5) =>
     request<{ meetings: Array<{ meeting_id: string; topic: string; status: string; deliverable_type?: string; score?: number }> }>(

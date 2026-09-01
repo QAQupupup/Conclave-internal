@@ -168,6 +168,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
         label: step.label || step.stepType,
         data: step.data,
         screenshot: step.screenshot,
+        screenshotRef: step.screenshotRef,
         url: step.url,
       }));
       updated[idx] = {

@@ -49,6 +49,7 @@ export function buildToolCallsFromEvents(events: RawMeetingEvent[]): ToolCallRec
           label: String(d.label || p.step_type || ''),
           data: d,
           screenshot: typeof d.screenshot === 'string' ? d.screenshot : undefined,
+          screenshotRef: typeof d.screenshot_ref === 'string' ? d.screenshot_ref : undefined,
           url: typeof d.url === 'string' ? d.url : undefined,
           status: statusFromData as ToolStep['status'],
           timestamp: ev.ts,

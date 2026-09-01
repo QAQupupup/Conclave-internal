@@ -91,6 +91,7 @@ class AGUIClient {
           data: e.data,
           url: e.url,
           screenshot: e.screenshot,
+          screenshotRef: e.screenshotRef,
           status: e.status || 'completed',
         })),
       );
@@ -403,6 +404,7 @@ class AGUIClient {
           data: stepData,
           url: stepData.url as string | undefined,
           screenshot: stepData.screenshot as string | undefined,
+          screenshotRef: stepData.screenshot_ref as string | undefined,
           status: (stepData.status as 'running' | 'completed' | 'failed') || 'completed',
         } as ToolCallStepEvent);
         break;
@@ -574,6 +576,7 @@ class AGUIClient {
           data: e.data,
           url: e.url,
           screenshot: e.screenshot,
+          screenshotRef: e.screenshotRef,
           status: e.status || 'completed',
         });
         break;

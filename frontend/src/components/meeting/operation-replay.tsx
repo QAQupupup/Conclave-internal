@@ -6,6 +6,7 @@ import type { ToolCallRecord, ToolStep } from '@/types';
 import { cn } from '@/lib/utils';
 import { ToolIcon } from './tool-icons';
 import { buildToolCallsFromEvents } from './operation-replay-utils';
+import { RecordingImage } from './recording-image';
 import {
   PlayIcon,
   PauseIcon,
@@ -397,7 +398,15 @@ export function OperationReplay({ meetingId, open, onClose }: OperationReplayPro
 
                   {/* 截图/详情预览 */}
                   <div className="min-h-0 flex-1 p-4">
-                    {currentStep?.screenshot ? (
+                    {currentStep?.screenshotRef ? (
+                      <div className="overflow-hidden rounded-md border border-border-default">
+                        <RecordingImage
+                          src={currentStep.screenshotRef}
+                          alt="操作截图"
+                          className="w-full"
+                        />
+                      </div>
+                    ) : currentStep?.screenshot ? (
                       <div className="overflow-hidden rounded-md border border-border-default">
                         <img
                           src={`data:image/png;base64,${currentStep.screenshot}`}
