@@ -6,7 +6,7 @@ import { ProtectedRoute, PublicOnlyRoute } from './components/auth/protected-rou
 import { AdminRoute } from './components/auth/admin-route';
 import { ErrorBoundary } from './components/error-boundary';
 import { TooltipProvider } from '@radix-ui/react-tooltip';
-import { useAuthStore } from './stores';
+import { useAuthStore } from './stores/auth-slice';
 
 const LoginPage = React.lazy(() => import('./features/login/page'));
 const SetupPage = React.lazy(() => import('./features/setup/page'));
