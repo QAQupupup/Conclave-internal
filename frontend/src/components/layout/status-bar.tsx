@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { useWSStore, useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
+import { useWSStore } from '@/stores/ws-slice';
 import { cn, formatDurationFromStart } from '@/lib/utils';
 import { STAGE_LABELS } from '@/lib/constants';
 import { isDemoMode } from '@/lib/mock-data';

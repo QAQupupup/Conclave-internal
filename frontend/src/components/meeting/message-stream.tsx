@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
 import { MessageBubble } from './message-bubble';
 import { ToolCallCard } from './tool-call-card';
 import { TakeoverPanel } from './takeover-panel';

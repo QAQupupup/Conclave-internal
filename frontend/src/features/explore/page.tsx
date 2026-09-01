@@ -7,9 +7,9 @@ import { InsightsPanel } from '@/components/meeting/insights-panel';
 import { OperationReplay } from '@/components/meeting/operation-replay';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
-import { useUIStore } from '@/stores';
+import { useUIStore } from '@/stores/ui-slice';
 import { useMeeting } from '@/hooks/use-meetings';
-import { useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
 import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,

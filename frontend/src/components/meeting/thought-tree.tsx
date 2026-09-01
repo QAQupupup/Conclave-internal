@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
 import { cn } from '@/lib/utils';
 import { ROLE_LABELS, ROLE_AVATAR_COLORS } from '@/lib/constants';
 import type { AgentInfo, AgentState, BorrowRequest } from '@/types';

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useUIStore } from '@/stores';
+import { useUIStore } from '@/stores/ui-slice';
 import { ThemeContext, type Theme } from './theme-context';
 
 function getSystemTheme(): 'light' | 'dark' {

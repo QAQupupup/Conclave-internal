@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { useUIStore, useAuthStore, useMeetingStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth-slice';
+import { useMeetingStore } from '@/stores/meeting-slice';
+import { useUIStore } from '@/stores/ui-slice';
 import { useTheme } from '@/providers/theme-context';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';

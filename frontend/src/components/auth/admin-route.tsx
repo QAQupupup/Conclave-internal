@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Navigate } from 'react-router';
-import { useAuthStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth-slice';
 import { Card, CardContent } from '@/components/ui/card';
 import { Lock } from 'lucide-react';
 

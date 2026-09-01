@@ -8,7 +8,7 @@
  * - 可管理角色列表（用于角色下拉）
  */
 import { useMemo } from 'react';
-import { useAuthStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth-slice';
 import {
   TEAM_ROLE_META,
   canManageRole,

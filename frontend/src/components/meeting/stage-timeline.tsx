@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
 import { cn } from '@/lib/utils';
 import { STAGE_LABELS, STAGE_DESCRIPTIONS, normalizeStageId } from '@/lib/constants';
 import type { StageId } from '@/types';

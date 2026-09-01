@@ -28,7 +28,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { useAuthStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth-slice';
 import { useRbac } from '@/hooks/use-rbac';
 import { teamsApi } from '@/lib/teams-api';
 import { TEAM_ROLE_META, type TeamDetail, type TeamMember, type TeamRole } from '@/types';

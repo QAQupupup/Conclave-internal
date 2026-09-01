@@ -2,7 +2,7 @@ import * as React from 'react';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { ROLE_LABELS, ROLE_AVATAR_COLORS, STAGE_LABELS } from '@/lib/constants';
 import type { MeetingMessage } from '@/types';
-import { useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
 import { Markdown } from '@/components/ui/markdown';
 import { AgentAvatar, UserAvatar, BrainIcon, CornerDownRightIcon, ChevronIcon } from '@/components/ui/svg-icons';
 import { ToolCallCard } from './tool-call-card';

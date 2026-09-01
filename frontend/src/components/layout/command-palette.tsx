@@ -3,7 +3,7 @@ import {
   Command as CommandPrimitive,
 } from 'cmdk';
 import { useNavigate } from 'react-router';
-import { useUIStore } from '@/stores';
+import { useUIStore } from '@/stores/ui-slice';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
   LayoutDashboard,
@@ -22,7 +22,7 @@ import { useTheme } from '@/providers/theme-context';
 import { cn } from '@/lib/utils';
 import { useStartMeeting } from '@/hooks/use-meetings';
 import { toast } from '@/hooks/use-toast';
-import { useAuthStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth-slice';
 
 export function CommandPalette() {
   const open = useUIStore((s) => s.commandPaletteOpen);

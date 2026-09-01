@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
 import type { ToolCallRecord, ToolStep } from '@/types';
 import { cn } from '@/lib/utils';
 import { ToolIcon } from './tool-icons';

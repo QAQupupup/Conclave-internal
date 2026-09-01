@@ -13,7 +13,7 @@ import {
   BuildingIcon,
 } from '@/components/ui/svg-icons';
 import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth-slice';
 
 interface NavItem {
   to: string;
