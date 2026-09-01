@@ -32,6 +32,7 @@ interface MeetingState {
   // Tool call 管理
   startToolCall: (call: Omit<ToolCallRecord, 'status' | 'steps' | 'startedAt'> & { startedAt?: string }) => void;
   addToolStep: (callId: string, step: Omit<ToolStep, 'id' | 'callId' | 'timestamp'> & { timestamp?: string }) => void;
+  addToolSteps: (callId: string, steps: (Omit<ToolStep, 'id' | 'callId' | 'timestamp'> & { timestamp?: string })[]) => void;
   completeToolCall: (callId: string, success: boolean, data: { error?: string; latencyMs?: number; summary?: Record<string, unknown> }) => void;
   failToolCall: (callId: string, error: string) => void;
   setTakeoverRequest: (req: { callId: string; toolName: string } | null) => void;
@@ -149,13 +150,17 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
     });
   },
 
-  addToolStep: (callId, step) => {
+  addToolStep: (callId, step) => get().addToolSteps(callId, [step]),
+
+  addToolSteps: (callId, steps) => {
+    if (steps.length === 0) return;
     set((s) => {
       const idx = s.toolCalls.findIndex((tc) => tc.id === callId);
       if (idx === -1) return s;
       const updated = [...s.toolCalls];
-      const stepRecord: ToolStep = {
-        id: `${callId}-step-${updated[idx].steps.length}`,
+      const baseLen = updated[idx].steps.length;
+      const stepRecords: ToolStep[] = steps.map((step, i) => ({
+        id: `${callId}-step-${baseLen + i}`,
         callId,
         timestamp: step.timestamp || new Date().toISOString(),
         status: step.status || 'completed',
@@ -164,10 +169,10 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
         data: step.data,
         screenshot: step.screenshot,
         url: step.url,
-      };
+      }));
       updated[idx] = {
         ...updated[idx],
-        steps: [...updated[idx].steps, stepRecord],
+        steps: [...updated[idx].steps, ...stepRecords],
       };
       return { toolCalls: updated };
     });

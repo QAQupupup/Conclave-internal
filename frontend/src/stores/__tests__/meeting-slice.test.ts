@@ -302,6 +302,41 @@ describe('meeting-slice', () => {
       expect(useMeetingStore.getState().toolCalls).toHaveLength(0);
     });
 
+    it('addToolSteps 批量追加步骤且顺序与 id 单调递增', () => {
+      useMeetingStore.getState().startToolCall({
+        id: 'tc1',
+        toolName: 'web_search',
+        iteration: 1,
+        arguments: {},
+      });
+      useMeetingStore.getState().addToolSteps('tc1', [
+        { stepType: 'search_started', label: '搜索开始', status: 'completed' },
+        { stepType: 'fetch_started', label: '抓取开始', status: 'running' },
+        { stepType: 'content_extracted', label: '提取完成', status: 'completed' },
+      ]);
+
+      const call = useMeetingStore.getState().toolCalls[0];
+      expect(call.steps).toHaveLength(3);
+      expect(call.steps.map((s) => s.id)).toEqual([
+        'tc1-step-0',
+        'tc1-step-1',
+        'tc1-step-2',
+      ]);
+      expect(call.steps.map((s) => s.stepType)).toEqual([
+        'search_started',
+        'fetch_started',
+        'content_extracted',
+      ]);
+    });
+
+    it('addToolSteps 对不存在的 tool call 无影响', () => {
+      useMeetingStore.getState().addToolSteps('non-existent', [
+        { stepType: 'info', label: 'test', status: 'completed' },
+      ]);
+
+      expect(useMeetingStore.getState().toolCalls).toHaveLength(0);
+    });
+
     it('completeToolCall 更新状态为 completed', () => {
       useMeetingStore.getState().startToolCall({
         id: 'tc1',

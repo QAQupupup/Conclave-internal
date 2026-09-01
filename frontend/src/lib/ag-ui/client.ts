@@ -1,4 +1,4 @@
-import { useMeetingStore } from '@/stores';
+import { useMeetingStore } from '@/stores/meeting-slice';
 import { ROLE_LABELS, normalizeStageId } from '@/lib/constants';
 import type {
   AGUIEvent,
@@ -25,6 +25,11 @@ class AGUIClient {
   private listeners: Set<EventListener> = new Set();
   private activeMessages: Map<string, { content: string; thinking: string; agentId?: string; agentName?: string; agentRole?: string; stage?: string }> = new Map();
 
+  // 高频 tool.step 批量缓冲：合并短窗口内的步骤事件，降低 store.set() 与 React 重渲染频率
+  private pendingSteps: ToolCallStepEvent[] = [];
+  private stepFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly STEP_FLUSH_DELAY_MS = 24;
+
   /**
    * 注册事件监听器，返回取消订阅函数
    */
@@ -39,8 +44,60 @@ class AGUIClient {
   handleRawMessage(raw: Record<string, unknown>) {
     const events = this.convertToAGUIEvents(raw);
     for (const event of events) {
+      if (event.type === 'TOOL_CALL_STEP') {
+        // 高频步骤事件进入缓冲，稍后合并批量写入 store（见 flushSteps）
+        this.bufferStep(event as ToolCallStepEvent);
+        continue;
+      }
+      // 非 step 事件先冲刷缓冲，保证步骤先于后续生命周期/消息事件应用，维持事件时序
+      this.flushSteps();
       this.dispatchToStore(event);
       this.emit(event);
+    }
+  }
+
+  /** 将单个 TOOL_CALL_STEP 事件入缓冲，并调度一次延迟冲刷（已定时则不重复调度）。 */
+  private bufferStep(event: ToolCallStepEvent): void {
+    this.pendingSteps.push(event);
+    if (this.stepFlushTimer === null) {
+      this.stepFlushTimer = setTimeout(() => this.flushSteps(), AGUIClient.STEP_FLUSH_DELAY_MS);
+    }
+  }
+
+  /** 冲刷缓冲中的步骤事件：按 callId 聚合后批量写入 store（单次 set()），再按到达顺序逐条 emit。 */
+  private flushSteps(): void {
+    if (this.stepFlushTimer !== null) {
+      clearTimeout(this.stepFlushTimer);
+      this.stepFlushTimer = null;
+    }
+    const steps = this.pendingSteps;
+    if (steps.length === 0) return;
+    this.pendingSteps = [];
+
+    // 按 callId 聚合，每个 call 只触发一次 addToolSteps（单次 set()），避免逐条 set() 引发大量重渲染
+    const byCall = new Map<string, ToolCallStepEvent[]>();
+    for (const e of steps) {
+      const arr = byCall.get(e.callId) ?? [];
+      arr.push(e);
+      byCall.set(e.callId, arr);
+    }
+    const store = useMeetingStore.getState();
+    for (const [callId, evts] of byCall) {
+      store.addToolSteps(
+        callId,
+        evts.map((e) => ({
+          stepType: e.stepType,
+          label: e.label,
+          data: e.data,
+          url: e.url,
+          screenshot: e.screenshot,
+          status: e.status || 'completed',
+        })),
+      );
+    }
+    // 按到达顺序逐条 emit，保证外部监听者（回放/接管/操作监控）拿到全序事件流
+    for (const e of steps) {
+      this.emit(e);
     }
   }
 
