@@ -21,6 +21,7 @@ const SettingsPage = React.lazy(() => import('./features/settings/page'));
 const TeamsPage = React.lazy(() => import('./features/teams/page'));
 const AdminPage = React.lazy(() => import('./features/admin/page'));
 const OperationsPage = React.lazy(() => import('./features/operations/page'));
+const MonitoringPage = React.lazy(() => import('./features/monitoring/page'));
 const NotFoundPage = React.lazy(() => import('./features/not-found/page'));
 
 function LoadingFallback() {
@@ -166,6 +167,7 @@ function App() {
                 <Route path="/teams" element={<TeamsPage />} />
                 <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
                 <Route path="/operations" element={<OperationsPage />} />
+                <Route path="/monitoring" element={<MonitoringPage />} />
               </Route>
 
               <Route path="*" element={<NotFoundPage />} />

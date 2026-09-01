@@ -1000,7 +1000,7 @@ function generateGenericMessages(meetingId: string, meeting: Meeting): MeetingMe
 
 // Mock API handlers
 export const mockApi = {
-  getMeetings(params: { page?: number; pageSize?: number; page_size?: number; status?: string; limit?: number }): PaginatedResponse<Meeting> {
+  getMeetings(params: { page?: number; pageSize?: number; page_size?: number; status?: string; limit?: number }): PaginatedResponse<Meeting> & { concurrent_limit?: number; running_count?: number } {
     let filtered = [...MOCK_MEETINGS];
     if (params.status) {
       filtered = filtered.filter((m) => m.status === params.status);
@@ -1009,6 +1009,7 @@ export const mockApi = {
     const pageSize = params.pageSize || params.page_size || params.limit || 20;
     const start = (page - 1) * pageSize;
     const items = filtered.slice(start, start + pageSize);
+    const runningCount = MOCK_MEETINGS.filter((m) => m.status === 'running' || m.status === 'paused').length;
     return {
       items,
       total: filtered.length,
@@ -1018,6 +1019,8 @@ export const mockApi = {
       totalPages: Math.ceil(filtered.length / pageSize),
       total_pages: Math.ceil(filtered.length / pageSize),
       hasMore: start + pageSize < filtered.length,
+      concurrent_limit: 3,
+      running_count: runningCount,
     };
   },
 

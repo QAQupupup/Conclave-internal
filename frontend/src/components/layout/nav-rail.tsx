@@ -11,6 +11,7 @@ import {
   ShieldIcon,
   ActivityIcon,
   BuildingIcon,
+  MonitorIcon,
 } from '@/components/ui/svg-icons';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-slice';
@@ -55,6 +56,7 @@ export function NavRail() {
         {isAdmin && (
           <>
             <NavItemButton item={{ to: '/operations', icon: ActivityIcon, label: '运维' }} />
+            <NavItemButton item={{ to: '/monitoring', icon: MonitorIcon, label: '监控' }} />
             <NavItemButton item={{ to: '/admin', icon: ShieldIcon, label: '管理' }} />
           </>
         )}

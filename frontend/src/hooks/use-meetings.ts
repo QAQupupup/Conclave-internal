@@ -148,6 +148,49 @@ export function useMeetings(params: { page?: number; pageSize?: number; status?:
   });
 }
 
+/** 监控看板概览：会议列表 + 并发上限 + 运行中计数 */
+export interface MeetingsOverview {
+  meetings: Meeting[];
+  total: number;
+  concurrentLimit: number;
+  runningCount: number;
+}
+
+/**
+ * 会议监控概览（并发会话总览）。
+ * 后端 /meetings 返回 { meetings, total, concurrent_limit, running_count }；
+ * demo 模式下 running_count 兜底从列表本地计算。
+ * pollMs 为 0 时不轮询（单次拉取）。
+ */
+export function useMeetingsOverview(pollMs = 3000) {
+  return useQuery({
+    queryKey: ['meetings', 'overview'],
+    queryFn: async (): Promise<MeetingsOverview> => {
+      const res = await api.get<BackendMeetingsResponse>(`/meetings?limit=200&offset=0`);
+      const rawMeetings = extractArray<BackendMeetingItem | Meeting>(res, ['meetings', 'items']);
+      const meetings = rawMeetings.map((m) => {
+        if ((m as Meeting).id) return m as Meeting;
+        return normalizeMeeting(m as BackendMeetingItem);
+      });
+      const runningCount =
+        typeof (res as unknown as Record<string, unknown>)?.running_count === 'number'
+          ? Number((res as unknown as Record<string, unknown>).running_count)
+          : meetings.filter((m) => m.status === 'running' || m.status === 'paused').length;
+      return {
+        meetings,
+        total: (res as unknown as Record<string, unknown>)?.total as number ?? meetings.length,
+        concurrentLimit:
+          typeof (res as unknown as Record<string, unknown>)?.concurrent_limit === 'number'
+            ? Number((res as unknown as Record<string, unknown>).concurrent_limit)
+            : 0,
+        runningCount,
+      };
+    },
+    staleTime: pollMs > 0 ? pollMs : 30_000,
+    refetchInterval: pollMs > 0 ? pollMs : false,
+  });
+}
+
 export function useMeeting(id: string | null | undefined) {
   return useQuery({
     queryKey: meetingKeys.detail(id!),
