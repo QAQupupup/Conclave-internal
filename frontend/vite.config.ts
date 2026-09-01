@@ -3,6 +3,26 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
 
+/**
+ * 将长期稳定、始终首屏加载的 vendor 依赖拆分为独立 chunk：
+ * - 降低单 chunk 体积（消除 >500kB 构建告警）
+ * - 提升缓存命中率（vendor 变化频率远低于业务代码）
+ * 仅拆"必然首屏加载"的包，不触碰 lazy 加载的模块（如 react-markdown），
+ * 避免破坏现有 React.lazy 路由级代码分割。
+ */
+function manualChunks(id: string): string | undefined {
+  if (!id.includes('node_modules')) return undefined;
+  const segments = id.split('node_modules/')[1].split('/');
+  const pkg = segments[0].startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
+
+  if (['react', 'react-dom', 'scheduler', 'react-router', 'react-router-dom'].includes(pkg)) {
+    return 'react-vendor';
+  }
+  if (pkg.startsWith('@tanstack/')) return 'tanstack-vendor';
+  if (pkg === 'cmdk') return 'cmdk-vendor';
+  return undefined;
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -69,6 +89,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         app: resolve(__dirname, 'app.html'),
+      },
+      output: {
+        manualChunks,
       },
     },
   },
