@@ -38,7 +38,7 @@ const POLL_INTERVAL_MS = 3000;
 /** 稳定空数组引用，避免 useMemo 依赖每帧变化 */
 const EMPTY_MEETINGS: Meeting[] = [];
 
-/** 统计快照：从会议列表本地派生（列表最多取 200 条） */
+/** 统计快照：状态计数从会议列表本地派生，总数优先用后端真实 total（列表最多取 200 条） */
 interface Stats {
   total: number;
   running: number;
@@ -47,7 +47,7 @@ interface Stats {
   failed: number;
 }
 
-function deriveStats(meetings: Meeting[]): Stats {
+function deriveStats(meetings: Meeting[], knownTotal?: number): Stats {
   let running = 0;
   let paused = 0;
   let done = 0;
@@ -58,7 +58,7 @@ function deriveStats(meetings: Meeting[]): Stats {
     else if (m.status === 'done') done += 1;
     else if (m.status === 'error' || m.status === 'aborted') failed += 1;
   }
-  return { total: meetings.length, running, paused, done, failed };
+  return { total: knownTotal ?? meetings.length, running, paused, done, failed };
 }
 
 export default function MonitoringPage() {
@@ -66,7 +66,7 @@ export default function MonitoringPage() {
   const { data, isFetching, isError, refetch, dataUpdatedAt } = useMeetingsOverview(POLL_INTERVAL_MS);
 
   const meetings = data?.meetings ?? EMPTY_MEETINGS;
-  const stats = React.useMemo(() => deriveStats(meetings), [meetings]);
+  const stats = React.useMemo(() => deriveStats(meetings, data?.total), [meetings, data?.total]);
   const active = React.useMemo(
     () => meetings.filter((m) => m.status === 'running' || m.status === 'paused'),
     [meetings]

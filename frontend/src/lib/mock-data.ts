@@ -1009,7 +1009,8 @@ export const mockApi = {
     const pageSize = params.pageSize || params.page_size || params.limit || 20;
     const start = (page - 1) * pageSize;
     const items = filtered.slice(start, start + pageSize);
-    const runningCount = MOCK_MEETINGS.filter((m) => m.status === 'running' || m.status === 'paused').length;
+    // running_count 口径与后端一致（只统计 running，paused 已释放并发槽位）
+    const runningCount = MOCK_MEETINGS.filter((m) => m.status === 'running').length;
     return {
       items,
       total: filtered.length,
@@ -1019,7 +1020,8 @@ export const mockApi = {
       totalPages: Math.ceil(filtered.length / pageSize),
       total_pages: Math.ceil(filtered.length / pageSize),
       hasMore: start + pageSize < filtered.length,
-      concurrent_limit: 3,
+      // 与后端 MAX_CONCURRENT_MEETINGS 默认值对齐
+      concurrent_limit: 5,
       running_count: runningCount,
     };
   },

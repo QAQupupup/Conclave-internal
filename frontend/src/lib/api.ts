@@ -168,11 +168,18 @@ function getMockResponse<T>(path: string, method: string, body?: unknown): T | n
 
   // Meetings list
   if (method === 'GET' && path.startsWith('/meetings') && !path.includes('/messages') && !path.includes('/control')) {
-    const match = path.match(/\/meetings\?.*page_size=(\d+)/);
-    const pageSize = match ? parseInt(match[1]) : 20;
+    // 兼容两种分页参数：page_size（旧）与 limit+offset（与后端一致），
+    // 否则监控概览的 limit=200 会被忽略而只取默认 20 条。
+    const pageSizeMatch = path.match(/[?&]page_size=(\d+)/);
+    const limitMatch = path.match(/[?&]limit=(\d+)/);
+    const limit = limitMatch ? parseInt(limitMatch[1], 10) : undefined;
+    const pageSize = pageSizeMatch ? parseInt(pageSizeMatch[1], 10) : limit ?? 20;
+    const offsetMatch = path.match(/[?&]offset=(\d+)/);
+    const offset = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
+    const page = pageSize > 0 && offset >= pageSize ? Math.floor(offset / pageSize) + 1 : 1;
     const statusMatch = path.match(/status=(\w+)/);
     const status = statusMatch ? statusMatch[1] : undefined;
-    return mockApi.getMeetings({ pageSize, status }) as unknown as T;
+    return mockApi.getMeetings({ page, pageSize, status }) as unknown as T;
   }
 
   // Single meeting

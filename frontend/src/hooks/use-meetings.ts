@@ -172,10 +172,12 @@ export function useMeetingsOverview(pollMs = 3000) {
         if ((m as Meeting).id) return m as Meeting;
         return normalizeMeeting(m as BackendMeetingItem);
       });
+      // running_count 口径统一为「正在运行」：后端值取自 _running_tasks（paused 已释放 task），
+      // 兜底也只统计 running，避免与并发槽位/运行中卡片口径不一致。
       const runningCount =
         typeof (res as unknown as Record<string, unknown>)?.running_count === 'number'
           ? Number((res as unknown as Record<string, unknown>).running_count)
-          : meetings.filter((m) => m.status === 'running' || m.status === 'paused').length;
+          : meetings.filter((m) => m.status === 'running').length;
       return {
         meetings,
         total: (res as unknown as Record<string, unknown>)?.total as number ?? meetings.length,
