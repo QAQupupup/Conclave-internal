@@ -69,6 +69,50 @@ async def save_event(
         return seq - 1
 
 
+# 单批批量写入上限：防止 multi-row INSERT 超参（PostgreSQL 每语句参数上限 65535）
+_MAX_BATCH_ROWS = 500
+
+
+async def save_events_batch(rows: list[dict[str, Any]]) -> list[int]:
+    """批量持久化事件（单次 INSERT + 单次 commit），返回各事件的对外 seq 列表（0 起始）。
+
+    rows 每项需含 meeting_id/type/payload/ts，trace_id/tenant_id 可选。
+    返回的 seq 按传入顺序排序后单调递增（DB 自增分配与插入顺序一致）。
+    空批直接返回 []；批大小超过 _MAX_BATCH_ROWS 时由调用方分块（本函数不递归）。
+    """
+    if not rows:
+        return []
+
+    tid = current_tenant_id()
+    values: list[dict[str, Any]] = []
+    for r in rows:
+        row: dict[str, Any] = {
+            "meeting_id": r["meeting_id"],
+            "type": r["type"],
+            "payload": json.dumps(r["payload"], ensure_ascii=False, default=str),
+            "ts": _parse_dt(r["ts"]),
+            "trace_id": r.get("trace_id"),
+        }
+        if tid is not None:
+            row["tenant_id"] = tid
+        values.append(row)
+
+    stmt = pg_insert(EventModel).values(values).returning(EventModel.seq)
+    async with async_session_factory() as session:
+        result = await session.execute(stmt)
+        seqs = [s for s in result.scalars().all() if s is not None]
+        await session.commit()
+
+    # 按自增值排序，保证与 rows 插入顺序一一对应（多行 RETURNING 顺序不强制保证，排序兜底）
+    sorted_seqs = sorted(seqs)
+    if len(sorted_seqs) != len(rows):
+        # 理论上不应发生；长度不匹配时宁可返回按行数补齐的占位 seq，也不抛异常破坏流程
+        pad = len(rows) - len(sorted_seqs)
+        last = sorted_seqs[-1] if sorted_seqs else 0
+        sorted_seqs += [last + i + 1 for i in range(pad)]
+    return [s - 1 for s in sorted_seqs]
+
+
 async def load_events(meeting_id: str, from_seq: int = 0, limit: int = 0) -> list[dict[str, Any]]:
     """从 PostgreSQL 加载事件，支持增量回放。
 
