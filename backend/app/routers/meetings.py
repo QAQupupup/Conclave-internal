@@ -764,6 +764,10 @@ async def delete_meeting(meeting_id: str, request: Request, mode: str = "soft") 
         from app.orchestrator.runner import cleanup_meeting_resources
 
         cleanup_meeting_resources(meeting_id)
+        # 清理操作回放录制文件（落盘截图）
+        from app.services.recording_store import delete_meeting_recordings
+
+        delete_meeting_recordings(meeting_id)
         _run_locks.pop(meeting_id, None)
         return {"meeting_id": meeting_id, "deleted": True, "mode": "hard"}
 
@@ -1431,6 +1435,30 @@ async def download_attachment(meeting_id: str, filename: str):
         filename=filename,
         media_type="application/octet-stream",
     )
+
+
+@router.get("/{meeting_id}/recordings/{filename}")
+async def download_recording(meeting_id: str, filename: str):
+    """下载会议操作回放截图（PNG）。
+
+    操作截图已落盘到录制存储，events 只存 filename 引用（screenshot_ref），
+    前端通过本端点拉取图片（带鉴权），避免大 base64 进 events/PostgreSQL。
+    """
+    from fastapi.responses import FileResponse
+
+    from app.services.recording_store import resolve_path
+
+    # 会议存在性校验（与 events/attachments 端点一致的恢复逻辑）
+    state = get_state(meeting_id)
+    if state is None:
+        state = await load_or_create(meeting_id, "")
+        if state.topic == "":
+            raise HTTPException(status_code=404, detail="会议不存在")
+
+    path = resolve_path(meeting_id, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="录制文件不存在")
+    return FileResponse(str(path), media_type="image/png")
 
 
 @router.get("/skills/list")

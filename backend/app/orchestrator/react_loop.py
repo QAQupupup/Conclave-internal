@@ -12,6 +12,7 @@
 # - ReactLoop：LLM 自主决定"下一步调用什么工具"，工具执行后 LLM 观察结果再决策
 from __future__ import annotations
 
+import base64
 import contextlib
 import os
 import time
@@ -477,11 +478,12 @@ async def _emit_step(step_cb: Any, step_type: str, data: dict[str, Any]) -> None
         await step_cb(step_type, data)
 
 
-async def _capture_step_screenshot(meeting_id: str) -> str | None:
-    """为浏览器步骤捕获一张 viewport 截图（best-effort、有界内联）。
+async def _capture_step_screenshot(meeting_id: str) -> dict[str, str] | None:
+    """为浏览器步骤捕获一张 viewport 截图（best-effort）。
 
-    借鉴 Skyvern 的逐步截图记录思路：Phase 1 用有界内联 base64 驱动前端可视化回放，
-    Phase 2 再迁移到签名 URL / 独立录像文件外链（避免大字段进 events）。
+    借鉴 Skyvern 的逐步截图记录思路。Phase 2：截图落盘到录制存储，返回
+    {"ref": 文件名}；落盘关闭/失败时降级为 {"inline": base64}（有界）。
+    调用方据此写 events 的 screenshot_ref / screenshot 字段，避免大 base64 进 events。
     """
     if not meeting_id:
         return None
@@ -492,9 +494,24 @@ async def _capture_step_screenshot(meeting_id: str) -> str | None:
         if shot.get("status") != "ok":
             return None
         b64 = shot.get("base64")
-        if not b64 or len(b64) > _STEP_SCREENSHOT_MAX_BYTES:
+        if not b64:
             return None
-        return b64  # type: ignore[no-any-return]
+
+        # Phase 2：优先落盘，events 只存引用
+        from app.config import settings
+        from app.services import recording_store
+
+        if settings.recording_enabled:
+            raw = base64.b64decode(b64)
+            if raw and len(raw) <= settings.recording_max_screenshot_bytes:
+                ref = recording_store.save_screenshot(meeting_id, raw)
+                if ref:
+                    return {"ref": ref}
+
+        # 降级：有界内联 base64
+        if len(b64) <= _STEP_SCREENSHOT_MAX_BYTES:
+            return {"inline": b64}
+        return None
     except Exception:
         return None
 
@@ -592,7 +609,11 @@ def create_default_tool_registry() -> ToolRegistry:
             step_data["label"] = str((result or {}).get("error") or "导航失败")
         shot = await _capture_step_screenshot(meeting_id)
         if shot:
-            step_data["screenshot"] = shot
+            if "ref" in shot:
+                # 存相对 URL 路径（外链引用），前端据此带鉴权拉取截图
+                step_data["screenshot_ref"] = f"/meetings/{meeting_id}/recordings/{shot['ref']}"
+            elif "inline" in shot:
+                step_data["screenshot"] = shot["inline"]
         await _emit_step(step_cb, "page_navigated", step_data)
         return result
 

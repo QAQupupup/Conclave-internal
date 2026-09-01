@@ -101,6 +101,19 @@ class Settings:
         str(Path.home() / ".conclave" / "workspace"),
     )
 
+    # 录制回放存储配置（操作截图落盘，避免大 base64 字段进 events/PostgreSQL）
+    # - recording_enabled：是否启用截图落盘；关闭时退回有界内联 base64
+    # - recording_dir：录制文件根目录（按 meeting_id 分子目录）
+    # - recording_retention_days：录制文件保留天数，<=0 表示不自动清理
+    # - recording_max_screenshot_bytes：单张截图落盘上限，超出退回内联 base64
+    recording_enabled: bool = _env("CONCLAVE_RECORDING_ENABLED", "1") == "1"
+    recording_dir: str = _env(
+        "CONCLAVE_RECORDING_DIR",
+        str(Path.home() / ".conclave" / "recordings"),
+    )
+    recording_retention_days: int = int(_env("CONCLAVE_RECORDING_RETENTION_DAYS", "7"))
+    recording_max_screenshot_bytes: int = int(_env("CONCLAVE_RECORDING_MAX_SCREENSHOT_BYTES", str(1024 * 1024)))
+
     # 三层记忆开关：CONCLAVE_MEMORY_DISABLED 环境变量存在（非空）时禁用
     memory_enabled: bool = _env("CONCLAVE_MEMORY_DISABLED", "") == ""
 

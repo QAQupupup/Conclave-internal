@@ -187,6 +187,16 @@ async def lifespan(app: FastAPI):
     # 启动时扫描工作区孤立目录
     _cleanup_orphaned_workspaces()
 
+    # 启动时清理过期录制文件（操作回放截图保留策略，非致命）
+    try:
+        from app.services.recording_store import cleanup_expired
+
+        removed = cleanup_expired()
+        if removed:
+            logger.info("启动时清理过期录制文件：%d 个会议目录", removed)
+    except Exception as e:
+        logger.warning("录制文件保留清理失败（非致命）: %s", e)
+
     # Redis 初始化（不可用时降级，不阻塞启动）
     await init_redis(app)
 
