@@ -23,6 +23,7 @@ API:
     CONCLAVE_WEB_SEARCH_PORT — 服务端口（默认 9100）
     CONCLAVE_WEB_SEARCH_HEADED — 设为 1 启用有头模式（值守模式）
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,8 +37,12 @@ from typing import Any
 # 确保 backend 目录在 sys.path 中（服务 Docker 镜像内 backend 是工作目录）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ── 配置：通过 app.config.settings 统一加载（一致性要求） ─────────
+# LLM API key 从 app.config.settings 读取，保持与主进程一致
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+from app.config import settings
 
 # ── 日志 ──────────────────────────────────────────────────────
 logging.basicConfig(
@@ -46,9 +51,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("web_search_service")
 
-# ── 配置：通过 app.config.settings 统一加载（一致性要求） ─────────
-# LLM API key 从 app.config.settings 读取，保持与主进程一致
-from app.config import settings
 LLM_BASE_URL = settings.llm_base_url
 LLM_API_KEY = settings.llm_api_key
 PORT = int(os.environ.get("CONCLAVE_WEB_SEARCH_PORT", "9100"))
@@ -62,10 +64,6 @@ os.environ.setdefault("CONCLAVE_DATA_DIR", DATA_DIR)
 _ws_instance: Any = None  # PlaywrightWebSearch 实例
 _research_agent: Any = None  # DeepResearchAgent 实例
 _startup_time: float = 0
-
-# ── 注入环境变量供 PlaywrightWebSearch 读取
-if settings.web_search_service_url:
-    os.environ.setdefault("CONCLAVE_WEB_SEARCH_SERVICE_URL", settings.web_search_service_url)
 
 
 # ── 生命周期 ──────────────────────────────────────────────────
@@ -88,12 +86,19 @@ async def lifespan(app: FastAPI):
     async def _search_wrapper(query: str, top_k: int, session_key: str, language: str):
         """将 PlaywrightWebSearch.search 适配为 Agent 期望的签名"""
         return await _ws_instance.search(
-            query, top_k=top_k, session_key=session_key, language=language,
+            query,
+            top_k=top_k,
+            session_key=session_key,
+            language=language,
         )
 
     _research_agent = get_research_agent(_search_wrapper)
-    logger.info("Web Search Service 已就绪 (port=%d, headed=%s, agent=%s)",
-                PORT, HEADED, "ready" if _research_agent else "disabled")
+    logger.info(
+        "Web Search Service 已就绪 (port=%d, headed=%s, agent=%s)",
+        PORT,
+        HEADED,
+        "ready" if _research_agent else "disabled",
+    )
 
     yield
 
@@ -266,7 +271,7 @@ async def search(req: SearchRequest):
         elapsed = (time.monotonic() - start) * 1000
 
         # 检测是否经过了翻译（简单启发：如果查询含中文但 language 被设为 en-US）
-        translated = any('\u4e00' <= c <= '\u9fff' for c in req.query) and req.language != "en-US"
+        translated = any("\u4e00" <= c <= "\u9fff" for c in req.query) and req.language != "en-US"
 
         return SearchResponse(
             results=results,
@@ -279,14 +284,14 @@ async def search(req: SearchRequest):
         raise HTTPException(
             status_code=504,
             detail=f"搜索超时 ({elapsed:.0f}ms): {req.query[:50]}",
-        )
+        ) from None
     except Exception as e:
         elapsed = (time.monotonic() - start) * 1000
         logger.error("搜索失败: %s", str(e)[:200])
         raise HTTPException(
             status_code=500,
             detail=f"搜索失败 ({elapsed:.0f}ms): {str(e)[:100]}",
-        )
+        ) from None
 
 
 @app.post("/fetch", response_model=FetchResponse)
@@ -337,7 +342,8 @@ async def research(req: ResearchRequest):
 
     try:
         report = await _research_agent.research(
-            req.topic, max_rounds=req.max_rounds,
+            req.topic,
+            max_rounds=req.max_rounds,
         )
         return ResearchResponse(
             topic=report.topic,
@@ -357,10 +363,10 @@ async def research(req: ResearchRequest):
             confidence=report.confidence,
         )
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="研究超时")
+        raise HTTPException(status_code=504, detail="研究超时") from None
     except Exception as e:
         logger.error("研究失败: %s", str(e)[:200])
-        raise HTTPException(status_code=500, detail=f"研究失败: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail=f"研究失败: {str(e)[:200]}") from None
 
 
 @app.post("/sessions/{session_key}/clear")
@@ -376,4 +382,5 @@ async def clear_session(session_key: str):
 # ── 主入口 ────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.compute import build_cross_team_prompt, execute_think
+from app.agents.compute import build_cross_team_prompt
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
 from app.orchestrator.stage_runners import run_cross_team
 
-from ._helpers import _resolve_model_for_call, _run_with_consistency
+from ._helpers import _build_tool_registry, _run_stage_step
 
 
 async def cross_team_node(state: MeetingState) -> MeetingState:
@@ -43,15 +43,24 @@ async def cross_team_node(state: MeetingState) -> MeetingState:
         # 消费门禁动作（cross_team 执行后由 run_cross_team 决定是否继续回流或推进）
         state.gate_pending_action = None
 
-    async def call_fn(anchor: str) -> dict[str, Any]:
+    tool_registry = _build_tool_registry()
+
+    def build_prompt(anchor: str, available_tools: Any) -> Any:
         # 合并门禁重审锚点
         merged_anchor = anchor
         if reexamine_anchor:
             merged_anchor = f"{reexamine_anchor}\n\n{anchor}" if anchor else reexamine_anchor
-        req = build_cross_team_prompt(state.team_conclusions, anchor=merged_anchor)
-        req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "cross_team")
-        resp = await execute_think(req)
-        return resp.result
+        return build_cross_team_prompt(
+            state.team_conclusions,
+            anchor=merged_anchor,
+            available_tools=available_tools,
+        )
 
-    result, confidence = await _run_with_consistency(state, "cross_team", call_fn)
+    result, confidence = await _run_stage_step(
+        state,
+        "cross_team",
+        Role.MODERATOR.value,
+        build_prompt,
+        tool_registry=tool_registry,
+    )
     return await run_cross_team(state, result, confidence)

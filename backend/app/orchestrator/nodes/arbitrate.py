@@ -4,23 +4,31 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.compute import build_arbitrate_prompt, execute_think
+from app.agents.compute import build_arbitrate_prompt
 from app.agents.trace import set_current_trace
 from app.models import MeetingState, Role
 from app.orchestrator.stage_runners import run_arbitrate
 
-from ._helpers import _resolve_model_for_call, _run_with_consistency
+from ._helpers import _build_tool_registry, _run_stage_step
 
 
 async def arbitrate_node(state: MeetingState) -> MeetingState:
     """Arbitrate 阶段：仲裁者裁决，形成结论"""
     set_current_trace(state.llm_trace)
+    tool_registry = _build_tool_registry()
 
-    async def call_fn(anchor: str) -> dict[str, Any]:
-        req = build_arbitrate_prompt(state.evidence_set, anchor=anchor)
-        req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "arbitrate")
-        resp = await execute_think(req)
-        return resp.result
+    def build_prompt(anchor: str, available_tools: Any) -> Any:
+        return build_arbitrate_prompt(
+            state.evidence_set,
+            anchor=anchor,
+            available_tools=available_tools,
+        )
 
-    result, confidence = await _run_with_consistency(state, "arbitrate", call_fn)
+    result, confidence = await _run_stage_step(
+        state,
+        "arbitrate",
+        Role.MODERATOR.value,
+        build_prompt,
+        tool_registry=tool_registry,
+    )
     return await run_arbitrate(state, result, confidence)

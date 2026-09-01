@@ -7,12 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.agents.compute import build_produce_prompt, execute_think
+from app.agents.compute import build_produce_prompt
 from app.agents.trace import set_current_trace
 from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 
-from ._helpers import _emit_agent_spoke, _resolve_model_for_call, _run_with_consistency
+from ._helpers import _build_tool_registry, _emit_agent_spoke, _run_stage_step
 
 
 def _make_token_stream_callback(state: MeetingState) -> Any:
@@ -812,8 +812,11 @@ async def produce_node(state: MeetingState) -> MeetingState:
             logger="orchestrator.nodes.produce",
         )
 
-    # 定义单次LLM调用函数（供非deployable_service类型和fallback使用）
-    async def call_fn(anchor: str) -> dict[str, Any]:
+    # 工具在全部环节可用：构建工具注册表，非空时走 ReactLoop（web_search/browser/workspace）
+    tool_registry = _build_tool_registry()
+
+    # 构造 produce prompt（供非deployable_service类型和fallback使用）
+    def build_prompt(anchor: str, available_tools: Any) -> Any:
         # 合并迭代反馈anchor + 跨会议baseline
         combined_anchor = anchor
         anchors_to_merge = []
@@ -823,28 +826,14 @@ async def produce_node(state: MeetingState) -> MeetingState:
             anchors_to_merge.append(baseline_anchor)
         if anchors_to_merge:
             combined_anchor = "\n".join(anchors_to_merge) + ("\n" + anchor if anchor else "")
-        req = build_produce_prompt(
+        return build_produce_prompt(
             state.decision_record or {},
             anchor=combined_anchor,
             template=template,
             deliverable_type=state.deliverable_type,
             evidence_summary=evidence_summary or None,
+            available_tools=available_tools,
         )
-        req.model = _resolve_model_for_call(state, Role.MODERATOR.value, "produce")
-        req.on_token = _make_token_stream_callback(state)
-        resp = await execute_think(req)
-        if not resp.success:
-            _lb.warning(
-                f"produce: compute.think 返回失败 — {resp.error}",
-                logger="orchestrator.nodes.produce",
-                extra={
-                    "deliverable_type": state.deliverable_type,
-                    "error": resp.error,
-                    "latency_ms": resp.latency_ms,
-                    "stage": "produce",
-                },
-            )
-        return resp.result
 
     # === 分阶段生成管线：deployable_service 使用7阶段子管线替代单次LLM调用 ===
     if state.deliverable_type == "deployable_service":
@@ -904,12 +893,26 @@ async def produce_node(state: MeetingState) -> MeetingState:
             await _emit_agent_spoke(
                 state, Role.ENGINEER, Stage.PRODUCE, f"分阶段生成异常({type(pe).__name__})，回退到传统生成模式"
             )
-            # 回退到原来的单次LLM调用
-            result, confidence = await _run_with_consistency(state, "produce", call_fn)
+            # 回退到原来的单次LLM调用（工具在全部环节可用）
+            result, confidence = await _run_stage_step(
+                state,
+                "produce",
+                Role.MODERATOR.value,
+                build_prompt,
+                tool_registry=tool_registry,
+                on_token=_make_token_stream_callback(state),
+            )
 
     else:
-        # 非deployable_service类型使用原有单次LLM调用
-        result, confidence = await _run_with_consistency(state, "produce", call_fn)
+        # 非deployable_service类型使用原有单次LLM调用（工具在全部环节可用）
+        result, confidence = await _run_stage_step(
+            state,
+            "produce",
+            Role.MODERATOR.value,
+            build_prompt,
+            tool_registry=tool_registry,
+            on_token=_make_token_stream_callback(state),
+        )
 
     # 内容完整性校验：检查关键字段是否为空
     # 一致性检查只验证结果不与已锁定结论矛盾，不验证内容是否为空

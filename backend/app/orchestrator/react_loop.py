@@ -459,6 +459,46 @@ class ReactLoop:
         )
 
 
+# ---------- 中间步骤事件（tool.step）发射助手 ----------
+
+# 内联截图 base64 上限（约 200KB），防止 tool.step 事件过大拖垮 WS 与 DB
+_STEP_SCREENSHOT_MAX_BYTES = 200 * 1024
+
+
+async def _emit_step(step_cb: Any, step_type: str, data: dict[str, Any]) -> None:
+    """安全调用步骤回调，未提供回调时静默跳过。
+
+    step_cb 由 ReactLoop.run 经 args["_step_callback"] 注入，回调内部把
+    tool.step 事件发布到事件总线（WS 推送 + PostgreSQL 持久化）。
+    """
+    if step_cb is None:
+        return
+    with contextlib.suppress(Exception):
+        await step_cb(step_type, data)
+
+
+async def _capture_step_screenshot(meeting_id: str) -> str | None:
+    """为浏览器步骤捕获一张 viewport 截图（best-effort、有界内联）。
+
+    借鉴 Skyvern 的逐步截图记录思路：Phase 1 用有界内联 base64 驱动前端可视化回放，
+    Phase 2 再迁移到签名 URL / 独立录像文件外链（避免大字段进 events）。
+    """
+    if not meeting_id:
+        return None
+    try:
+        from app.tools.browser_tool import get_browser_tool
+
+        shot = await get_browser_tool().screenshot(meeting_id, full_page=False)
+        if shot.get("status") != "ok":
+            return None
+        b64 = shot.get("base64")
+        if not b64 or len(b64) > _STEP_SCREENSHOT_MAX_BYTES:
+            return None
+        return b64  # type: ignore[no-any-return]
+    except Exception:
+        return None
+
+
 # ---------- 默认工具注册表工厂 ----------
 
 
@@ -473,8 +513,10 @@ def create_default_tool_registry() -> ToolRegistry:
     async def _web_search(args: dict[str, Any]) -> Any:
         from app.tools import get_web_search
 
+        step_cb = args.get("_step_callback")
         query = args.get("query", "")
         top_k = args.get("top_k", 5)
+        await _emit_step(step_cb, "search_started", {"label": f"搜索：{query}", "status": "running", "query": query})
         tool = get_web_search()
         # 传递可选参数：language, time_range, country, session_key
         kwargs: dict[str, Any] = {}
@@ -485,7 +527,12 @@ def create_default_tool_registry() -> ToolRegistry:
         meeting_id = args.get("meeting_id", "")
         if meeting_id:
             kwargs["session_key"] = str(meeting_id)
-        return await tool.search(query, top_k, **kwargs)
+        result = await tool.search(query, top_k, **kwargs)
+        count = len(result) if isinstance(result, list) else 0
+        await _emit_step(
+            step_cb, "results_found", {"label": f"找到 {count} 条结果", "status": "completed", "count": count}
+        )
+        return result
 
     registry.register(
         "web_search",
@@ -504,10 +551,14 @@ def create_default_tool_registry() -> ToolRegistry:
     async def _web_fetch(args: dict[str, Any]) -> Any:
         from app.tools import get_web_fetch
 
+        step_cb = args.get("_step_callback")
         url = args.get("url", "")
         max_chars = args.get("max_chars", 5000)
+        await _emit_step(step_cb, "fetch_started", {"label": f"抓取：{url}", "status": "running", "url": url})
         tool = get_web_fetch()
-        return await tool.fetch_url(url, max_chars)
+        result = await tool.fetch_url(url, max_chars)
+        await _emit_step(step_cb, "content_extracted", {"label": "正文提取完成", "status": "completed", "url": url})
+        return result
 
     registry.register(
         "web_fetch",
@@ -525,10 +576,25 @@ def create_default_tool_registry() -> ToolRegistry:
     async def _browser_goto(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
 
+        step_cb = args.get("_step_callback")
         tool = get_browser_tool()
         url = str(args.get("url", ""))
         meeting_id = str(args.get("meeting_id", ""))
-        return await tool.goto(meeting_id, url)
+        await _emit_step(step_cb, "navigating", {"label": f"导航到 {url}", "status": "running", "url": url})
+        result = await tool.goto(meeting_id, url)
+        final_url = str((result or {}).get("url") or url)
+        title = str((result or {}).get("title") or "")
+        step_data: dict[str, Any] = {"label": f"已打开 {title or final_url}", "status": "completed", "url": final_url}
+        if title:
+            step_data["title"] = title
+        if (result or {}).get("status") != "ok":
+            step_data["status"] = "failed"
+            step_data["label"] = str((result or {}).get("error") or "导航失败")
+        shot = await _capture_step_screenshot(meeting_id)
+        if shot:
+            step_data["screenshot"] = shot
+        await _emit_step(step_cb, "page_navigated", step_data)
+        return result
 
     registry.register(
         "browser.goto",
@@ -540,10 +606,14 @@ def create_default_tool_registry() -> ToolRegistry:
     async def _browser_extract(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
 
+        step_cb = args.get("_step_callback")
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         max_length = int(args.get("max_length", 5000))
-        return await tool.extract_content(meeting_id, max_length)
+        await _emit_step(step_cb, "extracting", {"label": "提取页面内容", "status": "running"})
+        result = await tool.extract_content(meeting_id, max_length)
+        await _emit_step(step_cb, "content_extracted", {"label": "内容提取完成", "status": "completed"})
+        return result
 
     registry.register(
         "browser.extract",
@@ -555,10 +625,14 @@ def create_default_tool_registry() -> ToolRegistry:
     async def _browser_click(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
 
+        step_cb = args.get("_step_callback")
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         selector = str(args.get("selector", ""))
-        return await tool.click(meeting_id, selector)
+        await _emit_step(step_cb, "clicking", {"label": f"点击 {selector}", "status": "running", "selector": selector})
+        result = await tool.click(meeting_id, selector)
+        await _emit_step(step_cb, "clicked", {"label": "点击完成", "status": "completed", "selector": selector})
+        return result
 
     registry.register(
         "browser.click",
@@ -570,10 +644,14 @@ def create_default_tool_registry() -> ToolRegistry:
     async def _browser_scroll(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
 
+        step_cb = args.get("_step_callback")
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         amount = int(args.get("amount", 500))
-        return await tool.scroll(meeting_id, "down", amount)
+        await _emit_step(step_cb, "scrolling", {"label": f"滚动 {amount}px", "status": "running", "amount": amount})
+        result = await tool.scroll(meeting_id, "down", amount)
+        await _emit_step(step_cb, "scrolled", {"label": "滚动完成", "status": "completed"})
+        return result
 
     registry.register(
         "browser.scroll",
@@ -585,6 +663,7 @@ def create_default_tool_registry() -> ToolRegistry:
     async def _browser_evaluate(args: dict[str, Any]) -> Any:
         from app.tools.browser_tool import get_browser_tool
 
+        step_cb = args.get("_step_callback")
         tool = get_browser_tool()
         meeting_id = str(args.get("meeting_id", ""))
         expression = str(args.get("expression", "document.title"))
@@ -598,8 +677,12 @@ def create_default_tool_registry() -> ToolRegistry:
                 logger="orchestrator.react_loop",
                 extra={"expression_preview": expression[:100], "reason": reason},
             )
+            await _emit_step(step_cb, "error", {"label": f"脚本被阻断：{reason}", "status": "failed", "reason": reason})
             return {"status": "blocked", "reason": reason, "expression": expression[:200]}
-        return await tool.evaluate(meeting_id, expression)
+        await _emit_step(step_cb, "evaluating", {"label": "执行脚本", "status": "running"})
+        result = await tool.evaluate(meeting_id, expression)
+        await _emit_step(step_cb, "evaluated", {"label": "脚本执行完成", "status": "completed"})
+        return result
 
     registry.register(
         "browser.evaluate",

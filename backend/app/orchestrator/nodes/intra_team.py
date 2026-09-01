@@ -6,16 +6,16 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.agents.compute import build_intra_prompt, execute_think
+from app.agents.compute import build_intra_prompt
 from app.agents.trace import set_current_trace
 from app.logging_config import get_logger
 from app.models import MeetingState, Role
 from app.orchestrator.stage_runners import run_intra_team
 
 from ._helpers import (
+    _build_tool_registry,
     _match_role,
-    _resolve_model_for_call,
-    _run_with_consistency,
+    _run_stage_step,
 )
 
 logger = get_logger("orchestrator.nodes.intra_team")
@@ -36,6 +36,7 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
     传入 run_intra_team。阶段完成后清空检查点字段。
     """
     set_current_trace(state.llm_trace)
+    tool_registry = _build_tool_registry()
 
     if not state.team_config:
         state.team_config = [
@@ -106,17 +107,26 @@ async def intra_team_node(state: MeetingState) -> MeetingState:
         )
 
     async def _think_one(role: Role, stance: str) -> dict[str, Any]:
-        async def call_fn(anchor: str) -> dict[str, Any]:
+        def build_prompt(anchor: str, available_tools: Any) -> Any:
             # 合并门禁补充锚点与常规锚点
             merged_anchor = anchor
             if supplement_anchor:
                 merged_anchor = f"{supplement_anchor}\n\n{anchor}" if anchor else supplement_anchor
-            req = build_intra_prompt(role, state.clarified_topic or state.topic, stance, anchor=merged_anchor)
-            req.model = _resolve_model_for_call(state, role.value, "intra_team")
-            resp = await execute_think(req)
-            return resp.result
+            return build_intra_prompt(
+                role,
+                state.clarified_topic or state.topic,
+                stance,
+                anchor=merged_anchor,
+                available_tools=available_tools,
+            )
 
-        result, confidence = await _run_with_consistency(state, "intra_team", call_fn)
+        result, confidence = await _run_stage_step(
+            state,
+            "intra_team",
+            role.value,
+            build_prompt,
+            tool_registry=tool_registry,
+        )
         output = {
             "role": role.value,
             "stance": stance,

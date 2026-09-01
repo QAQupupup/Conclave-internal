@@ -407,7 +407,13 @@ def build_clarify_prompt(
     )
 
 
-def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: str = "") -> ThinkRequest:
+def build_intra_prompt(
+    role: Role,
+    clarified_topic: str,
+    stance: str,
+    anchor: str = "",
+    available_tools: list[dict[str, Any]] | None = None,
+) -> ThinkRequest:
     """构造 intra_team 阶段的思考请求
 
     [Wave 7] clarified_topic 来自 LLM 产出（clarify 阶段），经过 sanitize_untrusted_content
@@ -422,6 +428,8 @@ def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: st
     prompt = render(template, role_persona=persona, clarified_topic=safe_topic, stance=stance)
     prompt = _inject_profile(prompt, role.value)
     prompt = _inject_skills(prompt, stage="intra_team", role=role.value)
+    if available_tools:
+        prompt = _inject_tools_to_prompt(prompt, available_tools)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -429,6 +437,7 @@ def build_intra_prompt(role: Role, clarified_topic: str, stance: str, anchor: st
         stage="intra_team",
         prompt=prompt,
         schema_hint="intra_team",
+        available_tools=available_tools or [],
     )
 
 
@@ -482,7 +491,11 @@ def build_intra_react_prompt(
     )
 
 
-def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> ThinkRequest:
+def build_cross_team_prompt(
+    team_conclusions: list[dict],
+    anchor: str = "",
+    available_tools: list[dict[str, Any]] | None = None,
+) -> ThinkRequest:
     """[Wave 7] team_conclusions 来自 LLM 产出，经 sanitize_untrusted_content 清洗"""
     from app.orchestrator.prompt_safety import sanitize_untrusted_content
 
@@ -490,6 +503,8 @@ def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> T
     prompt = render(CROSS_TEAM, team_conclusions=safe_conclusions)
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     prompt = _inject_skills(prompt, stage="cross_team", role=Role.MODERATOR.value)
+    if available_tools:
+        prompt = _inject_tools_to_prompt(prompt, available_tools)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -497,6 +512,7 @@ def build_cross_team_prompt(team_conclusions: list[dict], anchor: str = "") -> T
         stage="cross_team",
         prompt=prompt,
         schema_hint="cross_team",
+        available_tools=available_tools or [],
     )
 
 
@@ -525,7 +541,11 @@ def build_evidence_prompt(
     )
 
 
-def build_arbitrate_prompt(evidence_set: list[dict], anchor: str = "") -> ThinkRequest:
+def build_arbitrate_prompt(
+    evidence_set: list[dict],
+    anchor: str = "",
+    available_tools: list[dict[str, Any]] | None = None,
+) -> ThinkRequest:
     """[Wave 7] evidence_set 来自 LLM 产出，经 sanitize_untrusted_content 清洗"""
     from app.orchestrator.prompt_safety import sanitize_untrusted_content
 
@@ -533,6 +553,8 @@ def build_arbitrate_prompt(evidence_set: list[dict], anchor: str = "") -> ThinkR
     prompt = render(ARBITRATE, evidence_set=safe_evidence)
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     prompt = _inject_skills(prompt, stage="arbitrate", role=Role.MODERATOR.value)
+    if available_tools:
+        prompt = _inject_tools_to_prompt(prompt, available_tools)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -540,6 +562,7 @@ def build_arbitrate_prompt(evidence_set: list[dict], anchor: str = "") -> ThinkR
         stage="arbitrate",
         prompt=prompt,
         schema_hint="arbitrate",
+        available_tools=available_tools or [],
     )
 
 
@@ -549,6 +572,7 @@ def build_produce_prompt(
     template: str | None = None,
     deliverable_type: str = "prd_openapi",
     evidence_summary: dict | None = None,
+    available_tools: list[dict[str, Any]] | None = None,
 ) -> ThinkRequest:
     if template is None:
         template = PRODUCE
@@ -573,6 +597,8 @@ def build_produce_prompt(
     prompt = _inject_profile(prompt, Role.MODERATOR.value)
     # 注入匹配的Skills（UI设计规范、代码规范等，根据deliverable_type动态加载）
     prompt = _inject_skills(prompt, stage="produce", deliverable_type=deliverable_type, role=Role.MODERATOR.value)
+    if available_tools:
+        prompt = _inject_tools_to_prompt(prompt, available_tools)
     if anchor:
         prompt = f"{anchor}\n\n{prompt}"
     return ThinkRequest(
@@ -580,6 +606,7 @@ def build_produce_prompt(
         stage="produce",
         prompt=prompt,
         schema_hint=f"produce_{deliverable_type}",
+        available_tools=available_tools or [],
     )
 
 
