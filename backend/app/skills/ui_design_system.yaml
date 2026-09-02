@@ -131,6 +131,22 @@ prompt: |
   - **禁止 hover 时改变布局**：hover 效果只允许颜色/透明度/阴影变化，不得导致元素位移或尺寸变化
   - **必须尊重 prefers-reduced-motion**：用户偏好减少动画时，所有过渡/动画降级为即时呈现
 
+  ### 悬浮画布体系（FloatingPanel 基元 + 徽标轨；实现见 frontend/src/components/ui/floating-panel.tsx 与 meeting/canvas-rail.tsx、canvas-layer.tsx）
+  - **两档档位**：M = `--panel-width-m`（448px）右贴边默认档（洞察：冲突与证据/相关会议/可观测）；L = `--panel-width-l`（720px）居中偏右沉浸档（操作回放、报告全文）。用户仅可升档（M→L，升档记忆持久化），不可降档或自由缩放
+  - **非模态**：不设遮罩层，画布打开时对话流仍可操作（边看边聊）；层级取 `--z-panel`
+  - **单焦点**：同一时刻最多一个画布展开（状态源 ui-slice.activeCanvas）；打开新画布即替换旧画布（旧画布走 200ms 退场动画）
+  - **入口为徽标轨**：对话流右侧垂直小徽标列，悬停显示功能名（title），点击打开画布，再次点击收起；数据类徽标可带数量角标（如冲突计数）
+  - **关闭方式**：ESC / 标题栏关闭按钮 / 被其他画布替换
+  - **档内最多一条主滚动条**：画布内容容器为唯一滚动区（允许 sticky tab 栏）；回放等多窗格工具视图允许各窗格局部滚动
+  - **窄屏兜底**：画布最大宽度 = 100vw - 2rem
+
+  ### 表单反馈规范（FieldError/FormAlert 基元；实现见 frontend/src/components/ui/form-feedback.tsx）
+  - **范式统一**：带字段校验的表单统一用 react-hook-form；校验时机为提交时校验 + 出错后变更即时重校验（reValidateMode: onChange），禁止输入中即时报错制造打扰
+  - **字段级错误只允许 FieldError**：紧贴字段下方，`text-xs text-danger` + `role="alert"`；出错字段同时设 `aria-invalid`（自动红框，Input/Textarea 内置）与 `aria-describedby` 关联错误文本
+  - **表单级错误只允许 FormAlert 横幅**：仅承载无法归属单一字段的服务端/网络错误（如"用户名或密码错误"），置于字段与提交按钮之间
+  - **禁止用 toast 承载字段校验错误**：toast 只用于操作结果反馈（创建成功/失败等）；校验错误必须留在字段旁，用户视线无需跳转
+  - **禁止静默 return**：任何校验失败必须有可见反馈；触发型交互（输入框 + 触发按钮）以 disabled 为主反馈，键盘路径（Enter）补 FieldError
+
   ### 间距反模式
   - **禁止 padding/margin 使用非 4px 基准值**：所有间距必须是 4 的倍数（4/8/12/16/20/24/32/48/64），禁止 5px/7px/10px/13px 这类非基准值
   - **禁止卡片内容贴边**：卡片内边距至少 16px
