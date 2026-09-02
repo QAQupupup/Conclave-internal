@@ -11,6 +11,7 @@
  * 7. 空字符串 / 纯空白输入返回空字符串
  * 8. 幂等性：二次归一化结果不变
  * 9. 边界：--- / *** 水平分隔线不被误删
+ * 10. 换行归一：CRLF / 孤立 CR → LF（含围栏代码块内部）
  */
 import { describe, it, expect } from 'vitest';
 import { normalizeMarkdown } from '@/lib/markdown-normalize';
@@ -74,5 +75,26 @@ describe('normalizeMarkdown', () => {
   it('移除空列表项后不叠加出多余空行', () => {
     const input = '段落一\n\n-\n\n段落二';
     expect(normalizeMarkdown(input)).toBe('段落一\n\n段落二');
+  });
+
+  it('CRLF 换行归一为 LF', () => {
+    expect(normalizeMarkdown('甲\r\n乙')).toBe('甲\n乙');
+    // CRLF 段落分隔归一后仍是单个空行
+    expect(normalizeMarkdown('甲\r\n\r\n乙')).toBe('甲\n\n乙');
+  });
+
+  it('孤立 CR 归一为 LF', () => {
+    expect(normalizeMarkdown('甲\r乙')).toBe('甲\n乙');
+  });
+
+  it('CRLF 归一在围栏代码块内部同样生效', () => {
+    const input = '前文\r\n\r\n```\r\nline1\r\nline2\r\n```\r\n\r\n后文';
+    expect(normalizeMarkdown(input)).toBe('前文\n\n```\nline1\nline2\n```\n\n后文');
+  });
+
+  it('CRLF 输入幂等：二次归一化结果不变', () => {
+    const input = '甲\r\n\r\n\r\n乙\r\n-\r\n- 丙';
+    const once = normalizeMarkdown(input);
+    expect(normalizeMarkdown(once)).toBe(once);
   });
 });

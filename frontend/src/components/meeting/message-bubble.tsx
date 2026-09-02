@@ -151,7 +151,7 @@ export function MessageBubble({ message, isSelected, onSelect, onBranch }: Messa
 function UserBubble({ message }: { message: MeetingMessage }) {
   return (
     <div className="flex justify-end gap-3 px-4 py-2 message-enter">
-      <div className="max-w-[80%] rounded-lg bg-brand-500 px-3 py-2 text-sm leading-relaxed text-white shadow-sm">
+      <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-lg bg-brand-500 px-3 py-2 text-sm leading-relaxed text-white shadow-sm">
         {message.content}
       </div>
       <div className="mt-0.5 flex-shrink-0">
