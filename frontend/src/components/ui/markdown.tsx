@@ -2,6 +2,7 @@ import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
+import { normalizeMarkdown } from '@/lib/markdown-normalize';
 
 interface MarkdownProps {
   content: string;
@@ -13,9 +14,11 @@ interface MarkdownProps {
  * 注意：react-markdown 已经通过 lazy-import 在外层处理
  */
 export function Markdown({ content, className }: MarkdownProps) {
+  // 渲染前归一化：压缩多余空行、移除空列表项/空引用行（代码块内部不受影响）
+  const normalized = React.useMemo(() => normalizeMarkdown(content || ''), [content]);
   return (
     <div className={cn('prose-conclave', className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content || ''}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalized}</ReactMarkdown>
     </div>
   );
 }
