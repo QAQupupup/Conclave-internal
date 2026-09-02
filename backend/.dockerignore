@@ -7,6 +7,10 @@
 __pycache__
 *.pyc
 *.pyo
+# 本地 Cython 编译产物（开源发布脚手架生成）：禁止进镜像，
+# 否则 .so 会遮蔽同名 .py 源码（Python 优先加载扩展模块），导致新代码不生效
+*.so
+*.pyd
 *.egg-info
 .venv
 venv
