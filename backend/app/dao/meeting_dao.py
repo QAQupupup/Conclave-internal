@@ -143,12 +143,16 @@ async def query_meetings(
     offset: int = 0,
     tags: list[str] | None = None,
     include_deleted: bool = False,
+    statuses: list[str] | None = None,
 ) -> dict[str, Any]:
-    """搜索+分页+标签过滤查询会议。
+    """搜索+分页+标签+状态过滤查询会议。
 
     返回 {items, total}：
     - items：当前页的会议列表（含 tags 字段）
     - total：满足条件的总记录数（用于分页计算）
+
+    statuses：状态白名单（如 ["running", "paused"]），命中其一即匹配；
+    None/空列表表示不过滤。
     """
     cond = tenant_filter_expr(MeetingModel.tenant_id)
     conds: list[Any] = [cond]
@@ -158,6 +162,9 @@ async def query_meetings(
 
     if q:
         conds.append(MeetingModel.topic.like(f"%{q}%"))
+
+    if statuses:
+        conds.append(MeetingModel.status.in_(statuses))
 
     if tags:
         # 交集过滤：会议需同时拥有所有指定标签

@@ -645,15 +645,17 @@ async def list_meetings_with_status(
     limit: int = 20,
     offset: int = 0,
     tags: str | None = None,
+    status: str | None = None,
     include_deleted: bool = False,
 ) -> dict[str, Any]:
-    """列出会议（支持搜索、分页、标签过滤）
+    """列出会议（支持搜索、分页、标签过滤、状态过滤）
 
     查询参数：
     - q：按议题关键词搜索（模糊匹配）
     - limit：每页数量（默认 20）
     - offset：偏移量（默认 0）
     - tags：逗号分隔的标签列表，会议需同时拥有所有标签才匹配
+    - status：逗号分隔的状态白名单（如 "running,paused"），命中其一即匹配
     - include_deleted：是否包含已软删除的会议（默认 false，仅管理员建议使用）
 
     返回 {meetings[], total, concurrent_limit, running_count}：
@@ -663,7 +665,10 @@ async def list_meetings_with_status(
     - running_count：当前正在运行的会议数
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-    result = await query_meetings(q=q, limit=limit, offset=offset, tags=tag_list, include_deleted=include_deleted)
+    status_list = [s.strip() for s in status.split(",") if s.strip()] if status else None
+    result = await query_meetings(
+        q=q, limit=limit, offset=offset, tags=tag_list, include_deleted=include_deleted, statuses=status_list
+    )
     from app.orchestrator.instant import FLOW_STANDARD, normalize_mode
 
     items = []
