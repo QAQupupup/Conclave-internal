@@ -76,7 +76,7 @@ function NavItemButton({ item }: { item: NavItem }) {
       aria-label={item.label}
       className={({ isActive }) =>
         cn(
-          'group relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-fast',
+          'group relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-(--duration-hover) ease-(--ease-standard)',
           isActive
             ? 'bg-brand-soft text-brand-500'
             : 'text-text-tertiary hover:bg-bg-tertiary hover:text-text-secondary'

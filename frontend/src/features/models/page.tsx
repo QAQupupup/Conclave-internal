@@ -441,7 +441,7 @@ export default function ModelsPage() {
                 key={chip.value}
                 type="button"
                 onClick={() => setFilterChip(chip.value)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition-all duration-fast ${
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-all duration-(--duration-hover) ease-(--ease-standard) ${
                   filterChip === chip.value
                     ? 'border-brand-500 bg-brand-500/5 text-brand-600'
                     : 'border-border-default bg-bg-primary text-text-secondary hover:bg-bg-tertiary'
