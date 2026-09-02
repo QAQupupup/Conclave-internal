@@ -97,6 +97,9 @@ export function CommandPalette() {
               <CommandItem onSelect={() => runCommand(() => navigate('/board'))} icon={<LayoutDashboard className="h-4 w-4" />}>
                 看板
               </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => navigate('/board/new'))} icon={<Plus className="h-4 w-4" />}>
+                新建议题
+              </CommandItem>
               <CommandItem onSelect={() => runCommand(() => navigate('/workspace'))} icon={<FolderKanban className="h-4 w-4" />}>
                 工作区
               </CommandItem>

@@ -37,6 +37,18 @@ export default tseslint.config(
       // role="separator" + tabIndex + aria-orientation + aria-valuenow + 方向键。
       // jsx-a11y 未将 separator 归为 widget，故在此显式放行该角色，而非关闭规则。
       'jsx-a11y/no-noninteractive-tabindex': ['warn', { roles: ['separator'] }],
+      // 列表行（board 会议行）采用可点击行范式：li + role="button" + tabIndex +
+      // Enter keydown + aria-label，键盘可达性完整，故按官方文档的白名单机制
+      // 显式放行 li→button 组合（保留其余组合的告警），而非关闭规则。
+      'jsx-a11y/no-noninteractive-element-to-interactive-role': [
+        'warn',
+        {
+          ul: ['listbox', 'menu', 'menubar', 'radiogroup', 'tablist', 'tree', 'treegrid'],
+          ol: ['listbox', 'menu', 'menubar', 'radiogroup', 'tablist', 'tree', 'treegrid'],
+          li: ['menuitem', 'option', 'row', 'tab', 'treeitem', 'button'],
+          img: ['button'],
+        },
+      ],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-empty-object-type': 'warn',
