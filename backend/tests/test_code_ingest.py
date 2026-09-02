@@ -1,23 +1,29 @@
 # 代码摄入安全逻辑单元测试（ADR-016 Phase A）
 # 验证真实函数：_parse_repo_name / _sanitize_dir / _inject_token / _redact /
-#               _safe_extract_zip / _resolve_dest
-# 覆盖正向 + 边界（空/穿越）+ 异常（zip-slip）维度。
+#               _safe_extract_zip / _resolve_dest / _register_code_in_state /
+#               _register_code_to_state
+# 覆盖正向 + 边界（空/穿越）+ 异常（zip-slip/登记失败降级）维度。
 from __future__ import annotations
 
 import io
 import zipfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.models import MeetingState
 from app.routers.code import (
     _inject_token,
     _parse_repo_name,
     _redact,
+    _register_code_in_state,
+    _register_code_to_state,
     _resolve_dest,
     _safe_extract_zip,
     _sanitize_dir,
 )
+from conclave_core.anchor import get_code_anchor, get_full_anchor
 
 
 class TestParseRepoName:
@@ -147,3 +153,163 @@ class TestResolveDest:
     def test_normal_name_within_base(self, tmp_path: Path) -> None:
         dest = _resolve_dest(tmp_path, "repo")
         assert dest.parent.resolve() == tmp_path.resolve()
+
+
+# ---- [P1 修复] MeetingState 登记与代码锚点 ----
+
+
+def _make_state() -> MeetingState:
+    return MeetingState(meeting_id="m-1", topic="测试议题")
+
+
+def _repo_info(**overrides: object) -> dict:
+    info: dict = {
+        "name": "demo-repo",
+        "path": "demo-repo",
+        "source_type": "git",
+        "file_count": 42,
+        "size_bytes": 1024,
+        "indexed": True,
+    }
+    info.update(overrides)
+    return info
+
+
+class TestRegisterCodeInState:
+    """登记纯逻辑：写入 code_repos + 同步 doc_summaries + 去重。"""
+
+    def test_registers_repo_and_summary(self) -> None:
+        state = _make_state()
+        _register_code_in_state(state, _repo_info())
+        assert state.code_repos == [_repo_info()]
+        assert len(state.doc_summaries) == 1
+        summary = state.doc_summaries[0]
+        assert "demo-repo" in summary
+        assert "42" in summary
+        assert "git" in summary
+
+    def test_same_path_replaces_not_duplicates(self) -> None:
+        """非正向边界：重新摄入同路径 → 替换旧记录而非堆积。"""
+        state = _make_state()
+        _register_code_in_state(state, _repo_info(file_count=1, indexed=False))
+        _register_code_in_state(state, _repo_info(file_count=99, indexed=True))
+        assert len(state.code_repos) == 1
+        assert state.code_repos[0]["file_count"] == 99
+        assert state.code_repos[0]["indexed"] is True
+        # doc_summaries 同样不堆积
+        assert len(state.doc_summaries) == 1
+        assert "99" in state.doc_summaries[0]
+
+    def test_different_paths_coexist(self) -> None:
+        state = _make_state()
+        _register_code_in_state(state, _repo_info(name="a", path="a"))
+        _register_code_in_state(state, _repo_info(name="b", path="b"))
+        assert [r["path"] for r in state.code_repos] == ["a", "b"]
+        assert len(state.doc_summaries) == 2
+
+    def test_missing_name_falls_back_to_path(self) -> None:
+        """边界：repo_info 缺 name 时用 path 兜底，不抛 KeyError。"""
+        state = _make_state()
+        info = _repo_info()
+        del info["name"]
+        _register_code_in_state(state, info)
+        assert state.code_repos[0]["path"] == "demo-repo"
+        assert "demo-repo" in state.doc_summaries[0]
+
+    def test_preserves_existing_doc_summaries(self) -> None:
+        state = _make_state()
+        state.doc_summaries.append("需求文档（3 块）")
+        _register_code_in_state(state, _repo_info())
+        assert state.doc_summaries[0] == "需求文档（3 块）"
+        assert len(state.doc_summaries) == 2
+
+
+class TestCodeAnchor:
+    """代码锚点构造：注入各阶段 prompt 的"已导入代码"感知文本。"""
+
+    def test_empty_repos_returns_empty(self) -> None:
+        state = _make_state()
+        assert get_code_anchor(state) == ""
+
+    def test_anchor_contains_repo_facts(self) -> None:
+        state = _make_state()
+        state.code_repos = [_repo_info()]
+        anchor = get_code_anchor(state)
+        assert "[已导入代码仓库]" in anchor
+        assert "demo-repo" in anchor
+        assert "42 个文件" in anchor
+        assert "已建立代码索引" in anchor
+        # 引导取证行为
+        assert "fs.list" in anchor
+
+    def test_unindexed_repo_marked(self) -> None:
+        state = _make_state()
+        state.code_repos = [_repo_info(indexed=False)]
+        assert "未建立代码索引" in get_code_anchor(state)
+
+    def test_invalid_entries_skipped(self) -> None:
+        """非正向边界：无名无路径的脏条目被跳过，全部无效时返回空串。"""
+        state = _make_state()
+        state.code_repos = [{"name": "", "path": ""}, {}]
+        assert get_code_anchor(state) == ""
+
+    def test_full_anchor_includes_code_anchor(self) -> None:
+        state = _make_state()
+        state.code_repos = [_repo_info()]
+        full = get_full_anchor(state, "intra_team")
+        assert "[已导入代码仓库]" in full
+
+    def test_full_anchor_unchanged_without_code(self) -> None:
+        """回归：无代码仓库时 get_full_anchor 行为与修复前一致（空串）。"""
+        state = _make_state()
+        assert get_full_anchor(state, "clarify") == ""
+
+
+class TestRegisterCodeToState:
+    """登记入口：内存态/DB 恢复/降级路径。"""
+
+    async def test_in_memory_state_registered_and_persisted(self) -> None:
+        state = _make_state()
+        with (
+            patch("app.orchestrator.runner.get_state", return_value=state),
+            patch("app.routers.code._persist_state_lite", new=AsyncMock()) as mock_persist,
+        ):
+            ok = await _register_code_to_state("m-1", _repo_info())
+        assert ok is True
+        assert state.code_repos[0]["path"] == "demo-repo"
+        mock_persist.assert_awaited_once_with(state)
+
+    async def test_recovers_from_db_when_not_in_memory(self) -> None:
+        """重启场景：内存未命中但 DB 有记录 → 恢复后登记。"""
+        state = _make_state()
+        with (
+            patch("app.orchestrator.runner.get_state", return_value=None),
+            patch("app.dao.meeting_dao.get_meeting", new=AsyncMock(return_value={"topic": "测试议题"})),
+            patch("app.orchestrator.runner.load_or_create", new=AsyncMock(return_value=state)),
+            patch("app.routers.code._persist_state_lite", new=AsyncMock()),
+        ):
+            ok = await _register_code_to_state("m-1", _repo_info())
+        assert ok is True
+        assert state.code_repos
+
+    async def test_no_state_no_record_returns_false(self) -> None:
+        """非正向：无内存态且 DB 无记录 → 返回 False，不抛异常。"""
+        with (
+            patch("app.orchestrator.runner.get_state", return_value=None),
+            patch("app.dao.meeting_dao.get_meeting", new=AsyncMock(return_value=None)),
+        ):
+            ok = await _register_code_to_state("m-404", _repo_info())
+        assert ok is False
+
+    async def test_persist_failure_degrades_to_false(self) -> None:
+        """非正向：持久化失败 → 返回 False（摄入结果不受影响）。"""
+        state = _make_state()
+        with (
+            patch("app.orchestrator.runner.get_state", return_value=state),
+            patch(
+                "app.routers.code._persist_state_lite",
+                new=AsyncMock(side_effect=RuntimeError("db down")),
+            ),
+        ):
+            ok = await _register_code_to_state("m-1", _repo_info())
+        assert ok is False

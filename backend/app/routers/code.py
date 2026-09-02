@@ -323,6 +323,92 @@ def _count_files(path: Path) -> int:
     return sum(1 for p in path.rglob("*") if p.is_file() and ".git" not in p.parts)
 
 
+# ---- MeetingState 登记（[P1 修复] 打通"代码上传 → 会议感知"）----
+
+
+def _register_code_in_state(state: Any, repo_info: dict[str, Any]) -> None:
+    """把摄入的代码仓库登记进 MeetingState（纯逻辑，便于单元测试）。
+
+    - state.code_repos 是权威清单：按 path 去重（重新摄入同名目录时替换旧记录）
+    - state.doc_summaries 同步一条摘要：让 clarify 阶段"上传资料摘要"可见；
+      先移除同名旧摘要再追加，避免重复摄入后摘要堆积
+    """
+    path = str(repo_info.get("path") or repo_info.get("name") or "")
+    state.code_repos = [r for r in state.code_repos if r.get("path") != path]
+    state.code_repos.append(repo_info)
+
+    name = str(repo_info.get("name") or path)
+    marker = f"代码库 {name}"
+    state.doc_summaries = [s for s in state.doc_summaries if not s.startswith(marker)]
+    state.doc_summaries.append(
+        f"{marker}（{repo_info.get('file_count', 0)} 个文件，目录 {path}，来源 {repo_info.get('source_type', 'unknown')}）"
+    )
+
+
+async def _persist_state_lite(state: Any) -> None:
+    """立即持久化会议状态（单 session 原子，与 Runner._persist 同源逻辑）。
+
+    摄入多发生在会议启动前，若只改内存不落库，重启后登记会丢失、
+    且重新摄入会撞 409（目录已存在），故摄入成功后立即落库。
+    """
+    from app.dao.meeting_aux_dao import save_meeting_aux
+    from app.dao.meeting_dao import save_meeting
+    from app.db.engine import async_session_factory
+
+    aux = state.extract_aux()
+    try:
+        async with async_session_factory() as session:
+            try:
+                await save_meeting(
+                    meeting_id=state.meeting_id,
+                    topic=state.topic,
+                    status=state.status.value,
+                    stage=state.stage.value,
+                    created_at=state.created_at,
+                    payload=state.snapshot(),
+                    session=session,
+                )
+                await save_meeting_aux(state.meeting_id, aux, session=session)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    finally:
+        state.inject_aux(aux)
+
+
+async def _register_code_to_state(meeting_id: str, repo_info: dict[str, Any]) -> bool:
+    """把代码仓库登记进会议运行态并立即持久化。返回是否登记成功。
+
+    - 优先取内存态；未命中且 DB 有记录时从 PostgreSQL 恢复（进程重启场景）
+    - 登记/持久化失败不阻断摄入结果（文件已落盘，仍可浏览），仅告警
+    """
+    from app.orchestrator.runner import get_state, load_or_create
+
+    try:
+        state = get_state(meeting_id)
+        if state is None:
+            from app.dao.meeting_dao import get_meeting
+
+            record = await get_meeting(meeting_id)
+            if record is not None:
+                state = await load_or_create(meeting_id, record.get("topic") or "")
+        if state is None:
+            logger.info("会议运行态不存在，跳过代码登记: meeting_id=%s", meeting_id)
+            return False
+        _register_code_in_state(state, repo_info)
+        await _persist_state_lite(state)
+        return True
+    except Exception as e:
+        logger.warning(
+            "代码登记到会议状态失败（不影响摄入结果）: meeting_id=%s, %s: %s",
+            meeting_id,
+            type(e).__name__,
+            e,
+        )
+        return False
+
+
 # ---- 端点 ----
 
 
@@ -370,6 +456,21 @@ async def ingest_code(
             e,
         )
 
+    # [P1 修复] 登记 MeetingState：让会议流程感知"已导入代码"。
+    # 代码锚点（conclave_core.anchor.get_code_anchor）会随各阶段 prompt 注入，
+    # LLM 不再需要用户口述才知道代码在哪。登记失败不阻断摄入结果。
+    registered = await _register_code_to_state(
+        meeting_id,
+        {
+            "name": target_name,
+            "path": target_name,
+            "source_type": result["source_type"],
+            "file_count": result["file_count"],
+            "size_bytes": result["size_bytes"],
+            "indexed": index_stats is not None,
+        },
+    )
+
     response: dict[str, Any] = {
         "meeting_id": meeting_id,
         "source_type": result["source_type"],
@@ -380,6 +481,8 @@ async def ingest_code(
         "workspace_path": f"{meeting_id}/{target_name}".replace("\\", "/"),
         "size_bytes": result["size_bytes"],
         "file_count": result["file_count"],
+        # 是否已登记到会议状态（False 表示仅落盘可浏览，prompt 暂不感知）
+        "registered": registered,
     }
     if index_stats is not None:
         response["index"] = index_stats

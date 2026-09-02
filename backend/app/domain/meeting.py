@@ -137,6 +137,7 @@ class MeetingObservabilitySection(BaseModel):
     decision_record: dict[str, Any] | None = None
     artifact: dict[str, Any] | None = None
     doc_summaries: list[str] = Field(default_factory=list)
+    code_repos: list[dict[str, Any]] = Field(default_factory=list)
     reference_meeting_ids: list[str] = Field(default_factory=list)
     reference_context: str = ""
     charter: MeetingCharter | None = None
@@ -219,6 +220,12 @@ class MeetingState(BaseModel):
     resolved_from_model_override: str = ""
     paused_snapshot: dict[str, Any] | None = None
     doc_summaries: list[str] = Field(default_factory=list)  # 上传资料摘要
+    # 已摄入的代码仓库清单（routers/code.py ingest_code 成功后登记，[P1 修复]）
+    # 每项: {"name": "...", "path": "...", "source_type": "git|zip",
+    #        "file_count": int, "size_bytes": int, "indexed": bool}
+    # 供 prompt 代码锚点（conclave_core.anchor.get_code_anchor）注入各阶段，
+    # 让 LLM 感知"会议已导入哪些代码、在哪里、可否检索"。
+    code_repos: list[dict[str, Any]] = Field(default_factory=list)
     reference_meeting_ids: list[str] = Field(default_factory=list)  # 引用的历史会议 ID 列表
     reference_context: str = ""  # 引用会议摘要文本（注入 prompt）
     # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）
@@ -463,6 +470,7 @@ class MeetingState(BaseModel):
                 decision_record=self.decision_record,
                 artifact=self.artifact,
                 doc_summaries=self.doc_summaries,
+                code_repos=self.code_repos,
                 reference_meeting_ids=self.reference_meeting_ids,
                 reference_context=self.reference_context,
                 charter=self.charter,
