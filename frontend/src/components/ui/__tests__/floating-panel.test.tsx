@@ -6,9 +6,12 @@
  * 2. 打开时渲染标题与内容，带 role=dialog + aria-label
  * 3. 点击关闭按钮触发 onClose
  * 4. ESC 键触发 onClose
- * 5. M 档显示升档按钮并触发 onUpgrade；L 档隐藏升档按钮
- * 6. 关闭后延迟一个动效时长再卸载（退场动画窗口）
- * 7. 退场动画中途重新打开会取消卸载（边界：快速开合不丢面板）
+ * 5. 传入 onSizeChange 时渲染三档切换器；点击目标档触发回调，当前档不触发
+ * 6. 未传 onSizeChange 时不渲染档位切换器与拖拽条
+ * 7. 关闭后延迟一个动效时长再卸载（退场动画窗口）
+ * 8. 退场动画中途重新打开会取消卸载（边界：快速开合不丢面板）
+ *
+ * 档位吸附纯函数（snapWidthToSize）测试见 floating-panel-sizing.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
@@ -80,24 +83,34 @@ describe('FloatingPanel', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('M 档显示升档按钮，点击触发 onUpgrade', () => {
-    const onUpgrade = vi.fn();
+  it('传入 onSizeChange 时渲染三档切换器，点击目标档触发回调', () => {
+    const onSizeChange = vi.fn();
     renderWithProviders(
-      <FloatingPanel open onClose={vi.fn()} size="M" title="测试" onUpgrade={onUpgrade}>
+      <FloatingPanel open onClose={vi.fn()} size="M" title="测试" onSizeChange={onSizeChange}>
         <div>x</div>
       </FloatingPanel>,
     );
-    fireEvent.click(screen.getByLabelText('展开为大画布'));
-    expect(onUpgrade).toHaveBeenCalledTimes(1);
+    // 三档齐全
+    expect(screen.getByLabelText('切换到 M 档')).toBeDefined();
+    expect(screen.getByLabelText('切换到 L 档')).toBeDefined();
+    expect(screen.getByLabelText('切换到 XL 档')).toBeDefined();
+    // 当前档标记为按下态
+    expect(screen.getByLabelText('切换到 M 档').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByLabelText('切换到 XL 档').getAttribute('aria-pressed')).toBe('false');
+    // 点击目标档：双向均可（升档 XL / 保持档不触发）
+    fireEvent.click(screen.getByLabelText('切换到 XL 档'));
+    expect(onSizeChange).toHaveBeenCalledWith('XL');
+    fireEvent.click(screen.getByLabelText('切换到 M 档'));
+    expect(onSizeChange).toHaveBeenCalledTimes(1);
   });
 
-  it('L 档不显示升档按钮（只可升档不可降档）', () => {
+  it('未传 onSizeChange 时不渲染档位切换器（纯展示画布）', () => {
     renderWithProviders(
-      <FloatingPanel open onClose={vi.fn()} size="L" title="测试" onUpgrade={vi.fn()}>
+      <FloatingPanel open onClose={vi.fn()} size="L" title="测试">
         <div>x</div>
       </FloatingPanel>,
     );
-    expect(screen.queryByLabelText('展开为大画布')).toBeNull();
+    expect(screen.queryByRole('group', { name: '画布档位' })).toBeNull();
   });
 
   it('关闭后延迟一个动效时长再卸载（退场动画窗口内仍在场）', () => {

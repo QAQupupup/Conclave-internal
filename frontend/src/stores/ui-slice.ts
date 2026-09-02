@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { FloatingPanelSize } from '@/components/ui/floating-panel';
+import type { FloatingPanelSize } from '@/components/ui/floating-panel-sizing';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -19,8 +19,10 @@ interface UIState {
   commandPaletteOpen: boolean;
   /** 当前展开的悬浮画布；null 表示全部收起 */
   activeCanvas: CanvasKind | null;
-  /** 洞察画布档位记忆（用户仅可 M→L 升档，不可降档） */
+  /** 洞察画布档位记忆（M/L/XL 双向切换 + 拖拽吸附） */
   insightsCanvasSize: FloatingPanelSize;
+  /** 操作回放画布档位记忆（默认 L 档） */
+  replayCanvasSize: FloatingPanelSize;
   setTheme: (theme: Theme) => void;
   setTimelineWidth: (w: number) => void;
   setThoughtTreeWidth: (w: number) => void;
@@ -33,8 +35,10 @@ interface UIState {
   /** 打开画布（单焦点互斥：自动替换当前展开的画布） */
   openCanvas: (kind: CanvasKind) => void;
   closeCanvas: () => void;
-  /** 洞察画布 M→L 升档（升档后持久化，不提供降档） */
-  upgradeInsightsCanvas: () => void;
+  /** 洞察画布档位切换（可升可降，拖拽吸附与档位切换器共用） */
+  setInsightsCanvasSize: (size: FloatingPanelSize) => void;
+  /** 操作回放画布档位切换 */
+  setReplayCanvasSize: (size: FloatingPanelSize) => void;
 }
 
 const DEFAULT_TIMELINE_WIDTH = 260;
@@ -54,6 +58,7 @@ export const useUIStore = create<UIState>()(
       commandPaletteOpen: false,
       activeCanvas: null,
       insightsCanvasSize: 'M',
+      replayCanvasSize: 'L',
       setTheme: (theme) => set({ theme }),
       setTimelineWidth: (timelineWidth) => set({ timelineWidth }),
       setThoughtTreeWidth: (thoughtTreeWidth) => set({ thoughtTreeWidth }),
@@ -65,11 +70,12 @@ export const useUIStore = create<UIState>()(
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
       openCanvas: (kind) => set({ activeCanvas: kind }),
       closeCanvas: () => set({ activeCanvas: null }),
-      upgradeInsightsCanvas: () => set({ insightsCanvasSize: 'L' }),
+      setInsightsCanvasSize: (insightsCanvasSize) => set({ insightsCanvasSize }),
+      setReplayCanvasSize: (replayCanvasSize) => set({ replayCanvasSize }),
     }),
     {
       name: 'conclave:ui:layout',
-      version: 2,
+      version: 3,
       // activeCanvas 不持久化：进入页面默认全部收起，徽标轨是唯一入口
       partialize: (state) => ({
         theme: state.theme,
@@ -78,6 +84,7 @@ export const useUIStore = create<UIState>()(
         timelineCollapsed: state.timelineCollapsed,
         thoughtTreeCollapsed: state.thoughtTreeCollapsed,
         insightsCanvasSize: state.insightsCanvasSize,
+        replayCanvasSize: state.replayCanvasSize,
       }),
       onRehydrateStorage: () => (state) => {
         // 迁移旧版本的 theme 设置（从独立的 conclave:ui:theme key 迁移）
@@ -99,6 +106,9 @@ export const useUIStore = create<UIState>()(
       },
       migrate: (persistedState: unknown, version: number) => {
         const s = persistedState as Record<string, unknown> | undefined;
+        // 档位合法性校验：非法值（旧版本或脏数据）回落到指定默认档
+        const validSize = (v: unknown, fallback: FloatingPanelSize): FloatingPanelSize =>
+          v === 'M' || v === 'L' || v === 'XL' ? v : fallback;
         // Version 0 → 1: fill missing fields with defaults
         if (version < 1) {
           return {
@@ -108,11 +118,20 @@ export const useUIStore = create<UIState>()(
             timelineCollapsed: (s?.timelineCollapsed as boolean) ?? true,
             thoughtTreeCollapsed: (s?.thoughtTreeCollapsed as boolean) ?? true,
             insightsCanvasSize: 'M',
+            replayCanvasSize: 'L',
           };
         }
         // Version 1 → 2: 新增悬浮画布档位记忆
         if (version < 2) {
-          return { ...s, insightsCanvasSize: (s?.insightsCanvasSize as 'M' | 'L') ?? 'M' };
+          return { ...s, insightsCanvasSize: validSize(s?.insightsCanvasSize, 'M'), replayCanvasSize: 'L' };
+        }
+        // Version 2 → 3: 档位扩展 XL + 回放画布档位记忆
+        if (version < 3) {
+          return {
+            ...s,
+            insightsCanvasSize: validSize(s?.insightsCanvasSize, 'M'),
+            replayCanvasSize: validSize(s?.replayCanvasSize, 'L'),
+          };
         }
         return persistedState;
       },

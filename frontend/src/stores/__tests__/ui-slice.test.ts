@@ -6,15 +6,15 @@
  * 2. 打开另一个画布自动替换当前画布（单焦点互斥）
  * 3. closeCanvas 收起画布
  * 4. 无画布展开时 closeCanvas 幂等（边界）
- * 5. upgradeInsightsCanvas M → L 升档
- * 6. 已为 L 档时升档幂等，无降档路径（边界）
+ * 5. setInsightsCanvasSize 双向切换（M→XL 升档 / XL→M 降档）
+ * 6. setReplayCanvasSize 默认 L 档且可切换（边界）
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useUIStore } from '@/stores/ui-slice';
 
 describe('ui-slice 悬浮画布状态', () => {
   beforeEach(() => {
-    useUIStore.setState({ activeCanvas: null, insightsCanvasSize: 'M' });
+    useUIStore.setState({ activeCanvas: null, insightsCanvasSize: 'M', replayCanvasSize: 'L' });
   });
 
   it('openCanvas 设置当前展开的画布', () => {
@@ -40,14 +40,21 @@ describe('ui-slice 悬浮画布状态', () => {
     expect(useUIStore.getState().activeCanvas).toBeNull();
   });
 
-  it('upgradeInsightsCanvas 将洞察画布从 M 升到 L', () => {
-    useUIStore.getState().upgradeInsightsCanvas();
+  it('setInsightsCanvasSize 支持双向切换（升档与降档）', () => {
+    const { setInsightsCanvasSize } = useUIStore.getState();
+    // 升档：M → L → XL
+    setInsightsCanvasSize('L');
     expect(useUIStore.getState().insightsCanvasSize).toBe('L');
+    setInsightsCanvasSize('XL');
+    expect(useUIStore.getState().insightsCanvasSize).toBe('XL');
+    // 降档：XL → M
+    setInsightsCanvasSize('M');
+    expect(useUIStore.getState().insightsCanvasSize).toBe('M');
   });
 
-  it('已为 L 档时 upgradeInsightsCanvas 保持 L（无降档，幂等）', () => {
-    useUIStore.setState({ insightsCanvasSize: 'L' });
-    useUIStore.getState().upgradeInsightsCanvas();
-    expect(useUIStore.getState().insightsCanvasSize).toBe('L');
+  it('replayCanvasSize 默认 L 档，setReplayCanvasSize 可切换（边界）', () => {
+    expect(useUIStore.getState().replayCanvasSize).toBe('L');
+    useUIStore.getState().setReplayCanvasSize('XL');
+    expect(useUIStore.getState().replayCanvasSize).toBe('XL');
   });
 });

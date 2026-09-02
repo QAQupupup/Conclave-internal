@@ -136,6 +136,7 @@
      S 档（320px）属 Popover 家族，不使用画布 token */
   --panel-width-m: 28rem; /* 448px M 档：右贴边默认档（证据、相关会议、可观测） */
   --panel-width-l: 45rem; /* 720px L 档：居中偏右沉浸档（回放、报告全文） */
+  --panel-width-xl: 62rem; /* 992px XL 档：近全屏"小页面"档（长文阅读、报告审阅） */
 
   /* === z-index 层级 === */
   --z-base: 0;
