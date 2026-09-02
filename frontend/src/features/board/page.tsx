@@ -136,12 +136,13 @@ export default function BoardPage() {
   const pastMeetings = meetings.filter((m) => m.status === 'done' || m.status === 'error' || m.status === 'aborted' || m.status === 'pending');
   const isLaunching = launchPhase !== 'idle';
 
-  // Auto-resize textarea
+  // Auto-resize textarea：上限 480px（原 200px 对长议题描述过挤，
+  // 超过上限后回落到内部滚动；完整编辑体验升级见 board 拆分方案）
   React.useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+    ta.style.height = Math.min(ta.scrollHeight, 480) + 'px';
   }, [topic, showNewForm]);
 
   const handlePolish = async () => {
@@ -315,7 +316,7 @@ export default function BoardPage() {
                     if (topicError && e.target.value.trim()) setTopicError('');
                   }}
                   placeholder="描述你想讨论的议题或问题...&#10;例如：分析微服务架构中服务间通信的最佳实践，对比 gRPC 和 REST 的适用场景"
-                  className="min-h-[96px] text-[15px] leading-relaxed"
+                  className="min-h-[120px] text-[15px] leading-relaxed"
                   disabled={isLaunching}
                   aria-invalid={!!topicError}
                   aria-describedby={topicError ? 'topic-error' : undefined}
