@@ -94,6 +94,14 @@
   --spacing-12: 3rem;
   --spacing-16: 4rem;
 
+  /* === 排版节奏（4px 网格；驱动 prose-stream / prose-report 两档密度上下文）=== */
+  --rhythm-paragraph-stream: 0.5rem; /* 8px  流密度（对话）段落间距 */
+  --rhythm-paragraph-report: 1rem;   /* 16px 报告密度（阅读）段落间距 */
+  --rhythm-block: 0.75rem;           /* 12px 块级元素（代码块/列表/表格/引用）前后间距 */
+  --rhythm-message: 0.5rem;          /* 8px  消息行垂直内边距 */
+  --rhythm-stage: 1.5rem;            /* 24px 阶段边界分隔行上下间距 */
+  --rhythm-section: 1.5rem;          /* 24px 报告章节间距与标题上边距 */
+
   /* === 圆角 === */
   --radius-xs: 0.25rem;
   --radius-sm: 0.375rem;
@@ -304,6 +312,14 @@
   line-height: var(--leading-relaxed);
   word-break: break-word;
 }
+/* 间距单一所有权：垂直节奏由容器层（消息行/章节包装器）拥有，
+   内容首尾子元素外边距归零，避免容器间距与内容间距叠加出双倍空隙 */
+.prose-conclave > :first-child {
+  margin-top: 0;
+}
+.prose-conclave > :last-child {
+  margin-bottom: 0;
+}
 .prose-conclave p {
   margin: 0;
 }
@@ -383,6 +399,82 @@
   border: none;
   border-top: 1px solid var(--color-border-soft);
   margin: 0.75em 0;
+}
+
+/* === 密度上下文：流（对话密度，13px，紧凑）===
+   用法：<Markdown className="prose-stream" />
+   场景：会议消息流中 Agent 发言，扫读型内容 */
+.prose-conclave.prose-stream {
+  font-size: var(--text-sm);
+}
+.prose-conclave.prose-stream p + p {
+  margin-top: var(--rhythm-paragraph-stream);
+}
+/* 流内标题降级：统一为正文字号，仅以字重区分，防止大标题破坏对话密度 */
+.prose-conclave.prose-stream h1,
+.prose-conclave.prose-stream h2,
+.prose-conclave.prose-stream h3,
+.prose-conclave.prose-stream h4 {
+  font-size: 1em;
+  margin-top: var(--rhythm-block);
+  margin-bottom: 0.25rem;
+}
+.prose-conclave.prose-stream ul,
+.prose-conclave.prose-stream ol {
+  margin: var(--rhythm-paragraph-stream) 0;
+}
+.prose-conclave.prose-stream li + li {
+  margin-top: 0.25rem;
+}
+.prose-conclave.prose-stream pre {
+  margin: var(--rhythm-paragraph-stream) 0;
+  padding: 0.5rem 0.75rem;
+}
+.prose-conclave.prose-stream blockquote {
+  margin: var(--rhythm-paragraph-stream) 0;
+}
+.prose-conclave.prose-stream table {
+  margin: var(--rhythm-paragraph-stream) 0;
+}
+.prose-conclave.prose-stream hr {
+  margin: var(--rhythm-block) 0;
+}
+
+/* === 密度上下文：报告（阅读密度，14px，舒展）===
+   用法：<Markdown className="prose-report" />
+   场景：总结报告、报告预览等精读型内容 */
+.prose-conclave.prose-report {
+  font-size: var(--text-base);
+}
+.prose-conclave.prose-report p + p {
+  margin-top: var(--rhythm-paragraph-report);
+}
+.prose-conclave.prose-report h1,
+.prose-conclave.prose-report h2,
+.prose-conclave.prose-report h3,
+.prose-conclave.prose-report h4 {
+  margin-top: var(--rhythm-section);
+  margin-bottom: 0.5rem;
+}
+.prose-conclave.prose-report ul,
+.prose-conclave.prose-report ol {
+  margin: var(--rhythm-block) 0;
+}
+.prose-conclave.prose-report li + li {
+  margin-top: 0.25rem;
+}
+.prose-conclave.prose-report pre {
+  margin: var(--rhythm-block) 0;
+  padding: 0.75rem 1rem;
+}
+.prose-conclave.prose-report blockquote {
+  margin: var(--rhythm-block) 0;
+}
+.prose-conclave.prose-report table {
+  margin: var(--rhythm-block) 0;
+}
+.prose-conclave.prose-report hr {
+  margin: var(--rhythm-section) 0;
 }
 
 /* === 打字机光标 === */
