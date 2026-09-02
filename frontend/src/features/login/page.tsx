@@ -1,9 +1,11 @@
 import * as React from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FieldError, FormAlert } from '@/components/ui/form-feedback';
 import { Logo } from '@/components/ui/svg-icons';
 import { useAuthStore } from '@/stores/auth-slice';
 import { api } from '@/lib/api';
@@ -11,11 +13,21 @@ import { useToast } from '@/hooks/use-toast';
 import { sha256Hash } from '@/lib/crypto';
 import type { UserInfo } from '@/types';
 
+interface LoginFormData {
+  username: string;
+  password: string;
+}
+
 export default function LoginPage() {
-  const [username, setUsername] = React.useState(import.meta.env.DEV ? 'admin' : '');
-  const [password, setPassword] = React.useState(import.meta.env.DEV ? 'admin123' : '');
-  const [isLoading, setIsLoading] = React.useState(false);
-  const [error, setError] = React.useState('');
+  const form = useForm<LoginFormData>({
+    defaultValues: {
+      username: import.meta.env.DEV ? 'admin' : '',
+      password: import.meta.env.DEV ? 'admin123' : '',
+    },
+  });
+  const { errors, isSubmitting } = form.formState;
+  // 服务端/网络错误不归属单一字段，用表单级横幅展示
+  const [serverError, setServerError] = React.useState('');
   const navigate = useNavigate();
   const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -62,21 +74,15 @@ export default function LoginPage() {
     navigate(from, { replace: true });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setError('请输入用户名和密码');
-      return;
-    }
-    setError('');
-    setIsLoading(true);
+  const handleSubmit = form.handleSubmit(async (data) => {
+    setServerError('');
     try {
       // 安全：客户端先做 SHA-256 预哈希，后端永远不接触明文密码
-      const clientHash = await sha256Hash(password);
+      const clientHash = await sha256Hash(data.password);
       const res = await fetch('/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), password: clientHash }),
+        body: JSON.stringify({ username: data.username.trim(), password: clientHash }),
         credentials: 'include',
       });
 
@@ -101,10 +107,10 @@ export default function LoginPage() {
         throw new Error(msg);
       }
 
-      const data = await res.json();
-      const token = data.access_token;
+      const payload = await res.json();
+      const token = payload.access_token;
       // Login response includes user directly
-      const user = data.user as UserInfo;
+      const user = payload.user as UserInfo;
 
       if (!user) {
         // Fallback: fetch /auth/me if user not in response
@@ -121,11 +127,10 @@ export default function LoginPage() {
             meUser.tenant_id = '';
           }
           setAuth(token, meUser);
-          toast({ title: '登录成功', description: `欢迎回来，${meUser.display_name || meUser.username || username}` });
+          toast({ title: '登录成功', description: `欢迎回来，${meUser.display_name || meUser.username || data.username}` });
         } catch {
-          setError('获取用户信息失败');
+          setServerError('获取用户信息失败');
           useAuthStore.setState({ token: null });
-          setIsLoading(false);
           return;
         }
       } else {
@@ -138,21 +143,19 @@ export default function LoginPage() {
           user.tenant_id = '';
         }
         setAuth(token, user);
-        toast({ title: '登录成功', description: `欢迎回来，${user.display_name || user.username || username}` });
+        toast({ title: '登录成功', description: `欢迎回来，${user.display_name || user.username || data.username}` });
       }
 
       queryClient.clear();
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof TypeError && err.message.includes('fetch')) {
-        setError(import.meta.env.DEV ? '无法连接到服务器，请确认后端服务已启动' : '无法连接到服务，请检查网络连接');
+        setServerError(import.meta.env.DEV ? '无法连接到服务器，请确认后端服务已启动' : '无法连接到服务，请检查网络连接');
       } else {
-        setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
+        setServerError(err instanceof Error ? err.message : '登录失败，请稍后重试');
       }
-    } finally {
-      setIsLoading(false);
     }
-  };
+  });
 
   return (
     <div className="flex h-screen items-center justify-center bg-bg-secondary p-4">
@@ -165,35 +168,39 @@ export default function LoginPage() {
           <CardDescription className="text-xs">AI 智库 · 多 Agent 协同探索系统</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form onSubmit={handleSubmit} noValidate className="space-y-3">
             <div className="space-y-1.5">
               <label htmlFor="login-username" className="text-xs text-text-secondary">用户名</label>
               <Input
                 id="login-username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
-                disabled={isLoading}
+                disabled={isSubmitting}
+                aria-invalid={!!errors.username}
+                aria-describedby={errors.username ? 'login-username-error' : undefined}
+                {...form.register('username', {
+                  validate: (v) => v.trim().length > 0 || '请输入用户名',
+                })}
               />
+              <FieldError id="login-username-error">{errors.username?.message}</FieldError>
             </div>
             <div className="space-y-1.5">
               <label htmlFor="login-password" className="text-xs text-text-secondary">密码</label>
               <Input
                 id="login-password"
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                disabled={isLoading}
+                disabled={isSubmitting}
+                aria-invalid={!!errors.password}
+                aria-describedby={errors.password ? 'login-password-error' : undefined}
+                {...form.register('password', {
+                  validate: (v) => v.trim().length > 0 || '请输入密码',
+                })}
               />
+              <FieldError id="login-password-error">{errors.password?.message}</FieldError>
             </div>
-            {error && (
-              <div className="rounded-md bg-danger-bg px-2.5 py-2 text-xs text-danger">
-                {error}
-              </div>
-            )}
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? '登录中...' : '登录'}
+            <FormAlert>{serverError}</FormAlert>
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? '登录中...' : '登录'}
             </Button>
           </form>
           <div className="mt-3 flex items-center gap-2">
@@ -208,7 +215,7 @@ export default function LoginPage() {
                 variant="outline"
                 className="mt-3 w-full"
                 onClick={handleDemoLogin}
-                disabled={isLoading}
+                disabled={isSubmitting}
               >
                 演示模式（无需后端）
               </Button>

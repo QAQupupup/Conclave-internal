@@ -4,6 +4,7 @@
  */
 import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
 import {
   Users, Plus, Search, Shield, Ban, UserCheck, UserX,
   ChevronLeft, ChevronRight, MoreHorizontal, Building2, Crown,
@@ -12,6 +13,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FieldError } from '@/components/ui/form-feedback';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -65,20 +67,22 @@ function TeamListItem({ team, isActive, onClick }: { team: TeamDetail; isActive:
 function CreateTeamDialog({ open, onOpenChange, onCreated }: {
   open: boolean; onOpenChange: (o: boolean) => void; onCreated: (t: TeamDetail) => void;
 }) {
-  const [name, setName] = React.useState('');
-  const [slug, setSlug] = React.useState('');
-  const [description, setDescription] = React.useState('');
+  const form = useForm<{ name: string; slug: string; description: string }>({
+    defaultValues: { name: '', slug: '', description: '' },
+  });
+  const { errors } = form.formState;
   const [submitting, setSubmitting] = React.useState(false);
   const { toast } = useToast();
-  const reset = () => { setName(''); setSlug(''); setDescription(''); };
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { toast({ title: '请输入 Team 名称', variant: 'error' }); return; }
+    const valid = await form.trigger();
+    if (!valid) return;
+    const { name, slug, description } = form.getValues();
     setSubmitting(true);
     try {
       const team = await teamsApi.createTeam({ name: name.trim(), slug: slug.trim() || undefined, description: description.trim() || undefined });
       toast({ title: 'Team 创建成功', variant: 'success' });
-      onCreated(team); onOpenChange(false); reset();
+      onCreated(team); onOpenChange(false); form.reset();
     } catch (err) {
       toast({ title: '创建失败', description: (err as Error).message, variant: 'error' });
     } finally { setSubmitting(false); }
@@ -90,19 +94,36 @@ function CreateTeamDialog({ open, onOpenChange, onCreated }: {
           <DialogTitle>创建新工作空间</DialogTitle>
           <DialogDescription>创建一个新的 Team，你将自动成为所有者。</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="t-name">名称</Label>
-            <Input id="t-name" placeholder="例如：产品团队" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} />
+            <Input id="t-name" placeholder="例如：产品团队" maxLength={64}
+              aria-invalid={!!errors.name}
+              aria-describedby={errors.name ? 't-name-error' : undefined}
+              {...form.register('name', {
+                validate: (v) => v.trim().length > 0 || '请输入 Team 名称',
+                onChange: (e) => {
+                  // 输入后即时清除错误（与 reValidateMode: onChange 保持一致）
+                  if (errors.name && e.target.value.trim()) form.clearErrors('name');
+                },
+              })} />
+            <FieldError id="t-name-error">{errors.name?.message}</FieldError>
           </div>
           <div className="space-y-2">
             <Label htmlFor="t-slug">标识（可选）</Label>
-            <Input id="t-slug" placeholder="留空自动生成" value={slug}
-              onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} maxLength={64} />
+            <Input id="t-slug" placeholder="留空自动生成" maxLength={64}
+              {...form.register('slug', {
+                onChange: (e) => {
+                  // 仅允许小写字母/数字/连字符，非法字符即时替换
+                  const v = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+                  if (v !== e.target.value) form.setValue('slug', v);
+                },
+              })} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="t-desc">描述（可选）</Label>
-            <Input id="t-desc" placeholder="简单描述这个 Team" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={200} />
+            <Input id="t-desc" placeholder="简单描述这个 Team" maxLength={200}
+              {...form.register('description')} />
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>取消</Button>
@@ -121,6 +142,7 @@ function InviteMemberDialog({ open, teamId, onOpenChange, onInvited }: {
 }) {
   const [keyword, setKeyword] = React.useState('');
   const [selectedUser, setSelectedUser] = React.useState<{ user_id: number; username: string; display_name?: string } | null>(null);
+  const [selectionError, setSelectionError] = React.useState('');
   const [role, setRole] = React.useState<TeamRole>('member');
   const [submitting, setSubmitting] = React.useState(false);
   const { toast } = useToast();
@@ -133,7 +155,8 @@ function InviteMemberDialog({ open, teamId, onOpenChange, onInvited }: {
   });
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUser) { toast({ title: '请选择要添加的用户', variant: 'error' }); return; }
+    if (!selectedUser) { setSelectionError('请先搜索并选择要添加的用户'); return; }
+    setSelectionError('');
     setSubmitting(true);
     try {
       await teamsApi.addMember(teamId, { username: selectedUser.username, role });
@@ -165,7 +188,7 @@ function InviteMemberDialog({ open, teamId, onOpenChange, onInvited }: {
                 ) : searchResults.length === 0 ? (
                   <div className="py-6 text-center text-sm text-text-tertiary">未找到匹配的用户</div>
                 ) : searchResults.map((u) => (
-                  <button key={u.user_id} type="button" onClick={() => setSelectedUser(u)}
+                  <button key={u.user_id} type="button" onClick={() => { setSelectedUser(u); setSelectionError(''); }}
                     className={'flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition ' +
                       (selectedUser?.user_id === u.user_id ? 'bg-brand-500/10 text-brand-600' : 'hover:bg-bg-tertiary')}>
                     <div className="flex h-7 w-7 items-center justify-center rounded-full bg-bg-tertiary text-xs font-medium">
@@ -179,6 +202,7 @@ function InviteMemberDialog({ open, teamId, onOpenChange, onInvited }: {
                 ))}
               </div>
             )}
+            <FieldError>{selectionError}</FieldError>
           </div>
           <div className="space-y-2">
             <Label>角色</Label>

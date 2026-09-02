@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { FieldError } from '@/components/ui/form-feedback';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import type { Meeting, MeetingStatus } from '@/types';
@@ -63,6 +64,7 @@ export default function BoardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [topic, setTopic] = React.useState('');
+  const [topicError, setTopicError] = React.useState('');
   const [topicHistory, setTopicHistory] = React.useState<string[]>([]);
   const [isPolishing, setIsPolishing] = React.useState(false);
   const [showNewForm, setShowNewForm] = React.useState(false);
@@ -191,6 +193,7 @@ export default function BoardPage() {
 
   const resetForm = () => {
     setTopic('');
+    setTopicError('');
     setTopicHistory([]);
     setFiles([]);
     setSelectedRoleIds([]);
@@ -205,7 +208,13 @@ export default function BoardPage() {
 
   const handleStart = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!topic.trim() || isLaunching) return;
+    if (isLaunching) return;
+    if (!topic.trim()) {
+      setTopicError('请先输入议题内容');
+      textareaRef.current?.focus();
+      return;
+    }
+    setTopicError('');
     try {
       // 1. 创建会议（POST /meetings 只创建不运行）
       setLaunchPhase('creating');
@@ -301,10 +310,15 @@ export default function BoardPage() {
                 <Textarea
                   ref={textareaRef}
                   value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
+                  onChange={(e) => {
+                    setTopic(e.target.value);
+                    if (topicError && e.target.value.trim()) setTopicError('');
+                  }}
                   placeholder="描述你想讨论的议题或问题...&#10;例如：分析微服务架构中服务间通信的最佳实践，对比 gRPC 和 REST 的适用场景"
                   className="min-h-[96px] text-[15px] leading-relaxed"
                   disabled={isLaunching}
+                  aria-invalid={!!topicError}
+                  aria-describedby={topicError ? 'topic-error' : undefined}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                       e.preventDefault();
@@ -374,6 +388,7 @@ export default function BoardPage() {
                   </div>
                 )}
               </div>
+              <FieldError id="topic-error" className="mt-1.5">{topicError}</FieldError>
 
               {/* 已关联的相似会议 */}
               {relatedIds.length > 0 && (

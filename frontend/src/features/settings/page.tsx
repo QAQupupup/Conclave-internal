@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { FieldError } from '@/components/ui/form-feedback';
 import { Separator } from '@/components/ui/separator';
 import {
   UserIcon,
@@ -105,14 +106,7 @@ export default function SettingsPage() {
   });
 
   const onPasswordSubmit = passwordForm.handleSubmit((data) => {
-    if (data.new_password !== data.confirm_password) {
-      passwordForm.setError('confirm_password', { message: '两次输入的新密码不一致' });
-      return;
-    }
-    if (data.new_password.length < 6) {
-      passwordForm.setError('new_password', { message: '新密码长度至少 6 位' });
-      return;
-    }
+    // 字段校验（必填/长度/两次一致）已全部收敛到 register 规则，此处只处理提交
     passwordMutation.mutate(data);
   });
 
@@ -199,16 +193,16 @@ export default function SettingsPage() {
                   <Input
                     id="display_name"
                     placeholder="输入显示名称"
+                    aria-invalid={!!profileForm.formState.errors.display_name}
+                    aria-describedby={profileForm.formState.errors.display_name ? 'display-name-error' : undefined}
                     {...profileForm.register('display_name', {
                       required: '显示名称不能为空',
                       minLength: { value: 1, message: '显示名称不能为空' },
                     })}
                   />
-                  {profileForm.formState.errors.display_name && (
-                    <p className="text-xs text-danger">
-                      {profileForm.formState.errors.display_name.message}
-                    </p>
-                  )}
+                  <FieldError id="display-name-error">
+                    {profileForm.formState.errors.display_name?.message}
+                  </FieldError>
                 </div>
 
                 {/* Tenant info */}
@@ -264,13 +258,13 @@ export default function SettingsPage() {
                     id="old_password"
                     type="password"
                     placeholder="输入当前密码"
+                    aria-invalid={!!passwordForm.formState.errors.old_password}
+                    aria-describedby={passwordForm.formState.errors.old_password ? 'old-password-error' : undefined}
                     {...passwordForm.register('old_password', { required: '请输入原密码' })}
                   />
-                  {passwordForm.formState.errors.old_password && (
-                    <p className="text-xs text-danger">
-                      {passwordForm.formState.errors.old_password.message}
-                    </p>
-                  )}
+                  <FieldError id="old-password-error">
+                    {passwordForm.formState.errors.old_password?.message}
+                  </FieldError>
                 </div>
 
                 <div className="space-y-2">
@@ -279,16 +273,16 @@ export default function SettingsPage() {
                     id="new_password"
                     type="password"
                     placeholder="输入新密码（至少 6 位）"
+                    aria-invalid={!!passwordForm.formState.errors.new_password}
+                    aria-describedby={passwordForm.formState.errors.new_password ? 'new-password-error' : undefined}
                     {...passwordForm.register('new_password', {
                       required: '请输入新密码',
                       minLength: { value: 6, message: '新密码长度至少 6 位' },
                     })}
                   />
-                  {passwordForm.formState.errors.new_password && (
-                    <p className="text-xs text-danger">
-                      {passwordForm.formState.errors.new_password.message}
-                    </p>
-                  )}
+                  <FieldError id="new-password-error">
+                    {passwordForm.formState.errors.new_password?.message}
+                  </FieldError>
                 </div>
 
                 <div className="space-y-2">
@@ -297,13 +291,16 @@ export default function SettingsPage() {
                     id="confirm_password"
                     type="password"
                     placeholder="再次输入新密码"
-                    {...passwordForm.register('confirm_password', { required: '请确认新密码' })}
+                    aria-invalid={!!passwordForm.formState.errors.confirm_password}
+                    aria-describedby={passwordForm.formState.errors.confirm_password ? 'confirm-password-error' : undefined}
+                    {...passwordForm.register('confirm_password', {
+                      required: '请确认新密码',
+                      validate: (v, values) => v === values.new_password || '两次输入的新密码不一致',
+                    })}
                   />
-                  {passwordForm.formState.errors.confirm_password && (
-                    <p className="text-xs text-danger">
-                      {passwordForm.formState.errors.confirm_password.message}
-                    </p>
-                  )}
+                  <FieldError id="confirm-password-error">
+                    {passwordForm.formState.errors.confirm_password?.message}
+                  </FieldError>
                 </div>
 
                 <div className="flex justify-end pt-2">

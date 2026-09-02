@@ -1,8 +1,10 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router';
+import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FieldError, FormAlert } from '@/components/ui/form-feedback';
 import { Logo } from '@/components/ui/svg-icons';
 import { api } from '@/lib/api';
 import { sha256Hash } from '@/lib/crypto';
@@ -12,15 +14,21 @@ interface SetupStatus {
   has_admin: boolean;
 }
 
+interface SetupFormData {
+  username: string;
+  password: string;
+  confirm_password: string;
+}
+
 export default function SetupPage() {
-  const [username, setUsername] = React.useState('');
-  const [password, setPassword] = React.useState('');
-  const [confirmPassword, setConfirmPassword] = React.useState('');
+  const form = useForm<SetupFormData>({
+    defaultValues: { username: '', password: '', confirm_password: '' },
+  });
+  const { errors, isSubmitting } = form.formState;
   const [setupToken] = React.useState('');
-  const [isLoading, setIsLoading] = React.useState(false);
   const [checking, setChecking] = React.useState(true);
   const [needsSetup, setNeedsSetup] = React.useState(false);
-  const [error, setError] = React.useState('');
+  const [serverError, setServerError] = React.useState('');
   const navigate = useNavigate();
 
   React.useEffect(() => {
@@ -39,38 +47,22 @@ export default function SetupPage() {
       .finally(() => setChecking(false));
   }, [navigate]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim() || !password) {
-      setError('请填写用户名和密码');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('两次输入的密码不一致');
-      return;
-    }
-    if (password.length < 6) {
-      setError('密码长度至少 6 位');
-      return;
-    }
-    setError('');
-    setIsLoading(true);
+  const handleSubmit = form.handleSubmit(async (data) => {
+    setServerError('');
     try {
       // 安全：客户端先做 SHA-256 预哈希，后端永远不接触明文密码
-      const clientHash = await sha256Hash(password);
+      const clientHash = await sha256Hash(data.password);
       await api.post('/setup', {
         setup_token: setupToken || undefined,
-        username: username.trim(),
+        username: data.username.trim(),
         password: clientHash,
       });
       // Setup successful, redirect to login
       navigate('/login', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '初始化失败');
-    } finally {
-      setIsLoading(false);
+      setServerError(err instanceof Error ? err.message : '初始化失败');
     }
-  };
+  });
 
   if (checking) {
     return (
@@ -95,44 +87,56 @@ export default function SetupPage() {
           <CardDescription className="text-xs">创建管理员账号以开始使用</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form onSubmit={handleSubmit} noValidate className="space-y-3">
             <div className="space-y-1.5">
               <label htmlFor="setup-username" className="text-xs text-text-secondary">管理员用户名</label>
               <Input
                 id="setup-username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
-                disabled={isLoading}
+                disabled={isSubmitting}
+                aria-invalid={!!errors.username}
+                aria-describedby={errors.username ? 'setup-username-error' : undefined}
+                {...form.register('username', {
+                  validate: (v) => v.trim().length > 0 || '请填写用户名',
+                })}
               />
+              <FieldError id="setup-username-error">{errors.username?.message}</FieldError>
             </div>
             <div className="space-y-1.5">
               <label htmlFor="setup-password" className="text-xs text-text-secondary">密码</label>
               <Input
                 id="setup-password"
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 placeholder="至少 6 位"
-                disabled={isLoading}
+                disabled={isSubmitting}
+                aria-invalid={!!errors.password}
+                aria-describedby={errors.password ? 'setup-password-error' : undefined}
+                {...form.register('password', {
+                  required: '请填写密码',
+                  minLength: { value: 6, message: '密码长度至少 6 位' },
+                })}
               />
+              <FieldError id="setup-password-error">{errors.password?.message}</FieldError>
             </div>
             <div className="space-y-1.5">
               <label htmlFor="setup-confirm-password" className="text-xs text-text-secondary">确认密码</label>
               <Input
                 id="setup-confirm-password"
                 type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="再次输入密码"
-                disabled={isLoading}
+                disabled={isSubmitting}
+                aria-invalid={!!errors.confirm_password}
+                aria-describedby={errors.confirm_password ? 'setup-confirm-password-error' : undefined}
+                {...form.register('confirm_password', {
+                  required: '请再次输入密码',
+                  validate: (v, values) => v === values.password || '两次输入的密码不一致',
+                })}
               />
+              <FieldError id="setup-confirm-password-error">{errors.confirm_password?.message}</FieldError>
             </div>
-            {error && (
-              <div className="rounded-md bg-danger-bg px-2.5 py-2 text-xs text-danger">{error}</div>
-            )}
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? '初始化中...' : '创建管理员账号'}
+            <FormAlert>{serverError}</FormAlert>
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? '初始化中...' : '创建管理员账号'}
             </Button>
             <p className="text-center text-[11px] text-text-tertiary">
               已有账号？

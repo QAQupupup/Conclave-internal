@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { FieldError } from '@/components/ui/form-feedback';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -637,6 +638,7 @@ function RoleFormDialog({
 }) {
   const isEdit = !!role;
   const [name, setName] = React.useState('');
+  const [nameError, setNameError] = React.useState('');
   const [roleType, setRoleType] = React.useState<RoleType>('custom');
   const [description, setDescription] = React.useState('');
   const [systemPrompt, setSystemPrompt] = React.useState('');
@@ -660,14 +662,16 @@ function RoleFormDialog({
       setColor(COLOR_PRESETS[7].value);
       setDomainsText('');
     }
+    if (open) setNameError('');
   }, [open, role]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      toast({ title: '请填写角色名称', variant: 'error' });
+      setNameError('请填写角色名称');
       return;
     }
+    setNameError('');
     const domains = domainsText
       .split(/[,，、\s]+/)
       .map((s) => s.trim())
@@ -718,10 +722,16 @@ function RoleFormDialog({
               id="role-name"
               className="h-9 text-sm"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (nameError && e.target.value.trim()) setNameError('');
+              }}
               placeholder="例如：安全审计员"
               maxLength={50}
+              aria-invalid={!!nameError}
+              aria-describedby={nameError ? 'role-name-error' : undefined}
             />
+            <FieldError id="role-name-error">{nameError}</FieldError>
           </div>
 
           {/* 角色类型 */}
@@ -896,11 +906,14 @@ function GenerateDialog({
     });
   };
 
+  const [topicError, setTopicError] = React.useState('');
+
   const handleGenerate = () => {
     if (!topic.trim()) {
-      toast({ title: '请输入会议议题', variant: 'error' });
+      setTopicError('请输入会议议题');
       return;
     }
+    setTopicError('');
     setGeneratedRoles([]);
     setAccepted(new Set());
     generateMutation.mutate(topic.trim());
@@ -928,23 +941,31 @@ function GenerateDialog({
 
         <div className="space-y-4 px-6 py-5">
           {/* 输入区 */}
-          <div className="flex gap-2">
-            <Input
-              className="h-9 text-sm"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="例如：讨论微服务架构下的分布式事务方案"
-              onKeyDown={(e) => e.key === 'Enter' && !generateMutation.isPending && handleGenerate()}
-            />
-            <Button
-              size="sm"
-              onClick={handleGenerate}
-              disabled={generateMutation.isPending || !topic.trim()}
-              className="shrink-0 h-9"
-            >
-              {generateMutation.isPending ? <SpinnerIcon size={13} /> : <BrainIcon size={13} />}
-              生成
-            </Button>
+          <div className="space-y-1.5">
+            <div className="flex gap-2">
+              <Input
+                className="h-9 text-sm"
+                value={topic}
+                onChange={(e) => {
+                  setTopic(e.target.value);
+                  if (topicError && e.target.value.trim()) setTopicError('');
+                }}
+                placeholder="例如：讨论微服务架构下的分布式事务方案"
+                onKeyDown={(e) => e.key === 'Enter' && !generateMutation.isPending && handleGenerate()}
+                aria-invalid={!!topicError}
+                aria-describedby={topicError ? 'generate-topic-error' : undefined}
+              />
+              <Button
+                size="sm"
+                onClick={handleGenerate}
+                disabled={generateMutation.isPending || !topic.trim()}
+                className="shrink-0 h-9"
+              >
+                {generateMutation.isPending ? <SpinnerIcon size={13} /> : <BrainIcon size={13} />}
+                生成
+              </Button>
+            </div>
+            <FieldError id="generate-topic-error">{topicError}</FieldError>
           </div>
 
           {/* 生成结果 */}
