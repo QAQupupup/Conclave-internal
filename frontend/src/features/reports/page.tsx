@@ -228,36 +228,36 @@ function ReportBlockRenderer({ block, meetingId }: { block: LayoutBlock; meeting
   const { type, data } = block;
   switch (type) {
     case 'paragraph':
-      return <p className="mb-2 text-sm leading-relaxed text-text-secondary">{data.text}</p>;
+      return <p className="text-sm leading-relaxed text-text-secondary">{data.text}</p>;
     case 'heading':
-      return <h4 className="mb-1 mt-3 text-sm font-semibold text-text-primary">{data.text}</h4>;
+      return <h4 className="text-sm font-semibold text-text-primary">{data.text}</h4>;
     case 'list': {
       const items: string[] = Array.isArray(data.items) ? (data.items as string[]) : [];
       if (items.length === 0) return null;
       const ListTag = data.ordered ? 'ol' : 'ul';
       return (
-        <ListTag className={cn('mb-2 space-y-0.5 text-sm text-text-secondary', data.ordered ? 'list-decimal pl-5' : 'list-disc pl-4')}>
+        <ListTag className={cn('space-y-1 text-sm text-text-secondary', data.ordered ? 'list-decimal pl-5' : 'list-disc pl-4')}>
           {items.map((item, i) => <li key={i}>{item}</li>)}
         </ListTag>
       );
     }
     case 'field':
       return (
-        <div className="mb-1 flex gap-2 text-sm">
+        <div className="flex gap-2 text-sm">
           <span className="text-text-tertiary flex-shrink-0">{data.label}:</span>
           <span className="text-text-secondary">{String(data.value ?? '')}</span>
         </div>
       );
     case 'code':
       return (
-        <pre className="mb-2 overflow-x-auto rounded bg-bg-tertiary p-2.5 text-[11px] leading-relaxed text-text-secondary">
+        <pre className="overflow-x-auto rounded bg-bg-tertiary p-3 text-[11px] leading-relaxed text-text-secondary">
           <code>{data.code}</code>
         </pre>
       );
     case 'metric': {
       const value = data.value ?? data.count ?? data.number ?? '';
       return (
-        <div className="mb-2 inline-flex flex-col rounded-md bg-bg-secondary px-3 py-2 mr-2">
+        <div className="inline-flex flex-col rounded-md bg-bg-secondary px-3 py-2">
           <span className="text-lg font-semibold text-text-primary">{value}</span>
           <span className="text-[10px] text-text-tertiary">{data.label ?? ''}</span>
         </div>
@@ -267,7 +267,7 @@ function ReportBlockRenderer({ block, meetingId }: { block: LayoutBlock; meeting
       const headers: string[] = Array.isArray(data.headers) ? data.headers : [];
       const rows: unknown[][] = Array.isArray(data.rows) ? data.rows : [];
       return (
-        <div className="mb-2 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-xs">
             {headers.length > 0 && (
               <thead>
@@ -288,14 +288,14 @@ function ReportBlockRenderer({ block, meetingId }: { block: LayoutBlock; meeting
       );
     }
     case 'raw':
-      return <p className="mb-2 text-xs text-text-tertiary font-mono break-all">{String(data.text ?? JSON.stringify(data))}</p>;
+      return <p className="text-xs text-text-tertiary font-mono break-all">{String(data.text ?? JSON.stringify(data))}</p>;
     case 'findings': {
       const items: FindingItem[] = Array.isArray(data.items) ? (data.items as FindingItem[]) : [];
       if (items.length === 0) return null;
       return (
-        <div className="mb-2 space-y-2">
+        <div className="space-y-2">
           {items.map((item, i) => (
-            <div key={item.num ?? i} className="rounded-md border border-border-soft bg-bg-secondary/40 p-2.5">
+            <div key={item.num ?? i} className="rounded-md border border-border-soft bg-bg-secondary/40 p-3">
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-brand-500/10 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
                   {item.num ?? String(i + 1).padStart(2, '0')}
@@ -326,16 +326,16 @@ function ReportBlockRenderer({ block, meetingId }: { block: LayoutBlock; meeting
     }
     case 'attachments': {
       const items: AttachmentItem[] = Array.isArray(data.items) ? (data.items as AttachmentItem[]) : [];
-      if (items.length === 0) return <p className="mb-2 text-xs text-text-tertiary">暂无附件</p>;
+      if (items.length === 0) return <p className="text-xs text-text-tertiary">暂无附件</p>;
       return (
-        <div className="mb-2 space-y-1">
+        <div className="space-y-1">
           {items.map((item, i) => {
             const filename: string = item.filename ?? item.name ?? '';
             const size = item.size;
             return (
               <div
                 key={item.path ?? filename ?? i}
-                className="flex items-center gap-2 rounded-md border border-border-soft bg-bg-secondary/40 px-2.5 py-1.5"
+                className="flex items-center gap-2 rounded-md border border-border-soft bg-bg-secondary/40 px-3 py-2"
               >
                 <FileIcon size={14} className="flex-shrink-0 text-text-tertiary" />
                 <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">{filename}</span>
@@ -359,7 +359,7 @@ function ReportBlockRenderer({ block, meetingId }: { block: LayoutBlock; meeting
     }
     default:
       if (data.text || data.content) {
-        return <p className="mb-2 text-sm text-text-secondary">{data.text || data.content}</p>;
+        return <p className="text-sm text-text-secondary">{data.text || data.content}</p>;
       }
       return null;
   }
@@ -376,13 +376,13 @@ function ReportLayoutRenderer({ layout, meetingId }: { layout: LayoutSpec | null
     );
   }
   return (
-    <div className="space-y-5">
+    <div className="space-y-(--rhythm-section)">
       {sections.map((section) => (
         <div key={section.id}>
           <h4 className="mb-2 border-b border-border-soft pb-1 text-sm font-semibold text-text-primary">
             {section.title}
           </h4>
-          <div>
+          <div className="space-y-(--rhythm-block)">
             {(section.blocks ?? []).map((block, i) => (
               <ReportBlockRenderer key={i} block={block} meetingId={meetingId} />
             ))}
@@ -485,8 +485,8 @@ function ReportDialog({ meeting, open, onOpenChange }: ReportDialogProps) {
                 <Skeleton className="h-3 w-3/5 rounded" />
               </div>
             ) : summaryText ? (
-              <div className="rounded-md bg-bg-secondary/50 p-3">
-                <Markdown content={summaryText} className="text-sm leading-relaxed text-text-secondary" />
+              <div className="rounded-md bg-bg-secondary/50 p-4">
+                <Markdown content={summaryText} className="prose-report" />
               </div>
             ) : (
               <p className="text-sm text-text-tertiary">暂无摘要</p>
