@@ -12,6 +12,7 @@
 # - ReactLoop：LLM 自主决定"下一步调用什么工具"，工具执行后 LLM 观察结果再决策
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import os
@@ -380,8 +381,13 @@ class ReactLoop:
                             },
                         )
 
-                # 为 browser 类工具注入步骤回调
-                if call.tool_name.startswith("browser.") or call.tool_name in ("web_search", "web_fetch"):
+                # 为 browser / 搜索 / 代码类工具注入步骤回调（tool.step 监控回放）
+                if call.tool_name.startswith("browser.") or call.tool_name in (
+                    "web_search",
+                    "web_fetch",
+                    "code.retrieve",
+                    "code.structure",
+                ):
                     args["_step_callback"] = self._make_step_callback(call_id, call.tool_name)
 
                 t0 = time.monotonic()
@@ -519,10 +525,24 @@ async def _capture_step_screenshot(meeting_id: str) -> dict[str, str] | None:
 # ---------- 默认工具注册表工厂 ----------
 
 
-def create_default_tool_registry() -> ToolRegistry:
-    """创建默认工具注册表（web_search + browser 操作 + workspace 文件/命令工具）
+def _clamp_int(value: Any, default: int, lo: int, hi: int) -> int:
+    """把 LLM 传来的参数安全收敛为 [lo, hi] 内的 int。
 
-    在 evidence_check 和 produce 节点中使用。
+    LLM 可能给字符串、浮点或越界值；一律兜底为默认值/边界，
+    避免工具调用因参数类型错误直接失败。
+    """
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(parsed, hi))
+
+
+def create_default_tool_registry() -> ToolRegistry:
+    """创建默认工具注册表（web_search + browser 操作 + workspace 文件/命令 + 代码检索工具）
+
+    全部六个阶段节点（clarify/intra_team/cross_team/evidence_check/arbitrate/produce）
+    经 _build_tool_registry() 共用本注册表，工具在所有流程环节可用。
     """
     registry = ToolRegistry()
 
@@ -722,6 +742,91 @@ def create_default_tool_registry() -> ToolRegistry:
 
         logging.getLogger("orchestrator.react_loop").warning("工作区工具注册失败: %s", str(e)[:200])
 
+    # ========== 代码检索工具（ADR-016 Phase C，[P1 修复] 接入 Agent 工作流）==========
+    # meeting_id 由 ReactLoop 强制注入（跨会议注入防护），检索范围天然限定本会议。
+    # 会议未摄入代码时优雅降级为空结果，不报错。
+
+    async def _code_retrieve(args: dict[str, Any]) -> Any:
+        from app.rag.retriever import retrieve_code
+
+        step_cb = args.get("_step_callback")
+        meeting_id = str(args.get("meeting_id", ""))
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return {"status": "error", "error": "query 不能为空"}
+        top_k = _clamp_int(args.get("top_k", 5), 5, 1, 50)
+        max_hops = _clamp_int(args.get("max_hops", 1), 1, 0, 5)
+        await _emit_step(
+            step_cb,
+            "code_search_started",
+            {"label": f"代码检索：{query[:60]}", "status": "running", "query": query},
+        )
+        results = await retrieve_code(meeting_id, query, top_k=top_k, max_hops=max_hops)
+        await _emit_step(
+            step_cb,
+            "code_search_done",
+            {"label": f"命中 {len(results)} 个代码片段", "status": "completed", "count": len(results)},
+        )
+        return {"status": "ok", "count": len(results), "results": results}
+
+    registry.register(
+        "code.retrieve",
+        "语义检索本会议已导入的代码仓库（向量召回 + 调用图扩展）。当需要定位与某个需求/缺陷/功能相关的代码实现时使用。"
+        "返回相关代码片段列表（含文件路径与内容），图扩展命中的片段带 graph_hit 元数据。"
+        "会议未导入代码或未建索引时返回空列表。",
+        _code_retrieve,
+        {
+            "query": "str（检索查询，描述要找的逻辑，如：用户登录校验实现）",
+            "top_k": "int（可选，返回条数，默认5，最大50）",
+            "max_hops": "int（可选，沿调用图扩展的跳数，默认1，最大5）",
+        },
+    )
+
+    async def _code_structure(args: dict[str, Any]) -> Any:
+        from app.rag.graph_expand import structure_query
+
+        step_cb = args.get("_step_callback")
+        meeting_id = str(args.get("meeting_id", ""))
+        node_id = str(args.get("node_id", "")).strip()
+        if not node_id:
+            return {"status": "error", "error": "node_id 不能为空"}
+        max_hops = _clamp_int(args.get("max_hops", 1), 1, 0, 5)
+        await _emit_step(
+            step_cb,
+            "structure_query_started",
+            {"label": f"结构查询：{node_id[:60]}", "status": "running", "node_id": node_id},
+        )
+        # structure_query 是同步图遍历，放线程池避免阻塞事件循环（P1 异步纪律）
+        result = await asyncio.to_thread(structure_query, meeting_id, node_id, max_hops=max_hops)
+        # structure_query 返回 dict[str, object]，用 isinstance 收窄类型（mypy + 防御异常形状）
+        callers_raw = result.get("callers")
+        deps_raw = result.get("dependencies")
+        callers = callers_raw if isinstance(callers_raw, list) else []
+        deps = deps_raw if isinstance(deps_raw, list) else []
+        await _emit_step(
+            step_cb,
+            "structure_query_done",
+            {
+                "label": f"调用方 {len(callers)} 个，依赖 {len(deps)} 个",
+                "status": "completed",
+                "callers": len(callers),
+                "dependencies": len(deps),
+            },
+        )
+        return {"status": "ok", **result}
+
+    registry.register(
+        "code.structure",
+        "查询代码结构关系：给定符号/文件节点（限定名，如 a.py::ClassA::method_m），返回「谁调用它」（callers）与「它依赖谁」（dependencies）。"
+        "用于评估改动影响面、理解调用链。node_id 可从 code.retrieve 的结果中获得。"
+        "图索引未建立或节点不存在时返回空列表。",
+        _code_structure,
+        {
+            "node_id": "str（符号/文件节点 ID，限定名格式，如 a.py::A::m）",
+            "max_hops": "int（可选，图扩展最大跳数，默认1，最大5）",
+        },
+    )
+
     return registry
 
 
@@ -767,6 +872,16 @@ def _summarize_result(result: Any, tool_name: str) -> dict[str, Any]:
                 return {"type": "search_results", "count": len(result), "items": items}
             return {"type": "list", "count": len(result)}
         if isinstance(result, dict):
+            # 代码工具返回（优先于 browser 分支，避免 status=ok 被误判为浏览器动作）
+            if tool_name == "code.retrieve":
+                return {"type": "code_results", "count": result.get("count", 0)}
+            if tool_name == "code.structure":
+                return {
+                    "type": "code_structure",
+                    "node_id": result.get("node_id", ""),
+                    "callers": len(result.get("callers") or []),
+                    "dependencies": len(result.get("dependencies") or []),
+                }
             status = result.get("status", "")
             if status in ("ok", "error", "captcha", "blocked"):
                 # browser 工具返回
