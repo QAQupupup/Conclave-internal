@@ -461,7 +461,9 @@ class AGUIClient {
           agentId: e.agentId,
           agentName: e.agentName,
           agentRole: e.agentRole as AgentRole | undefined,
-          stage: e.stage ? (normalizeStageId(e.stage) as StageId) : undefined,
+          // 事件未携带阶段时回退为当前 store 阶段（stage.changed 已先行更新），
+          // 保证对话流的阶段分隔行在实时路径下可派生
+          stage: e.stage ? (normalizeStageId(e.stage) as StageId) : store.stage,
           content: '',
           thinking: '',
           timestamp: e.timestamp,

@@ -11,11 +11,16 @@ import { useMeetingMessages } from '@/hooks/use-meetings';
 import { useParams } from 'react-router';
 import { SendIcon, ArrowDownIcon, SpinnerIcon } from '@/components/ui/svg-icons';
 import { toast } from '@/hooks/use-toast';
+import { STAGE_LABELS, STAGE_DESCRIPTIONS, normalizeStageId } from '@/lib/constants';
+import type { StageId } from '@/types';
 
 // 合并消息和工具调用为统一的时间线条目
 type TimelineItem =
   | { type: 'message'; id: string; data: ReturnType<typeof useMeetingStore.getState>['messages'][number] }
   | { type: 'tool'; id: string; data: ReturnType<typeof useMeetingStore.getState>['toolCalls'][number] };
+
+// 渲染条目：时间线条目 + 派生的阶段分隔行
+type RenderItem = TimelineItem | { type: 'stage'; id: string; stage: StageId };
 
 export function MessageStream({ className }: { className?: string }) {
   const { id: meetingId } = useParams<{ id: string }>();
@@ -73,6 +78,25 @@ export function MessageStream({ className }: { className?: string }) {
     return items;
   }, [messages, toolCalls]);
 
+  // 阶段分隔行：当消息携带的阶段（归一化后）相对上一条消息发生变化时插入。
+  // 分隔行上下间距由 --rhythm-stage 驱动（见 app.css 排版节奏 token）。
+  // 未携带 stage 的消息（部分历史数据）不参与分隔，优雅降级为无分隔行。
+  const renderItems = React.useMemo<RenderItem[]>(() => {
+    const out: RenderItem[] = [];
+    let prevStage: string | undefined;
+    for (const item of timeline) {
+      if (item.type === 'message') {
+        const stage = item.data.stage ? normalizeStageId(item.data.stage) : undefined;
+        if (stage && STAGE_LABELS[stage] && stage !== prevStage) {
+          out.push({ type: 'stage', id: `stage-${stage}-${item.data.id}`, stage: stage as StageId });
+          prevStage = stage;
+        }
+      }
+      out.push(item);
+    }
+    return out;
+  }, [timeline]);
+
   const scrollToBottom = React.useCallback((smooth = true) => {
     const el = scrollRef.current;
     if (el) {
@@ -92,7 +116,7 @@ export function MessageStream({ className }: { className?: string }) {
       const el = scrollRef.current;
       if (el) el.scrollTop = el.scrollHeight;
     });
-  }, [timeline.length]);
+  }, [renderItems.length]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -173,7 +197,26 @@ export function MessageStream({ className }: { className?: string }) {
           </div>
         ) : (
           <div className="divide-y divide-border-soft/50">
-            {timeline.map((item) => {
+            {renderItems.map((item) => {
+              if (item.type === 'stage') {
+                return (
+                  <div
+                    key={item.id}
+                    role="separator"
+                    aria-label={`进入${STAGE_LABELS[item.stage]}阶段`}
+                    className="flex items-center gap-3 px-4 py-(--rhythm-stage)"
+                  >
+                    <div className="h-px flex-1 bg-border-soft" aria-hidden="true" />
+                    <span
+                      className="flex-shrink-0 text-xs text-text-tertiary"
+                      title={STAGE_DESCRIPTIONS[item.stage]}
+                    >
+                      {STAGE_LABELS[item.stage]}
+                    </span>
+                    <div className="h-px flex-1 bg-border-soft" aria-hidden="true" />
+                  </div>
+                );
+              }
               if (item.type === 'message') {
                 return (
                   <MessageBubble
@@ -212,6 +255,7 @@ export function MessageStream({ className }: { className?: string }) {
             value={input}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
+            aria-label="会议发言输入框"
             placeholder={status === 'running' ? '说点什么... (Enter 发送, Shift+Enter 换行)' : '会议未在运行'}
             disabled={status !== 'running'}
             rows={1}
