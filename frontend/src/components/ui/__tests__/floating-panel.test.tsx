@@ -10,6 +10,7 @@
  * 6. 未传 onSizeChange 时不渲染档位切换器与拖拽条
  * 7. 关闭后延迟一个动效时长再卸载（退场动画窗口）
  * 8. 退场动画中途重新打开会取消卸载（边界：快速开合不丢面板）
+ * 9. 传入 popoutHref 时渲染新标签页打开链接（路由画布入口）；未传则不渲染
  *
  * 档位吸附纯函数（snapWidthToSize）测试见 floating-panel-sizing.test.ts
  */
@@ -157,5 +158,25 @@ describe('FloatingPanel', () => {
       vi.advanceTimersByTime(PANEL_ANIM_MS * 2);
     });
     expect(screen.getByRole('dialog')).toBeDefined();
+  });
+
+  it('传入 popoutHref 时渲染新标签页打开链接（路由画布入口）', () => {
+    renderWithProviders(
+      <FloatingPanel open onClose={vi.fn()} size="M" title="测试" popoutHref="/meeting/m1/canvas/replay">
+        <div>x</div>
+      </FloatingPanel>,
+    );
+    const link = screen.getByLabelText('在新标签页打开画布');
+    expect(link.getAttribute('href')).toBe('/meeting/m1/canvas/replay');
+    expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  it('未传 popoutHref 时不渲染弹出链接（边界）', () => {
+    renderWithProviders(
+      <FloatingPanel open onClose={vi.fn()} size="M" title="测试">
+        <div>x</div>
+      </FloatingPanel>,
+    );
+    expect(screen.queryByLabelText('在新标签页打开画布')).toBeNull();
   });
 });

@@ -46,6 +46,7 @@ export function CanvasLayer({ meetingId }: { meetingId: string }) {
         size={insightsCanvasSize}
         title={INSIGHT_TITLES[shownTab]}
         onSizeChange={setInsightsCanvasSize}
+        popoutHref={`/meeting/${meetingId}/canvas/${shownTab}`}
       >
         <InsightsCanvas meetingId={meetingId} tab={shownTab} onTabChange={openCanvas} />
       </FloatingPanel>
@@ -55,6 +56,7 @@ export function CanvasLayer({ meetingId }: { meetingId: string }) {
         size={replayCanvasSize}
         title="操作回放"
         onSizeChange={setReplayCanvasSize}
+        popoutHref={`/meeting/${meetingId}/canvas/replay`}
       >
         <OperationReplayContent meetingId={meetingId} />
       </FloatingPanel>

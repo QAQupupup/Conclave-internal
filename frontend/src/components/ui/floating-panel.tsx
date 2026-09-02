@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
-import { XIcon } from '@/components/ui/svg-icons';
+import { XIcon, MaximizeIcon } from '@/components/ui/svg-icons';
 import { SIZE_ORDER, readTierWidths, snapWidthToSize } from '@/components/ui/floating-panel-sizing';
 import type { FloatingPanelSize } from '@/components/ui/floating-panel-sizing';
 
@@ -34,6 +34,8 @@ interface FloatingPanelProps {
   title: string;
   /** 传入才启用档位切换器与左缘拖拽调宽（松手吸附到最近档位） */
   onSizeChange?: (size: FloatingPanelSize) => void;
+  /** 传入才启用"弹出"按钮：路由画布地址，新标签页打开（问题 4 路由画布入口） */
+  popoutHref?: string;
   /** 标题栏徽标（如数量角标） */
   badge?: React.ReactNode;
   children: React.ReactNode;
@@ -42,7 +44,7 @@ interface FloatingPanelProps {
 /* 与 --duration-panel 保持一致：退出动画延迟卸载的时长 */
 const PANEL_ANIM_MS = 200;
 
-export function FloatingPanel({ open, onClose, onSizeChange, size, title, badge, children }: FloatingPanelProps) {
+export function FloatingPanel({ open, onClose, onSizeChange, popoutHref, size, title, badge, children }: FloatingPanelProps) {
   const [rendered, setRendered] = React.useState(open);
   const [closing, setClosing] = React.useState(false);
   /** 拖拽中的临时尺寸（松手后清空并吸附档位） */
@@ -169,6 +171,18 @@ export function FloatingPanel({ open, onClose, onSizeChange, size, title, badge,
                 </button>
               ))}
             </div>
+          )}
+          {popoutHref && (
+            <a
+              href={popoutHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="在新标签页打开"
+              aria-label="在新标签页打开画布"
+              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary transition-colors duration-(--duration-hover) hover:bg-bg-tertiary hover:text-text-secondary"
+            >
+              <MaximizeIcon size={13} />
+            </a>
           )}
           <button
             type="button"
