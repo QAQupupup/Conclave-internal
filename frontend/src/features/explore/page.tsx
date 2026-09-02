@@ -5,18 +5,12 @@ import { MessageStream } from '@/components/meeting/message-stream';
 import { ThoughtTree } from '@/components/meeting/thought-tree';
 import { CanvasRail } from '@/components/meeting/canvas-rail';
 import { CanvasLayer } from '@/components/meeting/canvas-layer';
-import { ResizableHandle } from '@/components/ui/resizable';
+import { SidePanel } from '@/components/ui/side-panel';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/ui-slice';
 import { useMeeting } from '@/hooks/use-meetings';
 import { useMeetingStore } from '@/stores/meeting-slice';
-import {
-  PanelLeftCloseIcon,
-  PanelLeftOpenIcon,
-  PanelRightCloseIcon,
-  PanelRightOpenIcon,
-  SpinnerIcon,
-} from '@/components/ui/svg-icons';
+import { SpinnerIcon } from '@/components/ui/svg-icons';
 
 export default function ExplorePage() {
   const { id } = useParams<{ id: string }>();
@@ -68,14 +62,6 @@ export default function ExplorePage() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleTimelineResize = (newSize: number) => {
-    setTimelineWidth(Math.max(200, Math.min(380, newSize)));
-  };
-
-  const handleThoughtTreeResize = (newSize: number) => {
-    setThoughtTreeWidth(Math.max(240, Math.min(480, newSize)));
-  };
-
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center bg-bg-secondary">
@@ -103,41 +89,19 @@ export default function ExplorePage() {
 
   return (
     <div className="flex h-full w-full bg-bg-secondary">
-      {/* Left: Collapsed timeline toggle */}
-      {timelineCollapsed && (
-        <button
-          onClick={toggleTimeline}
-          className="flex w-6 flex-shrink-0 items-center justify-center border-r border-border-soft bg-bg-primary hover:bg-bg-tertiary transition-colors group"
-          title="展开阶段时间线"
-          aria-label="展开阶段时间线"
-        >
-          <PanelLeftOpenIcon size={14} className="text-text-tertiary group-hover:text-text-secondary" />
-        </button>
-      )}
-
-      {/* Left: Stage Timeline */}
-      {!timelineCollapsed && (
-        <>
-          <div
-            className="flex flex-shrink-0 flex-col border-r border-border-soft"
-            style={{ width: timelineWidth }}
-          >
-            <div className="flex h-8 items-center justify-end border-b border-border-soft px-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleTimeline} title="折叠时间线" aria-label="折叠时间线">
-                <PanelLeftCloseIcon size={13} />
-              </Button>
-            </div>
-            <StageTimeline className="min-h-0 flex-1" />
-          </div>
-          <ResizableHandle
-            direction="horizontal"
-            onResize={handleTimelineResize}
-            minSize={200}
-            maxSize={380}
-            currentSize={timelineWidth}
-          />
-        </>
-      )}
+      {/* 左栏：阶段时间线（SidePanel：同位切换柄 + 拖拽调宽） */}
+      <SidePanel
+        side="left"
+        collapsed={timelineCollapsed}
+        onToggle={toggleTimeline}
+        label="阶段时间线"
+        width={timelineWidth}
+        onWidthChange={setTimelineWidth}
+        minSize={200}
+        maxSize={380}
+      >
+        <StageTimeline className="h-full" />
+      </SidePanel>
 
       {/* Center: Message Stream (flex-1) */}
       <div className="flex min-w-0 flex-1">
@@ -147,45 +111,21 @@ export default function ExplorePage() {
       {/* 悬浮画布入口徽标轨（洞察 ×3 + 操作回放） */}
       <CanvasRail meetingId={id!} />
 
-      {/* Right: Agent 状态树（洞察内容已迁移至悬浮画布） */}
-      {!thoughtTreeCollapsed && (
-        <>
-          <ResizableHandle
-            direction="horizontal"
-            onResize={handleThoughtTreeResize}
-            minSize={240}
-            maxSize={480}
-            currentSize={thoughtTreeWidth}
-            reverse
-          />
-          <div
-            className="flex flex-shrink-0 flex-col border-l border-border-soft"
-            style={{ width: thoughtTreeWidth }}
-          >
-            <div className="flex h-8 items-center justify-between border-b border-border-soft px-1">
-              <span className="px-1 text-[11px] font-medium text-text-tertiary">Agent 状态树</span>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠侧栏" aria-label="折叠侧栏">
-                <PanelRightCloseIcon size={13} />
-              </Button>
-            </div>
-            <ThoughtTree className="min-h-0 flex-1" />
-          </div>
-        </>
-      )}
+      {/* 右栏：Agent 状态树（洞察内容已迁移至悬浮画布） */}
+      <SidePanel
+        side="right"
+        collapsed={thoughtTreeCollapsed}
+        onToggle={toggleThoughtTree}
+        label="Agent 状态树"
+        width={thoughtTreeWidth}
+        onWidthChange={setThoughtTreeWidth}
+        minSize={240}
+        maxSize={480}
+      >
+        <ThoughtTree className="h-full" />
+      </SidePanel>
 
-      {/* Right: Collapsed thought tree toggle */}
-      {thoughtTreeCollapsed && (
-        <button
-          onClick={toggleThoughtTree}
-          className="flex w-6 flex-shrink-0 items-center justify-center border-l border-border-soft bg-bg-primary hover:bg-bg-tertiary transition-colors group"
-          title="展开 Agent 状态树"
-          aria-label="展开 Agent 状态树"
-        >
-          <PanelRightOpenIcon size={14} className="text-text-tertiary group-hover:text-text-secondary" />
-        </button>
-      )}
-
-      {/* 悬浮画布层：洞察画布（M/L 档）+ 操作回放画布（L 档），单焦点互斥 */}
+      {/* 悬浮画布层：洞察画布（M/L/XL 档）+ 操作回放画布，单焦点互斥 */}
       <CanvasLayer meetingId={id!} />
     </div>
   );
