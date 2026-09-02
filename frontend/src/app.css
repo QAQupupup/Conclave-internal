@@ -132,10 +132,16 @@
   --width-timeline: 260px;
   --width-thought-tree: 340px;
 
+  /* === 悬浮画布档位宽度（推导依据见设计讨论：与栏网格同源）===
+     S 档（320px）属 Popover 家族，不使用画布 token */
+  --panel-width-m: 28rem; /* 448px M 档：右贴边默认档（证据、相关会议、可观测） */
+  --panel-width-l: 45rem; /* 720px L 档：居中偏右沉浸档（回放、报告全文） */
+
   /* === z-index 层级 === */
   --z-base: 0;
   --z-sticky: 200;
   --z-tooltip: 300;
+  --z-panel: 900;
   --z-modal: 1000;
   /* Select/DropdownMenu 的 Portal 弹出层，需高于 Dialog(modal) 以支持在弹窗内使用 */
   --z-dropdown: 1050;
@@ -512,5 +518,34 @@
 }
 .message-enter {
   animation: message-in var(--duration-panel) var(--ease-standard);
+}
+
+/* === 悬浮画布开合动画（动效规格：--duration-panel；
+   开合用软着陆缓动，关闭用标准缓动——过冲只出现在"到达"，不出现在"离开"）=== */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes panel-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+.floating-panel-enter {
+  animation: panel-in var(--duration-panel) var(--ease-soft);
+}
+.floating-panel-exit {
+  animation: panel-out var(--duration-panel) var(--ease-standard);
 }
 

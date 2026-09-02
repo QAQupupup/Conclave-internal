@@ -111,5 +111,9 @@ export async function resetAllStores() {
     takeoverRequest: null,
   });
   // UI store 重置到默认（不强制，避免影响 UI 测试）
-  useUIStore.setState({ commandPaletteOpen: false });
+  useUIStore.setState({
+    commandPaletteOpen: false,
+    activeCanvas: null,
+    insightsCanvasSize: 'M',
+  });
 }

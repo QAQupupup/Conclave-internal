@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router';
 import { StageTimeline } from '@/components/meeting/stage-timeline';
 import { MessageStream } from '@/components/meeting/message-stream';
 import { ThoughtTree } from '@/components/meeting/thought-tree';
-import { InsightsPanel } from '@/components/meeting/insights-panel';
-import { OperationReplay } from '@/components/meeting/operation-replay';
+import { CanvasRail } from '@/components/meeting/canvas-rail';
+import { CanvasLayer } from '@/components/meeting/canvas-layer';
 import { ResizableHandle } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/ui-slice';
@@ -16,7 +16,6 @@ import {
   PanelRightCloseIcon,
   PanelRightOpenIcon,
   SpinnerIcon,
-  ClockIcon,
 } from '@/components/ui/svg-icons';
 
 export default function ExplorePage() {
@@ -32,7 +31,6 @@ export default function ExplorePage() {
   const toggleTimeline = useUIStore((s) => s.toggleTimeline);
   const toggleThoughtTree = useUIStore((s) => s.toggleThoughtTree);
   const setMeeting = useMeetingStore((s) => s.setMeeting);
-  const [replayOpen, setReplayOpen] = React.useState(false);
 
   // Initialize store from API data when loaded
   React.useEffect(() => {
@@ -146,7 +144,10 @@ export default function ExplorePage() {
         <MessageStream className="flex-1" />
       </div>
 
-      {/* Right: Thought Tree */}
+      {/* 悬浮画布入口徽标轨（洞察 ×3 + 操作回放） */}
+      <CanvasRail meetingId={id!} />
+
+      {/* Right: Agent 状态树（洞察内容已迁移至悬浮画布） */}
       {!thoughtTreeCollapsed && (
         <>
           <ResizableHandle
@@ -162,29 +163,12 @@ export default function ExplorePage() {
             style={{ width: thoughtTreeWidth }}
           >
             <div className="flex h-8 items-center justify-between border-b border-border-soft px-1">
-              <span className="px-1 text-[11px] font-medium text-text-tertiary">侧栏</span>
-              <div className="flex items-center">
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setReplayOpen(true)} title="操作回放" aria-label="操作回放">
-                  <ClockIcon size={13} />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠侧栏" aria-label="折叠侧栏">
-                  <PanelRightCloseIcon size={13} />
-                </Button>
-              </div>
+              <span className="px-1 text-[11px] font-medium text-text-tertiary">Agent 状态树</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleThoughtTree} title="折叠侧栏" aria-label="折叠侧栏">
+                <PanelRightCloseIcon size={13} />
+              </Button>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col">
-              {/* Agent 状态树（上半） */}
-              <div className="flex min-h-0 flex-1 flex-col border-b border-border-soft">
-                <div className="flex h-7 flex-shrink-0 items-center border-b border-border-soft px-2 text-[11px] font-medium text-text-tertiary">
-                  Agent 状态树
-                </div>
-                <ThoughtTree className="min-h-0 flex-1" />
-              </div>
-              {/* 可观测性面板（下半）：冲突/证据、相关会议、关键指标 */}
-              <div className="flex min-h-0 flex-1 flex-col">
-                <InsightsPanel meetingId={id!} />
-              </div>
-            </div>
+            <ThoughtTree className="min-h-0 flex-1" />
           </div>
         </>
       )}
@@ -201,8 +185,8 @@ export default function ExplorePage() {
         </button>
       )}
 
-      {/* 操作回放播放器（会议级工具调用轨迹） */}
-      <OperationReplay meetingId={id!} open={replayOpen} onClose={() => setReplayOpen(false)} />
+      {/* 悬浮画布层：洞察画布（M/L 档）+ 操作回放画布（L 档），单焦点互斥 */}
+      <CanvasLayer meetingId={id!} />
     </div>
   );
 }

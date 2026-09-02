@@ -10,15 +10,12 @@ import { RecordingImage } from './recording-image';
 import {
   PlayIcon,
   PauseIcon,
-  XIcon,
   SpinnerIcon,
   StepStatusDot,
 } from '@/components/ui/svg-icons';
 
-interface OperationReplayProps {
+interface OperationReplayContentProps {
   meetingId: string;
-  open: boolean;
-  onClose: () => void;
 }
 
 type Speed = 0.5 | 1 | 2 | 4;
@@ -81,8 +78,12 @@ function toolLabel(toolName: string): string {
   return toolName;
 }
 
-/** 会议级「操作回放」播放器：聚合整场会议的工具调用，支持播放/暂停/倍速/拖动/过滤。 */
-export function OperationReplay({ meetingId, open, onClose }: OperationReplayProps) {
+/**
+ * 会议级「操作回放」画布内容：聚合整场会议的工具调用，支持播放/暂停/倍速/拖动/过滤。
+ * 由悬浮画布体系（FloatingPanel L 档）承载：标题栏、关闭按钮、ESC、入场/退场动效
+ * 统一由画布提供，本组件不再自带遮罩与抽屉外壳（非模态，对话流保持可操作）。
+ */
+export function OperationReplayContent({ meetingId }: OperationReplayContentProps) {
   const liveToolCalls = useMeetingStore((s) => s.toolCalls);
   const [filter, setFilter] = React.useState<ToolFilter>('all');
   const [speed, setSpeed] = React.useState<Speed>(1);
@@ -92,7 +93,8 @@ export function OperationReplay({ meetingId, open, onClose }: OperationReplayPro
   const eventsQuery = useQuery({
     queryKey: ['meeting', 'events', meetingId],
     queryFn: () => api.getMeetingEvents(meetingId, 0),
-    enabled: open && !!meetingId,
+    // 组件仅在画布展开期间挂载（画布层按需渲染），无需 open 门控
+    enabled: !!meetingId,
     staleTime: 0,
   });
 
@@ -168,77 +170,29 @@ export function OperationReplay({ meetingId, open, onClose }: OperationReplayPro
     }
   };
 
-  // ESC 关闭
-  React.useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   return (
-    <div
-      className={cn(
-        'fixed inset-0 z-[100] transition-opacity duration-200',
-        open ? 'opacity-100' : 'pointer-events-none opacity-0',
-      )}
-      aria-hidden={!open}
-    >
-      {/* 轻量可点击遮罩：点击空白处关闭，不阻断式变暗 */}
-      <button
-        type="button"
-        aria-label="关闭操作回放"
-        onClick={onClose}
-        className="absolute inset-0 h-full w-full cursor-default border-0 bg-black/10 p-0"
-      />
-
-      {/* 右侧抽屉面板 */}
-      <aside
-        className={cn(
-          'absolute right-0 top-0 flex h-full w-[720px] max-w-[88vw] flex-col border-l border-border-soft bg-bg-primary shadow-2xl',
-          'transition-transform duration-300 ease-out',
-          open ? 'translate-x-0' : 'translate-x-full',
-        )}
-        role="dialog"
-        aria-label="操作回放"
-      >
-        {/* 头部 */}
-        <div className="flex h-12 flex-shrink-0 items-center gap-3 border-b border-border-soft px-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-text-primary">操作回放</span>
-            <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-tertiary">
-              {filtered.length} 次操作
-            </span>
-          </div>
-
-          <div className="ml-auto flex items-center gap-1">
-            {FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFilter(f.key)}
-                className={cn(
-                  'rounded px-2 py-1 text-[11px] font-medium transition-colors',
-                  filter === f.key
-                    ? 'bg-brand-500 text-white'
-                    : 'text-text-tertiary hover:bg-bg-tertiary hover:text-text-secondary',
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={onClose}
-              className="ml-1 flex h-6 w-6 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-bg-tertiary hover:text-text-secondary"
-              aria-label="关闭"
-            >
-              <XIcon size={14} />
-            </button>
-          </div>
-        </div>
+    <div className="flex h-full flex-col">
+      {/* 过滤工具栏（含操作计数）；标题栏与关闭按钮由画布统一提供 */}
+      <div className="flex flex-shrink-0 items-center gap-1 border-b border-border-soft px-4 py-2">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setFilter(f.key)}
+            className={cn(
+              'rounded px-2 py-1 text-[11px] font-medium transition-colors duration-(--duration-hover)',
+              filter === f.key
+                ? 'bg-brand-500 text-white'
+                : 'text-text-tertiary hover:bg-bg-tertiary hover:text-text-secondary',
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+        <span className="ml-auto flex-shrink-0 rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-tertiary">
+          {filtered.length} 次操作
+        </span>
+      </div>
 
         {/* 播放控制栏 */}
         <div className="flex flex-shrink-0 items-center gap-3 border-b border-border-soft px-4 py-2">
@@ -442,7 +396,6 @@ export function OperationReplay({ meetingId, open, onClose }: OperationReplayPro
             </div>
           </div>
         )}
-      </aside>
     </div>
   );
 }

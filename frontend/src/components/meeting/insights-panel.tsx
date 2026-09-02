@@ -3,9 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useMeetingDetailRaw } from '@/hooks/use-meetings';
 import { cn } from '@/lib/utils';
+import type { CanvasKind } from '@/stores/ui-slice';
 import { SpinnerIcon, LinkIcon, AlertCircleIcon, CheckIcon, GitBranchIcon } from '@/components/ui/svg-icons';
 
-type TabKey = 'conflicts' | 'related' | 'observability';
+/** 洞察画布的三个 tab（画布类别的子集，tab 即画布焦点） */
+export type InsightsTab = Extract<CanvasKind, 'conflicts' | 'related' | 'observability'>;
 
 interface RelatedMeeting {
   meeting_id: string;
@@ -36,16 +38,24 @@ interface ObservabilityDetail {
   key_questions?: string[];
 }
 
-const TABS: { key: TabKey; label: string }[] = [
+const TABS: { key: InsightsTab; label: string }[] = [
   { key: 'conflicts', label: '冲突与证据' },
   { key: 'related', label: '相关会议' },
   { key: 'observability', label: '可观测' },
 ];
 
-/** 会议可观测性面板（旧版 8 面板移植）：冲突/证据、相关会议、可观测指标。 */
-export function InsightsPanel({ meetingId }: { meetingId: string }) {
-  const [tab, setTab] = React.useState<TabKey>('conflicts');
+interface InsightsCanvasProps {
+  meetingId: string;
+  /** 受控 tab：由画布状态层（ui-slice.activeCanvas）驱动 */
+  tab: InsightsTab;
+  onTabChange: (tab: InsightsTab) => void;
+}
 
+/**
+ * 洞察画布内容：冲突/证据、相关会议、可观测指标。
+ * 由悬浮画布体系（FloatingPanel M 档）承载，不再作为右栏内嵌面板。
+ */
+export function InsightsCanvas({ meetingId, tab, onTabChange }: InsightsCanvasProps) {
   const detail = useMeetingDetailRaw(meetingId);
   const graph = useQuery({
     queryKey: ['graph', 'overview', meetingId],
@@ -65,13 +75,13 @@ export function InsightsPanel({ meetingId }: { meetingId: string }) {
   const contradictsCount = edges.filter((e) => e.type === 'contradicts').length;
 
   return (
-    <div className="flex h-full flex-col bg-bg-primary">
-      {/* Tabs */}
-      <div className="flex items-center border-b border-border-soft">
+    <div className="flex flex-col">
+      {/* Tabs（sticky：画布内容区滚动时 tab 栏保持可见） */}
+      <div className="sticky top-0 z-10 flex items-center border-b border-border-soft bg-bg-elevated">
         {TABS.map((t) => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => onTabChange(t.key)}
             className={cn(
               'relative flex-1 px-2 py-2 text-xs font-medium transition-colors',
               tab === t.key
@@ -92,7 +102,8 @@ export function InsightsPanel({ meetingId }: { meetingId: string }) {
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      {/* 内容区不另设滚动：画布内容容器（FloatingPanel）是唯一滚动条 */}
+      <div className="p-3">
         {tab === 'conflicts' && (
           <ConflictsTab
             conflicts={conflicts}
