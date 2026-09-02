@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { StageId, MeetingStatus, MeetingMessage, BorrowRequest, AgentInfo, ToolCallRecord, ToolStep } from '@/types';
 import { normalizeStageId } from '@/lib/constants';
+import { mergeAgentUpdates } from '@/lib/agent-merge';
 
 interface MeetingState {
   currentMeetingId: string | null;
@@ -22,6 +23,8 @@ interface MeetingState {
   setStage: (stage: StageId) => void;
   setPaused: (paused: boolean) => void;
   setAgents: (agents: AgentInfo[]) => void;
+  /** 按 id 合并 agents 增量（STATE_DELTA 瘦身负载不抹掉 name/role），见 lib/agent-merge */
+  mergeAgents: (incoming: AgentInfo[]) => void;
   updateAgentState: (agentId: string, state: AgentInfo['state']) => void;
   addMessage: (msg: MeetingMessage) => void;
   appendMessageDelta: (messageId: string, delta: string, thinking?: boolean) => void;
@@ -84,6 +87,8 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
   setPaused: (paused) => set({ paused }),
 
   setAgents: (agents) => set({ agents }),
+
+  mergeAgents: (incoming) => set((s) => ({ agents: mergeAgentUpdates(s.agents, incoming) })),
 
   updateAgentState: (agentId, state) =>
     set((s) => ({

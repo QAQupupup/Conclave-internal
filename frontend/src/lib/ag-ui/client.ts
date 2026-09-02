@@ -526,7 +526,9 @@ class AGUIClient {
         const e = event as StateDeltaEvent;
         if (e.stage) store.setStage(e.stage);
         if (e.status) store.setStatus(e.status);
-        if (e.agents) store.setAgents(e.agents);
+        // 按 id 合并而非整体替换：STATE_DELTA 可能仅携带 {id, state} 瘦身负载，
+        // 整体替换会抹掉 name/role，导致头像退化为 "?"（见 lib/agent-merge）
+        if (e.agents) store.mergeAgents(e.agents);
         if (e.title) {
           // 不直接 setMeeting，只更新 title
           useMeetingStore.setState({ title: e.title });

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { ROLE_LABELS, ROLE_AVATAR_COLORS } from '@/lib/constants';
 import type { AgentInfo, AgentState, BorrowRequest } from '@/types';
 import { AgentAvatar, StatusDot } from '@/components/ui/svg-icons';
+import { Tooltip } from '@/components/ui/tooltip';
 
 export function ThoughtTree({ className }: { className?: string }) {
   const agents = useMeetingStore((s) => s.agents);
@@ -92,6 +93,12 @@ function AgentCard({
   };
   const roleLabel = agent.role ? ROLE_LABELS[agent.role] : '';
   const roleColor = agent.role ? ROLE_AVATAR_COLORS[agent.role] : undefined;
+  // name 兜底：STATE_DELTA 瘦身负载或历史数据可能缺 name，
+  // 退化为角色标签而非空白，避免"无名 Agent"（数据层合并见 lib/agent-merge）
+  const displayName = agent.name || roleLabel || '未命名 Agent';
+  const tooltipText = roleLabel && agent.name
+    ? `${displayName} · ${roleLabel} · ${stateLabel[agent.state]}`
+    : `${displayName} · ${stateLabel[agent.state]}`;
 
   return (
     <div
@@ -102,15 +109,19 @@ function AgentCard({
       )}
     >
       <div className="flex items-center gap-2">
-        <AgentAvatar
-          agentId={agent.id}
-          agentName={agent.name}
-          role={agent.role}
-          size={24}
-        />
+        <Tooltip content={tooltipText} side="left">
+          <span className="flex flex-shrink-0 items-center" tabIndex={-1}>
+            <AgentAvatar
+              agentId={agent.id}
+              agentName={displayName}
+              role={agent.role}
+              size={24}
+            />
+          </span>
+        </Tooltip>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-xs font-medium text-text-primary">{agent.name}</span>
+            <span className="truncate text-xs font-medium text-text-primary">{displayName}</span>
             {roleLabel && (
               <span
                 className="inline-flex flex-shrink-0 items-center rounded px-1.5 py-px text-[10px] font-medium leading-tight"
