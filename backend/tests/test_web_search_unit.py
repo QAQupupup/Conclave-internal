@@ -28,12 +28,12 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
-from app.tools.playwright.session_pool import SessionPool
-
 # ---------------------------------------------------------------------------
 # 被测试模块
 # ---------------------------------------------------------------------------
-from app.tools.playwright_search import PlaywrightWebSearch, _is_safe_url
+from app.tools.playwright.security import _is_safe_url
+from app.tools.playwright.session_pool import SessionPool
+from app.tools.playwright_search import PlaywrightWebSearch
 from app.tools.search_engine import (
     EngineHealth,
     MultiEngineSearch,

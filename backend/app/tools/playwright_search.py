@@ -42,7 +42,7 @@ from .domain_registry import (
 from .playwright import _CAPTCHA_DETECT_JS, _STEALTH_JS  # 开源版为空字符串
 from .playwright.chunk_js import _CHUNK_EXTRACT_JS
 from .playwright.jsonld_js import _JSONLD_EXTRACT_JS
-from .playwright.security import _is_safe_url
+from .playwright.security import _is_safe_url_async
 from .playwright.session_pool import SessionPool
 
 logger = logging.getLogger("app.tools.playwright_search")
@@ -488,8 +488,8 @@ class PlaywrightWebSearch:
 
         fetched_at = datetime.now(timezone.utc).isoformat()
 
-        # SSRF 校验
-        safe, reason = _is_safe_url(url)
+        # SSRF 校验（异步版：含 DNS 解析校验，防 DNS rebinding 初始检查）
+        safe, reason = await _is_safe_url_async(url)
         if not safe:
             logger.warning("fetch_url SSRF拦截: url=%s reason=%s", url[:80], reason)
             return {
@@ -1042,8 +1042,8 @@ class PlaywrightWebSearch:
 
         异常处理：所有 Playwright 异常被捕获，返回空 chunks。
         """
-        # P0-1: SSRF 初始 URL 校验
-        safe, reason = _is_safe_url(url)
+        # P0-1: SSRF 初始 URL 校验（异步版：含 DNS 解析校验）
+        safe, reason = await _is_safe_url_async(url)
         if not safe:
             logger.warning("SSRF 拦截: url=%s reason=%s", url[:80], reason)
             return {
@@ -1140,10 +1140,10 @@ class PlaywrightWebSearch:
                 # goto 返回 Response 对象，含 HTTP 头
                 response = await page.goto(url, wait_until="domcontentloaded", timeout=15000)
 
-                # P0-1: redirect-hop SSRF 验证
+                # P0-1: redirect-hop SSRF 验证（异步版：含 DNS 解析校验）
                 if response:
                     final_url = response.url
-                    safe_redirect, redirect_reason = _is_safe_url(final_url)
+                    safe_redirect, redirect_reason = await _is_safe_url_async(final_url)
                     if not safe_redirect:
                         logger.warning(
                             "SSRF redirect 拦截: initial=%s final=%s reason=%s",

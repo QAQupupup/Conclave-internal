@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.tools import StubWebSearch, TavilyWebSearch
-from app.tools.playwright_search import _is_safe_url
+from app.tools.playwright.security import _is_safe_url
 from app.tools.search_engine import (
     EngineHealth,
     MultiEngineSearch,

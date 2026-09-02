@@ -126,8 +126,10 @@ class ToolPort(Protocol):
 
 ### 安全机制
 
-- 始终拒绝 `file://`、`data:`、`javascript:`、`vbscript:` 等危险 scheme
-- 拒绝私网/回环/链路本地/保留 IP（`_is_private_ip()`）
+- URL 校验统一到 `app.network_security.validate_url_async`（单一可信来源）
+- 始终拒绝 `file://`、`data:`、`javascript:`、`vbscript:` 等危险 scheme（仅放行 http/https）
+- 拒绝私网/回环/链路本地/保留 IP（含数字型变体 `http://2130706433/` → 127.0.0.1）
+- DNS 解析后所有 IP 复检（防 DNS rebinding 初始检查）
 - 域名白名单（`ALLOWED_DOMAINS`，空列表 = 允许所有公网域名但拒绝私网）
 - 截图大小限制 2MB，evaluate 返回值限制 1MB
 
