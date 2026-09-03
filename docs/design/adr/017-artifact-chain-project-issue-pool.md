@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted — 2026-09-04（三个可推翻点经用户裁决确认：D1 独立产物表、D4 三类型一次建齐、Phase 2/3 顺序调整为先议题池后测试闭环）
+Accepted — 2026-09-04（三个可推翻点经用户裁决确认：D1 独立产物表、D4 三类型一次建齐、Phase 2/3 顺序调整为先议题池后测试闭环。用户裁决 2026-09-04：索引隔离键用 `project_id` 而非 slug（与 ADR-018 D3 对齐）；新增 D11 议题合入 main 流程，作为 ADR-018 D13 索引同步的触发点）
 
 ## 背景
 
@@ -144,12 +144,13 @@ ALTER TABLE meetings ADD COLUMN issue_id   uuid NULL;
 | D2 | **Publish 模式**：运行态用 `state.artifact`，会议成功后单向发布入表 | 不改编排器中途写入路径，规避状态机契约风险（ADR-013）；发布幂等可重试 | 编排器实时双写：中途失败导致表与 payload 不一致 |
 | D3 | 血缘**双轨**：保留 `reference_meeting_ids`（会议级，向后兼容），新增产物级 `source_artifact_ids` | 会议级引用继续服务"参考某次会议的讨论"；产物级血缘服务"精确消费某个上游产物"。新会议创建时可勾选上游产物，系统自动展开其摘要注入 | 只留会议级：无法区分"参考整场会议"与"消费某个具体产物" |
 | D4 | 新增产出类型 `feasibility_report` / `adr` / `test_suite`，各配 produce 模板，**三类型一次建齐**（Phase 1 全部落地） | 产物链的每个环节都应有独立类型与质量门禁，而非塞进 `comprehensive`；一次建齐避免后续补建返工（用户裁决 2026-09-04：底座先建，用量上来后再改复杂度高）；`test_report` 作为 `test_suite` 的伴生产物（执行结果），不单设类型 | 复用现有类型：门禁与模板无法差异化；按 Phase 分期建类型：后续补建导致模板/门禁返工 |
-| D5 | `projects` 表作为仓库绑定 namespace，`slug` tenant 内唯一 | 议题池、会议、产物、代码库理解索引都需要一个共同聚合根；slug 同时预留为 Qdrant workspace / LightRAG namespace 的隔离键（与代码库理解层对齐，见 ADR-018 D3 `{tenant_id}:{project_slug}`） | 用 metadata 模拟：无实体则无法挂议题与外键 |
-| D6 | workspace 层级**保持** `workspace/{meeting_id}/` 为执行单位；`workspace/projects/{slug}/` 仅作项目级共享只读区（仓库缓存/共享文档），随项目 Phase 2 建立（仓库克隆缓存见 Phase 4） | 执行隔离边界不动（沙箱、防穿越、会议间隔离全部复用）；共享区只读，避免并发写冲突 | 议题共享单一工作区：并发会议互相踩踏 |
+| D5 | `projects` 表作为仓库绑定 namespace，`slug` tenant 内唯一（仅作人类可读标识与 URL） | 议题池、会议、产物、代码库理解索引都需要一个共同聚合根；**隔离键用稳定的 `projects.id`（project_id）**，预留为 Qdrant workspace / LightRAG namespace 键（用户裁决 2026-09-04，见 ADR-018 D3 `{tenant_id}:proj-{project_id}`）——slug 改名不影响索引 | 用 metadata 模拟：无实体则无法挂议题与外键；用 slug 作隔离键：改名即孤儿索引 |
+| D6 | workspace 层级**保持** `workspace/{meeting_id}/` 为执行单位；`workspace/projects/{project_id}/` 仅作项目级共享只读区（仓库缓存/共享文档），随项目 Phase 2 建立（仓库克隆缓存见 Phase 4） | 执行隔离边界不动（沙箱、防穿越、会议间隔离全部复用）；共享区只读，避免并发写冲突；目录与隔离键同用 project_id，slug 改名零迁移 | 议题共享单一工作区：并发会议互相踩踏 |
 | D7 | 议题入池**必须人工确认**：会议中主持人收集"候选议题"，用户确认后才写入 `issues`（source=meeting） | 防止 LLM 噪声议题污染池子；与"不令用户意外"的交互原则一致；用户手动入池（source=user）不受限 | 会议自动入池：低质量议题泛滥，治理成本高于收益 |
 | D8 | git 操作分级护栏：**commit 可自动**（workspace 内、bot 身份、Conventional Commits）；**push 必须用户显式确认**（API 确认参数 + UI 展示 diff 摘要） | 与 AGENTS.md §0.5.1 不可逆操作策略一致；commit 可回退，push 进入共享空间不可控 | push 也自动：违反既有纪律且风险不可逆 |
 | D9 | **自主迭代循环是理想态，不是 MVP**：本 ADR 只定义调度契约（按优先级取 open 议题 → 建会 → 质量门禁 → commit → 更新状态 → 下一条），实施推迟到 Phase 4 且另开 ADR | 自动循环的成本与质量风险（token 爆炸、错误累积、仓库被写坏）需要配额（ADR-007）+ 每日上限 + 人工审批开关先行 | 直接实现：风险敞口过大，属"凭理想编码" |
 | D10 | 新表全部带 `tenant_id` + DAO 层隔离，跨租户产物引用拒绝复用 `produce.py:734` 现有模式 | P8 多租户隔离 Checklist 是红线，漏一个 DAO 就跨租户泄露 | — |
+| D11 | **议题合入 main 流程**：合入触发 = 议题会议成功终态（产物已 publish + 质量门禁通过）+ **用户显式确认**（API 确认参数 + UI 展示 diff 摘要，同 D8）；合入目标 = 项目共享克隆的 `default_branch`；合入成功后议题置 `resolved`（挂 `resolution_artifact_id`）并触发 ADR-018 D13 增量重摄；合入冲突不自动解决，议题标记冲突态交回用户 | 与 D8 git 护栏哲学一致（进入共享空间的操作必须显式确认）；显式合入防止 LLM 产出未经审视混入项目基线；合入成功是唯一索引同步触发点，保证共享索引恒等于项目当前基线 | 自动合入：基线被污染且难回退；只 push 不合入：议题闭环悬空、索引永不更新 |
 
 ### 场景映射（用户三个目标 → 机制）
 
@@ -160,7 +161,8 @@ ALTER TABLE meetings ADD COLUMN issue_id   uuid NULL;
 | 上传设计文件/项目文件夹作为输入 | 现状已支持（`routers/code.py` 摄入到 `workspace/{meeting_id}/`），产物链中作为会议输入而非产物 | 已有 |
 | 仓库 → 生成测试用例 → 执行 → 测试报告 → 提交 git | `test_suite` 类型会议：produce 生成测试代码落 workspace → 沙箱执行（L2/L3）→ `test_report` 伴生产物 → 自动 commit / 确认后 push | Phase 3 |
 | 项目专属议题池（会议提出 + 用户发送） | `projects` + `issues`；会议候选经确认入池，用户手动直发 | Phase 2 |
-| 议题共享 namespace、各绑自己的 workspace | namespace = `projects.slug`；议题 → `assigned_meeting_id` → `workspace/{meeting_id}/`；仓库从项目共享区克隆 | Phase 2（共享区缓存 Phase 4） |
+| 议题共享 namespace、各绑自己的 workspace | namespace = `projects`（slug 人类标识 / project_id 隔离键）；议题 → `assigned_meeting_id` → `workspace/{meeting_id}/`；仓库从项目共享区克隆 | Phase 2（共享区缓存 Phase 4） |
+| 议题解决落回仓库（合入闭环） | D11 合入流程：门禁通过 + 显式确认 → 合入共享克隆 `default_branch` → 议题 resolved → 触发 ADR-018 D13 索引增量 | Phase 4（依赖共享克隆） |
 | 不断重复迭代（自动循环） | 调度契约已定义，实施推迟（D9） | Phase 4，另开 ADR |
 
 ### 与设计原则及相关 ADR 的对齐
@@ -169,7 +171,7 @@ ALTER TABLE meetings ADD COLUMN issue_id   uuid NULL;
 - **ADR-002（JSONB metadata）**：本 ADR 不依赖其落地；产物/项目/议题是核心实体走核心表，metadata 仍留给插件扩展。两者不冲突。
 - **ADR-013（状态机契约）**：Publish 模式保证编排器运行态不被新表污染；新产出类型必须注册对应质量门禁评估方法（`runner.py:1129` 分派点）。
 - **ADR-014（动态工作流）**：`feasibility_report` / `adr` / `test_suite` 各配 workflow 模板（复用 `workflow_template` 机制，domain/meeting.py:194）。
-- **ADR-016（代码知识图谱）**：项目 namespace 是代码库理解索引的天然隔离单位；`projects.slug` 预留为索引 workspace 键。当前图索引按 meeting_id 隔离（内存注册表），项目级共享索引属 Phase 4，由 ADR-018（LightRAG/Qdrant workspace 按 slug 隔离）承接。
+- **ADR-016（代码知识图谱）**：项目 namespace 是代码库理解索引的天然隔离单位；`projects.id`（project_id）预留为索引 workspace 键。当前图索引按 meeting_id 隔离（内存注册表），项目级共享索引属 Phase 4，由 ADR-018（LightRAG/Qdrant workspace 按 project_id 隔离）承接；本 ADR D11 的合入流程是 ADR-018 D13 索引同步的触发点。
 
 ## 分阶段实施计划
 
@@ -202,9 +204,10 @@ ALTER TABLE meetings ADD COLUMN issue_id   uuid NULL;
 ### Phase 4：理想态（另开 ADR，本 ADR 只留契约）
 
 1. **自主迭代调度器**：按优先级消费议题池，受配额（ADR-007）+ 每日上限 + 人工审批开关约束。
-2. **项目级仓库缓存**：`workspace/projects/{slug}/` 共享克隆 + git worktree 派生议题工作区，省去重复 clone。
-3. **项目级代码库理解索引**：LightRAG/Qdrant workspace 按 `projects.slug` 隔离，跨会议复用（承接 ADR-016 后续，详见 ADR-018）。
+2. **项目级仓库缓存**：`workspace/projects/{project_id}/` 共享克隆（跟踪 `default_branch`）+ git worktree 派生议题工作区，省去重复 clone。
+3. **项目级代码库理解索引**：LightRAG/Qdrant workspace 按 `projects.id`（project_id）隔离，跨会议复用（承接 ADR-016 后续，详见 ADR-018）。
 4. **产物版本演进**：同项目同类型产物的 diff/merge 视图。
+5. **议题合入流程**：落地 D11（显式确认合入共享克隆 `default_branch` + 议题状态闭环），合入成功后触发 ADR-018 D13 索引增量重摄。
 
 ### 测试策略（用户约定）
 
