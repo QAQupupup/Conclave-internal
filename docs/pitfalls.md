@@ -15,11 +15,12 @@
 | [异步/事件循环](#异步事件循环) | P1, P2 | 改 asyncio 代码、遇到事件循环报错 |
 | [Docker/部署](#docker部署) | P3, P4 | 改 Dockerfile/compose、Playwright 依赖 |
 | [数据库/ORM](#数据库orm) | P5, P6, P7, P8, P9, P10 | 改 ORM 模型、DDL、多租户、Alembic |
-| [测试](#测试) | P11, P12, P13, P14 | 写/改测试、fixture、断言 |
+| [测试](#测试) | P11, P12, P13, P14, P27 | 写/改测试、fixture、断言 |
 | [CI/Git](#cigit) | P15, P16, P17 | 提交、推送、hook 问题 |
 | [编排器](#编排器) | P18, P19, P20 | 改 runner/nodes/门禁 |
 | [文档质量](#文档质量) | P21, P22 | 写文档、回应代码审查 |
 | [杂项](#杂项) | P23, P24, P25, P26 | 前端 TS/ESLint、import 取舍、Alembic env |
+| [AI 助手文件操作纪律（PowerShell）](#ai-助手文件操作纪律powershell) | P28, P29 | 用 PowerShell 改记忆文件/vault 指针/配置等关键文件 |
 
 ---
 
@@ -413,6 +414,45 @@ git commit -F commit-msg.txt
 
 ---
 
+## AI 助手文件操作纪律（PowerShell）
+
+### P28. 关键文件截断事故（PowerShell 非终结错误 + 行切片写盘）
+
+**症状**：更新 `project_memory.md` 顶部指针后，文件被截断为 5 行，后续所有章节（Hard Constraints 尾部、Engineering Conventions、Lessons Learned）丢失，且本地无任何备份可恢复。
+
+**事故链**（2026-09-04，完整记录见 vault 检查点 `20260904-0303-projectid-isolation-d11-d13-committed.md` 事故记录节）：
+1. 编辑工具对 Trae 记忆路径有作用域限制（PathScopeExceed），改用 PowerShell 脚本替换文件头部指针块。
+2. 第一版脚本含中文常量：PowerShell 5 按系统 ANSI（GBK）读取 .ps1，中文乱码导致解析失败（见 P29）。
+3. 第二版脚本改为纯 ASCII 逻辑 + 行切片拼接（新头部行 + `$lines[5..($lines.Length-1)]`）。切片返回 `Object[]`，`List[string].AddRange()` 抛 `MethodArgumentConversionInvalidCast`。
+4. **该异常是非终结错误**：脚本未设 `$ErrorActionPreference='Stop'`，继续执行后续 `WriteAllLines`——只写入了前 5 行，原文件其余内容全部丢失。
+5. 恢复排查：记忆目录无备份、卷影副本不可用（WMI 初始化失败）、编辑器本地历史无记录、vault 原文层无全文引用。最终仅能从会话上下文逐字恢复部分内容，丢失章节如实标注、禁止凭空补写。
+
+**根因**：
+1. PowerShell 中 .NET 方法调用异常默认是**非终结错误**，脚本带伤继续执行后续写操作——这是数据丢失的直接原因。
+2. 行切片拼接写盘（只写部分行 + 拼接剩余行）天然有全量丢失风险，任何一步失败都会写出残缺文件。
+3. 关键文件修改前无备份，事故后无恢复源。
+
+**规则（强制）**：
+1. **关键文件（记忆文件、vault 指针、配置文件）修改前必须先备份**：复制原文件到工作目录再动手。
+2. **优先整文件读写，禁止无校验的行切片拼接**：`ReadAllText → String.Replace → 校验 Contains 成功 → WriteAllText`。替换未命中时必须中止，不得降级写部分内容。
+3. **PowerShell 写盘脚本必须设 `$ErrorActionPreference = 'Stop'`**，且写盘前校验所有中间结果（数组长度、替换命中、内容非空）。
+4. **写盘后必须验证**：读回文件确认长度合理 + 地标行存在（如章节标题）。
+5. **恢复纪律**：事故后按"目录备份 → 卷影副本 → 编辑器本地历史 → vault/会话上下文"顺序排查恢复源；只能逐字恢复有出处的内容，丢失部分如实标注"丢失待补"，**禁止凭空补写**（对齐 P21 文档真实性）。
+
+### P29. PowerShell 5 读取 .ps1 脚本的中文编码解析错误
+
+**症状**：含中文常量的 .ps1 脚本报 `Unexpected token` 解析错误，错误信息中的中文显示为乱码（如 `涓嬩竴姝ワ細`）。
+
+**根因**：PowerShell 5 对无 BOM 的 .ps1 按系统 ANSI（中文 Windows 为 GBK）读取；UTF-8 编码的中文被按 GBK 解析后乱码，引号/括号配对被打断，触发解析错误。与 P16（git commit -m 中文）同源不同面。
+
+**规则**：
+1. **脚本与数据分离**：中文内容写入独立的 UTF-8 文本文件（用编辑工具写，编码可控），.ps1 只保留纯 ASCII 逻辑，读数据文件处理。
+2. 备选：.ps1 保存为 UTF-8 **with BOM**（PowerShell 5 认 BOM）。但跨工具写 BOM 不可靠，优先用规则 1。
+3. PowerShell 7+ 默认 UTF-8 无此问题，但本项目环境是 PowerShell 5，按最严格规则执行。
+
+---
+
 > 本文件从 AGENTS.md §4 拆出于 2026-07-30。子节编号从原 §4.x 改为 P1-P26，内容不变。
 > AGENTS.md §4 现在只保留类别索引，按需指向本文件。
 > P27 新增于 2026-08-01，对应 AGENTS.md §5.7 测试纪律硬性规则。
+> P28/P29 新增于 2026-09-04，源自 project_memory.md 截断事故（新类别"AI 助手文件操作纪律"）。

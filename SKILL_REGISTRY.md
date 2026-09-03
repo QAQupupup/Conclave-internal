@@ -52,6 +52,7 @@ AI 助手在以下情况应**主动**检查并调用对应 Skill，无需用户�
 | `audit-remediation` | 审计报告修复、验证并修复、分析并修、fix audit | 收到审计报告后需要独立验证 + 实际代码修复 | 审计报告中的 P0/P1 问题需要修复 | 收到报告+需修复时 |
 | `orchestrator-state-check` | 阶段被跳过、阶段重复、质量门禁不执行、终态错误 | 修改编排器代码（runner.py、stage_runners.py、nodes/） | state.stage/status 赋值冲突 | 改编排器时 |
 | `hardcode-check` | 检查硬编码、巡检硬编码、hardcode check、硬编码扫描 | 提交前自检、代码审计、收到硬编码相关评审意见 | grep 发现 password/secret/token 硬编码、温度魔法数字 | 提交前/审计时 |
+| `adr-writing` | 写 ADR、起草 ADR、定稿 ADR、架构决策 | 引入新架构/新依赖/新范式、决策存在多个待裁决选项 | — | 设计前 |
 
 ### 内置通用 Skill（平台提供）
 
@@ -85,6 +86,9 @@ Provider 故障处理:
 
 编排器修改:
   orchestrator-state-check → (修复) → session-checkpoint
+
+架构设计:
+  adr-writing → (用户裁决可推翻点) → 落盘 Accepted → session-checkpoint
 ```
 
 ---

@@ -160,6 +160,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 | 编排器 | P18-P20 | 改 runner/nodes/门禁 |
 | 文档质量 | P21-P22 | 写文档、回应代码审查 |
 | 杂项 | P23-P26 | 前端 TS/ESLint、import 取舍、Alembic env |
+| AI 助手文件操作纪律 | P28-P29 | 用 PowerShell 改记忆文件/vault 指针/配置等关键文件 |
 
 **最常踩的 3 个坑**（每次必读）：
 1. **P1 asyncio 事件循环**——改任何 async 代码前必读，是项目最常见大坑
@@ -183,6 +184,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 - 不要"先写了再说，等测试报错再修"。先理解函数签名、调用链、异常路径。
 - 不要为了消一个类型错误就加 `# type: ignore` 或 `as any`。先理解为什么类型不对，治本。
 - 不要批量自动修复 lint 错误然后提交。手工检查每个自动修复是否改变语义。
+- **单一职责与可读性**：每个函数只做一件事，函数体过长就拆分；类继承关系清晰，函数内部逻辑不可混乱；命名与控制流对人和 LLM 都友好，避免晦涩技巧（2026-09-04 裁决固化的开发规范）。
 
 **写文档/评估问题（见 `docs/pitfalls.md` P21-P22）**：
 - 不要凭记忆/推测写 README/ADR/待办。每一条事实性声明必须 grep 核验。
@@ -289,6 +291,8 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 - 容器内是 Linux，shell 脚本用 bash 语法。
 - `.gitattributes` 已配置行尾：`.sh`/`Dockerfile*` 强制 LF，`.ps1`/`.bat`/`.cmd` 保持 CRLF。
 - **docker compose run 输出捕获陷阱**：PowerShell 下 `docker compose run` 的 stdout 会被 PowerShell 当作 stderr 处理（`NativeCommandError`），导致 `2>&1` 和 `Out-File` 捕获不到容器内 pytest 输出。解决方案：用 `Start-Process -RedirectStandardOutput` + `-RedirectStandardError` 分别重定向，或直接用 `docker run` 替代 `docker compose run`。
+- **PowerShell 非终结错误陷阱（P28）**：.NET 方法调用异常默认是非终结错误，脚本会带伤继续执行后续写盘操作，曾导致关键记忆文件被截断且无备份可恢复。写盘脚本必须设 `$ErrorActionPreference = 'Stop'`；关键文件修改前先备份；优先整文件读写（`ReadAllText → Replace → 校验命中 → WriteAllText`），禁止无校验的行切片拼接；写盘后读回验证。
+- **.ps1 脚本中文编码（P29）**：PowerShell 5 对无 BOM 的 .ps1 按系统 ANSI（GBK）读取，中文常量会乱码并触发解析错误。脚本与数据分离：.ps1 只保留纯 ASCII 逻辑，中文内容写入独立 UTF-8 数据文件。
 
 ---
 
@@ -308,6 +312,8 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 **隐私边界**：会话内容（决策/沟通/待办）不进 Git，只存 vault。`project_memory.md` 只留指针（路径+时间+一句话任务）。
 
+**写盘纪律**：修改 `project_memory.md`、`current-status.md` 等关键文件必须遵守 `docs/pitfalls.md` P28/P29——先备份、整文件读写、PowerShell 设 `$ErrorActionPreference='Stop'`、写后验证。完整规程见 `session-checkpoint` skill「关键文件安全写盘纪律」节。
+
 ---
 
-> 本文件最后更新：2026-08-26（§5.7 测试纪律迁出至 `docs/testing-rules.md`，本文件只留摘要索引；§2.1/§5.6 修正 `db_init.py` 双源矛盾，统一走 Alembic；§0/§4/§6 新增 SQL 开发守则与测试守则索引）。若发现新的高频坑，追加到 `docs/pitfalls.md` 对应类别并更新本文件 §4 索引。
+> 本文件最后更新：2026-09-04（§4 新增 P28/P29 AI 助手文件操作纪律类别；§5.2 新增单一职责/函数拆分开发规范；§8 新增 PowerShell 非终结错误与 .ps1 中文编码陷阱；§9 新增关键文件安全写盘纪律）。若发现新的高频坑，追加到 `docs/pitfalls.md` 对应类别并更新本文件 §4 索引。
