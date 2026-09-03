@@ -73,13 +73,17 @@
 
 ## 数据库/ORM
 
-### P5. ORM 模型与 DDL 一致性
+### P5. ORM 模型与 DDL 一致性（单一真相源）
 
-**症状**：`init_db()` 报错 `column "xxx" of relation "meetings" does not exist`。
+**症状**：新增/修改 ORM 字段后，数据库报错 `column "xxx" of relation "meetings" does not exist`。
 
-**根因**：新增/修改 ORM 字段后，忘记同步 `app/dao/db_init.py` 中的 CREATE TABLE DDL。
+**根因**：建表 DDL 与 ORM 模型分处维护，字段变更只改了一侧，双源漂移。
 
-**规则**：改 ORM 模型时必须同步改 `db_init.py`；JSONB metadata 是扩展槽（ADR-002），非核心字段优先塞 metadata，不要随便加表列。
+**规则**（`db_init.py` 手写 DDL 已于 2026-08 废弃，`init_db()` 现为 no-op 兼容壳，仅为兼容旧调用点保留）：
+1. 建表统一单入口：有 ORM 模型的表走 `Base.metadata.create_all()`；增量 schema 变更走 Alembic 迁移（`backend/alembic/versions/`）。
+2. 改 ORM 模型必须同步生成 Alembic 迁移（`alembic revision --autogenerate` + 人工 review diff），禁止手写 CREATE TABLE。
+3. 少数 legacy 表（users/tenants/rbac 相关/notifications/net_auth_requests 等）仍由各模块 `ensure_*_table()` / `init_auth_table()` 函数 raw SQL 建表：改这些表必须同步改对应 ensure 函数 DDL 与所有 raw SQL INSERT（见 `docs/sql-development-rules.md` §5）。
+4. JSONB metadata 是扩展槽（ADR-002），非核心字段优先塞 metadata，不要随便加表列。
 
 ### P6. 多租户外键与 TRUNCATE CASCADE 锁超时
 

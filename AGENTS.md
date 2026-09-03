@@ -88,7 +88,7 @@
 - [ ] `cd backend && python -m ruff check app conclave_core tests` → **0 errors**
 - [ ] `cd backend && python -m ruff format --check app conclave_core tests` → **0 files need reformatting**
 - [ ] `cd backend && python -m mypy --config-file pyproject.toml app conclave_core` → **0 新增 errors**（mypy 2.3.0 本地显示 0 errors，见 `docs/pitfalls.md` P15，不得新增）
-- [ ] 若改了 ORM 模型，确认模型字段一致，并通过 Alembic 迁移更新 DDL（禁止手写 `db_init.py` DDL，见 `docs/sql-development-rules.md` §5）
+- [ ] 若改了 ORM 模型，确认模型字段一致，并通过 Alembic 迁移更新 DDL（`db_init.py` 手写 DDL 已于 2026-08 废弃，建表统一 create_all + Alembic，见 `docs/sql-development-rules.md` §5）
 - [ ] 若改了 API 路由，确认所有路径都在前端 `vite.config.ts` 的 proxy 列表和 `nginx.conf` 中
 - [ ] **若新增/修改了函数，确认有对应单元测试且测试 import 了真实函数**（`testing-rules` §1）
 - [ ] **若修改了配对函数（hash/verify、encode/decode、create/verify），确认有往返测试**（`testing-rules` §3）
@@ -145,7 +145,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 ## 4. 高频踩坑清单（按需加载）
 
-> 26 个踩坑子节已迁移到 `docs/pitfalls.md`（按类别分组，P1-P26）。
+> 29 个踩坑子节已迁移到 `docs/pitfalls.md`（按类别分组，P1-P29）。
 > 本节只保留类别索引——根据当前任务类型，读对应类别即可。
 
 | 类别 | pitfalls.md 章节 | 何时读 |
@@ -216,7 +216,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 ### 5.6 数据模型红线
 
-- Core 表（meetings、messages、events、users 等）加列必须考虑：Alembic 迁移脚本、所有 DAO、schema 层、前端类型（禁止手写 `db_init.py` DDL，见 `docs/sql-development-rules.md` §5.3）。
+- Core 表（meetings、messages、events、users 等）加列必须考虑：Alembic 迁移脚本、所有 DAO、schema 层、前端类型（`db_init.py` 手写 DDL 已于 2026-08 废弃，见 `docs/sql-development-rules.md` §5.3）。
 - 扩展字段优先走 `meetings.metadata JSONB`（ADR-002），以插件名为顶级键命名空间。
 - 禁止跨插件写入 metadata（插件隔离）。
 - DDL 变更必须考虑已有数据（默认值、NULL 处理、回滚策略）。
@@ -252,11 +252,11 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 | `PROJECT_CONVENTIONS.md` | **唯一权威工程规范**（部署/构建/镜像源/提交/卡点） |
 | `AGENTS.md` | 本文件，AI 助手实战纪律（就是你正在读的） |
 | `SKILL_REGISTRY.md` | Skill 索引——AI 助手自动发现和调用 Skill 的入口 |
-| `docs/pitfalls.md` | **高频踩坑清单**（26 条，按类别分组，从 AGENTS.md §4 拆出） |
+| `docs/pitfalls.md` | **高频踩坑清单**（29 条，按类别分组，从 AGENTS.md §4 拆出） |
 | `docs/sql-development-rules.md` | **SQL 开发守则**（五级标签：模型/查询/写入/分页/迁移/原生SQL例外） |
 | `docs/testing-rules.md` | **测试开发守则**（五级标签：验证真实代码/断言/往返测试/安全函数/外部状态/回归/快乐路径） |
 | `docs/design/design-principles.md` | 11 条固化设计原则（RAG五原则、借调三问法、MVP三问等） |
-| `docs/design/adr/001-015` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移/论点提纯/会话检查点/状态机契约/动态工作流/prompt回归测试） |
+| `docs/design/adr/001-018` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移/论点提纯/会话检查点/状态机契约/动态工作流/prompt回归测试/代码知识图谱/产物链与议题池/代码库理解层） |
 | `docs/RETROSPECTIVE_CONVENTIONS.md` | 修复报告归档规范（HTML 格式、commit 区间、13 种错误模式） |
 | `docs/ci-stability-guide.md` | CI 稳定性详细指南（双层 Hook 体系、历史修复记录，P15 的补充） |
 | `docs/conclave-sandbox-directory-standard.md` | 沙箱目录规范 |
@@ -274,7 +274,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 1. **先搜后问**：用 grep/ripgrep 搜错误信息、函数名，看现有代码怎么处理的。
 2. **看 ADR**：架构/数据模型问题 90% 在 `docs/design/adr/` 里有答案。
-3. **看踩坑清单**：`docs/pitfalls.md` 里记录了 26 个高频坑和修复方式。
+3. **看踩坑清单**：`docs/pitfalls.md` 里记录了 29 个高频坑和修复方式。
 4. **看历史修复报告**：`docs/retrospectives/` 里记录了 13 种典型错误模式和修复方式。
 5. **最小复现**：遇到 bug 先写最小复现脚本/测试，不要在大流程里猜。
 6. **不要硬绕**：遇到 asyncio 循环/数据库连接/Playwright 挂死这类底层问题，先看 `docs/pitfalls.md` 异步/事件循环和 Docker/部署类别。
@@ -316,4 +316,4 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 ---
 
-> 本文件最后更新：2026-09-04（§4 新增 P28/P29 AI 助手文件操作纪律类别；§5.2 新增单一职责/函数拆分开发规范；§8 新增 PowerShell 非终结错误与 .ps1 中文编码陷阱；§9 新增关键文件安全写盘纪律）。若发现新的高频坑，追加到 `docs/pitfalls.md` 对应类别并更新本文件 §4 索引。
+> 本文件最后更新：2026-09-04（修正 DDL 单一真相源收敛后的失真表述：`db_init.py` 手写 DDL 已于 2026-08 废弃，踩坑数 26→29，ADR 范围 001-015→001-018；此前：§4 新增 P28/P29 AI 助手文件操作纪律类别；§5.2 新增单一职责/函数拆分开发规范；§8 新增 PowerShell 非终结错误与 .ps1 中文编码陷阱；§9 新增关键文件安全写盘纪律）。若发现新的高频坑，追加到 `docs/pitfalls.md` 对应类别并更新本文件 §4 索引。

@@ -210,7 +210,7 @@ async def list_messages_paged(meeting_id, page, size, last_id=None):
 
 - **为什么**：`db_init.py` 的 `CREATE TABLE IF NOT EXISTS` 无法处理列变更、回滚，`IF NOT EXISTS` 会静默跳过已存在表的字段漂移。
 - **风险点**：双源 DDL 漂移（见 §1.3）。
-- **何时才可用**：**任何表结构变更只能走 Alembic**。项目已具备 `backend/alembic/env.py` + `versions/`（0001-0005），`compare_type=True` + `compare_server_default=True` 已开启，改模型后：
+- **何时才可用**：**任何表结构变更只能走 Alembic**。项目已具备 `backend/alembic/env.py` + `versions/`（0001-0006），`compare_type=True` + `compare_server_default=True` 已开启，改模型后：
 
 ```bash
 # 生成增量迁移（容器内或按 AGENTS.md 规定的方式）
@@ -224,11 +224,11 @@ alembic upgrade head
 - 删列/改类型：先评估是否破坏已有数据，迁移脚本需含回滚思路（downgrade 分支）。
 - 迁移脚本**必须人工 review** `autogenerate` 的 diff，不能盲跑——`autogenerate` 对改名/类型变化可能误判。
 
-### 5.3 legacy 表纳入迁移轨道【红线】
+### 5.3 legacy 表纳入迁移轨道【红线】（2026-08 已完成）
 
-- **为什么**：`schema_verify.py` 的 `_LEGACY_RAW_TABLES` 把 `meetings/messages/events` 等白名单跳出了 schema 校验，这些表继续靠 `db_init.py` 手写 DDL 建表，是双源漂移的重灾区。
-- **风险点**：这些核心表 ORM 模型已存在但校验不看它们，模型与 DB 脱钩。
-- **何时才可用**：全量迁移时把这些表从 `_LEGACY_RAW_TABLES` 移除，统一到 Alembic + ORM 轨道，废弃 `db_init.py` 手写 DDL（此步牵涉启动流程和测试 fixture，**单独拆一个 commit**，不与守则文档 commit 混在一起）。
+- **为什么**：`schema_verify.py` 的 `_LEGACY_RAW_TABLES` 曾把 `meetings/messages/events` 等白名单跳出了 schema 校验，这些表靠 `db_init.py` 手写 DDL 建表，是双源漂移的重灾区。
+- **完成状态**（2026-08）：`meetings/messages/events/user_preferences/meeting_tags/agent_roles/meeting_aux` 等核心表已迁移到 ORM 模型并移出白名单；`db_init.py` 手写 DDL 已废弃，`init_db()` 现为 no-op 兼容壳。白名单现仅保留确无 ORM 模型的表（`net_auth_requests`/`notifications`/`alembic_version`/`casbin_rule` 等，以 `app/db/schema_verify.py` 为准）。
+- **残留红线**：新增表优先走 ORM + `create_all()`/Alembic 轨道，**不得**再往 `_LEGACY_RAW_TABLES` 白名单加新条目。
 
 ---
 

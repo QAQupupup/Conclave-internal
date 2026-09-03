@@ -56,7 +56,7 @@ prompt: |
   ### DDL 单一真相源原则（防止"改ORM忘改SQL"类bug）
   - **每张表只能有一个"规范DDL定义"位置**：
     - ORM 管理的表（有 Mapped 模型）：以 SQLAlchemy 模型定义为准，通过 `Base.metadata.create_all()` 建表
-    - Raw SQL 管理的 legacy 表：以 `app/dao/db_init.py` 或对应模块的 `ensure_*_table()` 函数为准
+    - Raw SQL 管理的 legacy 表（users/tenants/rbac/notifications/net_auth 等）：以对应模块的 `ensure_*_table()` / `init_auth_table()` 函数为准（`app/dao/db_init.py` 手写 DDL 已于 2026-08 废弃，`init_db()` 现为 no-op 兼容壳）
   - **禁止在 conftest.py 中手写 CREATE TABLE**：测试初始化必须复用生产环境的初始化函数（如 `_init_users_table()`、`ensure_rbac_tables()`），与 `main.py` lifespan 保持完全一致的初始化顺序
   - **禁止在业务查询函数中写 CREATE TABLE 作为"保险"**：`config_service.py` 中 `set_system_setting()`/`get_all_system_settings()` 这类查询函数不应自建表，表的创建是启动流程的职责
   - 如必须在多处做"表存在防护"（防御性编程），只能写 `CREATE TABLE IF NOT EXISTS`（字段与规范定义一致）+ `ALTER TABLE ADD COLUMN IF NOT EXISTS`（补列），不能自行定义不同的列集合

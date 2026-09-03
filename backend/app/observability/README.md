@@ -511,9 +511,10 @@ audit.log("plugin.installed", "插件安装成功", extra={"plugin_id": pid, "ve
 ```
 
 新增持久化字段时，需要同步：
-1. `audit_logs` 表 DDL（`app/dao/db_init.py`）
-2. ORM 模型（`app/db/models/observability.py`）
-3. Alembic 迁移脚本（若项目启用）
+1. ORM 模型（`app/db/models/observability.py`）
+2. Alembic 迁移脚本（`alembic revision --autogenerate`，DDL 已收敛 Alembic 单轨）
+
+> `db_init.py` 手写 DDL 已于 2026-08 废弃，不要再写新的 CREATE TABLE。
 
 ---
 
