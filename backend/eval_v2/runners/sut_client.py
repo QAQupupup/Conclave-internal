@@ -33,7 +33,7 @@ class SUTClient:
         auth_token: str | None = None,
         dev_token: str | None = None,
         admin_username: str = "admin",
-        admin_password: str = "admin",
+        admin_password: str = "admin",  # noqa: S107 本地 dev SUT 兜底值，可被 eval 配置 target.admin_password 覆盖
         timeout: float = 30.0,
         poll_interval: float = 3.0,
         max_poll_attempts: int = 200,
@@ -293,6 +293,24 @@ class SUTClient:
             )
             if resp.status_code == 200:
                 return resp.json()
+            return {}
+        except (httpx.TimeoutException, httpx.ConnectError):
+            return {}
+
+    async def get_prompt_snapshot(self) -> dict[str, Any]:
+        """获取 prompt 版本快照（ADR-015 Phase 1）。
+
+        best-effort：旧版 SUT 无该端点或请求失败时返回 {}，不中断评估流程。
+        """
+        client = self._get_client()
+        try:
+            resp = await client.get(
+                f"{self.base_url}/system/prompts/snapshot",
+                headers=self._headers(),
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data if isinstance(data, dict) else {}
             return {}
         except (httpx.TimeoutException, httpx.ConnectError):
             return {}

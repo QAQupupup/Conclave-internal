@@ -2,7 +2,9 @@
 
 ## 状态
 
-Proposed — 2026-08-02
+Accepted — 2026-09-04（Phase 1 已实现并有测试覆盖；Phase 2-4 保持规划，按需实施）
+
+> 最初提案：2026-08-02（Proposed）。Phase 1 落地记录见 `015-prompt-regression-implementation-tasks.md`。
 
 ## 背景
 
@@ -83,7 +85,8 @@ grep -r "multi_agent_score\|parallel_discussion" backend/eval_v2/  # 零结果
 - SuiteResult 新增字段 `prompt_snapshot_id`、`prompt_snapshot`
 - Vault 导出包含 prompt snapshot，历史对比可定位到具体哪个 prompt 文件的改动与分数变化相关
 
-**Prompt 文件范围**（从代码中识别）：
+**Prompt 文件范围**（从代码中识别，2026-09-04 实现时核实更新）：
+- `conclave_core/prompts.py` — 核心 prompt 模板主体（`app/agents/prompts.py` 仅为 re-export 入口）
 - `app/orchestrator/system_prompt.py` — 系统提示词
 - `app/agents/role_templates.py` — 7个角色画像
 - `app/agents/compute.py` — IntraTeam/InterTeam 模板

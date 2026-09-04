@@ -2,40 +2,48 @@
 
 > ADR: docs/design/adr/015-prompt-regression-and-multi-agent-scoring.md
 > 创建时间: 2026-08-02
-> 状态: Phase 1 待开始
+> 状态: Phase 1 已完成（2026-09-04），Phase 2-4 待开始
 
 ---
 
-## Phase 1：Prompt Snapshot + 版本绑定
+## Phase 1：Prompt Snapshot + 版本绑定 ✅（2026-09-04 完成）
 
 目标：每次 eval 运行自动捕获所有 prompt 文件快照，评估结果可追溯到精确 prompt 版本。
 
-- [ ] **T1.1** 后端新增 `GET /system/prompts/snapshot` 端点
+- [x] **T1.1** 后端新增 `GET /system/prompts/snapshot` 端点
   - 收集以下文件的 hash + 长度 + git commit：
+    - `conclave_core/prompts.py`（实现时核实新增：核心模板主体，`app/agents/prompts.py` 仅为 re-export）
     - `app/orchestrator/system_prompt.py`
     - `app/agents/role_templates.py`
     - `app/agents/compute.py`
     - `app/orchestrator/stage_runners.py`
     - `app/orchestrator/borrow_helpers.py`
-    - `app/plugins/builtin/auth/middleware.py`（如含 prompt 逻辑）
+    - ~~`app/plugins/builtin/auth/middleware.py`~~（实现时核实：不含 prompt 逻辑，不纳入）
   - 返回 `snapshot_id`(sha256)、`git_commit`、`git_dirty`、各文件 hash
-  - 文件位置: `app/routers/system.py`（新建）或扩展现有 debug 路由
+  - 文件位置: `app/routers/system.py`（新建，前缀 `/system`）；已同步注册到
+    `app/main.py`、`frontend/vite.config.ts` proxy、`frontend/nginx.conf` API 正则
   - 验收: `curl /system/prompts/snapshot` 返回合法 JSON，修改任一 prompt 文件后 snapshot_id 变化
+  - 测试: `backend/tests/test_prompt_snapshot.py`（端点契约 + hash/snapshot_id 纯函数，含缺失/变化敏感性/顺序无关等非正向用例）
 
-- [ ] **T1.2** eval_v2 SuiteResult 增加 prompt_snapshot 字段
+- [x] **T1.2** eval_v2 SuiteResult 增加 prompt_snapshot 字段
   - 文件: `backend/eval_v2/models/result.py`
   - 新增字段: `prompt_snapshot_id: str`, `prompt_snapshot: dict`, `git_commit: str`, `git_dirty: bool`
   - 验收: 序列化/反序列化正常，向后兼容（默认空值）
+  - 测试: `backend/eval_v2/tests/test_prompt_snapshot.py` TestSuiteResultSnapshotFields
 
-- [ ] **T1.3** SUTClient 在运行时自动获取 snapshot
-  - 文件: `backend/eval_v2/runners/sut_client.py`
-  - 在创建会议前/后调用 `/system/prompts/snapshot`，绑定到 SuiteResult
+- [x] **T1.3** SUTClient 在运行时自动获取 snapshot
+  - 文件: `backend/eval_v2/runners/sut_client.py`（`get_prompt_snapshot()`，best-effort：
+    旧版 SUT 无端点/超时返回 `{}`，不中断评估）+ `suite_runner.py`（登录后获取、聚合后绑定到 SuiteResult）
   - 验收: 运行 eval 后，报告 JSON 中包含 prompt_snapshot 字段
+  - 测试: `backend/eval_v2/tests/test_prompt_snapshot.py` TestSUTClientPromptSnapshot（httpx.MockTransport：200/404/超时）
 
-- [ ] **T1.4** Vault 导出包含 snapshot
+- [x] **T1.4** Vault 导出包含 snapshot
   - 文件: `backend/eval_v2/vault/exporter.py`
-  - 导出时包含 prompt snapshot 信息
+  - Markdown 摘要新增 "Prompt Snapshot (ADR-015)" 小节（无快照时不渲染）；
+    完整 JSON 导出天然含快照字段；`load_history()` 增加 `prompt_snapshot_id`/`git_commit`
+    供 Phase 2 矩阵使用
   - 验收: vault 中历史记录可通过 snapshot_id 查询
+  - 测试: `backend/eval_v2/tests/test_prompt_snapshot.py` TestVaultExportSnapshot
 
 ---
 

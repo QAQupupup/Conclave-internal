@@ -37,7 +37,7 @@ export default defineConfig({
           '/setup/', '/auth/', '/workspace/', '/health',
           '/agent-roles/', '/preferences/', '/tenants/', '/metrics/',
           '/audit/', '/debug/', '/captcha/', '/config/', '/documents/',
-          '/net-auth/', '/docker-hosts/', '/regression/', '/admin/',
+          '/net-auth/', '/docker-hosts/', '/regression/', '/system/', '/admin/',
           '/graph/', '/llm/', '/vnc.html', '/vnc/', '/meetings/',
         ];
         server.middlewares.use((req, _res, next) => {
@@ -124,6 +124,7 @@ export default defineConfig({
       '/net-auth': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/docker-hosts': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/regression': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
+      '/system': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
     },
   },
 });

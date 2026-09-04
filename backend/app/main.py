@@ -41,6 +41,7 @@ from app.routers import net_auth as net_auth_router
 from app.routers import notifications as notifications_router
 from app.routers import preferences as preferences_router
 from app.routers import regression as regression_router
+from app.routers import system as system_router
 from app.routers import teams as teams_router
 from app.routers import workspace as workspace_router
 from app.routers import ws as ws_router
@@ -473,6 +474,7 @@ def create_app() -> FastAPI:
     app.include_router(workspace_router.router)
     app.include_router(ws_router.router)
     app.include_router(regression_router.router)
+    app.include_router(system_router.router)
     app.include_router(net_auth_router.router)
     app.include_router(preferences_router.router)
     app.include_router(audit_router.router)

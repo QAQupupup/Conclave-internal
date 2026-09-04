@@ -109,6 +109,13 @@ class SuiteRunner:
         if self.sut_client:
             await self.sut_client.login()
 
+        # 获取 prompt 版本快照（ADR-015 Phase 1）：将本批结果绑定到精确 prompt 版本
+        prompt_snapshot: dict[str, Any] = {}
+        if self.sut_client:
+            prompt_snapshot = await self.sut_client.get_prompt_snapshot()
+            if not prompt_snapshot:
+                logger.warning("未获取到 prompt 快照（SUT 版本较旧或端点不可用），本批结果不做版本绑定")
+
         # 创建 CaseRunner
         case_runner = CaseRunner(
             sut_client=self.sut_client,
@@ -157,6 +164,12 @@ class SuiteRunner:
         # 统计汇总
         suite_result = self._aggregate_results(all_results, cases, suite_id, pass_k, mode)
         suite_result.duration_seconds = time.monotonic() - start_time
+
+        # 绑定 prompt 版本快照（ADR-015 Phase 1）
+        suite_result.prompt_snapshot_id = prompt_snapshot.get("snapshot_id", "")
+        suite_result.prompt_snapshot = prompt_snapshot.get("prompts", {})
+        suite_result.git_commit = prompt_snapshot.get("git_commit", "")
+        suite_result.git_dirty = bool(prompt_snapshot.get("git_dirty", False))
 
         # 检测长度偏置
         scores = [r.aggregate_score for r in all_results if r.audit and r.audit.meeting.artifact_length > 0]

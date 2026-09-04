@@ -226,3 +226,11 @@ class SuiteResult(BaseModel):
     judge_unreliable_count: int = 0
     """3次评分标准差超阈值的维度数量。"""
     duration_seconds: float = 0.0
+    prompt_snapshot_id: str = ""
+    """Prompt 版本快照 ID（ADR-015 Phase 1），旧版 SUT 无端点时为空。"""
+    prompt_snapshot: dict[str, Any] = Field(default_factory=dict)
+    """Prompt 快照明细：{逻辑名: {hash, length}}（ADR-015 Phase 1）。"""
+    git_commit: str = ""
+    """评估时 SUT 的 git commit（ADR-015 Phase 1）。"""
+    git_dirty: bool = False
+    """评估时 SUT 工作区是否有未提交改动（ADR-015 Phase 1）。"""

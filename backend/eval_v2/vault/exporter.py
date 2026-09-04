@@ -28,7 +28,6 @@ def export_to_vault(result: SuiteResult, config: dict[str, Any]) -> str:
     """导出评估结果到 Obsidian Vault，返回导出的 Markdown 文件路径。"""
     eval_dir = _get_eval_dir(config)
 
-    date_str = datetime.now().strftime("%Y-%m-%d")
     md_path = eval_dir / f"eval-{result.suite_id}.md"
     json_path = eval_dir / f"eval-{result.suite_id}.json"
 
@@ -134,6 +133,19 @@ def _build_markdown_summary(result: SuiteResult, json_path: Path) -> str:
             ]
         )
 
+    if result.prompt_snapshot_id:
+        lines.extend(
+            [
+                "",
+                "## Prompt Snapshot (ADR-015)",
+                "",
+                f"- Snapshot ID: `{result.prompt_snapshot_id}`",
+                f"- Git Commit: {result.git_commit or 'unknown'}",
+                f"- Git Dirty: {'YES' if result.git_dirty else 'NO'}",
+                f"- Prompt Files: {len(result.prompt_snapshot)}",
+            ]
+        )
+
     lines.extend(
         [
             "",
@@ -206,6 +218,9 @@ def load_history(eval_dir: Path | None = None, config: dict[str, Any] | None = N
                     "total_cost": data.get("total_cost_usd"),
                     "n_cases": data.get("n_cases"),
                     "model_info": data.get("model_info", {}),
+                    # ADR-015 Phase 1：版本绑定字段，供后续逐话题得分矩阵使用
+                    "prompt_snapshot_id": data.get("prompt_snapshot_id", ""),
+                    "git_commit": data.get("git_commit", ""),
                 }
             )
         except (json.JSONDecodeError, KeyError):
