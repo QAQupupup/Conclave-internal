@@ -514,7 +514,7 @@ audit.log("plugin.installed", "插件安装成功", extra={"plugin_id": pid, "ve
 1. ORM 模型（`app/db/models/observability.py`）
 2. Alembic 迁移脚本（`alembic revision --autogenerate`，DDL 已收敛 Alembic 单轨）
 
-> `db_init.py` 手写 DDL 已于 2026-08 废弃，不要再写新的 CREATE TABLE。
+> `db_init.py` 手写 DDL 已于 2026-08 废弃、2026-09 文件删除，不要再写新的 CREATE TABLE。
 
 ---
 

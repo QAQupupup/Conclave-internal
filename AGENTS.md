@@ -88,7 +88,7 @@
 - [ ] `cd backend && python -m ruff check app conclave_core tests` → **0 errors**
 - [ ] `cd backend && python -m ruff format --check app conclave_core tests` → **0 files need reformatting**
 - [ ] `cd backend && python -m mypy --config-file pyproject.toml app conclave_core` → **0 新增 errors**（mypy 2.3.0 本地显示 0 errors，见 `docs/pitfalls.md` P15，不得新增）
-- [ ] 若改了 ORM 模型，确认模型字段一致，并通过 Alembic 迁移更新 DDL（`db_init.py` 手写 DDL 已于 2026-08 废弃，建表统一 create_all + Alembic，见 `docs/sql-development-rules.md` §5）
+- [ ] 若改了 ORM 模型，确认模型字段一致，并通过 Alembic 迁移更新 DDL（`db_init.py` 手写 DDL 已于 2026-08 废弃、2026-09 删除，建表统一 create_all + Alembic，见 `docs/sql-development-rules.md` §5）
 - [ ] 若改了 API 路由，确认所有路径都在前端 `vite.config.ts` 的 proxy 列表和 `nginx.conf` 中
 - [ ] **若新增/修改了函数，确认有对应单元测试且测试 import 了真实函数**（`testing-rules` §1）
 - [ ] **若修改了配对函数（hash/verify、encode/decode、create/verify），确认有往返测试**（`testing-rules` §3）
@@ -216,7 +216,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 ### 5.6 数据模型红线
 
-- Core 表（meetings、messages、events、users 等）加列必须考虑：Alembic 迁移脚本、所有 DAO、schema 层、前端类型（`db_init.py` 手写 DDL 已于 2026-08 废弃，见 `docs/sql-development-rules.md` §5.3）。
+- Core 表（meetings、messages、events、users 等）加列必须考虑：Alembic 迁移脚本、所有 DAO、schema 层、前端类型（`db_init.py` 手写 DDL 已于 2026-08 废弃、2026-09 删除，见 `docs/sql-development-rules.md` §5.3）。
 - 扩展字段优先走 `meetings.metadata JSONB`（ADR-002），以插件名为顶级键命名空间。
 - 禁止跨插件写入 metadata（插件隔离）。
 - DDL 变更必须考虑已有数据（默认值、NULL 处理、回滚策略）。
@@ -316,4 +316,4 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 
 ---
 
-> 本文件最后更新：2026-09-04（修正 DDL 单一真相源收敛后的失真表述：`db_init.py` 手写 DDL 已于 2026-08 废弃，踩坑数 26→29，ADR 范围 001-015→001-018；此前：§4 新增 P28/P29 AI 助手文件操作纪律类别；§5.2 新增单一职责/函数拆分开发规范；§8 新增 PowerShell 非终结错误与 .ps1 中文编码陷阱；§9 新增关键文件安全写盘纪律）。若发现新的高频坑，追加到 `docs/pitfalls.md` 对应类别并更新本文件 §4 索引。
+> 本文件最后更新：2026-09-04（文档失真审计：`db_init.py`/`db_legacy.py` 死代码删除，建表收敛 ORM + Alembic 单入口，§2.1/§5.6 表述同步为"2026-08 废弃、2026-09 删除"；此前：修正 DDL 单一真相源收敛后的失真表述，踩坑数 26→29，ADR 范围 001-015→001-018；§4 新增 P28/P29 AI 助手文件操作纪律类别；§5.2 新增单一职责/函数拆分开发规范；§8 新增 PowerShell 非终结错误与 .ps1 中文编码陷阱；§9 新增关键文件安全写盘纪律）。若发现新的高频坑，追加到 `docs/pitfalls.md` 对应类别并更新本文件 §4 索引。

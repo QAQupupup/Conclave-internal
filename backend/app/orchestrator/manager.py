@@ -145,7 +145,7 @@ class MeetingManager:
 
     # ---------- 统一交互层（后续逐步替换 Runner 中直接调用） ----------
     async def persist_state(self, state: Any) -> None:
-        """持久化状态到 PostgreSQL（通过 db_legacy）"""
+        """持久化状态到 PostgreSQL（通过 app.dao 异步 DAO）"""
         from app.dao.meeting_aux_dao import save_meeting_aux
         from app.dao.meeting_dao import save_meeting
         from app.dao.message_dao import save_message

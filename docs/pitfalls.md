@@ -79,7 +79,7 @@
 
 **根因**：建表 DDL 与 ORM 模型分处维护，字段变更只改了一侧，双源漂移。
 
-**规则**（`db_init.py` 手写 DDL 已于 2026-08 废弃，`init_db()` 现为 no-op 兼容壳，仅为兼容旧调用点保留）：
+**规则**（`db_init.py` 手写 DDL 已于 2026-08 废弃、2026-09 删除，建表由 ORM + Alembic 单一负责）：
 1. 建表统一单入口：有 ORM 模型的表走 `Base.metadata.create_all()`；增量 schema 变更走 Alembic 迁移（`backend/alembic/versions/`）。
 2. 改 ORM 模型必须同步生成 Alembic 迁移（`alembic revision --autogenerate` + 人工 review diff），禁止手写 CREATE TABLE。
 3. 少数 legacy 表（users/tenants/rbac 相关/notifications/net_auth_requests 等）仍由各模块 `ensure_*_table()` / `init_auth_table()` 函数 raw SQL 建表：改这些表必须同步改对应 ensure 函数 DDL 与所有 raw SQL INSERT（见 `docs/sql-development-rules.md` §5）。
@@ -134,17 +134,18 @@
 3. **验证方式**：`grep -n "class.*Model.*Base" app/db/models/*.py` 列出所有模型类，与 `__init__.py` 的 `__all__` 和 `alembic/env.py` 的导入列表交叉比对。
 4. **raw SQL 创建的表不建 ORM 模型**（见 P7），只有通过 `Base.metadata.create_all()` / Alembic 管理的表才需要。
 
-### P10. db_legacy shim 迁移纪律
+### P10. db_legacy shim 迁移纪律（已收官）
 
 **症状**：`from app.db_legacy import xxx` 的调用链中多了一层无意义的 re-export，增加代码导航成本和 IDE 跳转层级。
 
 **根因**：`db_legacy.py` 原本是直接实现数据库操作的模块，后来所有函数迁移到 `app.dao.*` 子模块，`db_legacy.py` 变成纯 shim。但调用方未同步更新 import 路径。
 
-**规则**：
-1. **新代码禁止 `from app.db_legacy import`**，直接使用 `from app.dao.xxx import yyy`。
-2. **迁移 shim 时按 dao 子模块分组 import**：`meeting_dao`、`meeting_aux_dao`、`message_dao`、`event_dao`、`agent_role_dao`、`preference_dao`、`tag_dao`、`db_init`。
+**规则**（历史经验，shim 迁移已收官）：
+1. **数据访问统一 `from app.dao.xxx import yyy`**，不走任何 re-export 中间层。
+2. **迁移 shim 时按 dao 子模块分组 import**：`meeting_dao`、`meeting_aux_dao`、`message_dao`、`event_dao`、`agent_role_dao`、`preference_dao`、`tag_dao`。
 3. **函数内 import 保持原位置**：如果原来是函数内 import（避免循环依赖），迁移后仍然是函数内 import。
-4. **shim 文件保留不删除**：可能有外部代码或插件引用，后续单独清理。
+
+**收官状态**（2026-09）：所有调用方迁移完成后，`db_legacy.py` shim 文件与 `dao/db_init.py`（no-op）一并删除。删除前必须 grep 全仓确认零引用（含测试、脚本、文档）。
 
 ---
 

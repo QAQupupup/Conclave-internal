@@ -1903,7 +1903,7 @@ def new_state(meeting_id: str, topic: str, doc_summaries: list[str] | None = Non
 async def load_or_create(meeting_id: str, topic: str, doc_summaries: list[str] | None = None) -> MeetingState:
     """从内存取或新建运行态；内存未命中时从 PostgreSQL 恢复
 
-    db_legacy 已迁移到 SQLAlchemy async，直接 await 即可。
+    数据访问统一走 app.dao.* 子模块（SQLAlchemy async），直接 await 即可。
     """
     existing = get_state(meeting_id)
     if existing is not None:

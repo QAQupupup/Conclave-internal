@@ -18,7 +18,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth import init_auth as init_jwt_auth  # noqa: F401  # 保留供外部引用，实际初始化由 auth 插件完成
 from app.core.exceptions import AppException
-from app.dao.db_init import init_db
 from app.db.base import Base
 from app.db.engine import async_session_factory
 from app.db.redis import close_redis, init_redis
@@ -87,8 +86,8 @@ def _cleanup_orphaned_workspaces() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库 + 崩溃恢复 + 后台指标采集"""
-    # PostgreSQL 兼容层（db_legacy，逐步迁移到 async Repository）
-    await init_db()
+    # 建表单一入口：ORM 表走 Base.metadata.create_all()（见下方 db_mode 分支），
+    # 增量变更走 Alembic；raw SQL ensure 函数仅用于少数 legacy 表（见 docs/sql-development-rules.md §5）
     await init_auth_table()
     # 注意：JWT 用户认证系统（init_auth）由 auth CORE 插件 on_startup 处理，此处不再直接调用
 

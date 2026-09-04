@@ -58,9 +58,9 @@ row = await session.execute(text("SELECT * FROM meetings WHERE id = :id"), {"id"
 
 ### 1.3 模型是唯一的 schema 真相【红线】
 
-- **为什么**：项目历史上同时存在 ORM 模型 + `db_init.py` 手写 DDL 两套 schema，字段改了要同步两处，易漂移（`AGENTS.md` §2.1 专门要求核对）。
+- **为什么**：项目历史上同时存在 ORM 模型 + `db_init.py` 手写 DDL 两套 schema，字段改了要同步两处，易漂移。
 - **风险点**：双源漂移会导致"ORM 声明了列但 DB 不存在"或类型不匹配，运行期才爆。
-- **何时才可用**：**取消双源**。改表结构只能走 Alembic 迁移（见 §5），不要改 `db_init.py` 的 DDL 字符串。
+- **现状**：双源已取消——`db_init.py` 手写 DDL 2026-08 废弃、2026-09 文件删除。模型是唯一 schema 真相，改表结构只能走 Alembic 迁移（见 §5），禁止手写 CREATE TABLE。
 
 `db/models/` 里的 `MeetingModel`、`MessageModel`、`EventModel` 等 15 张表模型已齐全，DAO 层必须使用它们，而非当前 `dao/` 下 `text()` 手写 SQL 的模式。
 
@@ -227,7 +227,7 @@ alembic upgrade head
 ### 5.3 legacy 表纳入迁移轨道【红线】（2026-08 已完成）
 
 - **为什么**：`schema_verify.py` 的 `_LEGACY_RAW_TABLES` 曾把 `meetings/messages/events` 等白名单跳出了 schema 校验，这些表靠 `db_init.py` 手写 DDL 建表，是双源漂移的重灾区。
-- **完成状态**（2026-08）：`meetings/messages/events/user_preferences/meeting_tags/agent_roles/meeting_aux` 等核心表已迁移到 ORM 模型并移出白名单；`db_init.py` 手写 DDL 已废弃，`init_db()` 现为 no-op 兼容壳。白名单现仅保留确无 ORM 模型的表（`net_auth_requests`/`notifications`/`alembic_version`/`casbin_rule` 等，以 `app/db/schema_verify.py` 为准）。
+- **完成状态**（2026-08）：`meetings/messages/events/user_preferences/meeting_tags/agent_roles/meeting_aux` 等核心表已迁移到 ORM 模型并移出白名单；`db_init.py` 手写 DDL 已废弃，文件已于 2026-09 删除（no-op `init_db()` 及全部调用点一并移除）。白名单现仅保留确无 ORM 模型的表（`net_auth_requests`/`notifications`/`alembic_version`/`casbin_rule` 等，以 `app/db/schema_verify.py` 为准）。
 - **残留红线**：新增表优先走 ORM + `create_all()`/Alembic 轨道，**不得**再往 `_LEGACY_RAW_TABLES` 白名单加新条目。
 
 ---

@@ -334,7 +334,10 @@ pnpm config set registry https://registry.npmmirror.com
 | `docs/audits/` | 审计报告和修复归档 |
 | `docs/research/` | 调研文档（skill-system-architecture、optimization-backlog） |
 | `docs/sessions/` | 会话归档 |
-| `.trae/documents/` | 实施计划和完成报告 |
+| `docs/retrospectives/` | 修复报告归档（HTML，见 `docs/RETROSPECTIVE_CONVENTIONS.md`） |
+
+> `.trae/` 目录（skills、documents 等）是 AI 助手的本地工作区，**不进 Git**（`.gitignore` 已忽略）。
+> 值得长期保留的实施计划/完成报告应放入 `docs/` 对应子目录，而非 `.trae/documents/`。
 
 ### 10.2 文档引用
 

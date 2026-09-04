@@ -188,13 +188,11 @@ def _ensure_db_initialized():
 
     from sqlalchemy import text as _text
 
-    from app.dao.db_init import init_db as _init_db
     from app.db.engine import _ensure_engine, dispose_async_engine
 
     async def _do_init():
         # _ensure_engine 是同步函数，直接调用（它处理循环检测与重建）
         _ensure_engine()
-        await _init_db()
 
         from app.auth import _init_users_table
         from app.auth import hash_password as _hash_pw
