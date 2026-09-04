@@ -8,18 +8,20 @@ Creates all 7 tables defined in app/db/models.py:
   meetings, messages, events, user_preferences,
   meeting_tags, agent_roles, net_auth_requests
 """
+
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "0001_initial"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -87,7 +89,10 @@ def upgrade() -> None:
     op.create_table(
         "events",
         sa.Column(
-            "seq", sa.Integer, primary_key=True, autoincrement=True,
+            "seq",
+            sa.Integer,
+            primary_key=True,
+            autoincrement=True,
         ),
         sa.Column(
             "meeting_id",
@@ -107,7 +112,9 @@ def upgrade() -> None:
     )
     op.create_index("idx_events_meeting", "events", ["meeting_id"])
     op.create_index(
-        "idx_events_meeting_seq", "events", ["meeting_id", "seq"],
+        "idx_events_meeting_seq",
+        "events",
+        ["meeting_id", "seq"],
     )
 
     # ── 4. user_preferences ─────────────────────────────────────
@@ -148,7 +155,9 @@ def upgrade() -> None:
         ),
     )
     op.create_unique_constraint(
-        "uq_meeting_tag", "meeting_tags", ["meeting_id", "tag"],
+        "uq_meeting_tag",
+        "meeting_tags",
+        ["meeting_id", "tag"],
     )
     op.create_index("idx_meeting_tags_meeting", "meeting_tags", ["meeting_id"])
     op.create_index("idx_meeting_tags_tag", "meeting_tags", ["tag"])
@@ -160,7 +169,10 @@ def upgrade() -> None:
         sa.Column("display_name", sa.String(100), nullable=False),
         sa.Column("perspective", sa.Text, nullable=False, server_default=""),
         sa.Column(
-            "expertise_domains", sa.Text, nullable=False, server_default="[]",
+            "expertise_domains",
+            sa.Text,
+            nullable=False,
+            server_default="[]",
         ),
         sa.Column(
             "risk_appetite",
@@ -176,15 +188,24 @@ def upgrade() -> None:
             server_default="balanced",
         ),
         sa.Column(
-            "model_override", sa.String(100), nullable=False, server_default="",
+            "model_override",
+            sa.String(100),
+            nullable=False,
+            server_default="",
         ),
         sa.Column("background_brief", sa.Text, nullable=False, server_default=""),
         sa.Column("prompt_template", sa.Text, nullable=False, server_default=""),
         sa.Column(
-            "is_builtin", sa.Boolean, nullable=False, server_default=sa.text("false"),
+            "is_builtin",
+            sa.Boolean,
+            nullable=False,
+            server_default=sa.text("false"),
         ),
         sa.Column(
-            "is_active", sa.Boolean, nullable=False, server_default=sa.text("true"),
+            "is_active",
+            sa.Boolean,
+            nullable=False,
+            server_default=sa.text("true"),
         ),
         sa.Column(
             "created_at",
@@ -211,10 +232,16 @@ def upgrade() -> None:
         sa.Column("requested_level", sa.String(20), nullable=False),
         sa.Column("detected_level", sa.String(20), nullable=False),
         sa.Column(
-            "failure_reason", sa.Text, nullable=False, server_default="",
+            "failure_reason",
+            sa.Text,
+            nullable=False,
+            server_default="",
         ),
         sa.Column(
-            "stderr_output", sa.Text, nullable=False, server_default="",
+            "stderr_output",
+            sa.Text,
+            nullable=False,
+            server_default="",
         ),
         sa.Column(
             "status",

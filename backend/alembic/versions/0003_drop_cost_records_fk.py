@@ -9,17 +9,18 @@ Conclave stores meetings in SQLite (legacy db_legacy) while cost_records
 live in PostgreSQL, so the FK cannot be satisfied and causes silent flush
 failures.
 """
+
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 # revision identifiers
 revision: str = "0003_drop_cost_records_fk"
-down_revision: Union[str, None] = "0002_aux_keys_docs_cost"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0002_aux_keys_docs_cost"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
