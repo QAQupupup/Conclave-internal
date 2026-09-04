@@ -122,7 +122,7 @@ def test_embed_does_not_crash_across_loops():
     """端到端验证：跨循环调用 embed 不崩溃。
 
     使用 StubEmbedding 降级路径（无 API key 时），确保测试不依赖外网。
-    但 _get_client 仍会被调用（因为 base_url/api_key 检查在 _resolve_config 之后）。
+    但 _get_client 仍会被调用（因为 base_url/api_key 检查在 resolve_config 之后）。
     注意：不使用 @pytest.mark.asyncio，因为测试内部手动管理事件循环（asyncio.run）。
     """
     emb = SiliconFlowEmbedding()

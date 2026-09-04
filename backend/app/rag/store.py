@@ -87,7 +87,7 @@ class SiliconFlowEmbedding:
         assert self._client is not None
         return self._client
 
-    def _resolve_config(self) -> tuple[str, str, str]:
+    def resolve_config(self) -> tuple[str, str, str]:
         """解析当前生效的 (base_url, api_key, model)。
 
         优先级：租户级覆盖 > 系统配置(DB) > 全局默认（环境变量）
@@ -126,7 +126,7 @@ class SiliconFlowEmbedding:
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        base_url, api_key, model = self._resolve_config()
+        base_url, api_key, model = self.resolve_config()
         if not base_url or not api_key:
             # 没有配置 key，降级到 stub
             return await StubEmbedding(dim=self.dim).embed_batch(texts)

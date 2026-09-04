@@ -23,6 +23,12 @@ tree-sitter-python>=0.21
 tree-sitter-javascript>=0.21
 tree-sitter-typescript>=0.21
 
+# 代码库语义理解层（ADR-018）：LightRAG 实体-关系图谱 + 双层检索
+# PyPI 包名 lightrag-hku，import 名 lightrag；上限锁 minor 防上游 API 漂移（D9，适配层隔离）
+lightrag-hku>=1.5.7,<1.6
+# 适配层直接导入 numpy（LightRAG 嵌入函数契约返回 np.ndarray），显式声明不依赖传递依赖
+numpy>=2.0
+
 # 中文分词
 jieba>=0.42
 
