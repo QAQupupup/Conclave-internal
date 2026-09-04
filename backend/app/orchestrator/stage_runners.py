@@ -28,7 +28,11 @@ from conclave_core.text import (
 
 from .stage_common import emit_agent_spoke, record_drift
 from .topic_decomposer import decompose_topic, should_decompose
-from .workflow_templates import complexity_to_template, next_stage_with_template
+from .workflow_templates import (
+    DELIVERABLE_TEMPLATE_MAP,
+    complexity_to_template,
+    next_stage_with_template,
+)
 
 _logger = get_logger("orchestrator.stage_runners")
 
@@ -63,10 +67,18 @@ async def run_clarify(state: MeetingState, result: dict[str, Any], confidence: s
 
     # ADR-014 Phase 2: 根据 complexity + topic_type 选择工作流模板
     topic_type = result.get("topic_type", "report")
-    state.workflow_template = complexity_to_template(complexity, topic_type)
+    # ADR-017 Phase 1（T1.8 / I6）：产出类型属于三新类型时固定专用模板，
+    # 不被 complexity 映射覆写（参照上方 plan 保留模式）
+    pinned_template = DELIVERABLE_TEMPLATE_MAP.get(state.deliverable_type)
+    if pinned_template:
+        state.workflow_template = pinned_template
+    else:
+        state.workflow_template = complexity_to_template(complexity, topic_type)
 
     # ADR-014 Phase 3: 议题拆分（仅 full 复杂度 + 非 standard 模板时执行）
-    if should_decompose(complexity, state.workflow_template):
+    # ADR-017 Phase 1：固定模板的会议不做议题拆分，
+    # 防止首个子议题模板覆写固定模板（拆分能力与产物链暂不组合）
+    if pinned_template is None and should_decompose(complexity, state.workflow_template):
         _logger.info(
             "会议 %s 触发议题拆分 (complexity=%s, template=%s)", state.meeting_id, complexity, state.workflow_template
         )

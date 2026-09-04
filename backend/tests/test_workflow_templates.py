@@ -15,9 +15,9 @@ from conclave_core.state import STAGE_ORDER
 # ---------- 模板注册表测试 ----------
 
 
-def test_workflow_templates_has_six_templates():
-    """工作流模板注册表包含 6 个内置模板"""
-    expected_ids = {"standard", "design", "build", "research", "analysis"}
+def test_workflow_templates_has_eight_templates():
+    """工作流模板注册表包含 8 个内置模板（ADR-017 Phase 1 新增 adr/feasibility/test_gen）"""
+    expected_ids = {"standard", "design", "build", "research", "analysis", "adr", "feasibility", "test_gen"}
     assert set(WORKFLOW_TEMPLATES.keys()) == expected_ids
 
 

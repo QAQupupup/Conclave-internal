@@ -24,6 +24,7 @@ from app.orchestrator.system_prompt import (
     build_classification_prompt,
     parse_classification_result,
 )
+from app.services.artifact_service import publish_and_notify
 from app.services.knowledge_graph import materialize_meeting_knowledge
 from conclave_core.state import Stage
 
@@ -222,6 +223,9 @@ async def run_instant(query: str, state: MeetingState) -> MeetingState:
             state.flow_plan = FLOW_INSTANT
             # [GraphRAG-lite] 即时模式 DONE：议题向量落库（无冲突/证据，图谱边为空）
             await materialize_meeting_knowledge(state)
+            # ADR-017 Phase 1: Publish 产物入 artifacts 表
+            # （即时模式无质量门禁，回答即终态产物；失败仅记日志，不阻断终态）
+            await publish_and_notify(state)
 
             # 发布事件通知前端
             await bus.publish(

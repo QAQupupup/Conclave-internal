@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.dao.agent_role_dao import get_agent_roles_by_ids, list_agent_roles
+from app.dao.artifact_dao import get_artifacts_by_ids
 from app.dao.meeting_dao import (
     batch_delete_meetings,
     get_meeting,
@@ -103,6 +104,26 @@ def _build_reference_context(ref_meetings: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _build_artifact_reference_context(artifacts: list[dict[str, Any]]) -> str:
+    """将引用的上游产物构建为注入 prompt 的上下文文本（ADR-017 Phase 1 / I2）。
+
+    与会议级引用（_build_reference_context）共享 reference_context 注入通道，
+    但使用独立分节标题「[上游产物引用]」，血缘数据独立存 source_artifact_ids。
+    """
+    if not artifacts:
+        return ""
+    lines = ["[上游产物引用] 以下是本次会议引用的上游产物，请消费其结论并保持衔接："]
+    for i, a in enumerate(artifacts, 1):
+        title = a.get("title") or "（无标题）"
+        summary = a.get("summary") or "（无摘要）"
+        lines.append(
+            f"\n{i}. 产物「{title}」（id={a.get('id', '')}，类型={a.get('type', '')}，v{a.get('version', 1)}）\n"
+            f"   摘要：{summary}"
+        )
+    lines.append("\n请基于以上上游产物的结论展开本次会议的讨论与产出，避免重复已完成的工作。")
+    return "\n".join(lines)
+
+
 @router.post("", response_model=CreateMeetingResponse)
 async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateMeetingResponse:
     """创建会议"""
@@ -171,6 +192,40 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
             f"历史会议引用: count={len(ref_meetings)}",
             logger="routers.meetings",
             extra={"meeting_id": meeting_id, "ref_count": len(ref_meetings)},
+        )
+
+    # ADR-017 Phase 1（T1.9）：上游产物引用——校验租户归属后写入。
+    # 不存在/跨租户的 id 静默剔除并记告警日志（不阻断创建，复用 produce.py 的拒绝模式）；
+    # 有效产物的摘要拼入 reference_context（I2），血缘 id 记录到 source_artifact_ids。
+    if req.source_artifact_ids:
+        found_artifacts = await get_artifacts_by_ids(req.source_artifact_ids)
+        found_ids = {a["id"] for a in found_artifacts}
+        # 保持请求顺序去重，只保留当前租户可见的产物
+        valid_ids = list(dict.fromkeys(aid for aid in req.source_artifact_ids if aid in found_ids))
+        dropped = [aid for aid in req.source_artifact_ids if aid not in found_ids]
+        if dropped:
+            log_bus.warning(
+                f"上游产物引用无效（不存在或跨租户），已剔除: count={len(dropped)}",
+                logger="routers.meetings",
+                extra={"meeting_id": meeting_id, "dropped_artifact_ids": dropped[:20]},
+            )
+        state.source_artifact_ids = valid_ids
+        if valid_ids:
+            # 按 valid_ids 顺序取产物摘要（found_artifacts 按 created_at 倒序，需重排）
+            by_id = {a["id"]: a for a in found_artifacts}
+            ordered = [by_id[aid] for aid in valid_ids]
+            artifact_context = _build_artifact_reference_context(ordered)
+            state.reference_context = (
+                f"{state.reference_context}\n\n{artifact_context}" if state.reference_context else artifact_context
+            )
+        log_bus.info(
+            f"上游产物引用: valid={len(valid_ids)}, dropped={len(dropped)}",
+            logger="routers.meetings",
+            extra={
+                "meeting_id": meeting_id,
+                "valid_count": len(valid_ids),
+                "dropped_count": len(dropped),
+            },
         )
 
     # 持久化

@@ -28,6 +28,7 @@ from app.net_auth import init_auth_table
 from app.plugins import PluginRegistry, set_global_registry
 from app.routers import admin as admin_router
 from app.routers import agent_roles as agent_roles_router
+from app.routers import artifacts as artifacts_router
 from app.routers import audit_logs as audit_router
 from app.routers import captcha as captcha_router
 from app.routers import code as code_router
@@ -468,6 +469,8 @@ def create_app() -> FastAPI:
     app.include_router(agent_roles_router.router)
     app.include_router(captcha_router.router)
     app.include_router(meetings_router.router)
+    # ADR-017 Phase 1：产物查询 API（列表/单条/血缘）
+    app.include_router(artifacts_router.router)
     app.include_router(documents_router.router)
     app.include_router(code_router.router)
     app.include_router(metrics_router.router)

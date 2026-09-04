@@ -756,6 +756,86 @@ CODE_FIX_PROMPT = """你是一位代码修复工程师。以下代码经审查�
 
 修复后的{file_to_fix}内容："""
 
+# ---------- 产出阶段：可行性报告（ADR-017 Phase 1） ----------
+PRODUCE_FEASIBILITY_REPORT = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：基于讨论与裁决结论，产出可行性报告。结论必须可追溯到裁决结果，禁止引入讨论中未出现的新假设。
+
+【要求】
+1. verdict 必须三选一：go（可行，建议推进）/ no-go（不可行，给出依据）/ conditional（有条件可行，条件写入 blockers）
+2. dimensions 必须覆盖技术、成本、风险、合规四个维度，逐项给出评估与置信度
+3. assumptions 列出结论依赖的前提假设；blockers 列出阻断项或 conditional 的解除条件
+4. 不要输出空泛结论，每项评估须引用裁决结果中的具体论点
+
+输出 JSON:
+{{
+  "feasibility_report": {{
+    "title": "...",
+    "summary": "一句话结论摘要",
+    "verdict": "go|no-go|conditional",
+    "dimensions": [
+      {{"name": "技术", "assessment": "技术可行性评估", "confidence": "high|medium|low"}},
+      {{"name": "成本", "assessment": "成本与资源评估", "confidence": "high|medium|low"}},
+      {{"name": "风险", "assessment": "主要风险与缓解", "confidence": "high|medium|low"}},
+      {{"name": "合规", "assessment": "合规与安全评估", "confidence": "high|medium|low"}}
+    ],
+    "assumptions": ["假设1", "假设2"],
+    "blockers": ["阻断项或待解除条件"]
+  }}
+}}"""
+
+# ---------- 产出阶段：架构决策记录 ADR（ADR-017 Phase 1） ----------
+PRODUCE_ADR = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：基于讨论与裁决结论，产出架构决策记录（ADR）。每个决策点必须来自裁决结果，禁止凭感觉新增决策。
+
+【要求】
+1. decision_table 为 D 决策表：每行含编号（D1、D2 顺序递增）、决策（做什么）、理由（为什么）、被推翻替代方案（不这么做会怎样）
+2. alternatives_rejected 汇总被否决的方案及否决理由，与决策表保持一致
+3. consequences 列出决策带来的正面与负面后果
+4. status 填 proposed（待评审）；禁止虚构已接受的裁决记录
+
+输出 JSON:
+{{
+  "adr": {{
+    "title": "ADR 标题",
+    "summary": "一句话决策摘要",
+    "status": "proposed",
+    "context": "背景与问题定义",
+    "decision_table": [
+      {{"id": "D1", "decision": "做什么", "rationale": "为什么", "rejected_alternative": "替代方案及不选原因"}}
+    ],
+    "consequences": ["后果1", "后果2"],
+    "alternatives_rejected": ["被否决方案1：不选原因"]
+  }}
+}}"""
+
+# ---------- 产出阶段：测试套件（ADR-017 Phase 1） ----------
+PRODUCE_TEST_SUITE = """[阶段: Produce]
+裁决结果：{decision_record}
+任务：基于讨论与裁决结论，针对目标范围生成可执行的测试套件。测试必须验证真实行为，禁止空断言。
+
+【要求】
+1. test_files 中每个文件给出完整可运行代码（默认 pytest 风格），path 为相对路径
+2. 每个测试文件至少包含 1 个非正向用例（异常/边界/越权/降级），不得只有快乐路径
+3. 配对函数（编码/解码、创建/校验等）必须有往返测试
+4. run_instructions 给出容器内执行命令；禁止依赖外网或测试执行顺序
+5. 本阶段只生成测试代码，不执行；执行闭环在后续阶段落地
+
+输出 JSON:
+{{
+  "test_suite": {{
+    "title": "...",
+    "summary": "测试范围摘要",
+    "target_scope": "被测目标模块/接口范围说明",
+    "test_files": [
+      {{"path": "tests/test_xxx.py", "code": "完整测试代码"}}
+    ],
+    "run_instructions": "执行命令与环境说明",
+    "coverage_notes": "覆盖说明（含非正向用例设计）"
+  }}
+}}"""
+
 # 产出模板映射
 PRODUCE_TEMPLATES = {
     "prd_openapi": PRODUCE,
@@ -767,6 +847,10 @@ PRODUCE_TEMPLATES = {
     "data_science": PRODUCE_DATA_SCIENCE,
     "tested_system": PRODUCE_TESTED_SYSTEM,
     "deployable_service": PRODUCE_DEPLOYABLE_SERVICE,
+    # ADR-017 Phase 1：三种新产出类型（I1 复用 deliverable_type 取值）
+    "feasibility_report": PRODUCE_FEASIBILITY_REPORT,
+    "adr": PRODUCE_ADR,
+    "test_suite": PRODUCE_TEST_SUITE,
 }
 
 

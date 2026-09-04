@@ -140,6 +140,7 @@ class MeetingObservabilitySection(BaseModel):
     code_repos: list[dict[str, Any]] = Field(default_factory=list)
     reference_meeting_ids: list[str] = Field(default_factory=list)
     reference_context: str = ""
+    source_artifact_ids: list[str] = Field(default_factory=list)
     charter: MeetingCharter | None = None
     conclusion_chain: ConclusionChain = Field(default_factory=ConclusionChain)
     llm_trace: CallTrace = Field(default_factory=CallTrace)
@@ -228,6 +229,9 @@ class MeetingState(BaseModel):
     code_repos: list[dict[str, Any]] = Field(default_factory=list)
     reference_meeting_ids: list[str] = Field(default_factory=list)  # 引用的历史会议 ID 列表
     reference_context: str = ""  # 引用会议摘要文本（注入 prompt）
+    # ADR-017 Phase 1：引用的上游产物 ID 列表（产物级血缘，区别于会议级引用）
+    # 创建会议时校验租户归属后写入；publish 时随产物入 artifacts.source_artifact_ids
+    source_artifact_ids: list[str] = Field(default_factory=list)
     # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）
     charter: MeetingCharter | None = None
     # 漂移检查日志（非阻塞，记录每条发言的 drift 判定）
@@ -473,6 +477,7 @@ class MeetingState(BaseModel):
                 code_repos=self.code_repos,
                 reference_meeting_ids=self.reference_meeting_ids,
                 reference_context=self.reference_context,
+                source_artifact_ids=self.source_artifact_ids,
                 charter=self.charter,
                 conclusion_chain=self.conclusion_chain,
                 llm_trace=self.llm_trace,

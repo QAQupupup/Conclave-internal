@@ -12,7 +12,11 @@ class CreateMeetingRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=500, description="会议议题")
     deliverable_type: str = Field(
         "prd_openapi",
-        description="产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|code_analysis|tested_system|deployable_service|execution",
+        description=(
+            "产出类型: prd_openapi|design_doc|comprehensive|research_report|business_report|"
+            "code_analysis|tested_system|deployable_service|execution|"
+            "feasibility_report|adr|test_suite"
+        ),
     )
     flow_plan: str = Field(
         "standard", description="执行模式: instant(即时回答)|standard(标准六阶段)|plan(先计划后执行)"
@@ -20,6 +24,10 @@ class CreateMeetingRequest(BaseModel):
     debate_depth: str = Field("standard", description="辩论深度: light|standard|deep")
     role_ids: list[str] = Field(default_factory=list, max_length=50, description="预选角色 ID 列表，为空则自动生成")
     reference_meeting_ids: list[str] = Field(default_factory=list, max_length=20, description="引用的历史会议 ID 列表")
+    # ADR-017 Phase 1：引用的上游产物 ID 列表（产物级血缘，区别于会议级引用）
+    source_artifact_ids: list[str] = Field(
+        default_factory=list, max_length=20, description="引用的上游产物 ID 列表（摘要注入 prompt + 血缘记录）"
+    )
     model: str = Field(
         "", max_length=200, description="会议级模型覆盖（格式: provider_id:model_id 或纯 model_id），空=继承 ENV 默认"
     )

@@ -188,6 +188,8 @@ class CaseRunner:
         for key in (
             "role_ids",
             "reference_meeting_ids",
+            # ADR-017 Phase 1：上游产物引用（产物级血缘）
+            "source_artifact_ids",
             "model",
             "auto_iterate",
             "max_iterations",

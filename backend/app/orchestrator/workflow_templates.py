@@ -125,6 +125,71 @@ WORKFLOW_TEMPLATES: dict[str, WorkflowTemplate] = {
             "strategic_clarity",
         ],
     ),
+    # ---------- ADR-017 Phase 1：三种新产出类型的专用模板（T1.8 / I6） ----------
+    "feasibility": WorkflowTemplate(
+        template_id="feasibility",
+        description="可行性研究议题（保留证据检查，产出可行性报告）",
+        stages=[
+            Stage.CLARIFY,
+            Stage.INTRA_TEAM,
+            Stage.CROSS_TEAM,
+            Stage.EVIDENCE_CHECK,
+            Stage.PRODUCE,
+        ],
+        default_roles=["product_architect", "engineer"],
+        produce_type="feasibility_report",
+        quality_dimensions=[
+            "completeness",
+            "verdict_clarity",
+            "dimension_coverage",
+            "assumption_traceability",
+        ],
+    ),
+    "adr": WorkflowTemplate(
+        template_id="adr",
+        description="架构决策议题（聚焦决策记录，产出 ADR）",
+        stages=[
+            Stage.CLARIFY,
+            Stage.INTRA_TEAM,
+            Stage.CROSS_TEAM,
+            Stage.PRODUCE,
+        ],
+        default_roles=["product_architect", "engineer"],
+        produce_type="adr",
+        quality_dimensions=[
+            "completeness",
+            "decision_traceability",
+            "alternative_coverage",
+            "consequence_clarity",
+        ],
+    ),
+    "test_gen": WorkflowTemplate(
+        template_id="test_gen",
+        description="测试生成议题（聚焦测试设计，产出测试套件）",
+        stages=[
+            Stage.CLARIFY,
+            Stage.INTRA_TEAM,
+            Stage.CROSS_TEAM,
+            Stage.PRODUCE,
+        ],
+        default_roles=["product_architect", "engineer"],
+        produce_type="test_suite",
+        quality_dimensions=[
+            "completeness",
+            "test_coverage",
+            "negative_case_coverage",
+            "runnability",
+        ],
+    ),
+}
+
+# ADR-017 Phase 1（T1.8 / I6）：产出类型 → 专用工作流模板。
+# 会议创建请求的 deliverable_type 属于三新类型时，run_clarify 固定对应模板，
+# 不被 complexity 映射或议题拆分覆写。
+DELIVERABLE_TEMPLATE_MAP: dict[str, str] = {
+    "feasibility_report": "feasibility",
+    "adr": "adr",
+    "test_suite": "test_gen",
 }
 
 

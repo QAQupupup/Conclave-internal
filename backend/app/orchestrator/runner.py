@@ -26,6 +26,7 @@ from app.orchestrator.instant import (
 )
 from app.orchestrator.manager import MeetingManager
 from app.orchestrator.nodes import _inc_loop_count, _let_borrowed_agents_speak, decide_next_stage
+from app.services.artifact_service import publish_and_notify
 from app.services.knowledge_graph import materialize_meeting_knowledge
 from conclave_core.state import STAGE_ORDER, is_terminal, should_pause  # noqa: F401 (STAGE_ORDER kept for fallback)
 
@@ -785,6 +786,8 @@ class Runner:
                         state.completed_at = datetime.now(timezone.utc)
                         # [GraphRAG-lite] 会议 DONE：物化冲突/证据图谱边 + 议题向量 + 惰性实体抽取
                         await materialize_meeting_knowledge(state)
+                        # 注：质量未达标（需人工确认）不发布产物——
+                        # ADR-017 D2 要求门禁通过才 publish，避免劣质产物流入下游
                         log_bus.info(
                             f"质量未达标但 auto_iterate=False，设置终态 DONE（需人工确认）: "
                             f"score={state.quality_score}, iterations={state.iteration_count}",
@@ -799,6 +802,9 @@ class Runner:
                         state.completed_at = datetime.now(timezone.utc)
                         # [GraphRAG-lite] 会议 DONE：物化冲突/证据图谱边 + 议题向量 + 惰性实体抽取
                         await materialize_meeting_knowledge(state)
+                        # ADR-017 Phase 1: Publish 产物入 artifacts 表
+                        # （单向幂等；失败仅记日志，不阻断终态）
+                        await publish_and_notify(state)
                         log_bus.info(
                             f"质量门禁通过/迭代结束，设置终态 DONE: "
                             f"score={state.quality_score}, iterations={state.iteration_count}",
@@ -1132,9 +1138,17 @@ class Runner:
             return await self._evaluate_quality_deployable(state)
         elif dt == "prd_openapi":
             return await self._evaluate_quality_prd(state)
-        elif dt in ("design_doc", "comprehensive", "research_report", "business_report"):
+        elif dt in (
+            "design_doc",
+            "comprehensive",
+            "research_report",
+            "business_report",
+            # ADR-017 Phase 1：新产出类型走文档评估（T1.7）
+            "feasibility_report",
+            "adr",
+        ):
             return await self._evaluate_quality_document(state, dt)
-        elif dt in ("code_analysis", "data_science", "tested_system"):
+        elif dt in ("code_analysis", "data_science", "tested_system", "test_suite"):
             return await self._evaluate_quality_code(state, dt)
         else:
             return await self._evaluate_quality_prd(state)
@@ -1521,7 +1535,7 @@ class Runner:
         )
 
     async def _evaluate_quality_document(self, state: MeetingState, dt: str) -> dict:
-        """评估文档类产出质量（design_doc/research_report/business_report/comprehensive，总分 100）。"""
+        """评估文档类产出质量（design_doc/research_report/business_report/comprehensive/feasibility_report/adr，总分 100）。"""
         artifact = state.artifact or {}
         doc = artifact.get(dt) if isinstance(artifact.get(dt), dict) else {}
 
@@ -1547,6 +1561,9 @@ class Runner:
                     "risk_assessment",
                 ],
                 "comprehensive": ["title", "requirements", "system_design", "api_design", "data_model"],
+                # ADR-017 Phase 1：新产出类型必需字段（T1.7）
+                "feasibility_report": ["title", "summary", "verdict", "dimensions", "assumptions"],
+                "adr": ["title", "summary", "context", "decision_table", "alternatives_rejected"],
             }
             required = required_fields_map.get(dt, ["title", "summary"])
             present = [f for f in required if doc.get(f)]
@@ -1597,7 +1614,7 @@ class Runner:
         )
 
     async def _evaluate_quality_code(self, state: MeetingState, dt: str) -> dict:
-        """评估代码类产出质量（code_analysis/data_science/tested_system，总分 100）。"""
+        """评估代码类产出质量（code_analysis/data_science/tested_system/test_suite，总分 100）。"""
         artifact = state.artifact or {}
         code_data = artifact.get(dt) if isinstance(artifact.get(dt), dict) else {}
         execution = artifact.get("execution") or {}
@@ -1622,6 +1639,18 @@ class Runner:
                     score += 15
                 if not main_code and not test_code:
                     hard_failures.append("tested_system 缺少 main_code 和 test_code")
+            elif dt == "test_suite":
+                # ADR-017 Phase 1（T1.7）：存在性看 test_files 非空 + run_instructions
+                test_files = code_data.get("test_files") or []
+                valid_files = [f for f in test_files if isinstance(f, dict) and f.get("path") and f.get("code")]
+                if valid_files:
+                    score += 20
+                else:
+                    hard_failures.append("test_suite 缺少有效的 test_files（需含 path 与 code）")
+                if code_data.get("run_instructions"):
+                    score += 10
+                else:
+                    feedback_parts.append("test_suite 缺少 run_instructions")
             else:
                 code = code_data.get("code") or ""
                 if code:
@@ -1637,6 +1666,11 @@ class Runner:
             elif execution.get("error"):
                 score += 10
                 feedback_parts.append(f"代码执行异常: {execution.get('error', '')[:80]}")
+            elif dt == "test_suite":
+                # ADR-017 Phase 1（T1.7）：执行闭环 Phase 3 才落地，
+                # 未执行按「未执行」扣分（给一半基础分）而非硬门槛
+                score += 15
+                feedback_parts.append("测试未执行（执行闭环将在后续阶段落地，按未执行扣分而非硬门槛）")
             else:
                 feedback_parts.append("未检测到代码执行结果")
 
@@ -1644,6 +1678,10 @@ class Runner:
             all_code = ""
             if dt == "tested_system":
                 all_code = (code_data.get("main_code") or "") + (code_data.get("test_code") or "")
+            elif dt == "test_suite":
+                all_code = "".join(
+                    str(f.get("code") or "") for f in (code_data.get("test_files") or []) if isinstance(f, dict)
+                )
             else:
                 all_code = code_data.get("code") or ""
             if len(all_code) >= 200:

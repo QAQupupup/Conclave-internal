@@ -7,6 +7,7 @@ Alembic 通过 ``from app.db.models import *`` 注册所有模型到 metadata。
 from __future__ import annotations
 
 from app.db.models.agent_role import AgentRoleModel
+from app.db.models.artifact import ArtifactModel
 from app.db.models.docker_host import DockerHostModel, DockerHostSecretModel
 from app.db.models.document import (
     DocumentModel,
@@ -32,6 +33,7 @@ from app.db.models.user_account import UserModel
 __all__ = [
     "AgentRoleModel",
     "ApiKeyModel",
+    "ArtifactModel",
     "AuditLogModel",
     "ChunkEntityModel",
     "CostRecordModel",

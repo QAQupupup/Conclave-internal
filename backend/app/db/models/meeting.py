@@ -50,6 +50,10 @@ class MeetingModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin):
     payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     # 数据格式版本号（用于未来 schema 演进时的数据迁移）
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # ADR-017 Phase 1：项目/议题关联（可空；外键目标表 projects/issues
+    # 在 Phase 2 落地，届时补 FK，现阶段不声明以避免 create_all 报错）
+    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    issue_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     # 关系（历史 relationship 已按 docs/sql-development-rules.md §1.2 红线注释，
     # 跨模块关联改用显式 join；保留注释以便追溯，不可重新启用）
