@@ -2,6 +2,8 @@
 # 使用 StubLLM（不烧 token），验证状态机和数据流正确性
 import asyncio
 
+import pytest
+
 from app.models import MeetingStatus
 from app.orchestrator import runner as runner_mod
 from app.orchestrator.runner import Runner
@@ -192,33 +194,42 @@ def test_full_six_stage_flow(client):
     assert len(state.drift_log) > 0, "应有漂移检查记录"
 
 
-def test_deliverable_type_selection(client):
-    """不同 deliverable_type 产出不同类型 artifact"""
-    for deliverable_type in ["prd_openapi", "code_analysis", "tested_system", "deployable_service"]:
-        resp = client.post(
-            "/meetings",
-            json={
-                "topic": f"测试 {deliverable_type}",
-                "deliverable_type": deliverable_type,
-            },
-        )
-        meeting_id = resp.json()["meeting_id"]
+# 各 deliverable_type 对应的 artifact 必备键
+_ARTIFACT_REQUIRED_KEYS: dict[str, list[str]] = {
+    "prd_openapi": ["prd", "openapi"],
+    "code_analysis": ["code_analysis"],
+    "tested_system": ["tested_system"],
+    "deployable_service": ["deployable_service"],
+}
 
-        state = runner_mod.get_state(meeting_id)
-        state.status = MeetingStatus.RUNNING
-        state = asyncio.run(Runner().run(state))
 
-        assert state.status.value == "done", f"{deliverable_type} 应完成"
-        assert state.stage.value == "produce", f"{deliverable_type} 最终阶段应为 produce"
-        assert state.artifact is not None, f"{deliverable_type} 应有产出"
+@pytest.mark.parametrize("deliverable_type", sorted(_ARTIFACT_REQUIRED_KEYS))
+def test_deliverable_type_selection(client, deliverable_type):
+    """不同 deliverable_type 产出不同类型 artifact
 
-        # 验证产出类型
-        if deliverable_type == "prd_openapi":
-            assert "prd" in state.artifact, "prd_openapi 应有 prd"
-            assert "openapi" in state.artifact, "prd_openapi 应有 openapi"
-        elif deliverable_type == "code_analysis":
-            assert "code_analysis" in state.artifact, "code_analysis 应有 code_analysis"
-        elif deliverable_type == "tested_system":
-            assert "tested_system" in state.artifact, "tested_system 应有 tested_system"
-        elif deliverable_type == "deployable_service":
-            assert "deployable_service" in state.artifact, "deployable_service 应有 deployable_service"
+    参数化为独立用例（而非单测试内循环跑 4 场会议），原因：
+    1. 每场六阶段会议约 7s，4 场串行约 28s，贴 30s 超时线，负载下必然 flaky；
+       拆成独立用例后每个用例独享超时预算。
+    2. autouse fixture 在用例间重置进程级单例，消除同一测试内多次
+       ``asyncio.run`` 跨事件循环复用单例的隐患（见 docs/pitfalls.md P1）。
+    """
+    resp = client.post(
+        "/meetings",
+        json={
+            "topic": f"测试 {deliverable_type}",
+            "deliverable_type": deliverable_type,
+        },
+    )
+    meeting_id = resp.json()["meeting_id"]
+
+    state = runner_mod.get_state(meeting_id)
+    state.status = MeetingStatus.RUNNING
+    state = asyncio.run(Runner().run(state))
+
+    assert state.status.value == "done", f"{deliverable_type} 应完成"
+    assert state.stage.value == "produce", f"{deliverable_type} 最终阶段应为 produce"
+    assert state.artifact is not None, f"{deliverable_type} 应有产出"
+
+    # 验证产出类型
+    for key in _ARTIFACT_REQUIRED_KEYS[deliverable_type]:
+        assert key in state.artifact, f"{deliverable_type} 应有 {key}"

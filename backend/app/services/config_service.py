@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -129,7 +128,6 @@ _USER_CACHE_TTL = 30.0
 _SYS_CACHE_TTL = 120.0
 _user_cache: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}  # (tid, uid) -> (expire, data)
 _sys_cache: tuple[float, dict[str, Any]] | None = None
-_cache_lock = asyncio.Lock()
 
 
 # ---------------------------------------------------------------------------
