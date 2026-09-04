@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/stores/auth-slice';
+import type { Artifact, ArtifactListResponse, ArtifactLineageResponse } from '@/types';
 import { isDemoMode, mockApi } from './mock-data';
 
 const API_BASE = '';
@@ -804,6 +805,22 @@ export const api = {
       `/meetings/${meetingId}/events${buildQueryString({ from_seq: fromSeq })}`,
       { method: 'GET' },
     ),
+  /** 产物（ADR-017 Phase 1）：会议产出的一等公民实体 */
+  artifacts: {
+    /** 分页查询产物（可按会议/类型过滤，最新在上） */
+    list: (params?: { meeting_id?: string; type?: string; limit?: number; offset?: number }) => {
+      const query: Record<string, string | number> = {};
+      if (params?.meeting_id) query.meeting_id = params.meeting_id;
+      if (params?.type) query.type = params.type;
+      if (params?.limit !== undefined) query.limit = params.limit;
+      if (params?.offset !== undefined) query.offset = params.offset;
+      return request<ArtifactListResponse>(`/artifacts${buildQueryString(query)}`, { method: 'GET' });
+    },
+    /** 单条产物详情 */
+    get: (id: string) => request<Artifact>(`/artifacts/${id}`, { method: 'GET' }),
+    /** 产物上游血缘图（深度上限防环） */
+    lineage: (id: string) => request<ArtifactLineageResponse>(`/artifacts/${id}/lineage`, { method: 'GET' }),
+  },
 };
 
 /** 后端 /events 端点返回的领域事件信封（tool.started/step/completed/failed 等） */

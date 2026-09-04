@@ -79,6 +79,9 @@ export interface CreateOption {
 export const DELIVERABLE_TYPES: CreateOption[] = [
   { value: 'prd_openapi', label: 'PRD + OpenAPI', description: '产品需求文档与接口定义' },
   { value: 'design_doc', label: '设计文档', description: '技术方案与架构设计' },
+  { value: 'feasibility_report', label: '可行性报告', description: '技术/成本/风险/合规四维可行性结论' },
+  { value: 'adr', label: '架构决策记录', description: 'D 决策表格式的 ADR 产出' },
+  { value: 'test_suite', label: '测试套件', description: '针对目标范围生成可执行测试代码' },
   { value: 'research_report', label: '研究报告', description: '调研分析与结论' },
   { value: 'business_report', label: '商业报告', description: '市场与商业分析' },
   { value: 'comprehensive', label: '综合报告', description: '多维度综合分析' },

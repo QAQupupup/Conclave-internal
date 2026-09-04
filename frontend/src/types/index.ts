@@ -34,7 +34,15 @@ export type {
   CustomEvent,
 } from './ag-ui';
 
-export type { ApiError, PaginatedResponse } from './api';
+export type {
+  ApiError,
+  PaginatedResponse,
+  Artifact,
+  ArtifactListResponse,
+  ArtifactLineageNode,
+  ArtifactLineageEdge,
+  ArtifactLineageResponse,
+} from './api';
 
 // RBAC / Team 多租户
 export type {

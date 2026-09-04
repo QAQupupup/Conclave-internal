@@ -38,7 +38,7 @@ export default defineConfig({
           '/agent-roles/', '/preferences/', '/tenants/', '/metrics/',
           '/audit/', '/debug/', '/captcha/', '/config/', '/documents/',
           '/net-auth/', '/docker-hosts/', '/regression/', '/system/', '/admin/',
-          '/graph/', '/llm/', '/vnc.html', '/vnc/', '/meetings/',
+          '/graph/', '/llm/', '/vnc.html', '/vnc/', '/meetings/', '/artifacts/',
         ];
         server.middlewares.use((req, _res, next) => {
           const url = req.url || '/';
@@ -106,6 +106,8 @@ export default defineConfig({
       '/vnc': { target: process.env.VITE_VNC_URL || 'http://localhost:6080', ws: true },
       '/websockify': { target: process.env.VITE_VNC_URL || 'http://localhost:6080', ws: true },
       '/meetings': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
+      // ADR-017 Phase 1：产物查询 API（列表/单条/血缘）
+      '/artifacts': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/workspace': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/health': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/agent-roles': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
