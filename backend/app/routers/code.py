@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from app.config import settings
 from app.observability.log_bus import log_bus
@@ -409,6 +409,81 @@ async def _register_code_to_state(meeting_id: str, repo_info: dict[str, Any]) ->
         return False
 
 
+# ---- 语义索引（ADR-018 Phase B） ----
+
+
+def _resolve_tenant_id() -> int:
+    """解析语义索引隔离键所需租户 ID。
+
+    请求上下文无租户（开发模式未认证/系统租户）时用 0 作系统命名空间：
+    真实租户 ID 从 1 起，不会与 0 冲突（D3 租户前缀隔离不受影响）。
+    """
+    from app.tenants.context import get_tenant_id
+
+    tenant_id = get_tenant_id()
+    return tenant_id if tenant_id is not None else 0
+
+
+async def _build_semantic_index(repo_path: Path, meeting_id: str) -> dict[str, Any]:
+    """构建仓库级语义索引（LightRAG）。失败不阻断摄入（降级哲学）。
+
+    配额超限（QuotaExceededError）例外上抛：由全局异常处理器转 429，
+    属显式预算语义，不应被吞成"索引失败可重试"。
+    """
+    from app.core.exceptions import QuotaExceededError
+    from app.rag.semantic_ingest import ingest_repo_semantic
+
+    try:
+        return await ingest_repo_semantic(
+            repo_path,
+            meeting_id=meeting_id,
+            tenant_id=_resolve_tenant_id(),
+        )
+    except QuotaExceededError:
+        raise
+    except Exception as e:
+        logger.warning(
+            "语义索引构建失败（不影响导入，可稍后重建）: meeting_id=%s, %s: %s",
+            meeting_id,
+            type(e).__name__,
+            e,
+        )
+        return {"enabled": False, "reason": f"{type(e).__name__}: {e}", "docs_ingested": 0}
+
+
+def _degraded_status(reason: str) -> dict[str, Any]:
+    """进度查询的降级响应（语义层不可用/查询失败统一语义，前端据此提示可重试）。"""
+    return {"enabled": False, "reason": reason, "status_counts": {}, "documents": []}
+
+
+async def _semantic_index_status(meeting_id: str, track_id: str | None) -> dict[str, Any]:
+    """查询语义索引 DocStatus 进度（与摄入同隔离键：会议级 workspace）。
+
+    降级哲学与摄入一致：语义层不可用或查询失败返回 enabled=False（非 500），
+    进度轮询不被存储故障打断；查询用毕立即关闭索引，不长期占用存储句柄。
+    """
+    from app.rag.lightrag_adapter import get_semantic_index
+
+    index = get_semantic_index(_resolve_tenant_id(), meeting_id=meeting_id)
+    if index is None:
+        return _degraded_status("semantic_layer_unavailable")
+    try:
+        await index.initialize()
+        try:
+            progress = await index.get_progress(track_id)
+        finally:
+            await index.close()
+    except Exception as e:
+        logger.warning(
+            "语义索引进度查询失败（降级返回）: meeting_id=%s, %s: %s",
+            meeting_id,
+            type(e).__name__,
+            e,
+        )
+        return _degraded_status(f"{type(e).__name__}: {e}")
+    return {"enabled": True, "workspace": index.workspace, **progress}
+
+
 # ---- 端点 ----
 
 
@@ -419,6 +494,7 @@ async def ingest_code(
     branch: str | None = Form(default=None),
     target_dir: str | None = Form(default=None),
     token: str | None = Form(default=None),
+    semantic_index: bool = Form(default=False),
     file: UploadFile | None = File(default=None),
 ) -> dict[str, Any]:
     """导入代码库到会议工作区。
@@ -426,6 +502,9 @@ async def ingest_code(
     二选一：`git_url`（http/https，递归 submodule）或 `file`（zip）。
     产物落在 `workspace/{meeting_id}/{target_dir|repo_name}/`，
     随后可通过 fs.list / fs.read / shell.exec 浏览。
+
+    `semantic_index=true` 时额外构建 LightRAG 语义索引（ADR-018 Phase B）：
+    分批摄入受配额约束，进度经 `GET .../code/index/status` 查询。
     """
     await _ensure_meeting_owned(meeting_id)
 
@@ -471,6 +550,12 @@ async def ingest_code(
         },
     )
 
+    # 语义索引（ADR-018 Phase B）：semantic_index 开关控制，默认关闭；
+    # 失败降级不阻断导入，配额超限例外上抛（见 _build_semantic_index）
+    semantic_result: dict[str, Any] | None = None
+    if semantic_index:
+        semantic_result = await _build_semantic_index(meeting_dir / target_name, meeting_id)
+
     response: dict[str, Any] = {
         "meeting_id": meeting_id,
         "source_type": result["source_type"],
@@ -486,6 +571,8 @@ async def ingest_code(
     }
     if index_stats is not None:
         response["index"] = index_stats
+    if semantic_result is not None:
+        response["semantic_index"] = semantic_result
     return response
 
 
@@ -519,3 +606,19 @@ async def code_structure(
     """
     await _ensure_meeting_owned(meeting_id)
     return structure_query(meeting_id, body.node_id, max_hops=body.max_hops)
+
+
+@router.get("/{meeting_id}/code/index/status")
+async def code_index_status(
+    meeting_id: str,
+    track_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """语义索引进度查询（ADR-018 Phase B）：DocStatus 状态计数 + 按批次明细。
+
+    - 不传 `track_id`：仅返回 workspace 级各状态文档数（``status_counts``），
+      避免大仓库全量枚举拖慢查询；
+    - 传 `track_id`（摄入返回的批次凭据）：额外返回该批次逐文档状态（``documents``）。
+    语义层不可用时返回 ``enabled=false``（降级语义，前端据此隐藏进度区）。
+    """
+    await _ensure_meeting_owned(meeting_id)
+    return await _semantic_index_status(meeting_id, track_id)

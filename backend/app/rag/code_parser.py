@@ -83,7 +83,7 @@ class Symbol:
     char_end: int
     text: str  # 符号源码全文（docstring/body 懒读用）
     signature: str  # 定义首行（def/class/function 声明）
-    docstring: str  # Python 文档字符串；JS/TS 暂不提取 JSDoc
+    docstring: str  # Python 文档字符串 / JS/TS 紧邻声明的 JSDoc（ADR-018 D5）
     body_head: str = ""  # 正文头部（无 docstring 时用作检索摘要）
 
 
@@ -268,7 +268,7 @@ def parse_source(code: str, language: str, file_path: str = "") -> ParsedFile:
         name = _field_text(node, "name")
         qname = f"{class_qname}::{name}" if class_qname else f"{base}::{name}"
         signature = text[: text.find("\n")].strip() if text else ""
-        docstring = _py_docstring(node, text) if language == "python" else ""
+        docstring = _py_docstring(node, text) if language == "python" else _js_doc_comment(node)
         # body_head：签名行之后的正文头部（无 docstring 时用作检索摘要）
         rest = text[len(signature) :].strip().strip("\n") if signature else text.strip()
         if docstring:
@@ -473,3 +473,39 @@ def _py_docstring(node: Any, text: str) -> str:
                     s = child.text.decode("utf-8", errors="replace")
                     return str(s.strip("\"'").strip())
     return ""
+
+
+def _clean_jsdoc(raw: str) -> str:
+    """清洗 JSDoc 注释块：去掉 /** */ 边界与每行前导 *，保留正文。"""
+    lines: list[str] = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if s.startswith("/**"):
+            s = s[3:]
+        if s.endswith("*/"):
+            s = s[:-2]
+        s = s.lstrip("*").strip()
+        if s:
+            lines.append(s)
+    return "\n".join(lines)
+
+
+def _js_doc_comment(node: Any) -> str:
+    """提取紧邻声明节点之前的 JSDoc 注释（/** ... */）；无则返回空串（ADR-018 D5）。
+
+    - 只认"紧邻"：声明与注释之间隔了其他节点（如另一个声明）则不提取，
+      避免把无关注释误当文档。
+    - ``export function foo`` 的注释位于 export_statement 之前，需上提一层查找。
+    - 普通 ``//`` 行注释与非 /** 开头的块注释不算 JSDoc，直接返回空串。
+    """
+    target = node
+    parent = node.parent
+    if parent is not None and parent.type == "export_statement":
+        target = parent
+    sib = target.prev_sibling
+    if sib is None or sib.type != "comment":
+        return ""
+    raw = str(sib.text.decode("utf-8", errors="replace"))
+    if not raw.startswith("/**"):
+        return ""
+    return _clean_jsdoc(raw)

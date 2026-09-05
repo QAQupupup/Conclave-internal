@@ -36,6 +36,24 @@ _MEETING_KEY_PREFIX = "mtg-"
 _EXTRACTION_TEMPERATURE = 0.0
 
 
+def _serialize_doc_status(status_obj: Any) -> dict[str, Any]:
+    """把 LightRAG ``DocProcessingStatus`` 序列化为 JSON 安全 dict。
+
+    只暴露前端进度展示所需字段；status 取枚举值（pending/parsing/analyzing/
+    processing/preprocessed/processed/failed），上游新增字段不影响本层契约。
+    """
+    status = getattr(status_obj, "status", None)
+    return {
+        "file_path": getattr(status_obj, "file_path", "") or "",
+        "status": getattr(status, "value", str(status)),
+        "chunks_count": getattr(status_obj, "chunks_count", 0) or 0,
+        "content_length": getattr(status_obj, "content_length", 0) or 0,
+        "error_msg": getattr(status_obj, "error_msg", "") or "",
+        "created_at": getattr(status_obj, "created_at", "") or "",
+        "updated_at": getattr(status_obj, "updated_at", "") or "",
+    }
+
+
 def build_workspace_key(
     tenant_id: int,
     *,
@@ -224,10 +242,22 @@ class LightRAGIndex:
             raise RuntimeError("LightRAGIndex 未初始化：请先调用 initialize()")
         return self._rag
 
-    async def insert_texts(self, texts: list[str], ids: list[str] | None = None) -> None:
-        """插入文档。LightRAG 内建内容哈希去重 + 增量合并（D6 直接复用）。"""
+    async def insert_texts(
+        self,
+        texts: list[str],
+        ids: list[str] | None = None,
+        file_paths: list[str] | None = None,
+        track_id: str | None = None,
+    ) -> str:
+        """插入文档并返回 track_id（DocStatus 进度查询的批次凭据）。
+
+        LightRAG 内建内容哈希去重 + 增量合并（D6 直接复用）：不传 ids 时
+        上游按内容哈希生成文档 ID——文件改名（内容不变）识别为同文档。
+        file_paths 与 texts 一一对应，供引用溯源与按文件定位文档。
+        """
         rag = self._require_rag()
-        await rag.ainsert(texts, ids=ids)
+        result = await rag.ainsert(texts, ids=ids, file_paths=file_paths, track_id=track_id)
+        return str(result)
 
     async def query(self, question: str, mode: str = "mix") -> str:
         """双层检索查询。mode: local/global/hybrid/mix/naive（mix=实体+主题双层）。"""
@@ -244,6 +274,22 @@ class LightRAGIndex:
         """删除文档并触发图谱清理（D7：LightRAG 4 阶段 purge 直接复用）。"""
         rag = self._require_rag()
         await rag.adelete_by_doc_id(doc_id)
+
+    async def get_progress(self, track_id: str | None = None) -> dict[str, Any]:
+        """DocStatus 进度查询（ADR-018 Phase B）：状态计数 + 按批次的逐文档明细。
+
+        复用 LightRAG 内建 DocStatus 状态机（D6）：
+        - status_counts：workspace 级各状态文档数（pending/.../processed/failed）
+        - documents：指定 track_id（一次 insert 批次）时返回逐文档状态，
+          未指定时为空列表（避免大仓库全量枚举拖慢查询）
+        """
+        rag = self._require_rag()
+        status_counts: dict[str, int] = await rag.get_processing_status()
+        documents: list[dict[str, Any]] = []
+        if track_id:
+            mapping = await rag.doc_status.get_docs_by_track_id(track_id)
+            documents = [_serialize_doc_status(s) for s in mapping.values()]
+        return {"status_counts": status_counts, "documents": documents}
 
     async def close(self) -> None:
         """关闭存储（flush 向量缓冲、释放客户端）。"""

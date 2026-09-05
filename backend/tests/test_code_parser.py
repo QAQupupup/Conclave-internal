@@ -184,3 +184,51 @@ class TestLanguageDetection:
     )
     def test_extension_mapping(self, path: str, expected: str) -> None:
         assert language_for_path(path) == expected
+
+
+class TestJsDocExtraction:
+    """ADR-018 D5：JS/TS 紧邻声明的 JSDoc 提取到 Symbol.docstring。"""
+
+    def test_jsdoc_before_function(self) -> None:
+        code = "/**\n * 计算总价。\n * @param n 数量\n */\nfunction total(n: number): number { return n * 2; }\n"
+        pf = parse_source(code, "typescript", "price.ts")
+        by = {s.name: s for s in pf.symbols}
+        assert "total" in by
+        assert "计算总价。" in by["total"].docstring
+        assert "@param n 数量" in by["total"].docstring
+
+    def test_jsdoc_before_export_statement(self) -> None:
+        """export function 的 JSDoc 位于 export_statement 之前，需上提一层。"""
+        code = "/** 导出工具函数 */\nexport function util(): void {}\n"
+        pf = parse_source(code, "typescript", "u.ts")
+        by = {s.name: s for s in pf.symbols}
+        assert "util" in by
+        assert "导出工具函数" in by["util"].docstring
+
+    def test_plain_line_comment_not_jsdoc(self) -> None:
+        """非正向：// 行注释不是 JSDoc，不得误提取。"""
+        code = "// 普通注释\nfunction plain(): void {}\n"
+        pf = parse_source(code, "javascript", "p.js")
+        by = {s.name: s for s in pf.symbols}
+        assert by["plain"].docstring == ""
+
+    def test_non_adjacent_comment_not_extracted(self) -> None:
+        """非正向：注释与声明之间隔了其他声明 → 不属于该符号。"""
+        code = "/** 属于 first */\nfunction first(): void {}\nfunction second(): void {}\n"
+        pf = parse_source(code, "javascript", "n.js")
+        by = {s.name: s for s in pf.symbols}
+        assert "属于 first" in by["first"].docstring
+        assert by["second"].docstring == ""
+
+    def test_block_comment_without_jsdoc_marker_ignored(self) -> None:
+        """非正向：/* ... */（非 /** 开头）不算 JSDoc。"""
+        code = "/* 普通块注释 */\nfunction plain(): void {}\n"
+        pf = parse_source(code, "javascript", "b.js")
+        by = {s.name: s for s in pf.symbols}
+        assert by["plain"].docstring == ""
+
+    def test_python_docstring_unaffected(self) -> None:
+        """回归：Python 仍走 ast docstring 路径，不受 JSDoc 逻辑影响。"""
+        code = 'def f():\n    """中文文档"""\n    return 1\n'
+        pf = parse_source(code, "python", "a.py")
+        assert pf.symbols[0].docstring == "中文文档"

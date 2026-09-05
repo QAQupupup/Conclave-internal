@@ -65,16 +65,39 @@ def _patch_embed_config(
     monkeypatch.setattr(SiliconFlowEmbedding, "resolve_config", lambda self: (base, key, model))
 
 
+class _FakeStatusEnum:
+    value = "processed"
+
+
+class _FakeDocProcessingStatus:
+    """DocProcessingStatus 测试替身：字段与 _serialize_doc_status 读取面一致。"""
+
+    def __init__(self) -> None:
+        self.file_path = "app/main.py"
+        self.status = _FakeStatusEnum()
+        self.chunks_count = 3
+        self.content_length = 120
+        self.error_msg = ""
+        self.created_at = "2026-09-05T10:00:00"
+        self.updated_at = "2026-09-05T10:01:00"
+
+
 def _install_fake_rag(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """安装 fake LightRAG 类，捕获构造参数与操作记录（不 mock 适配层自身）。"""
     import lightrag as lightrag_module
 
     state: dict[str, Any] = {"init_count": 0, "ops": [], "kwargs": {}}
 
+    class _FakeDocStatus:
+        async def get_docs_by_track_id(self, track_id: str) -> dict[str, Any]:
+            state["ops"].append(("get_docs_by_track_id", track_id))
+            return {"doc-1": _FakeDocProcessingStatus()}
+
     class _FakeRAG:
         def __init__(self, **kwargs: Any) -> None:
             state["init_count"] += 1
             state["kwargs"] = kwargs
+            self.doc_status = _FakeDocStatus()
 
         async def initialize_storages(self) -> None:
             state["initialized"] = True
@@ -82,8 +105,15 @@ def _install_fake_rag(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         async def finalize_storages(self) -> None:
             state["finalized"] = True
 
-        async def ainsert(self, texts: list[str], ids: list[str] | None = None) -> None:
-            state["ops"].append(("ainsert", list(texts), ids))
+        async def ainsert(
+            self,
+            texts: list[str],
+            ids: list[str] | None = None,
+            file_paths: list[str] | None = None,
+            track_id: str | None = None,
+        ) -> str:
+            state["ops"].append(("ainsert", list(texts), ids, file_paths, track_id))
+            return track_id or "fake-track-id"
 
         async def aquery(self, question: str, param: Any = None) -> str:
             state["ops"].append(("aquery", question, param.mode))
@@ -91,6 +121,10 @@ def _install_fake_rag(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
         async def adelete_by_doc_id(self, doc_id: str) -> None:
             state["ops"].append(("adelete_by_doc_id", doc_id))
+
+        async def get_processing_status(self) -> dict[str, int]:
+            state["ops"].append(("get_processing_status",))
+            return {"pending": 1, "processed": 2}
 
     monkeypatch.setattr(lightrag_module, "LightRAG", _FakeRAG)
     return state
@@ -397,23 +431,61 @@ async def test_initialize_syncs_qdrant_url_from_settings(
 
 
 async def test_index_delegates_ops_to_rag(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    """插入/查询/删除正确委托 LightRAG，查询默认 mix 双层检索。"""
+    """插入/查询/删除正确委托 LightRAG，查询默认 mix 双层检索。
+
+    Phase B 扩展：insert_texts 透传 file_paths 并返回 track_id（批次凭据）。
+    """
     state = _install_fake_rag(monkeypatch)
     _patch_embed_config(monkeypatch)
 
     idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
     await idx.initialize()
 
-    await idx.insert_texts(["t1", "t2"], ids=["id1", "id2"])
+    track = await idx.insert_texts(["t1", "t2"], ids=["id1", "id2"], file_paths=["a.py", "b.py"])
     answer = await idx.query("这个仓库是干什么的？")
     await idx.delete_doc("doc-9")
     await idx.close()
 
+    assert track == "fake-track-id"
     assert answer == "fake 答案"
     ops = state["ops"]
-    assert ops[0] == ("ainsert", ["t1", "t2"], ["id1", "id2"])
+    assert ops[0] == ("ainsert", ["t1", "t2"], ["id1", "id2"], ["a.py", "b.py"], None)
     assert ops[1][0] == "aquery"
     assert ops[1][2] == "mix"  # 默认双层检索模式
     assert ops[2] == ("adelete_by_doc_id", "doc-9")
     assert state["finalized"] is True
     assert idx.is_ready is False
+
+
+async def test_get_progress_counts_and_batch_details(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """DocStatus 进度查询（Phase B）：状态计数 + 按 track_id 的逐文档序列化明细。"""
+    state = _install_fake_rag(monkeypatch)
+    _patch_embed_config(monkeypatch)
+
+    idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
+    await idx.initialize()
+    try:
+        # 不传 track_id：只有计数，无逐文档明细（避免大仓库全量枚举）
+        overview = await idx.get_progress()
+        assert overview["status_counts"] == {"pending": 1, "processed": 2}
+        assert overview["documents"] == []
+
+        # 传 track_id：返回该批次逐文档状态，枚举值序列化为字符串
+        detail = await idx.get_progress(track_id="track-1")
+        assert detail["documents"] == [
+            {
+                "file_path": "app/main.py",
+                "status": "processed",
+                "chunks_count": 3,
+                "content_length": 120,
+                "error_msg": "",
+                "created_at": "2026-09-05T10:00:00",
+                "updated_at": "2026-09-05T10:01:00",
+            }
+        ]
+    finally:
+        await idx.close()
+
+    op_names = [op[0] for op in state["ops"]]
+    assert op_names.count("get_processing_status") == 2
+    assert ("get_docs_by_track_id", "track-1") in state["ops"]
