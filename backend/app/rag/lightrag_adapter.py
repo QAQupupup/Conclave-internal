@@ -35,6 +35,80 @@ _MEETING_KEY_PREFIX = "mtg-"
 # D8：语义索引构建属抽取类调用，温度锁 0.0
 _EXTRACTION_TEMPERATURE = 0.0
 
+# 摄入路径编码分隔符（把仓库相对路径压成单段 token，见 encode_ingest_path）
+_PATH_SEP = "~"
+
+# list_documents 分页枚举 DocStatus 的单页大小（上游允许 10-200）
+_DOC_PAGE_SIZE = 200
+
+
+def encode_ingest_path(rel_path: str) -> str:
+    """把仓库相对路径编码为可在 LightRAG 内存活的 file_path token（D9 隔离）。
+
+    上游 ``normalize_document_file_path`` 只保留 basename：直接传 ``src/a/util.py``
+    会被归一成 ``util.py``，与 ``src/b/util.py`` 撞键——同名记录一律按重复文档
+    拒绝（上游源码级核实，见 pipeline.py filename dedup），导致同名文件互相顶掉。
+
+    编码规则（单射、可逆，逆运算见 decode_ingest_path）：
+    先把已有的 ``~`` 转义为 ``~~``，再把 ``/`` 替换为 ``~``，
+    结果不含路径分隔符，basename 归一化后原样保留。
+
+    已知边界：上游另会剥离 ``名称.[解析引擎].扩展名`` 中的提示段（如
+    ``x.[native].py`` → ``x.py``）；代码仓库文件名命中该模式的概率极低，
+    且内容哈希去重仍兜底，不为此引入更重的转义。
+    """
+    normalized = rel_path.replace("\\", "/").strip().strip("/")
+    if not normalized:
+        raise ValueError(f"摄入路径编码拒绝空路径: {rel_path!r}")
+    return normalized.replace(_PATH_SEP, _PATH_SEP * 2).replace("/", _PATH_SEP)
+
+
+def decode_ingest_path(token: str) -> str:
+    """``encode_ingest_path`` 的逆运算（配对函数，往返测试覆盖）。
+
+    尽力而为：对未经编码的普通文件名原样返回，供引用展示与溯源。
+    """
+    out: list[str] = []
+    i = 0
+    n = len(token)
+    while i < n:
+        ch = token[i]
+        if ch == _PATH_SEP:
+            if i + 1 < n and token[i + 1] == _PATH_SEP:
+                out.append(_PATH_SEP)
+                i += 2
+            else:
+                out.append("/")
+                i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def resolve_semantic_tenant_id() -> int:
+    """语义索引操作的租户 ID 解析（摄入/检索/清理共用，保证隔离键一致）。
+
+    请求/任务上下文租户 → 0（系统命名空间，开发模式约定）。
+    与 ``routers/code.py`` 原 ``_resolve_tenant_id`` 同口径：真实租户 ID 从 1 起，
+    0 不冲突（D3 租户前缀隔离不受影响）。
+    """
+    from app.tenants.context import get_tenant_id
+
+    tenant_id = get_tenant_id()
+    return tenant_id if tenant_id is not None else 0
+
+
+def content_hash_of(text: str) -> str:
+    """按 LightRAG 上游同口径计算文档内容哈希（增量比对的唯一事实源）。
+
+    复用上游 ``compute_text_content_hash``：与 DocStatus 落库的 content_hash
+    完全一致，本地比对结果等价于上游去重判定（D6 复用上游机制，不自研）。
+    """
+    from lightrag.utils_pipeline import compute_text_content_hash
+
+    return str(compute_text_content_hash(text))
+
 
 def _serialize_doc_status(status_obj: Any) -> dict[str, Any]:
     """把 LightRAG ``DocProcessingStatus`` 序列化为 JSON 安全 dict。
@@ -274,6 +348,82 @@ class LightRAGIndex:
         """删除文档并触发图谱清理（D7：LightRAG 4 阶段 purge 直接复用）。"""
         rag = self._require_rag()
         await rag.adelete_by_doc_id(doc_id)
+
+    @property
+    def workspace_dir(self) -> Path:
+        """workspace 文件存储目录（``working_dir/{workspace}/``，上游按 workspace 分子目录落盘）。"""
+        return Path(self._working_dir) / self._workspace
+
+    async def retrieve_chunks(self, question: str, top_k: int = 5) -> list[dict[str, Any]]:
+        """结构化 chunk 召回（Phase C 检索级联的语义入口）。
+
+        用上游 ``aquery_data`` naive 模式：纯向量召回预处理文档的 chunk，
+        **零查询期 LLM 消耗**（D8 成本治理——mix 双层需查询期关键词抽取，
+        不放在检索热路径；级联融合交 Conclave reranker 统一完成）。
+        返回 ``[{text, file_path, chunk_id, reference_id}]``；无命中返回空列表。
+        """
+        from lightrag.base import QueryParam
+
+        rag = self._require_rag()
+        param = QueryParam(mode="naive", top_k=top_k, chunk_top_k=top_k, enable_rerank=False)
+        # 上游 aquery_data 返回结构化 dict（lightrag 无类型存根，显式收窄防 Any 泄漏）
+        raw: dict[str, Any] = await rag.aquery_data(question, param=param)
+        data = raw.get("data") if isinstance(raw, dict) else None
+        chunks = data.get("chunks") if isinstance(data, dict) else None
+        out: list[dict[str, Any]] = []
+        for chunk in chunks or []:
+            if not isinstance(chunk, dict):
+                continue
+            text = str(chunk.get("content") or "")
+            if not text.strip():
+                continue
+            out.append(
+                {
+                    "text": text,
+                    "file_path": str(chunk.get("file_path") or ""),
+                    "chunk_id": str(chunk.get("chunk_id") or ""),
+                    "reference_id": str(chunk.get("reference_id") or ""),
+                }
+            )
+        return out
+
+    async def list_documents(self) -> dict[str, dict[str, Any]]:
+        """枚举 workspace 全部文档（增量 diff 与整体清理的依据）。
+
+        返回 ``{file_path: {doc_id, content_hash, status}}``。file_path 为上游
+        归一化后的存储键（即 encode_ingest_path 的编码结果）。上游同名去重保证
+        其唯一性；极端的历史撞键（上游 SourceConflict 记录）下后者覆盖前者，
+        清理时按 doc_id 逐个删除不受影响。
+        """
+        rag = self._require_rag()
+        out: dict[str, dict[str, Any]] = {}
+        page = 1
+        while True:
+            result = await rag.doc_status.get_docs_paginated(page=page, page_size=_DOC_PAGE_SIZE)
+            items, total = result
+            for doc_id, status_obj in items:
+                file_path = str(getattr(status_obj, "file_path", "") or "")
+                status_enum = getattr(status_obj, "status", None)
+                out[file_path] = {
+                    "doc_id": str(doc_id),
+                    "content_hash": str(getattr(status_obj, "content_hash", "") or ""),
+                    "status": str(getattr(status_enum, "value", status_enum) or ""),
+                }
+            if not items or len(out) >= int(total):
+                break
+            page += 1
+        return out
+
+    async def purge_all_documents(self) -> int:
+        """删除 workspace 全部文档（逐个触发上游 4 阶段 purge，D7）。
+
+        图谱实体/关系的孤儿清理与 Qdrant 点位删除由上游 purge 机制承担；
+        本方法只负责按 DocStatus 枚举并逐文档下发删除。返回删除文档数。
+        """
+        documents = await self.list_documents()
+        for info in documents.values():
+            await self.delete_doc(info["doc_id"])
+        return len(documents)
 
     async def get_progress(self, track_id: str | None = None) -> dict[str, Any]:
         """DocStatus 进度查询（ADR-018 Phase B）：状态计数 + 按批次的逐文档明细。

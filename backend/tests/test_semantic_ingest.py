@@ -1,7 +1,9 @@
-# 仓库级语义摄入测试（ADR-018 Phase B）
-# 验证真实函数：check_ingest_budget / _workspace_lock / ingest_repo_semantic
+# 仓库级语义摄入测试（ADR-018 Phase B/C）
+# 验证真实函数：check_ingest_budget / _workspace_lock / _diff_documents /
+# ingest_repo_semantic（含增量 diff）/ cleanup_semantic_workspace，
 # 以及路由层 _build_semantic_index / _semantic_index_status 的降级与透传行为。
-# 覆盖正向 + 边界（空仓库/分批）+ 异常（配额超限/语义层不可用/索引失败降级）+ 并发（D12 串行锁）。
+# 覆盖正向 + 边界（空仓库/分批/空扫描不误删）+ 异常（配额超限/语义层不可用/
+# 索引失败降级/清理失败上抛）+ 并发（D12 串行锁）。
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +15,7 @@ import pytest
 from app.core.exceptions import QuotaExceededError
 from app.rag import semantic_ingest
 from app.rag.code_to_text import FileDocument
+from app.rag.lightrag_adapter import content_hash_of
 from app.routers import code as code_router
 
 
@@ -29,6 +32,12 @@ class FakeIndex:
         self._active = 0
         self.max_active = 0
         self.progress_result: dict[str, Any] = {"status_counts": {"processed": 2}, "documents": []}
+        # Phase C：DocStatus 现有记录（{编码路径: {doc_id, content_hash, status}}）
+        self.documents: dict[str, dict[str, Any]] = {}
+        self.deleted: list[str] = []
+        self.purge_count = 0
+        # 默认指向不存在目录：rmtree(ignore_errors=True) 无副作用
+        self.workspace_dir = Path(f"fake-workspace-{workspace}")
 
     async def initialize(self) -> None:
         self.initialized += 1
@@ -49,6 +58,16 @@ class FakeIndex:
             return f"track-{len(self.calls)}"
         finally:
             self._active -= 1
+
+    async def list_documents(self) -> dict[str, dict[str, Any]]:
+        return dict(self.documents)
+
+    async def delete_doc(self, doc_id: str) -> None:
+        self.deleted.append(doc_id)
+
+    async def purge_all_documents(self) -> int:
+        self.purge_count += 1
+        return len(self.documents)
 
     async def get_progress(self, track_id: str | None = None) -> dict[str, Any]:
         self.progress_queries.append(track_id)
@@ -195,6 +214,179 @@ class TestIngestRepoSemantic:
         assert index.max_active == 1  # 串行：任一时刻只有一个 insert 在跑
         assert len(index.calls) == 2  # 两次摄入各 1 批 × 2 篇（内容哈希去重由上游承担）
         assert all(len(texts) == 2 for texts, _ in index.calls)
+
+
+# ---------------------------------------------------------------------------
+# _diff_documents：增量四分类（Phase C，D6/D13）
+# ---------------------------------------------------------------------------
+
+
+class TestDiffDocuments:
+    def _doc(self, rel_path: str, text: str) -> FileDocument:
+        return FileDocument(rel_path=rel_path, category="plain", text=text)
+
+    def test_classifies_all_five_categories(self) -> None:
+        """新增/不变/变更/failed 重试/仓库已删，五类输入各归其位。"""
+        docs = [
+            self._doc("new.md", "新文档"),
+            self._doc("same.md", "内容不变"),
+            self._doc("changed.md", "变更后的内容"),
+            self._doc("failed.md", "重试内容"),
+            self._doc("busy.md", "在途文档"),
+        ]
+        existing = {
+            "same.md": {"doc_id": "d-same", "content_hash": content_hash_of("内容不变"), "status": "processed"},
+            "changed.md": {"doc_id": "d-changed", "content_hash": "stale-hash", "status": "processed"},
+            "failed.md": {"doc_id": "d-failed", "content_hash": "old-hash", "status": "failed"},
+            "busy.md": {"doc_id": "d-busy", "content_hash": "", "status": "pending"},
+            "gone.md": {"doc_id": "d-gone", "content_hash": "h", "status": "processed"},
+        }
+
+        diff = semantic_ingest._diff_documents(docs, existing)
+
+        assert [d.rel_path for d in diff["to_insert"]] == ["new.md", "changed.md", "failed.md"]
+        assert sorted(diff["delete_ids"]) == ["d-changed", "d-failed", "d-gone"]
+        assert diff["new"] == 1
+        assert diff["updated"] == 2  # changed + failed 重试
+        assert diff["unchanged"] == 1
+        assert diff["skipped_in_progress"] == 1
+        assert diff["removed"] == 1
+
+    def test_empty_scan_produces_only_removals(self) -> None:
+        """边界：扫描为空 → 现有记录全部标记删除（是否执行由编排层拦截空扫描）。"""
+        diff = semantic_ingest._diff_documents(
+            [], {"a.md": {"doc_id": "d1", "content_hash": "h", "status": "processed"}}
+        )
+        assert diff["to_insert"] == []
+        assert diff["delete_ids"] == ["d1"]
+        assert diff["removed"] == 1
+
+    def test_empty_existing_all_new(self) -> None:
+        """首次摄入：无现有记录 → 全部为新增，无删除。"""
+        diff = semantic_ingest._diff_documents([self._doc("a.md", "甲"), self._doc("b.md", "乙")], {})
+        assert len(diff["to_insert"]) == 2
+        assert diff["delete_ids"] == []
+        assert diff["new"] == 2
+
+
+# ---------------------------------------------------------------------------
+# ingest_repo_semantic 增量语义（Phase C）
+# ---------------------------------------------------------------------------
+
+
+class TestIncrementalIngest:
+    async def test_reingest_diffs_by_content_hash(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """增量重摄入：变更删旧插新、已删文件清理、不变跳过、新文件直插。"""
+        index = FakeIndex()
+        _patch_index(monkeypatch, index)
+        _build_repo(tmp_path, 3)  # f0/f1/f2
+
+        first = await semantic_ingest.ingest_repo_semantic(tmp_path, meeting_id="m1", tenant_id=0)
+        assert first["docs_new"] == 3
+        assert first["docs_updated"] == 0
+
+        # 模拟上游 DocStatus 落库：按首次摄入的文本登记内容哈希
+        path_to_doc: dict[str, str] = {}
+        texts_paths = [(t, p) for texts, paths in index.calls for t, p in zip(texts, paths, strict=True)]
+        for i, (text, path) in enumerate(texts_paths):
+            doc_id = f"doc-{i}"
+            path_to_doc[path] = doc_id
+            index.documents[path] = {"doc_id": doc_id, "content_hash": content_hash_of(text), "status": "processed"}
+        index.calls.clear()
+
+        # 变更 f0、保留 f1、删除 f2、新增 f3
+        (tmp_path / "f0.md").write_text("# 文档 0\n内容已变更\n", encoding="utf-8")
+        (tmp_path / "f2.md").unlink()
+        (tmp_path / "f3.md").write_text("# 文档 3\n内容 3\n", encoding="utf-8")
+
+        result = await semantic_ingest.ingest_repo_semantic(tmp_path, meeting_id="m1", tenant_id=0)
+
+        assert result["docs_new"] == 1  # f3
+        assert result["docs_updated"] == 1  # f0
+        assert result["docs_unchanged"] == 1  # f1
+        assert result["docs_removed"] == 1  # f2
+        assert result["docs_ingested"] == 2  # f0 + f3
+        # 删旧：变更（f0）+ 仓库已删（f2），f1 不触发任何删除
+        assert sorted(index.deleted) == sorted([path_to_doc["f0.md"], path_to_doc["f2.md"]])
+        # 插入只含变更与新增，且先删后插（上游同名去重所迫）
+        inserted_paths = [p for _, paths in index.calls for p in paths]
+        assert sorted(inserted_paths) == ["f0.md", "f3.md"]
+
+    async def test_empty_scan_does_not_delete_existing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非正向（防误清）：扫描结果为空 → 提前返回，不触发任何删除。"""
+        index = FakeIndex()
+        index.documents["old.md"] = {"doc_id": "d-old", "content_hash": "h", "status": "processed"}
+        _patch_index(monkeypatch, index)
+        (tmp_path / "binary.bin").write_bytes(b"\x00\x01")  # 三路分派范围外
+
+        result = await semantic_ingest.ingest_repo_semantic(tmp_path, meeting_id="m1", tenant_id=0)
+
+        assert result["docs_ingested"] == 0
+        assert index.deleted == []  # 空扫描不得清空索引
+        assert index.calls == []
+
+    async def test_failed_record_rebuilt_on_reingest(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """failed 记录重摄入即失败重试：删旧插新。"""
+        index = FakeIndex()
+        _patch_index(monkeypatch, index)
+        _build_repo(tmp_path, 1)  # f0.md
+        index.documents["f0.md"] = {"doc_id": "d-bad", "content_hash": "whatever", "status": "failed"}
+
+        result = await semantic_ingest.ingest_repo_semantic(tmp_path, meeting_id="m1", tenant_id=0)
+
+        assert result["docs_updated"] == 1
+        assert index.deleted == ["d-bad"]
+        assert [p for _, paths in index.calls for p in paths] == ["f0.md"]
+
+
+# ---------------------------------------------------------------------------
+# cleanup_semantic_workspace：整体清理（Phase C，D10/D7）
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupSemanticWorkspace:
+    async def test_noop_when_layer_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非正向：语义层不可用 → enabled=False no-op。"""
+        _patch_index(monkeypatch, None)
+        result = await semantic_ingest.cleanup_semantic_workspace(0, meeting_id="m1")
+        assert result == {"enabled": False, "reason": "semantic_layer_unavailable", "docs_purged": 0}
+
+    async def test_purges_docs_and_removes_workspace_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """正向：逐文档 purge + 关闭存储 + 删除文件目录。"""
+        index = FakeIndex()
+        ws_dir = tmp_path / "lightrag" / index.workspace
+        ws_dir.mkdir(parents=True)
+        (ws_dir / "kv_store.json").write_text("{}", encoding="utf-8")
+        index.workspace_dir = ws_dir
+        index.documents = {
+            "a.md": {"doc_id": "d1", "content_hash": "h1", "status": "processed"},
+            "b.md": {"doc_id": "d2", "content_hash": "h2", "status": "processed"},
+        }
+        _patch_index(monkeypatch, index)
+
+        result = await semantic_ingest.cleanup_semantic_workspace(0, meeting_id="m1")
+
+        assert result["enabled"] is True
+        assert result["workspace"] == "0:mtg-m1"
+        assert result["docs_purged"] == 2
+        assert index.purge_count == 1
+        assert index.initialized == 1
+        assert index.closed == 1
+        assert not ws_dir.exists()  # 目录已删除
+
+    async def test_cleanup_error_propagates_after_close(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非正向：清理失败上抛（调用方决定降级），但索引仍被关闭。"""
+        index = FakeIndex()
+
+        async def _fail() -> int:
+            raise RuntimeError("qdrant down")
+
+        index.purge_all_documents = _fail  # type: ignore[method-assign]
+        _patch_index(monkeypatch, index)
+
+        with pytest.raises(RuntimeError, match="qdrant down"):
+            await semantic_ingest.cleanup_semantic_workspace(0, meeting_id="m1")
+        assert index.closed == 1
 
 
 # ---------------------------------------------------------------------------

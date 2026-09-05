@@ -25,11 +25,15 @@ from app.rag.lightrag_adapter import (
     _make_embedding_func,
     _make_llm_func,
     build_workspace_key,
+    content_hash_of,
+    decode_ingest_path,
+    encode_ingest_path,
     get_semantic_index,
     is_semantic_index_available,
+    resolve_semantic_tenant_id,
 )
 from app.rag.store import SiliconFlowEmbedding
-from app.tenants.context import get_tenant_id
+from app.tenants.context import get_tenant_id, reset_tenant_ctx, set_tenant_id
 
 # ---------------------------------------------------------------------------
 # fixtures / helpers
@@ -86,12 +90,21 @@ def _install_fake_rag(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """安装 fake LightRAG 类，捕获构造参数与操作记录（不 mock 适配层自身）。"""
     import lightrag as lightrag_module
 
-    state: dict[str, Any] = {"init_count": 0, "ops": [], "kwargs": {}}
+    state: dict[str, Any] = {"init_count": 0, "ops": [], "kwargs": {}, "doc_pages": [], "query_data_result": {}}
 
     class _FakeDocStatus:
         async def get_docs_by_track_id(self, track_id: str) -> dict[str, Any]:
             state["ops"].append(("get_docs_by_track_id", track_id))
             return {"doc-1": _FakeDocProcessingStatus()}
+
+        async def get_docs_paginated(
+            self, page: int = 1, page_size: int = 50, **_kwargs: Any
+        ) -> tuple[list[tuple[str, Any]], int]:
+            state["ops"].append(("get_docs_paginated", page, page_size))
+            pages: list[list[tuple[str, Any]]] = state["doc_pages"]
+            total = sum(len(p) for p in pages)
+            items = pages[page - 1] if 0 < page <= len(pages) else []
+            return list(items), total
 
     class _FakeRAG:
         def __init__(self, **kwargs: Any) -> None:
@@ -118,6 +131,10 @@ def _install_fake_rag(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         async def aquery(self, question: str, param: Any = None) -> str:
             state["ops"].append(("aquery", question, param.mode))
             return "fake 答案"
+
+        async def aquery_data(self, question: str, param: Any = None) -> dict[str, Any]:
+            state["ops"].append(("aquery_data", question, param.mode, param.enable_rerank))
+            return state["query_data_result"]
 
         async def adelete_by_doc_id(self, doc_id: str) -> None:
             state["ops"].append(("adelete_by_doc_id", doc_id))
@@ -489,3 +506,206 @@ async def test_get_progress_counts_and_batch_details(monkeypatch: pytest.MonkeyP
     op_names = [op[0] for op in state["ops"]]
     assert op_names.count("get_processing_status") == 2
     assert ("get_docs_by_track_id", "track-1") in state["ops"]
+
+
+# ---------------------------------------------------------------------------
+# Phase C：摄入路径编码（防 basename 碰撞）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "rel_path",
+    [
+        "src/a/util.py",
+        "deep/nested/dir/file.md",
+        "a~b/c~d.py",  # 含分隔符字符本身，需转义
+        "模块/工具/说明.md",
+        "single-file.txt",
+        "a/b~c/d.py",
+    ],
+)
+def test_encode_decode_path_roundtrip(rel_path: str) -> None:
+    """配对函数往返测试（testing-rules §3）：编码后解码必须还原原路径。"""
+    token = encode_ingest_path(rel_path)
+    assert "/" not in token and "\\" not in token  # 单段 token 才能存活于 basename 归一化
+    assert decode_ingest_path(token) == rel_path
+
+
+def test_encode_path_normalizes_backslash_and_strips() -> None:
+    assert encode_ingest_path("a\\b\\c.py") == encode_ingest_path("a/b/c.py")
+    assert encode_ingest_path("  /x/y.py/  ") == encode_ingest_path("x/y.py")
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "///", "\\\\"])
+def test_encode_path_rejects_empty(bad: str) -> None:
+    """非正向：空路径/纯分隔符拒绝编码（防静默生成空 token）。"""
+    with pytest.raises(ValueError, match="空路径"):
+        encode_ingest_path(bad)
+
+
+def test_decode_plain_filename_passthrough() -> None:
+    """尽力而为解码：未编码的普通文件名原样返回（历史数据兼容）。"""
+    assert decode_ingest_path("readme.md") == "readme.md"
+
+
+def test_distinct_paths_same_basename_encode_differently() -> None:
+    """核心动机：同名文件不同目录必须生成不同 token，避免上游重复拒绝。"""
+    assert encode_ingest_path("src/a/util.py") != encode_ingest_path("src/b/util.py")
+
+
+# ---------------------------------------------------------------------------
+# Phase C：租户解析与内容哈希
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_semantic_tenant_id_defaults_to_zero() -> None:
+    assert get_tenant_id() is None  # 测试环境默认无租户上下文
+    assert resolve_semantic_tenant_id() == 0
+
+
+def test_resolve_semantic_tenant_id_uses_context() -> None:
+    token = set_tenant_id(7)
+    try:
+        assert resolve_semantic_tenant_id() == 7
+    finally:
+        reset_tenant_ctx(token)
+
+
+def test_content_hash_deterministic_and_distinct() -> None:
+    """同口径哈希（与上游 DocStatus 落库一致）：确定性 + 内容敏感。"""
+    assert content_hash_of("代码内容甲") == content_hash_of("代码内容甲")
+    assert content_hash_of("代码内容甲") != content_hash_of("代码内容乙")
+
+
+# ---------------------------------------------------------------------------
+# Phase C：retrieve_chunks（检索级联语义入口）
+# ---------------------------------------------------------------------------
+
+
+def _chunk_item(content: str, file_path: str = "src~a.py", chunk_id: str = "c1") -> dict[str, Any]:
+    return {"content": content, "file_path": file_path, "chunk_id": chunk_id, "reference_id": f"ref-{chunk_id}"}
+
+
+async def test_retrieve_chunks_parses_structured_result(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """aquery_data(naive) 结构化解析：文本/路径/ID 透传，空内容过滤。"""
+    state = _install_fake_rag(monkeypatch)
+    _patch_embed_config(monkeypatch)
+    state["query_data_result"] = {
+        "status": "success",
+        "data": {
+            "chunks": [
+                _chunk_item("def foo(): pass", chunk_id="c1"),
+                _chunk_item("   ", chunk_id="c-empty"),  # 空白内容应被过滤
+                _chunk_item("class Bar: ...", file_path="pkg~b.py", chunk_id="c2"),
+                "非 dict 噪声",  # 异常形状应被跳过
+            ]
+        },
+    }
+
+    idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
+    await idx.initialize()
+    try:
+        chunks = await idx.retrieve_chunks("foo 在哪定义", top_k=7)
+    finally:
+        await idx.close()
+
+    assert [c["chunk_id"] for c in chunks] == ["c1", "c2"]
+    assert chunks[0]["text"] == "def foo(): pass"
+    assert chunks[0]["file_path"] == "src~a.py"
+    assert chunks[0]["reference_id"] == "ref-c1"
+    # 查询参数：naive 模式 + rerank 关闭（级联融合交 Conclave reranker）
+    op = next(op for op in state["ops"] if op[0] == "aquery_data")
+    assert op[1] == "foo 在哪定义"
+    assert op[2] == "naive"
+    assert op[3] is False
+
+
+async def test_retrieve_chunks_failure_response_returns_empty(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """非正向：上游失败响应（data={}）→ 空列表而非抛错。"""
+    state = _install_fake_rag(monkeypatch)
+    _patch_embed_config(monkeypatch)
+    state["query_data_result"] = {"status": "failure", "message": "empty query", "data": {}}
+
+    idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
+    await idx.initialize()
+    try:
+        assert await idx.retrieve_chunks("q") == []
+    finally:
+        await idx.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase C：list_documents / purge_all_documents（增量 diff 与整体清理）
+# ---------------------------------------------------------------------------
+
+
+class _FakeDocRecord:
+    """DocProcessingStatus 最小替身：list_documents 读取面（file_path/status/content_hash）。"""
+
+    def __init__(self, file_path: str, content_hash: str, status_value: str = "processed") -> None:
+        self.file_path = file_path
+        self.content_hash = content_hash
+        self.status = _FakeStatusEnum() if status_value == "processed" else type("S", (), {"value": status_value})()
+
+
+async def test_list_documents_aggregates_pages(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """分页枚举聚合：跨页收集 {file_path: {doc_id, content_hash, status}}。"""
+    state = _install_fake_rag(monkeypatch)
+    _patch_embed_config(monkeypatch)
+    state["doc_pages"] = [
+        [("doc-1", _FakeDocRecord("a.py", "h1")), ("doc-2", _FakeDocRecord("b.py", "h2", "failed"))],
+        [("doc-3", _FakeDocRecord("c.py", "h3"))],
+    ]
+
+    idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
+    await idx.initialize()
+    try:
+        docs = await idx.list_documents()
+    finally:
+        await idx.close()
+
+    assert set(docs) == {"a.py", "b.py", "c.py"}
+    assert docs["a.py"] == {"doc_id": "doc-1", "content_hash": "h1", "status": "processed"}
+    assert docs["b.py"]["status"] == "failed"
+    # 两页各请求一次，单页大小取适配层常量
+    pages = [op for op in state["ops"] if op[0] == "get_docs_paginated"]
+    assert [(p[1], p[2]) for p in pages] == [(1, 200), (2, 200)]
+
+
+async def test_list_documents_empty_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """边界：空 workspace → 空 dict，不无限翻页。"""
+    state = _install_fake_rag(monkeypatch)
+    _patch_embed_config(monkeypatch)
+    state["doc_pages"] = []
+
+    idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
+    await idx.initialize()
+    try:
+        assert await idx.list_documents() == {}
+    finally:
+        await idx.close()
+    assert sum(1 for op in state["ops"] if op[0] == "get_docs_paginated") == 1
+
+
+async def test_purge_all_deletes_each_document(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """整体清理：枚举全部文档并逐个触发上游删除，返回删除数。"""
+    state = _install_fake_rag(monkeypatch)
+    _patch_embed_config(monkeypatch)
+    state["doc_pages"] = [[("doc-1", _FakeDocRecord("a.py", "h1")), ("doc-2", _FakeDocRecord("b.py", "h2"))]]
+
+    idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
+    await idx.initialize()
+    try:
+        purged = await idx.purge_all_documents()
+    finally:
+        await idx.close()
+
+    assert purged == 2
+    deleted = [op[1] for op in state["ops"] if op[0] == "adelete_by_doc_id"]
+    assert sorted(deleted) == ["doc-1", "doc-2"]
+
+
+def test_workspace_dir_is_working_dir_scoped(tmp_path) -> None:
+    """workspace 文件目录 = working_dir/{workspace}（清理时 rmtree 的目标）。"""
+    idx = LightRAGIndex(workspace="1:proj-x", working_dir=str(tmp_path))
+    assert idx.workspace_dir == tmp_path / "1:proj-x"

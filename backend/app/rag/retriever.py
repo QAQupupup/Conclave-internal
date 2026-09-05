@@ -218,38 +218,91 @@ async def retrieve_for_conflict(
     return results
 
 
+async def _semantic_code_candidates(meeting_id: str, query: str, top_k: int) -> list[dict[str, Any]]:
+    """语义层召回（ADR-018 Phase C 检索级联入口）：LightRAG naive chunk 召回。
+
+    与结构层（向量+图）级联而非替代：aquery_data(naive) 纯向量召回预处理文档
+    的 chunk，零查询期 LLM 消耗（D8），结果并入候选池交 Conclave reranker 统一
+    重排。任何失败（语义层不可用/存储故障）返回空列表，不影响结构层检索路径。
+
+    返回项携带 ``semantic_hit``（file_path/reference_id）供审计；``expandable``
+    恒为 False——语义 chunk 不在结构 store 中，无展开入口，摘要即全文片段。
+    """
+    from app.rag.lightrag_adapter import decode_ingest_path, get_semantic_index, resolve_semantic_tenant_id
+
+    index = get_semantic_index(resolve_semantic_tenant_id(), meeting_id=meeting_id)
+    if index is None:
+        return []
+    try:
+        await index.initialize()
+        try:
+            chunks = await index.retrieve_chunks(query, top_k=top_k)
+        finally:
+            await index.close()
+    except Exception as e:
+        logger.warning(
+            "语义层召回失败（降级为纯结构检索）: meeting_id=%s, %s: %s",
+            meeting_id,
+            type(e).__name__,
+            e,
+        )
+        return []
+
+    out: list[dict[str, Any]] = []
+    for i, c in enumerate(chunks):
+        text = c["text"]
+        # file_path 是摄入时的编码 token（encode_ingest_path），解码还原仓库相对路径
+        file_path = decode_ingest_path(c["file_path"]) if c["file_path"] else ""
+        out.append(
+            {
+                "chunk_id": c["chunk_id"] or f"semantic-{i}",
+                "doc_id": file_path,
+                "section": "",
+                "text": text,
+                "char_start": 0,
+                "char_end": len(text),
+                "source": file_path,
+                "score": 0.0,
+                "summary": text[:200] + ("..." if len(text) > 200 else ""),
+                "full_length": len(text),
+                "expandable": False,
+                "semantic_hit": {"file_path": file_path, "reference_id": c["reference_id"]},
+            }
+        )
+    return out
+
+
 async def retrieve_code(
     meeting_id: str,
     query: str,
     top_k: int = 5,
     max_hops: int = 1,
 ) -> list[dict[str, Any]]:
-    """代码检索：向量入口 + N 跳图扩展，扩展结果与向量候选统一交 reranker（ADR-016 Phase C）。
+    """代码检索：向量入口 + N 跳图扩展 + 语义层召回，候选统一交 reranker。
 
-    向量管「语义入口」（召回种子符号 chunk），图管「结构扩展」（沿 CALLS/INHERITS
-    做 N 跳遍历，回答"谁调用它 / 它依赖谁"），两者级联而非替代（ADR-016 D4）。
+    结构层（ADR-016 Phase C）：向量管「语义入口」（召回种子符号 chunk），
+    图管「结构扩展」（沿 CALLS/INHERITS 做 N 跳遍历，回答"谁调用它 / 它依赖谁"），
+    两者级联而非替代（ADR-016 D4）。
+    语义层（ADR-018 Phase C）：LightRAG 预处理文档的 naive chunk 召回并入候选池，
+    与结构候选统一重排——语义层不可用时静默降级为纯结构检索。
 
     降级策略：
-    - 会议无图索引 → 退化为纯向量检索（等价 `retrieve`）。
+    - 会议无图索引 → 结构层退化为纯向量检索（等价 `retrieve`）。
     - 种子 chunk 非图节点（如纯文本 chunk）→ 跳过图扩展，仍作为向量候选返回。
+    - 语义索引不存在/召回失败 → 跳过语义候选，不影响结构层结果。
 
     与 `retrieve`/`retrieve_for_conflict` 的区别：返回项中图扩展命中的 chunk 携带
-    `graph_hit` 字段（hop/edge_type/via），供审计与解释性展示。
+    `graph_hit` 字段（hop/edge_type/via），语义层命中项携带 `semantic_hit` 字段
+    （file_path/reference_id），供审计与解释性展示。
     """
     store = get_store(meeting_id)
-    if not store.all_chunks():
-        logger.debug("retrieve_code: store 无 chunk，返回空列表 (meeting_id=%s)", meeting_id)
-        return []
-
     graph = get_graph(meeting_id)
 
-    # 1. 向量召回种子（取更多候选，给图扩展 + reranker 留空间）
+    # 1. 向量召回种子（取更多候选，给图扩展 + 语义层 + reranker 留空间）
     search_k = max(top_k * 2, 10)
-    seeds = await store.search(query, top_k=search_k)
-    if not seeds:
-        return []
+    seeds = await store.search(query, top_k=search_k) if store.all_chunks() else []
 
-    # 候选池：种子打底，图扩展追加（按 chunk_id 去重，种子优先）
+    # 候选池：种子打底，图扩展与语义召回追加（按 chunk_id 去重，种子优先）
     pool: dict[str, dict[str, Any]] = {chunk.chunk_id: _build_chunk_dict(chunk, score, store) for chunk, score in seeds}
 
     # 2. 图扩展：仅对命中图节点的种子沿 CALLS/INHERITS 做双向 N 跳扩展
@@ -279,14 +332,19 @@ async def retrieve_code(
                 }
                 pool[hit.node_id] = d
 
+    # 3. 语义层召回并入候选池（键加 semantic: 前缀，防与结构层 chunk_id 撞键）
+    for d in await _semantic_code_candidates(meeting_id, query, top_k=search_k):
+        pool.setdefault(f"semantic:{d['chunk_id']}", d)
+
     base = list(pool.values())
     if not base:
+        logger.debug("retrieve_code: 结构层与语义层均无候选，返回空列表 (meeting_id=%s)", meeting_id)
         return []
 
-    # 排序为 reranker 提供稳定输入（图扩展项初始分 0，排在种子之后）
+    # 排序为 reranker 提供稳定输入（图扩展/语义项初始分 0，排在种子之后）
     base.sort(key=lambda x: x["score"], reverse=True)
 
-    # 3. reranker 融合（与 retrieve_for_conflict 一致性：真实 Reranker 失败回退初始分）
+    # 4. reranker 融合（与 retrieve_for_conflict 一致性：真实 Reranker 失败回退初始分）
     reranker = get_reranker()
     documents = [c["text"] for c in base]
     try:
@@ -307,10 +365,11 @@ async def retrieve_code(
             results.append(item)
 
     logger.info(
-        "retrieve_code 完成: meeting_id=%s, 候选=%d(图扩展 %d), 返回=%d, max_hops=%d",
+        "retrieve_code 完成: meeting_id=%s, 候选=%d(图扩展 %d, 语义 %d), 返回=%d, max_hops=%d",
         meeting_id,
         len(base),
         sum(1 for c in base if "graph_hit" in c),
+        sum(1 for c in base if "semantic_hit" in c),
         len(results),
         max_hops,
     )

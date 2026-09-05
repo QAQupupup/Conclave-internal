@@ -61,7 +61,10 @@ class TestRetrieveCode:
     async def test_no_chunks_returns_empty(self) -> None:
         store = MagicMock()
         store.all_chunks.return_value = []
-        with patch("app.rag.retriever.get_store", return_value=store):
+        with (
+            patch("app.rag.retriever.get_store", return_value=store),
+            patch("app.rag.lightrag_adapter.get_semantic_index", return_value=None),
+        ):
             assert await retrieve_code("m", "query") == []
 
     @pytest.mark.asyncio
@@ -73,6 +76,7 @@ class TestRetrieveCode:
             patch("app.rag.retriever.get_store", return_value=store),
             patch("app.rag.retriever.get_graph", return_value=None),
             patch("app.rag.retriever.get_reranker", return_value=reranker),
+            patch("app.rag.lightrag_adapter.get_semantic_index", return_value=None),
         ):
             results = await retrieve_code("m", "A", top_k=5)
         assert [r["chunk_id"] for r in results] == ["a.py::A"]
@@ -88,6 +92,7 @@ class TestRetrieveCode:
             patch("app.rag.retriever.get_store", return_value=store),
             patch("app.rag.retriever.get_graph", return_value=index),
             patch("app.rag.retriever.get_reranker", return_value=reranker),
+            patch("app.rag.lightrag_adapter.get_semantic_index", return_value=None),
         ):
             results = await retrieve_code("m", "A", top_k=5, max_hops=1)
 
@@ -111,6 +116,7 @@ class TestRetrieveCode:
             patch("app.rag.retriever.get_store", return_value=store),
             patch("app.rag.retriever.get_graph", return_value=index),
             patch("app.rag.retriever.get_reranker", return_value=reranker),
+            patch("app.rag.lightrag_adapter.get_semantic_index", return_value=None),
         ):
             results = await retrieve_code("m", "A", top_k=5, max_hops=1)
         assert [r["chunk_id"] for r in results] == ["a.py::A"]
@@ -126,6 +132,7 @@ class TestRetrieveCode:
             patch("app.rag.retriever.get_store", return_value=store),
             patch("app.rag.retriever.get_graph", return_value=index),
             patch("app.rag.retriever.get_reranker", return_value=reranker),
+            patch("app.rag.lightrag_adapter.get_semantic_index", return_value=None),
         ):
             results = await retrieve_code("m", "文本", top_k=5, max_hops=1)
         assert [r["chunk_id"] for r in results] == ["doc-0"]

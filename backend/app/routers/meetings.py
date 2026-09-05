@@ -393,6 +393,11 @@ async def batch_delete(req: BatchDeleteRequest, request: Request) -> dict[str, A
     for mid in result["deleted"]:
         clear_state(mid)
 
+    # 硬删除：同步清理各会议的语义索引工作区（ADR-018 Phase C，失败仅告警）
+    if req.mode == "hard":
+        for mid in result["deleted"]:
+            await _cleanup_semantic_index_quiet(mid)
+
     # [CON-20] system 广播：让前端 TaskBoard/Dashboard/Sidebar 立即感知
     if result["deleted"]:
         await bus.publish(
@@ -762,6 +767,27 @@ async def list_meetings_with_status(
     }
 
 
+async def _cleanup_semantic_index_quiet(meeting_id: str) -> None:
+    """硬删除时清理会议级语义索引工作区（ADR-018 Phase C，D10/D7）。
+
+    清理语义层（LightRAG 文档 + Qdrant 点位 + 文件目录）。失败只告警不阻断：
+    数据库记录已删除，残留索引可由后续运维清理，不应让删除请求失败。
+    语义层不可用（配置缺失）时 cleanup 内部即 no-op。
+    """
+    from app.observability.log_bus import log_bus
+    from app.rag.lightrag_adapter import resolve_semantic_tenant_id
+    from app.rag.semantic_ingest import cleanup_semantic_workspace
+
+    try:
+        await cleanup_semantic_workspace(resolve_semantic_tenant_id(), meeting_id=meeting_id)
+    except Exception as e:
+        log_bus.warning(
+            f"语义索引清理失败（不阻断会议删除）: {meeting_id}",
+            logger="routers.meetings",
+            extra={"meeting_id": meeting_id, "error": f"{type(e).__name__}: {e}"},
+        )
+
+
 @router.delete("/{meeting_id}")
 async def delete_meeting(meeting_id: str, request: Request, mode: str = "soft") -> dict[str, Any]:
     """删除会议
@@ -828,6 +854,8 @@ async def delete_meeting(meeting_id: str, request: Request, mode: str = "soft") 
         from app.services.recording_store import delete_meeting_recordings
 
         delete_meeting_recordings(meeting_id)
+        # 清理语义索引工作区（ADR-018 Phase C：LightRAG 文档 + 文件目录）
+        await _cleanup_semantic_index_quiet(meeting_id)
         _run_locks.pop(meeting_id, None)
         return {"meeting_id": meeting_id, "deleted": True, "mode": "hard"}
 
