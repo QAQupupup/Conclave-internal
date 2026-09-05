@@ -33,9 +33,12 @@ class ArtifactModel(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, TenantScopeMixin)
         ForeignKey("meetings.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # 可选归属项目（projects 表 Phase 2 落地，届时补 FK；
-    # 现阶段不声明 FK，避免 create_all 因目标表缺失报错，见 db/base.py docstring）
-    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # 可选归属项目（ADR-017 Phase 2 补 FK；SET NULL：项目删除不级联删产物）
+    project_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # 产物类型：直接复用 deliverable_type 取值（017 任务清单 I1）
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)

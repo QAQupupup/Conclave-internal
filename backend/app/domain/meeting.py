@@ -141,6 +141,9 @@ class MeetingObservabilitySection(BaseModel):
     reference_meeting_ids: list[str] = Field(default_factory=list)
     reference_context: str = ""
     source_artifact_ids: list[str] = Field(default_factory=list)
+    # ADR-017 Phase 2：会议归属的项目/议题（从议题发起会议时自动回填）
+    project_id: str | None = None
+    issue_id: str | None = None
     charter: MeetingCharter | None = None
     conclusion_chain: ConclusionChain = Field(default_factory=ConclusionChain)
     llm_trace: CallTrace = Field(default_factory=CallTrace)
@@ -232,6 +235,10 @@ class MeetingState(BaseModel):
     # ADR-017 Phase 1：引用的上游产物 ID 列表（产物级血缘，区别于会议级引用）
     # 创建会议时校验租户归属后写入；publish 时随产物入 artifacts.source_artifact_ids
     source_artifact_ids: list[str] = Field(default_factory=list)
+    # ADR-017 Phase 2：会议归属的项目/议题（从议题发起会议时自动回填；
+    # publish 挂钩据此闭环议题，abort 挂钩据此释放议题回池）
+    project_id: str | None = None
+    issue_id: str | None = None
     # 会议宪章（clarify 阶段构造，作为后续阶段防漂移的不变锚点）
     charter: MeetingCharter | None = None
     # 漂移检查日志（非阻塞，记录每条发言的 drift 判定）
@@ -478,6 +485,8 @@ class MeetingState(BaseModel):
                 reference_meeting_ids=self.reference_meeting_ids,
                 reference_context=self.reference_context,
                 source_artifact_ids=self.source_artifact_ids,
+                project_id=self.project_id,
+                issue_id=self.issue_id,
                 charter=self.charter,
                 conclusion_chain=self.conclusion_chain,
                 llm_trace=self.llm_trace,

@@ -28,6 +28,8 @@ class CreateMeetingRequest(BaseModel):
     source_artifact_ids: list[str] = Field(
         default_factory=list, max_length=20, description="引用的上游产物 ID 列表（摘要注入 prompt + 血缘记录）"
     )
+    # ADR-017 Phase 2：从议题发起会议（自动回填 project_id，绑定议题并驱动状态机）
+    issue_id: str | None = Field(None, max_length=36, description="待执行的议题 ID（仅 open/scheduled 状态可绑定）")
     model: str = Field(
         "", max_length=200, description="会议级模型覆盖（格式: provider_id:model_id 或纯 model_id），空=继承 ENV 默认"
     )

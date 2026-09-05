@@ -126,6 +126,8 @@ async def publish_meeting_artifact(state: MeetingState) -> dict[str, Any] | None
         content_ref=content_ref,
         parent_id=parent_id,
         source_artifact_ids=list(getattr(state, "source_artifact_ids", []) or []),
+        # ADR-017 Phase 2 第 5 条：议题会议产物回填项目归属（项目级聚合与闭环追溯）
+        project_id=getattr(state, "project_id", None),
         created_by=getattr(state, "owner_username", None),
     )
     log_bus.info(
@@ -138,6 +140,22 @@ async def publish_meeting_artifact(state: MeetingState) -> dict[str, Any] | None
             "version": version,
         },
     )
+
+    # ADR-017 Phase 2 第 4 条：议题闭环挂钩——会议绑定议题时，
+    # 以本次发布的产物为闭环凭证闭环议题（→ resolved）。
+    # 已终态/已闭环的议题由 resolve_issue 静默跳过；失败仅记日志，不阻断产物发布。
+    issue_id = getattr(state, "issue_id", None)
+    if issue_id:
+        from app.services.issue_service import resolve_issue
+
+        try:
+            await resolve_issue(issue_id, str(published["id"]))
+        except Exception as e:
+            log_bus.warning(
+                f"议题闭环失败（不影响产物发布）: {str(e)[:150]}",
+                logger="services.artifact_service",
+                extra={"meeting_id": state.meeting_id, "issue_id": issue_id},
+            )
     return published
 
 

@@ -40,6 +40,25 @@ async def _seed_meeting(meeting_id: str) -> None:
     )
 
 
+async def _ensure_tenant(tid: int) -> None:
+    """预建真实租户行：artifacts 挂 fk_artifacts_tenant FK（ADR-017 Phase 2
+    纳入 _BUSINESS_TABLES 兜底），tenant_id 必须引用已存在的租户。"""
+    from sqlalchemy import text
+
+    from app.db.engine import async_session_factory
+
+    async with async_session_factory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO tenants(id, name, slug, plan, owner_id, description, is_active, settings) "
+                "VALUES(:id, :name, :slug, 'free', 1, '', TRUE, '{}'::jsonb) "
+                "ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": tid, "name": f"测试租户 {tid}", "slug": f"test-tenant-{tid}"},
+        )
+        await session.commit()
+
+
 # ---------- 幂等发布与往返 ----------
 
 
@@ -184,6 +203,8 @@ async def test_tenant_isolation_cross_tenant_invisible():
     """跨租户读取不可见：get/批量/列表三条路径全部隔离（非正向）"""
     mid = _mid("tenant")
     await _seed_meeting(mid)
+    await _ensure_tenant(901)
+    await _ensure_tenant(902)
 
     set_system_tenant(False)
     set_tenant_id(901)

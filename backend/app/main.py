@@ -36,11 +36,13 @@ from app.routers import config as config_router
 from app.routers import docker_hosts as docker_hosts_router
 from app.routers import documents as documents_router
 from app.routers import graph as graph_router
+from app.routers import issues as issues_router
 from app.routers import meetings as meetings_router
 from app.routers import metrics as metrics_router
 from app.routers import net_auth as net_auth_router
 from app.routers import notifications as notifications_router
 from app.routers import preferences as preferences_router
+from app.routers import projects as projects_router
 from app.routers import regression as regression_router
 from app.routers import system as system_router
 from app.routers import teams as teams_router
@@ -471,6 +473,9 @@ def create_app() -> FastAPI:
     app.include_router(meetings_router.router)
     # ADR-017 Phase 1：产物查询 API（列表/单条/血缘）
     app.include_router(artifacts_router.router)
+    # ADR-017 Phase 2：项目与议题池（/projects、/issues）
+    app.include_router(projects_router.router)
+    app.include_router(issues_router.router)
     app.include_router(documents_router.router)
     app.include_router(code_router.router)
     app.include_router(metrics_router.router)

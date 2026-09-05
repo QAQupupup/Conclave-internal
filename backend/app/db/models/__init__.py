@@ -21,10 +21,12 @@ from app.db.models.graph import (
     EntityModel,
     GraphEdgeModel,
 )
+from app.db.models.issue import IssueModel
 from app.db.models.meeting import MeetingAuxModel, MeetingModel, MeetingTagModel
 from app.db.models.memory import FeatureMemoryModel, ProfileMemoryModel, RawMemoryModel
 from app.db.models.message import MessageModel
 from app.db.models.observability import AuditLogModel, CostRecordModel
+from app.db.models.project import ProjectModel
 from app.db.models.tenant import TenantModel
 from app.db.models.tenant_member import TenantMemberModel
 from app.db.models.user import ApiKeyModel, UserPreferenceModel, UserSettingModel
@@ -45,6 +47,7 @@ __all__ = [
     "EventModel",
     "FeatureMemoryModel",
     "GraphEdgeModel",
+    "IssueModel",
     "KnowledgeSpaceModel",
     "MeetingAuxModel",
     "MeetingDocumentRefModel",
@@ -52,6 +55,7 @@ __all__ = [
     "MeetingTagModel",
     "MessageModel",
     "ProfileMemoryModel",
+    "ProjectModel",
     "RawMemoryModel",
     "TenantMemberModel",
     "TenantModel",

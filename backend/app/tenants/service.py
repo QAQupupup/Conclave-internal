@@ -304,6 +304,11 @@ _BUSINESS_TABLES = [
     "raw_memories",
     "feature_memories",
     "profile_memories",
+    # [ADR-017] 产物链核心实体表（ORM 建表已含 tenant_id，此处纳入自动迁移兜底，
+    # 满足 docs/pitfalls.md P8 多租户隔离 Checklist 第 1 项）
+    "artifacts",
+    "projects",
+    "issues",
 ]
 
 
@@ -382,12 +387,21 @@ async def ensure_business_tables_tenant_id() -> None:
                 BEGIN
                     IF EXISTS (
                         SELECT 1 FROM information_schema.tables WHERE table_name = '{table}'
-                    ) AND NOT EXISTS (
-                        SELECT 1 FROM information_schema.table_constraints
-                        WHERE constraint_name = 'fk_{table}_tenant' AND table_name = '{table}'
                     ) THEN
-                        ALTER TABLE {table} ADD CONSTRAINT fk_{table}_tenant
-                        FOREIGN KEY (tenant_id) REFERENCES {TENANTS_TABLE}(id) ON DELETE SET NULL;
+                        -- 挂 FK 前先清理孤儿 tenant_id（引用不存在租户的存量数据置 NULL，
+                        -- 与 ON DELETE SET NULL 语义一致；否则 ALTER TABLE 会因脏数据失败）
+                        UPDATE {table} SET tenant_id = NULL
+                        WHERE tenant_id IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM {TENANTS_TABLE} t WHERE t.id = {table}.tenant_id
+                          );
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE constraint_name = 'fk_{table}_tenant' AND table_name = '{table}'
+                        ) THEN
+                            ALTER TABLE {table} ADD CONSTRAINT fk_{table}_tenant
+                            FOREIGN KEY (tenant_id) REFERENCES {TENANTS_TABLE}(id) ON DELETE SET NULL;
+                        END IF;
                     END IF;
                 END $$;
                 """

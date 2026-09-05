@@ -124,6 +124,57 @@ def _build_artifact_reference_context(artifacts: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+async def _maybe_ingest_project_repo(meeting_id: str, project_id: str) -> None:
+    """ADR-017 Phase 2 第 3 条：议题会议创建后，项目绑定仓库后台摄入会议 workspace。
+
+    fire-and-forget 语义：
+    - 项目不存在/跨租户/未绑定仓库（纯文档型项目）→ 跳过；
+    - clone 在受监督后台任务中执行，失败仅记日志，不阻断会议创建；
+    - 项目信息在请求上下文内读取（租户 contextvar 可用），后台任务只做 git 操作不访问 DB。
+    """
+    from app.dao import project_dao
+    from app.observability.log_bus import log_bus
+    from app.routers.code import WORKSPACE_ROOT, _ingest_git
+
+    try:
+        project = await project_dao.get_project(project_id)
+    except Exception as e:
+        log_bus.warning(f"项目读取失败，跳过仓库后台摄入: {str(e)[:150]}", logger="routers.meetings")
+        return
+    if project is None:
+        log_bus.warning(
+            "项目不存在或跨租户，跳过仓库后台摄入",
+            logger="routers.meetings",
+            extra={"meeting_id": meeting_id, "project_id": project_id},
+        )
+        return
+    repo_url = project.get("repo_url")
+    if not repo_url:
+        return
+
+    meeting_dir = WORKSPACE_ROOT / meeting_id
+    meeting_dir.mkdir(parents=True, exist_ok=True)
+    branch = str(project.get("default_branch") or "main")
+
+    async def _clone_repo() -> None:
+        try:
+            result = await _ingest_git(meeting_dir, meeting_id, str(repo_url), branch, None, None)
+        except Exception as e:
+            log_bus.warning(
+                f"项目仓库后台摄入失败（不影响会议）: {str(e)[:200]}",
+                logger="routers.meetings",
+                extra={"meeting_id": meeting_id, "project_id": project_id},
+            )
+            return
+        log_bus.info(
+            f"项目仓库后台摄入完成: target={result.get('target_name', '')}, files={result.get('file_count', 0)}",
+            logger="routers.meetings",
+            extra={"meeting_id": meeting_id, "project_id": project_id},
+        )
+
+    create_supervised_task(_clone_repo(), name=f"project-repo-ingest-{meeting_id}")
+
+
 @router.post("", response_model=CreateMeetingResponse)
 async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateMeetingResponse:
     """创建会议"""
@@ -228,6 +279,25 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
             },
         )
 
+    # ADR-017 Phase 2：从议题发起会议——校验议题 → 绑定（状态机）→ 回填项目归属。
+    # 绑定失败（议题不存在/跨租户/状态不允许/并发竞争）直接拒绝创建，
+    # 避免产生未绑定成功的孤儿会议。
+    bound_issue: dict[str, Any] | None = None
+    if req.issue_id:
+        from app.dao import issue_dao
+        from app.services.issue_service import bind_meeting
+
+        issue_row = await issue_dao.get_issue(req.issue_id)
+        if issue_row is None:
+            raise HTTPException(status_code=404, detail="议题不存在")
+        if issue_row["status"] not in ("open", "scheduled"):
+            raise HTTPException(status_code=409, detail=f"议题当前状态不可绑定会议: {issue_row['status']}")
+        bound_issue = await bind_meeting(issue_row["id"], meeting_id)
+        if bound_issue is None:
+            raise HTTPException(status_code=409, detail="议题绑定失败（状态已并发变更），请刷新后重试")
+        state.project_id = str(bound_issue["project_id"])
+        state.issue_id = str(bound_issue["id"])
+
     # 持久化
     await save_meeting(
         meeting_id=meeting_id,
@@ -237,7 +307,13 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
         created_at=state.created_at,
         payload=state.snapshot(),
         owner_username=username,
+        project_id=state.project_id,
+        issue_id=state.issue_id,
     )
+    # ADR-017 Phase 2 第 3 条：议题会议创建后，项目绑定仓库后台摄入会议 workspace。
+    # fire-and-forget：摄入失败仅记日志，不阻断会议创建。
+    if bound_issue is not None:
+        await _maybe_ingest_project_repo(meeting_id, str(bound_issue["project_id"]))
     # [临近话题] 议题向量落库（创建时即写入，供其他会议创建时推荐 / 完成后聚类）
     try:
         from app.rag.topic_index import get_topic_index
@@ -821,6 +897,20 @@ async def delete_meeting(meeting_id: str, request: Request, mode: str = "soft") 
                 await asyncio.wait_for(task, timeout=3.0)
         _run_locks.pop(meeting_id, None)
 
+    # ADR-017 Phase 2 第 4 条：会议删除（软/硬）→ 释放绑定议题回池，
+    # 避免议题永久卡在 in_progress。restore 不触发。失败仅记日志，不阻断删除。
+    if meeting.get("issue_id"):
+        from app.services.issue_service import release_issue
+
+        try:
+            await release_issue(str(meeting["issue_id"]))
+        except Exception as e:
+            log_bus.warning(
+                f"删除会议释放议题失败（不影响删除）: {str(e)[:150]}",
+                logger="routers.meetings",
+                extra={"meeting_id": meeting_id, "issue_id": meeting["issue_id"]},
+            )
+
     if mode == "soft":
         ok = await soft_delete_meeting(meeting_id)
         if not ok:
@@ -1153,6 +1243,20 @@ async def control_meeting(meeting_id: str, req: ControlRequest, request: Request
                 await stop_service(meeting_id)
             except Exception:
                 pass
+            # ADR-017 Phase 2 第 4 条：会议中止 → 释放议题回池（in_progress → open）。
+            # 失败仅记日志，不阻断 abort 信号本身。
+            if state.issue_id:
+                from app.observability.log_bus import log_bus as _log_bus
+                from app.services.issue_service import release_issue
+
+                try:
+                    await release_issue(state.issue_id)
+                except Exception as e:
+                    _log_bus.warning(
+                        f"中止会议释放议题失败（不影响 abort）: {str(e)[:150]}",
+                        logger="routers.meetings",
+                        extra={"meeting_id": meeting_id, "issue_id": state.issue_id},
+                    )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {

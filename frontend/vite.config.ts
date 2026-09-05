@@ -39,6 +39,7 @@ export default defineConfig({
           '/audit/', '/debug/', '/captcha/', '/config/', '/documents/',
           '/net-auth/', '/docker-hosts/', '/regression/', '/system/', '/admin/',
           '/graph/', '/llm/', '/vnc.html', '/vnc/', '/meetings/', '/artifacts/',
+          '/projects/', '/issues/',
         ];
         server.middlewares.use((req, _res, next) => {
           const url = req.url || '/';
@@ -108,6 +109,9 @@ export default defineConfig({
       '/meetings': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       // ADR-017 Phase 1：产物查询 API（列表/单条/血缘）
       '/artifacts': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
+      // ADR-017 Phase 2：项目与议题池
+      '/projects': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
+      '/issues': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/workspace': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/health': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
       '/agent-roles': process.env.VITE_BACKEND_URL || 'http://localhost:8000',

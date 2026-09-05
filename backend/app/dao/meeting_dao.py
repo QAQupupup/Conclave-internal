@@ -57,6 +57,9 @@ def _meeting_to_dict(row: MeetingModel) -> dict[str, Any]:
         "payload": json.loads(row.payload or "{}"),
         "schema_version": row.schema_version,
         "tenant_id": row.tenant_id,
+        # ADR-017 Phase 2：归属项目/议题（删除挂钩据此释放议题；前端据此展示归属）
+        "project_id": row.project_id,
+        "issue_id": row.issue_id,
     }
 
 
@@ -68,11 +71,15 @@ async def save_meeting(
     created_at: datetime,
     payload: dict[str, Any],
     owner_username: str | None = None,
+    project_id: str | None = None,
+    issue_id: str | None = None,
     session: AsyncSession | None = None,
 ) -> None:
     """upsert 会议记录，payload 存 JSON。自动填充当前 tenant_id。
 
     Args:
+        project_id: ADR-017 Phase 2 归属项目（仅创建时传入；None 时不触碰已有值）。
+        issue_id: ADR-017 Phase 2 归属议题（同上）。
         session: 可选外部 session。传入时仅执行 SQL 不 commit（由调用方控制事务）；
                  不传时创建独立 session 并 commit（向后兼容）。
     """
@@ -88,6 +95,10 @@ async def save_meeting(
     }
     if owner_username is not None:
         values["owner_username"] = owner_username
+    if project_id is not None:
+        values["project_id"] = project_id
+    if issue_id is not None:
+        values["issue_id"] = issue_id
     if tid is not None:
         values["tenant_id"] = tid
 
@@ -100,6 +111,10 @@ async def save_meeting(
     }
     if owner_username is not None:
         set_["owner_username"] = insert_stmt.excluded.owner_username
+    if project_id is not None:
+        set_["project_id"] = insert_stmt.excluded.project_id
+    if issue_id is not None:
+        set_["issue_id"] = insert_stmt.excluded.issue_id
     if tid is not None:
         # COALESCE: 已有值保留，无值则回填
         set_["tenant_id"] = func.coalesce(MeetingModel.tenant_id, insert_stmt.excluded.tenant_id)
