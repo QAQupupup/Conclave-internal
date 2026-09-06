@@ -1,10 +1,11 @@
 """议题平铺端点（ADR-017 Phase 2）。
 
-- GET /issues/{id}：单条（租户过滤，不存在/跨租户 → 404）
-- PATCH /issues/{id}：更新字段 / 状态流转（状态机校验，非法流转 → 409）
-- DELETE /issues/{id}：删除（会议侧 issue_id 外键 SET NULL）
+- GET /api/issues/{id}：单条（租户过滤，不存在/跨租户 → 404）
+- PATCH /api/issues/{id}：更新字段 / 状态流转（状态机校验，非法流转 → 409）
+- DELETE /api/issues/{id}：删除（会议侧 issue_id 外键 SET NULL）
 
-创建议题走项目嵌套端点 POST /projects/{id}/issues（routers/projects.py）。
+创建议题走项目嵌套端点 POST /api/projects/{id}/issues（routers/projects.py）。
+路径挂 /api 前缀避免与前端 SPA 路由冲突（同 /api/admin 范式）。
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from app.dao import issue_dao
 from app.schemas.issue import IssueResponse, UpdateIssueRequest
 from app.services.issue_service import IssueTransitionError, transition_issue
 
-router = APIRouter(prefix="/issues", tags=["issues"])
+router = APIRouter(prefix="/api/issues", tags=["issues"])
 
 
 @router.get("/{issue_id}", response_model=IssueResponse)

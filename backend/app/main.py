@@ -473,7 +473,7 @@ def create_app() -> FastAPI:
     app.include_router(meetings_router.router)
     # ADR-017 Phase 1：产物查询 API（列表/单条/血缘）
     app.include_router(artifacts_router.router)
-    # ADR-017 Phase 2：项目与议题池（/projects、/issues）
+    # ADR-017 Phase 2：项目与议题池（/api/projects、/api/issues）
     app.include_router(projects_router.router)
     app.include_router(issues_router.router)
     app.include_router(documents_router.router)
