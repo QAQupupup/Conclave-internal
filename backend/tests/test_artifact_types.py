@@ -170,3 +170,51 @@ async def test_quality_gate_test_suite_missing_test_files():
     result = await Runner()._evaluate_quality(_state("test_suite", artifact))
     assert any("test_files" in h for h in result["hard_failures"])
     assert result["should_iterate"] is True
+
+
+# ---------- 质量门禁：执行结果分支（ADR-017 Phase 3 / T3.3） ----------
+
+
+def _test_suite_artifact() -> dict:
+    code = "def test_artifact_publish():\n    assert publish() is not None\n" * 8
+    return {
+        "test_suite": {
+            "title": "产物模块测试套件",
+            "test_files": [{"path": "tests/test_artifact.py", "code": code}],
+            "run_instructions": "pytest tests/test_artifact.py",
+        }
+    }
+
+
+async def test_quality_gate_test_suite_executed_success():
+    """沙箱执行成功（exit_code=0）：执行分拿满且反馈执行成功"""
+    artifact = _test_suite_artifact()
+    artifact["execution"] = {"exit_code": 0, "stdout": "2 passed", "stderr": ""}
+    artifact["test_report"] = {"passed": 2, "failed": 0, "exit_code": 0}
+    result = await Runner()._evaluate_quality(_state("test_suite", artifact))
+    assert result["hard_failures"] == []
+    assert "代码执行成功" in result["feedback"]
+    assert result["score"] >= 90
+
+
+async def test_quality_gate_test_suite_executed_but_failed():
+    """已执行但未全部通过：按失败计分并反馈通过/失败数（修复前误判为未执行）"""
+    artifact = _test_suite_artifact()
+    artifact["execution"] = {"exit_code": 1, "stdout": "1 failed, 1 passed", "stderr": ""}
+    artifact["test_report"] = {"passed": 1, "failed": 2, "exit_code": 1}
+    result = await Runner()._evaluate_quality(_state("test_suite", artifact))
+    assert result["hard_failures"] == []
+    assert "测试执行未全部通过" in result["feedback"]
+    assert "1 通过" in result["feedback"]
+    assert "2 失败" in result["feedback"]
+    assert "未执行" not in result["feedback"]
+
+
+async def test_quality_gate_code_analysis_exit_failure_feedback():
+    """非 test_suite 类型执行失败（exit_code 非 0 且无 error）反馈含退出码"""
+    artifact = {
+        "code_analysis": {"code": "print('hello world')\n" * 30},
+        "execution": {"exit_code": 2, "stdout": "", "stderr": "boom"},
+    }
+    result = await Runner()._evaluate_quality(_state("code_analysis", artifact))
+    assert "代码执行失败（exit_code=2）" in result["feedback"]

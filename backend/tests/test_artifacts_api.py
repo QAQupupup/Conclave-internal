@@ -158,3 +158,106 @@ def test_create_meeting_accepts_new_deliverable_types(client):
         resp = client.post("/meetings", json={"topic": f"新产出类型 {dt}", "deliverable_type": dt})
         assert resp.status_code == 200, f"{dt}: {resp.text}"
         assert resp.json()["meeting_id"]
+
+
+# ---------- 推送端点（ADR-017 Phase 3 / T3.6，决策 D8/I13） ----------
+
+
+def test_push_artifact_not_found(client):
+    """不存在产物的推送请求 → 404（非正向）"""
+    resp = client.post("/artifacts/art-does-not-exist/push")
+    assert resp.status_code == 404
+
+
+def test_push_dry_run_returns_diff_summary(client, monkeypatch):
+    """confirm=false（默认）为 dry-run：返回变更摘要，不执行推送"""
+    from app.services import git_service
+
+    push_calls: list[str] = []
+
+    async def fake_diff(meeting_id: str) -> dict[str, Any]:
+        return {
+            "is_git_repo": True,
+            "changed_files": ["?? tests/test_new.py"],
+            "unpushed_commits": 2,
+            "remote": "origin",
+        }
+
+    async def fake_push(meeting_id: str) -> dict[str, Any]:
+        push_calls.append(meeting_id)
+        return {"pushed_to": "origin/main", "output": ""}
+
+    monkeypatch.setattr(git_service, "diff_summary", fake_diff)
+    monkeypatch.setattr(git_service, "push_repo", fake_push)
+
+    mid = _create_meeting(client, topic="推送 dry-run 专题")
+    row = _seed_artifact(mid)
+
+    resp = client.post(f"/artifacts/{row['id']}/push")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["mode"] == "dry_run"
+    assert body["diff"]["unpushed_commits"] == 2
+    assert body["diff"]["changed_files"] == ["?? tests/test_new.py"]
+    assert push_calls == []  # dry-run 绝不推送
+
+
+def test_push_dry_run_workspace_error_409(client, monkeypatch):
+    """dry-run 时工作区不可用（非 git 仓库/不存在）→ 409（非正向）"""
+    from app.services import git_service
+    from app.services.git_service import GitServiceError
+
+    async def fake_diff(meeting_id: str) -> dict[str, Any]:
+        raise GitServiceError("会议工作区不存在")
+
+    monkeypatch.setattr(git_service, "diff_summary", fake_diff)
+
+    mid = _create_meeting(client, topic="推送工作区缺失专题")
+    row = _seed_artifact(mid)
+    resp = client.post(f"/artifacts/{row['id']}/push")
+    assert resp.status_code == 409
+
+
+def test_push_confirm_executes_commit_and_push(client, monkeypatch):
+    """confirm=true：先补齐提交再推送，返回推送目标与提交号"""
+    from app.services import git_service
+
+    async def fake_commit(meeting_id: str, topic: str = "") -> dict[str, Any]:
+        return {"committed": True, "commit_sha": "abcdef123456", "message": "test: x"}
+
+    async def fake_push(meeting_id: str) -> dict[str, Any]:
+        return {"pushed_to": "origin/main", "output": ""}
+
+    monkeypatch.setattr(git_service, "commit_workspace", fake_commit)
+    monkeypatch.setattr(git_service, "push_repo", fake_push)
+
+    mid = _create_meeting(client, topic="推送确认专题")
+    row = _seed_artifact(mid)
+    resp = client.post(f"/artifacts/{row['id']}/push", json={"confirm": True})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["mode"] == "pushed"
+    assert body["pushed_to"] == "origin/main"
+    assert body["commit_sha"] == "abcdef123456"
+
+
+def test_push_confirm_push_error_409(client, monkeypatch):
+    """confirm=true 但推送失败（无远端等）→ 409（非正向，D8 显式确认红线）"""
+    from app.services import git_service
+    from app.services.git_service import GitPushError
+
+    async def fake_commit(meeting_id: str, topic: str = "") -> dict[str, Any]:
+        return {"committed": True, "commit_sha": "abcdef123456"}
+
+    async def fake_push(meeting_id: str) -> dict[str, Any]:
+        raise GitPushError("不存在可推送的远端（remote），请先配置 origin")
+
+    monkeypatch.setattr(git_service, "commit_workspace", fake_commit)
+    monkeypatch.setattr(git_service, "push_repo", fake_push)
+
+    mid = _create_meeting(client, topic="推送失败专题")
+    row = _seed_artifact(mid)
+    resp = client.post(f"/artifacts/{row['id']}/push", json={"confirm": True})
+    assert resp.status_code == 409
+    # 自定义 HTTP 异常格式（main.py http_exception_handler）：{"error":{"code","message"}}
+    assert "远端" in resp.json()["error"]["message"]

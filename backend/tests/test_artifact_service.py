@@ -341,3 +341,77 @@ async def test_publish_and_notify_no_event_when_no_artifact(
     monkeypatch.setattr(bus, "publish", fake_publish)
     assert await publish_and_notify(_state(artifact=None)) is None
     assert published_events == []
+
+
+# ---------- test_report 伴生产物（ADR-017 Phase 3 / T3.4，决策 I11） ----------
+
+
+def _test_suite_state(**artifact_overrides: Any) -> MeetingState:
+    """构造带 test_report 的 test_suite 会议状态。"""
+    artifact: dict[str, Any] = {
+        "test_suite": {
+            "title": "产物模块测试套件",
+            "test_files": [{"path": "tests/test_a.py", "code": "def test_x():\n    assert True\n"}],
+            "run_instructions": "pytest",
+        },
+        "test_report": {"passed": 3, "failed": 1, "exit_code": 1},
+    }
+    artifact.update(artifact_overrides)
+    return _state(deliverable_type="test_suite", artifact=artifact)
+
+
+async def test_publish_test_suite_releases_test_report_companion(fake_store: FakeArtifactStore):
+    """test_suite 主产物发布后追加 test_report 伴生产物：血缘指向主产物"""
+    published = await publish_meeting_artifact(_test_suite_state())
+    assert published is not None
+    assert published["type"] == "test_suite"
+
+    report_rows = [r for r in fake_store.rows.values() if r["type"] == "test_report"]
+    assert len(report_rows) == 1
+    report = report_rows[0]
+    assert report["version"] == 1
+    assert report["source_artifact_ids"] == [published["id"]]  # 血缘指向主产物
+
+    report_call = next(c for c in fake_store.publish_calls if c["artifact_type"] == "test_report")
+    assert "passed=3" in report_call["summary"]
+    assert "failed=1" in report_call["summary"]
+    assert report_call["content"] == {"passed": 3, "failed": 1, "exit_code": 1}
+    assert "测试执行报告" in (report_call["title"] or "")
+
+
+async def test_publish_test_report_companion_failure_not_blocking(
+    fake_store: FakeArtifactStore, monkeypatch: pytest.MonkeyPatch
+):
+    """伴生产物写入失败不影响主产物发布（降级路径）"""
+    orig = fake_store.publish_artifact
+
+    async def flaky_publish(**kwargs: Any) -> dict[str, Any]:
+        if kwargs.get("artifact_type") == "test_report":
+            raise RuntimeError("数据库写入失败")
+        return await orig(**kwargs)
+
+    monkeypatch.setattr(artifact_dao, "publish_artifact", flaky_publish)
+
+    published = await publish_meeting_artifact(_test_suite_state())
+    assert published is not None
+    assert published["type"] == "test_suite"
+    assert all(r["type"] == "test_suite" for r in fake_store.rows.values())
+
+
+async def test_publish_test_suite_without_report_has_no_companion(fake_store: FakeArtifactStore):
+    """test_suite 无 test_report（执行被跳过）时不发布伴生产物（边界）"""
+    state = _state(
+        deliverable_type="test_suite",
+        artifact={"test_suite": {"title": "未执行套件", "test_files": []}},
+    )
+    published = await publish_meeting_artifact(state)
+    assert published is not None
+    assert all(r["type"] == "test_suite" for r in fake_store.rows.values())
+
+
+async def test_publish_non_test_suite_never_releases_companion(fake_store: FakeArtifactStore):
+    """非 test_suite 类型即使携带 test_report 键也不发布伴生产物（非正向）"""
+    state = _state(artifact={"title": "决策记录", "test_report": {"passed": 1, "failed": 0}})
+    published = await publish_meeting_artifact(state)
+    assert published is not None
+    assert all(r["type"] == "adr" for r in fake_store.rows.values())

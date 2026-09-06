@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.agents.compute import build_produce_prompt
 from app.agents.trace import set_current_trace
@@ -13,6 +14,17 @@ from app.events import bus, make_event
 from app.models import MeetingState, Role, Stage
 
 from ._helpers import _build_tool_registry, _emit_agent_spoke, _run_stage_step
+
+if TYPE_CHECKING:
+    from app.sandbox import SandboxNetworkLevel
+
+# ADR-017 Phase 3（I14）：test_suite 沙箱执行超时（秒）。
+# 测试套件通常重于 tested_system 单文件（30s），取双倍；环境变量可覆盖。
+TEST_SUITE_EXEC_TIMEOUT = int(os.environ.get("CONCLAVE_TEST_SUITE_TIMEOUT", "60"))
+
+# ADR-017 Phase 3（I10）：test_files 相对路径白名单（LLM 输出不可信）。
+# 限定字符集后命令拼接无注入面；另叠加 ".." 拒绝与 resolve 包含校验。
+_TEST_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_\-.\/]*$")
 
 
 def _make_token_stream_callback(state: MeetingState) -> Any:
@@ -148,7 +160,7 @@ async def _emit_degradation_event(
         await bus.publish(make_event("produce.degradation", state.meeting_id, payload))
 
 
-def _detect_network_level(code: str) -> str:
+def _detect_network_level(code: str) -> SandboxNetworkLevel:
     """根据代码内容自动判断需要的沙箱网络级别
 
     L1(无网络)：默认，纯计算代码
@@ -188,6 +200,75 @@ def _detect_network_level(code: str) -> str:
 
     # L1: 默认纯计算
     return "L1"
+
+
+def _parse_test_report(exec_result: dict[str, Any]) -> dict[str, Any]:
+    """解析 pytest 文本输出为结构化测试报告（ADR-017 Phase 3，T3.2）。
+
+    复用 ``sandbox.run_tests_in_container`` 的正则模式（``X passed`` /
+    ``Y failed`` / ``FAILED path::name``），保持两处解析口径一致。
+    输出尾部保留 3000 字符，防止大输出撑爆 artifact（大产物红线）。
+    """
+    output = (exec_result.get("stdout") or "") + "\n" + (exec_result.get("stderr") or "")
+    passed = 0
+    failed = 0
+    pass_match = re.search(r"(\d+)\s+passed", output)
+    fail_match = re.search(r"(\d+)\s+failed", output)
+    if pass_match:
+        passed = int(pass_match.group(1))
+    if fail_match:
+        failed = int(fail_match.group(1))
+    failures = re.findall(r"FAILED\s+(\S+::\S+)", output)[:10]
+    # 无标准汇总行但有 ERRORS 段（收集阶段报错）→ 按 error 数计失败
+    if passed == 0 and failed == 0 and "ERRORS" in output:
+        err_match = re.search(r"(\d+)\s+error", output)
+        if err_match:
+            failed = int(err_match.group(1))
+    return {
+        "passed": passed,
+        "failed": failed,
+        "failures": failures,
+        "exit_code": exec_result.get("exit_code"),
+        "output": output[-3000:],
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+        "sandboxed": bool(exec_result.get("sandboxed")),
+    }
+
+
+def _write_test_files(ws_root: Path, test_files: list[Any]) -> tuple[list[dict[str, str]], list[str]]:
+    """把 LLM 生成的测试文件写入会议工作区（ADR-017 Phase 3，I10 路径防护）。
+
+    三重防护：白名单正则（限定字符集）→ 拒绝 ``..`` 段 → ``resolve()``
+    包含校验（必须仍在 ws_root 内）。非法路径跳过并记录，不抛异常。
+
+    Returns:
+        ``(kept_files, skipped_paths)``：kept_files 为 ``{path, code}`` 列表
+        （path 为规范化后的相对路径），skipped_paths 为被拒路径（截断）。
+    """
+    kept: list[dict[str, str]] = []
+    skipped: list[str] = []
+    ws_resolved = ws_root.resolve()
+    for tf in test_files:
+        if not isinstance(tf, dict):
+            continue
+        raw_path = str(tf.get("path") or "")
+        code = str(tf.get("code") or "")
+        if not raw_path or not code:
+            continue
+        rel = raw_path.replace("\\", "/").lstrip("/")
+        if not _TEST_PATH_RE.match(rel) or ".." in rel.split("/"):
+            skipped.append(raw_path[:100])
+            continue
+        target = (ws_root / rel).resolve()
+        try:
+            target.relative_to(ws_resolved)
+        except ValueError:
+            skipped.append(rel[:100])
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(code, encoding="utf-8")
+        kept.append({"path": rel, "code": code})
+    return kept, skipped
 
 
 def _scan_artifacts(ws_root: Path, meeting_id: str) -> list[dict[str, Any]]:
@@ -1037,6 +1118,22 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 Stage.PRODUCE,
                 f"系统代码和测试已生成：主代码 {main_len} 字符，测试代码 {test_len} 字符，准备运行测试...",
             )
+    elif state.deliverable_type == "test_suite":
+        ts_data = result.get("test_suite", {})
+        file_count = len(
+            [f for f in (ts_data.get("test_files") or []) if isinstance(f, dict) and f.get("path") and f.get("code")]
+        )
+        if file_count == 0:
+            await _emit_agent_spoke(
+                state,
+                Role.ENGINEER,
+                Stage.PRODUCE,
+                "测试生成失败：LLM 未返回有效测试文件，跳过沙箱执行。产出物可能不完整，建议重试。",
+            )
+        else:
+            await _emit_agent_spoke(
+                state, Role.ENGINEER, Stage.PRODUCE, f"已生成 {file_count} 个测试文件，准备沙箱执行验证..."
+            )
     elif state.deliverable_type == "deployable_service":
         ds_data = result.get("deployable_service", {})
         app_len = len(ds_data.get("app_code", ""))
@@ -1254,6 +1351,107 @@ async def produce_node(state: MeetingState) -> MeetingState:
                 await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"测试执行异常：{str(e)[:200]}")
         else:
             state.artifact["tested_system"] = ts_data
+
+    elif state.deliverable_type == "test_suite":
+        # ADR-017 Phase 3（T3.2）：test_suite 执行闭环
+        # 写入测试文件 → 沙箱 pytest → execution + test_report 写回
+        ts_data = result.get("test_suite") or {}
+        test_files = ts_data.get("test_files") or []
+        if test_files:
+            from app.config import settings
+            from app.sandbox import SANDBOX_IMAGE_DATASCIENCE, run_command
+
+            ws_root = Path(settings.workspace_root) / state.meeting_id
+            ws_root.mkdir(parents=True, exist_ok=True)
+            try:
+                kept_files, skipped_paths = _write_test_files(ws_root, test_files)
+                if skipped_paths:
+                    _lb.warning(
+                        f"produce: test_suite 丢弃 {len(skipped_paths)} 个非法路径",
+                        logger="orchestrator.nodes.produce",
+                        extra={"meeting_id": state.meeting_id, "skipped_paths": skipped_paths[:5]},
+                    )
+                # 规范化后的文件列表回写（路径已清洗，供产物发布与门禁使用）
+                ts_data["test_files"] = kept_files
+
+                if kept_files:
+                    all_code = "".join(f["code"] for f in kept_files)
+                    net_level = _detect_network_level(all_code)
+                    # I10：路径已过白名单校验（字符集受限），拼接无注入面
+                    pytest_cmd = "python -m pytest " + " ".join(f["path"] for f in kept_files) + " -v"
+                    exec_result = await run_command(
+                        pytest_cmd,
+                        ws_root,
+                        timeout=TEST_SUITE_EXEC_TIMEOUT,
+                        image=SANDBOX_IMAGE_DATASCIENCE,
+                        network_level=net_level,
+                    )
+                    exec_dict = exec_result.to_dict()
+                    report = _parse_test_report(exec_dict)
+                    report["test_file_count"] = len(kept_files)
+                    state.artifact["test_suite"] = ts_data
+                    state.artifact["execution"] = exec_dict
+                    state.artifact["test_report"] = report
+                    if report["failed"] == 0 and report["passed"] > 0:
+                        await _emit_agent_spoke(
+                            state,
+                            Role.ENGINEER,
+                            Stage.PRODUCE,
+                            f"测试套件执行完成：{report['passed']} 个测试全部通过。",
+                        )
+                    else:
+                        await _emit_agent_spoke(
+                            state,
+                            Role.ENGINEER,
+                            Stage.PRODUCE,
+                            f"测试套件执行完成：{report['passed']} 通过 / {report['failed']} 失败。",
+                        )
+                    # ADR-017 Phase 3（T3.5）：workspace 自动提交（bot 身份、
+                    # Conventional Commits）。失败仅记日志，不阻断产出。
+                    try:
+                        from app.services.git_service import commit_workspace
+
+                        commit_info = await commit_workspace(
+                            state.meeting_id, topic=state.clarified_topic or state.topic
+                        )
+                        if commit_info.get("committed"):
+                            _lb.info(
+                                f"produce: test_suite 工作区已提交 {commit_info.get('commit_sha')}",
+                                logger="orchestrator.nodes.produce",
+                                extra={"meeting_id": state.meeting_id},
+                            )
+                    except Exception as commit_err:
+                        _lb.warning(
+                            f"produce: 工作区自动提交失败（不影响产出）: {str(commit_err)[:150]}",
+                            logger="orchestrator.nodes.produce",
+                            extra={"meeting_id": state.meeting_id},
+                        )
+                else:
+                    # 全部路径非法 → 不执行，产物仍发布（降级可追溯）
+                    state.artifact["test_suite"] = ts_data
+                    state.artifact["test_report"] = {
+                        "error": "所有测试路径均未通过安全校验，未执行",
+                        "passed": 0,
+                        "failed": 0,
+                        "test_file_count": 0,
+                        "executed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    await _emit_agent_spoke(
+                        state, Role.ENGINEER, Stage.PRODUCE, "测试文件路径均未通过安全校验，已跳过沙箱执行。"
+                    )
+            except Exception as e:
+                state.artifact["test_suite"] = ts_data
+                state.artifact["execution"] = {"error": str(e), "exit_code": -1}
+                state.artifact["test_report"] = {
+                    "error": str(e)[:300],
+                    "passed": 0,
+                    "failed": 0,
+                    "test_file_count": len(test_files),
+                    "executed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                await _emit_agent_spoke(state, Role.ENGINEER, Stage.PRODUCE, f"测试执行异常：{str(e)[:200]}")
+        else:
+            state.artifact["test_suite"] = ts_data
 
     elif state.deliverable_type == "deployable_service":
         ds_data = result.get("deployable_service") or {}
@@ -1665,7 +1863,9 @@ async def health_check():
             state.artifact["deployable_service"] = ds_data
     else:
         # 其他类型直接存入 artifact
-        for key in ["design_doc", "comprehensive", "research_report", "business_report"]:
+        # ADR-017 Phase 3（T3.1/I8）：补两种新文档类型的写入链路。
+        # test_suite 不在此列——它走上方专属执行分支。
+        for key in ["design_doc", "comprehensive", "research_report", "business_report", "feasibility_report", "adr"]:
             if key in result:
                 state.artifact[key] = result[key]
 

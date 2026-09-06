@@ -156,6 +156,41 @@ async def publish_meeting_artifact(state: MeetingState) -> dict[str, Any] | None
                 logger="services.artifact_service",
                 extra={"meeting_id": state.meeting_id, "issue_id": issue_id},
             )
+
+    # ADR-017 Phase 3（T3.4/I11）：test_report 伴生产物发布。
+    # 仅 test_suite 主产物发布成功后追加；血缘指向主产物；失败仅记日志不阻断。
+    test_report = artifact.get("test_report")
+    if artifact_type == "test_suite" and isinstance(test_report, dict) and test_report:
+        try:
+            report_version, report_parent = await artifact_dao.next_version(state.meeting_id, "test_report")
+            await artifact_dao.publish_artifact(
+                meeting_id=state.meeting_id,
+                artifact_type="test_report",
+                version=report_version,
+                title=f"测试执行报告：{title or state.meeting_id}",
+                summary=(
+                    f"passed={test_report.get('passed', 0)}, "
+                    f"failed={test_report.get('failed', 0)}, "
+                    f"exit_code={test_report.get('exit_code')}"
+                ),
+                content=test_report,
+                content_ref=None,
+                parent_id=report_parent,
+                source_artifact_ids=[str(published["id"])],
+                project_id=getattr(state, "project_id", None),
+                created_by=getattr(state, "owner_username", None),
+            )
+            log_bus.info(
+                f"test_report 伴生产物已发布: version={report_version}",
+                logger="services.artifact_service",
+                extra={"meeting_id": state.meeting_id, "source_artifact_id": published["id"]},
+            )
+        except Exception as e:
+            log_bus.warning(
+                f"test_report 伴生产物发布失败（不影响主产物）: {str(e)[:150]}",
+                logger="services.artifact_service",
+                extra={"meeting_id": state.meeting_id},
+            )
     return published
 
 

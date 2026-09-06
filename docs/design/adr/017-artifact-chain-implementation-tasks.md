@@ -2,7 +2,7 @@
 
 > ADR: docs/design/adr/017-artifact-chain-project-issue-pool.md
 > 创建时间: 2026-09-04
-> 状态: Phase 1 进行中
+> 状态: Phase 3 进行中（Phase 1 已闭环 2026-09-05 / Phase 2 已闭环 6952efb 2026-09-05）
 
 ---
 
@@ -19,6 +19,13 @@
 | I5 | 大产物阈值：artifact JSON 序列化 > 200KB 时不写 `content` 列，只存 `summary` + `content_ref`（指向 `workspace/{meeting_id}/` 相对路径） | ADR-017「大产物不入库」红线；阈值为工程魔数，代码中加注释 |
 | I6 | 三个新产出类型的 workflow 模板（`feasibility`/`adr`/`test_gen`）注册进 `WORKFLOW_TEMPLATES`；`run_clarify` 覆写 `workflow_template` 时，若 `deliverable_type` 属于三新类型则保留对应模板不被 complexity 映射覆盖 | 对齐 ADR-017「与 ADR-014 对齐」节；参照 `stage_runners.py:57` flow_plan=="plan" 的保留模式 |
 | I7 | Publish 钩子位置：`runner.py` 设置 `MeetingStatus.DONE` 处（约 :798）之后调用，异常仅记日志不阻断终态 | Publish 是快照动作，失败可由补偿重试，不应使会议僵死；instant 模式终态路径实现时核实是否需要同步挂钩 |
+| I8 | Phase 3 前置修复：`produce.py` 兜底分支（约 L1666）补 `feasibility_report`/`adr` 键；`test_suite` 走专属分支（含执行闭环）不走兜底 | 核验发现 Phase 1 缺口：三种新产出类型的 LLM 结果均无代码路径写入 `state.artifact`（兜底只拷贝 4 个旧键），质量门禁测试手工构造 artifact 未暴露该问题 |
+| I9 | `test_suite` 沙箱执行只跑一次捕获结果，不做单文件 refine loop | `refine_python_code` 面向单文件设计，test_suite 为多文件结构；会议级 `should_iterate` 机制（质量门禁不达标重跑 produce）已提供粗粒度反馈环 |
+| I10 | `test_files[].path` 双重防护：白名单正则 `^[A-Za-z0-9_][A-Za-z0-9_\-.\/]*$` + 拒绝 `..` + `resolve().relative_to(ws_root)`；pytest 命令仅由已校验路径拼接 | 路径来自 LLM 输出；字符集受限后命令拼接无注入面（对齐 `code.py` 参数列表无 shell 模式） |
+| I11 | `test_report` 伴生产物在 `publish_meeting_artifact` 内发布：仅当 `deliverable_type == "test_suite"` 且 `artifact["test_report"]` 存在时追加一条 `type="test_report"` 记录，`source_artifact_ids` 指向同批 test_suite 产物 id；失败仅记日志 | 伴生产物不阻断主产物发布；血缘挂接使 lineage 可查（I1 决策：test_report 为独立 type 值） |
+| I12 | git 封装新建 `app/services/git_service.py`：`asyncio.create_subprocess_exec("git", *args)` 参数列表无 shell（对齐 `code.py:_run_git`）；bot 身份 `conclave-bot <conclave-bot@conclave.local>` 仅 `git config --local`；提交排除临时文件（`.pytest_cache`/`__pycache__`/`*.pyc`/`.conclave/`） | 全后端无 git commit/push 封装与 bot 身份（核验确认）；本地配置不污染全局 |
+| I13 | `POST /artifacts/{id}/push` 语义：`confirm=false`（默认）→ 200 返回 diff 摘要（dry-run 供 UI 展示）；`confirm=true` → 执行 push；workspace 非 git 仓库或无 remote → 409 | ADR-017 D8 + 工程红线「进入共享空间的 git 操作必须用户显式确认」；dry-run 与执行共用一端点，以 confirm 参数区分 |
+| I14 | pytest 沙箱执行超时 60s（`CONCLAVE_TEST_SUITE_TIMEOUT` 可覆盖） | 测试套件通常重于 tested_system 单文件（30s）；魔数加环境变量出口（AGENTS.md §5.4） |
 
 ---
 
@@ -167,7 +174,7 @@
 
 ---
 
-## Phase 2：项目与议题池（待开始）
+## Phase 2：项目与议题池（已完成，6952efb）
 
 1. Alembic 迁移：`projects` / `issues` 表；补 `meetings.project_id/issue_id` 外键。
 2. 议题两条入口：用户手动（source=user）；会议候选经人工确认（source=meeting，D7）。
@@ -175,11 +182,69 @@
 4. 议题状态机随会议生命周期流转（resolved 需挂 `resolution_artifact_id`）。
 5. 产物：项目下多议题并行，工作区隔离，闭环可追溯。
 
-## Phase 3：测试生成闭环（待开始）
+## Phase 3：测试生成闭环（进行中）
 
-1. `test_suite` workflow 执行闭环：分析目标仓库（复用 ADR-016 检索）→ 测试代码落 workspace。
-2. 沙箱执行（L2/L3）→ `test_report` 伴生产物。
-3. git 护栏：workspace 内自动 commit；push 需显式确认（D8）+ diff 摘要。
+目标：`test_suite` 会议产出可执行、执行结果入产物、提交可追溯。验收：仓库进 → 测试代码生成落 workspace → 沙箱执行 → `test_report` 伴生产物发布 → workspace 自动 commit → push 端点 dry-run/确认双模式。
+
+### T3.1 produce 写入链路补齐（I8 前置修复）
+
+- 文件: `backend/app/orchestrator/nodes/produce.py`、`backend/app/orchestrator/stage_runners.py`
+- 兜底分支（produce.py 约 L1666）键列表补 `feasibility_report`、`adr`（test_suite 不进兜底，走 T3.2 专属分支）
+- `stage_runners.py` 附件扫描类型列表（约 L603）补 `test_suite`
+- 发言分派补 `test_suite` 分支（生成完成 → 准备沙箱执行）；`feasibility_report`/`adr` 沿用通用分支
+- 验收: 三种新类型 LLM 结果均写入 `state.artifact` 对应键
+- 测试: 构造含 `feasibility_report`/`adr`/`test_suite` 键的 result，断言 artifact 对应键非空（非正向：LLM 返回缺键时不 KeyError）
+
+### T3.2 test_suite 沙箱执行闭环
+
+- 文件: `backend/app/orchestrator/nodes/produce.py`（新增 `elif state.deliverable_type == "test_suite":` 分支，参照 tested_system 分支结构）
+- 步骤:
+  1. 校验 `test_files[].path`（I10 白名单正则 + `..` 拒绝 + `resolve().relative_to`），非法路径跳过并记日志
+  2. 合法文件写入 `workspace/{meeting_id}/`（保持相对路径结构）
+  3. `run_command("python -m pytest <已校验路径...> -v", ws_root, timeout=60, image=SANDBOX_IMAGE_DATASCIENCE, network_level=_detect_network_level(拼接代码))`（I14）
+  4. 解析 pytest 输出（复用 `sandbox.py:1968-1984` 正则模式：`X passed`/`Y failed`/`FAILED <path>::<name>`）
+  5. 写回 `state.artifact["test_suite"]`（含最终 test_files）、`state.artifact["execution"]`（exit_code/stdout/stderr/sandboxed）、`state.artifact["test_report"]`（passed/failed/failures/output 尾部 3000 字符/executed_at/test_file_count）
+  6. 执行异常（沙箱不可用等）→ `execution={"error": ..., "exit_code": -1}`，test_report 记 `error`，不阻断产出
+- 验收: StubLLM 下结构校验通过；沙箱拒绝执行时产物仍发布（降级可追溯）
+- 测试: mock `run_command` 全通过/部分失败/沙箱异常三态；路径穿越用例（`../evil.py` 被拒）
+
+### T3.3 质量门禁执行分支校准
+
+- 文件: `backend/app/orchestrator/runner.py` `_evaluate_quality_code`（约 L1661-1675）
+- 现状缺陷: `exit_code != 0` 且无 `error` 键时落入「未执行」分支（+15），已执行但失败被误判为未执行
+- 修改: `exit_code is not None` 即视为已执行——`== 0` +30；非 0 +10 并反馈失败数（有 test_report 时带 passed/failed）；`exit_code is None` 才走 error/未执行分支
+- 测试: 已执行失败（exit_code=1）不再命中「未执行」文案；未执行（无 execution）仍 +15
+
+### T3.4 test_report 伴生产物发布（I11）
+
+- 文件: `backend/app/services/artifact_service.py` `publish_meeting_artifact`
+- 主产物发布成功后：`deliverable_type == "test_suite"` 且 `artifact["test_report"]` 为 dict → 追加发布 `type="test_report"`，`source_artifact_ids=[主产物 id]`，project_id 同主产物；异常仅 `log_bus.warning`
+- 测试: 伴生发布成功/主产物发布失败不伴生/伴生异常不影响主产物返回（三态）
+
+### T3.5 git_service（I12）
+
+- 文件: `backend/app/services/git_service.py`（新建）
+- 函数:
+  - `commit_workspace(meeting_id, topic) -> dict`: workspace 无 `.git` 则 `git init`；`git config --local` bot 身份；写 `.gitignore`（`.pytest_cache/`、`__pycache__/`、`*.pyc`、`.conclave/`，幂等）；`git add -A` + `git commit -m "test(<meeting_id 前 8 位>): <topic 截断 80>"`；返回 `{commit_sha, files_changed, inserted, deleted}`；无变更返回 `{committed: False}`
+  - `diff_summary(meeting_id) -> dict`: `git status --porcelain` + `git diff --stat HEAD`（未提交变更摘要，供 push dry-run）
+  - `push_repo(meeting_id) -> dict`: 取首个 remote（`git remote`）→ `git push <remote> HEAD`；无 remote 抛 `GitPushError`；超时 120s kill（对齐 code.py 受控子进程模式：`GIT_TERMINAL_PROMPT=0` 防交互挂死）
+- 子进程统一 `asyncio.create_subprocess_exec("git", *args)`，env 注入 `GIT_TERMINAL_PROMPT=0`；错误输出脱敏（复用 `code.py:_redact` 模式）
+- 测试: 临时目录真实 git 仓库——init+commit 往返（提交可 `git log` 验证）、重复提交无变更返回 committed=False、临时文件不入提交、无 remote push 抛错、路径非 workspace 拒绝
+
+### T3.6 POST /artifacts/{id}/push 端点（I13）
+
+- 文件: `backend/app/routers/artifacts.py`、`backend/app/schemas/artifact.py`
+- schema: `ArtifactPushRequest{confirm: bool = False}`；`ArtifactPushResponse{mode: "dry_run"|"pushed", diff: {...}|None, pushed_to: str|None, commit_sha: str|None, message: str}`
+- 逻辑: `artifact_dao.get_artifact` 取产物（404 同现有语义）→ `meeting_id` 定位 workspace → `confirm=false` 返回 diff_summary；`confirm=true` 执行 push，`GitPushError` → 409
+- 验收: 挂在现有 `/artifacts` 前缀下，vite proxy / nginx 无需改动（核验确认）
+- 测试: dry-run 返回 diff 不 push；confirm 无 remote → 409；跨租户 → 404
+
+### 验收标准（Phase 3 整体）
+
+- [ ] T3.1-T3.6 全部完成
+- [ ] 容器内 ruff/mypy/pytest 全绿（含新增测试，每文件 ≥1 非正向用例）
+- [ ] StubLLM 端到端：test_suite 会议 → 产物表含 test_suite + test_report 两条记录，血缘可查
+- [ ] git 链路：workspace 自动 commit（bot 身份、Conventional Commits）；push dry-run/确认双模式
 
 ## Phase 4：理想态（另开 ADR）
 

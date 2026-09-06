@@ -600,7 +600,8 @@ async def run_produce(
         state.artifact = {}
 
     # 附件扫描：代码/服务类产出收集工作区文件
-    if state.deliverable_type in ("code_analysis", "tested_system", "deployable_service"):
+    # ADR-017 Phase 3（T3.1）：test_suite 测试文件落 workspace，同样需要附件扫描
+    if state.deliverable_type in ("code_analysis", "tested_system", "deployable_service", "test_suite"):
         ws_root = Path(settings.workspace_root) / state.meeting_id
         try:
             from app.orchestrator.produce_helpers import _scan_artifacts

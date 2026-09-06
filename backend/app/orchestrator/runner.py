@@ -1666,11 +1666,25 @@ class Runner:
             elif execution.get("error"):
                 score += 10
                 feedback_parts.append(f"代码执行异常: {execution.get('error', '')[:80]}")
+            elif exit_code is not None:
+                # ADR-017 Phase 3（T3.3）：已执行但失败（exit_code 非 0 且无 error）。
+                # 修复前该情况落入「未执行」分支被误判；现按已执行失败计分并反馈失败数。
+                score += 10
+                test_report = artifact.get("test_report") or {}
+                if (
+                    dt == "test_suite"
+                    and isinstance(test_report, dict)
+                    and (test_report.get("passed") or test_report.get("failed"))
+                ):
+                    feedback_parts.append(
+                        f"测试执行未全部通过: {test_report.get('passed', 0)} 通过 / {test_report.get('failed', 0)} 失败"
+                    )
+                else:
+                    feedback_parts.append(f"代码执行失败（exit_code={exit_code}）")
             elif dt == "test_suite":
-                # ADR-017 Phase 1（T1.7）：执行闭环 Phase 3 才落地，
-                # 未执行按「未执行」扣分（给一半基础分）而非硬门槛
+                # 未执行兜底：执行闭环已落地（Phase 3），仅沙箱不可用/路径全部被拒时进入
                 score += 15
-                feedback_parts.append("测试未执行（执行闭环将在后续阶段落地，按未执行扣分而非硬门槛）")
+                feedback_parts.append("测试未执行（沙箱不可用或执行被跳过，按未执行扣分而非硬门槛）")
             else:
                 feedback_parts.append("未检测到代码执行结果")
 
