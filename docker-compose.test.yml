@@ -77,7 +77,11 @@ services:
     container_name: conclave-test-backend
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "pytest -q --tb=short"
+      # -n 4 显式指定 xdist worker 数（pyproject addopts 已不再含 -n）：
+      # 曾用 -n auto，多核机器开满逻辑核（20 worker 同时 import 全量
+      # 应用栈），内存峰值触发 OOM killer，全体 worker "crashed/node down"。
+      # 4 worker 兼顾并行收益与内存上限（本地 20 核机与 GitHub 7GB runner 均验证）。
+      - "pytest -q --tb=short -n 4"
     environment:
       DATABASE_URL: postgresql+asyncpg://conclave:conclave_dev@postgres-test:5432/conclave_test
       REDIS_URL: redis://redis-test:6379/0

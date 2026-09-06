@@ -121,6 +121,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Create swap (防 OOM 杀 pytest worker)
+        run: |
+          # GitHub runner 仅 7GB 内存且默认无 swap。测试栈同时跑
+          # postgres + redis + qdrant + 2 个 xdist worker（各自 import
+          # 全量应用栈），尾段内存峰值会触发 OOM killer，表现为
+          # "worker 'gwX' crashed / node down: Not properly terminated"
+          # （2026-09-04 起多次随机击中不同轻量测试，本地 Docker 全绿）。
+          # 补 4G swap 兜底，容器进程与宿主共享内核，swap 对容器生效。
+          sudo fallocate -l 4G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

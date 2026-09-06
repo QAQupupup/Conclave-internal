@@ -208,7 +208,7 @@ def _ensure_db_initialized():
         async with async_session_factory() as session, session.bind.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)  # type: ignore[union-attr]
 
-        # 3. 创建 tenants 表 + users.tenant_id 列 + 外键 + 业务表 tenant_id 列
+        # 3. 创建 tenants 表（tenant_id 列/外键/回填推迟到 TRUNCATE 之后，见步骤 5）
         #    与 app/plugins/builtin/auth/plugin.py on_startup 保持一致
         from app.tenants.service import (
             ensure_business_tables_tenant_id,
@@ -216,7 +216,6 @@ def _ensure_db_initialized():
         )
 
         await ensure_tenants_table()
-        await ensure_business_tables_tenant_id()
 
         # 3.5 RBAC 多租户表（tenant_members, user_settings, system_settings, casbin_rule）
         from app.rbac.migrations import ensure_rbac_tables as _ensure_rbac
@@ -228,7 +227,9 @@ def _ensure_db_initialized():
 
         await _init_net_auth()
 
-        # 4. TRUNCATE 所有表 + 插入测试数据
+        # 4. TRUNCATE 所有表（必须先于 tenant_id 回填：上次运行若被中断，
+        #    持久 volume 会残留脏数据——如系统租户空 slug 重复行——回填
+        #    UPDATE 会撞唯一约束崩溃，级联杀死整个 worker 的 setup）
         async with async_session_factory() as session:
             # 查询所有用户表（排除 alembic_version），然后 TRUNCATE CASCADE
             result = await session.execute(
@@ -240,6 +241,15 @@ def _ensure_db_initialized():
             tables = [row[0] for row in result.fetchall()]
             if tables:
                 await session.execute(_text(f"TRUNCATE TABLE {', '.join(tables)} RESTART IDENTITY CASCADE"))
+            await session.commit()
+
+        # 5. users.tenant_id 列 + 外键 + 业务表 tenant_id 列与回填
+        #    （TRUNCATE 后表为空，回填为无害 no-op；users.tenant_id 列
+        #    须先于步骤 6 的 UPDATE users SET tenant_id 存在）
+        await ensure_business_tables_tenant_id()
+
+        # 6. 插入测试数据
+        async with async_session_factory() as session:
             # 插入测试管理员用户（id=1，与测试模式 middleware 中 set_user_id("1") 对应）
             await session.execute(
                 _text(

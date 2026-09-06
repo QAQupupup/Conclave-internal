@@ -44,12 +44,18 @@ include = ["app*", "conclave_core*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
-# 默认启用多进程并行测试（pytest-xdist）
-# -n auto: 自动按 CPU 核心数分配 worker
+# pytest-xdist worker 数不在此处配置（历史教训：addopts 里的 -n auto 在
+# 多核机器上开满逻辑核——20 worker 同时 import 全量应用栈，内存峰值触发
+# OOM killer，全体 worker "crashed/node down"；且 addopts 被追加到命令行
+# 末尾，命令行 `-n X` 无法覆盖 addopts 的 `-n`，xdist 取最后一个）。
+# worker 数由各运行入口显式指定：
+#   - docker-compose.test.yml backend-test command: -n 4（CI 与本地全量）
+#   - scripts/docker-ci-check.sh（pre-push）: -n0 单进程
+#   - 裸跑 pytest 默认串行，需并行请显式加 -n 4
 # --timeout=30: 单测超时 30s
 # --timeout-method=thread: 线程超时（兼容 asyncio）
 # 如需禁用多进程（调试单测）：pytest -p no:xdist
-addopts = "-n auto --timeout=30 --timeout-method=thread"
+addopts = "--timeout=30 --timeout-method=thread"
 
 [tool.ruff]
 target-version = "py310"
