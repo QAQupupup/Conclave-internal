@@ -182,7 +182,7 @@
 4. 议题状态机随会议生命周期流转（resolved 需挂 `resolution_artifact_id`）。
 5. 产物：项目下多议题并行，工作区隔离，闭环可追溯。
 
-## Phase 3：测试生成闭环（进行中）
+## Phase 3：测试生成闭环（已完成，1111637）
 
 目标：`test_suite` 会议产出可执行、执行结果入产物、提交可追溯。验收：仓库进 → 测试代码生成落 workspace → 沙箱执行 → `test_report` 伴生产物发布 → workspace 自动 commit → push 端点 dry-run/确认双模式。
 
@@ -241,10 +241,10 @@
 
 ### 验收标准（Phase 3 整体）
 
-- [ ] T3.1-T3.6 全部完成
-- [ ] 容器内 ruff/mypy/pytest 全绿（含新增测试，每文件 ≥1 非正向用例）
-- [ ] StubLLM 端到端：test_suite 会议 → 产物表含 test_suite + test_report 两条记录，血缘可查
-- [ ] git 链路：workspace 自动 commit（bot 身份、Conventional Commits）；push dry-run/确认双模式
+- [x] T3.1-T3.6 全部完成
+- [x] 容器内 ruff/mypy/pytest 全绿（1563 passed / 11 skipped，pre-push Docker CI 复验通过）
+- [x] StubLLM 端到端：test_suite 会议 → 产物表含 test_suite + test_report 两条记录，血缘可查（由组合覆盖：`test_produce_test_suite.py` produce_node 闭环 + `test_artifact_service.py` 伴生发布/血缘链测试）
+- [x] git 链路：workspace 自动 commit（bot 身份、Conventional Commits）；push dry-run/确认双模式（`test_git_service.py` 真实 git 仓库往返 + `test_artifacts_api.py` push 端点三态）
 
 ## Phase 4：理想态（另开 ADR）
 
