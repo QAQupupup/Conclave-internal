@@ -12,6 +12,8 @@ const LoginPage = React.lazy(() => import('./features/login/page'));
 const SetupPage = React.lazy(() => import('./features/setup/page'));
 const BoardPage = React.lazy(() => import('./features/board/page'));
 const BoardNewPage = React.lazy(() => import('./features/board/new-page'));
+const ProjectsPage = React.lazy(() => import('./features/projects/page'));
+const ProjectDetailPage = React.lazy(() => import('./features/projects/detail-page'));
 const MeetingCanvasPage = React.lazy(() => import('./features/meeting-canvas/page'));
 const ExplorePage = React.lazy(() => import('./features/explore/page'));
 const WorkspacePage = React.lazy(() => import('./features/workspace/page'));
@@ -155,6 +157,8 @@ function App() {
                 <Route path="/" element={<Navigate to="/board" replace />} />
                 <Route path="/board" element={<BoardPage />} />
                 <Route path="/board/new" element={<BoardNewPage />} />
+                <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/projects/:id" element={<ProjectDetailPage />} />
                 {/* 会议视图：/meeting 为正式路由；/explore 旧链接重定向不失效 */}
                 <Route path="/meeting/:id" element={<ExplorePage />} />
                 {/* 路由画布：整页档画布（可开新标签页/分享），见 features/meeting-canvas */}

@@ -6,9 +6,12 @@
  * - 双栏布局：左主栏 = 编辑区 + 相近话题推荐；右侧栏 = 启动参数 / 参与角色 / 参考文档
  * - 底部操作条：取消（返回列表）/ 保存草稿（只创建不运行）/ 发起会议（主按钮）
  * - ?from=<meeting_id>：复用历史议题预填（列表页行操作入口）
+ * - ?issue=<issue_id>：从议题池发起会议（ADR-017 Phase 2）——预填议题文本，
+ *   创建时携带 issue_id，后端绑定议题（open/scheduled → in_progress）并回填项目归属
  */
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useStartMeeting,
   useRunMeeting,
@@ -16,6 +19,7 @@ import {
   useAgentRoles,
   useMeeting,
 } from '@/hooks/use-meetings';
+import { useIssue, isBindable, projectKeys, issueKeys } from '@/hooks/use-projects';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldError } from '@/components/ui/form-feedback';
@@ -49,9 +53,15 @@ type LaunchPhase = 'idle' | 'creating' | 'uploading' | 'running';
 
 export default function BoardNewPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const fromId = searchParams.get('from');
   const { data: fromMeeting } = useMeeting(fromId);
+  // ADR-017 Phase 2：从议题池发起（项目详情页"发起会议"入口跳转而来）
+  const issueId = searchParams.get('issue');
+  const { data: issue } = useIssue(issueId);
+  // 仅 open/scheduled 可绑定（与后端 bind_meeting 校验一致）；不可绑定时不携带 issue_id
+  const issueBindable = !!issue && isBindable(issue.status);
 
   const [topic, setTopic] = React.useState('');
   const [topicError, setTopicError] = React.useState('');
@@ -93,6 +103,14 @@ export default function BoardNewPage() {
     }
   }, [fromMeeting]);
 
+  // 议题池预填：标题 + 详情一次性带入（?issue= 入口，同样只预填一次）
+  React.useEffect(() => {
+    if (issue && !prefilledRef.current) {
+      prefilledRef.current = true;
+      setTopic(issue.body ? `${issue.title}\n\n${issue.body}` : issue.title);
+    }
+  }, [issue]);
+
   const toggleRelated = (id: string) => {
     setRelatedIds((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
   };
@@ -127,6 +145,9 @@ export default function BoardNewPage() {
   }, [topic]);
 
   const isLaunching = launchPhase !== 'idle';
+
+  /** 返回目标：议题入口 → 项目详情页；其余 → 看板列表 */
+  const backPath = issue ? `/projects/${issue.project_id}` : '/board';
 
   // Auto-resize textarea：min 320px，上限 60vh，超限转内部滚动（问题 5：编辑区解压）
   React.useEffect(() => {
@@ -204,8 +225,15 @@ export default function BoardNewPage() {
       debate_depth: debateDepth,
       role_ids: selectedRoleIds,
       reference_meeting_ids: relatedIds,
+      // 议题绑定仅在可绑定状态下携带（后端对非 open/scheduled 返回 409）
+      ...(issueBindable && issueId ? { issue_id: issueId } : {}),
     });
     const meetingId = res.meeting_id;
+    // 绑定成功后议题状态已变（→ in_progress），刷新议题池相关缓存
+    if (issueBindable) {
+      qc.invalidateQueries({ queryKey: projectKeys.all });
+      qc.invalidateQueries({ queryKey: issueKeys.all });
+    }
     if (files.length > 0) {
       setLaunchPhase('uploading');
       for (const f of files) {
@@ -249,7 +277,7 @@ export default function BoardNewPage() {
     try {
       await createAndUpload();
       toast({ title: '草稿已保存', description: '议题已创建，可在列表中随时启动' });
-      navigate('/board');
+      navigate(backPath);
     } catch (e: unknown) {
       toast({ title: '保存失败', description: (e as Error).message, variant: 'error' });
     } finally {
@@ -273,13 +301,15 @@ export default function BoardNewPage() {
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => navigate('/board')}
+          onClick={() => navigate(backPath)}
           className="rounded-md p-1.5 text-text-tertiary transition-colors hover:bg-bg-tertiary hover:text-text-secondary"
           aria-label="返回列表"
         >
           <ChevronLeftIcon size={16} />
         </button>
-        <h1 className="text-lg font-semibold text-text-primary">{fromId ? '复用议题' : '新建议题'}</h1>
+        <h1 className="text-lg font-semibold text-text-primary">
+          {issueId ? '从议题发起' : fromId ? '复用议题' : '新建议题'}
+        </h1>
       </div>
 
       {/* 复用来源提示条 */}
@@ -288,6 +318,27 @@ export default function BoardNewPage() {
           <LinkIcon size={12} className="flex-shrink-0 text-text-tertiary" />
           <span className="min-w-0 flex-1 truncate">
             正在复用：{fromMeeting ? truncate(fromMeeting.title, 60) : '加载中...'}
+          </span>
+        </div>
+      )}
+
+      {/* 议题池来源提示条（?issue= 入口）：可绑定 → 品牌色；不可绑定 → 警示色 */}
+      {issueId && (
+        <div
+          className={cn(
+            'mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-xs',
+            issue && !issueBindable
+              ? 'border-danger/30 bg-danger/5 text-danger'
+              : 'border-brand-500/30 bg-brand-soft text-brand-600',
+          )}
+        >
+          <LinkIcon size={12} className="flex-shrink-0 opacity-70" />
+          <span className="min-w-0 flex-1 truncate">
+            {!issue
+              ? '议题加载中...'
+              : issueBindable
+                ? `从议题发起：${truncate(issue.title, 60)}（发起后议题将转为进行中）`
+                : `议题「${truncate(issue.title, 40)}」当前状态不可绑定会议，将按普通会议创建`}
           </span>
         </div>
       )}
@@ -552,7 +603,7 @@ export default function BoardNewPage() {
         <div className="mx-auto flex max-w-5xl items-center justify-between">
           <span className="text-[11px] text-text-tertiary">Ctrl+Enter 快速发起</span>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="ghost" size="sm" disabled={isLaunching} onClick={() => navigate('/board')}>
+            <Button type="button" variant="ghost" size="sm" disabled={isLaunching} onClick={() => navigate(backPath)}>
               取消
             </Button>
             <Button type="button" variant="outline" size="sm" disabled={!topic.trim() || isLaunching} onClick={handleSaveDraft}>

@@ -42,6 +42,16 @@ export type {
   ArtifactLineageNode,
   ArtifactLineageEdge,
   ArtifactLineageResponse,
+  IssueStatus,
+  Project,
+  ProjectDetail,
+  ProjectListResponse,
+  CreateProjectRequest,
+  UpdateProjectRequest,
+  Issue,
+  IssueListResponse,
+  CreateIssueRequest,
+  UpdateIssueRequest,
 } from './api';
 
 // RBAC / Team 多租户

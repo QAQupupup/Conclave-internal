@@ -8,6 +8,8 @@
  * 4. 发起会议 → POST /meetings + POST /run 并进入会议页
  * 5. 保存草稿 → 仅 POST /meetings 不调用 /run，返回列表页
  * 6. 字数统计随输入更新
+ * 7. ?issue= 从议题发起 → 预填议题文本 + 创建时携带 issue_id（ADR-017 Phase 2）
+ * 8. ?issue= 议题不可绑定（已闭环）→ 警示条且不携带 issue_id（非正向）
  */
 import * as React from 'react';
 import { Routes, Route } from 'react-router';
@@ -22,6 +24,7 @@ vi.mock('@/lib/api', () => ({
     get: vi.fn(),
     post: vi.fn(),
     relatedMeetings: vi.fn(),
+    issues: { get: vi.fn() },
   },
 }));
 
@@ -34,6 +37,7 @@ vi.mock('@/hooks/use-toast', () => ({
 const mockApiGet = vi.mocked(api.get);
 const mockApiPost = vi.mocked(api.post);
 const mockRelated = vi.mocked(api.relatedMeetings);
+const mockIssueGet = vi.mocked(api.issues.get);
 
 function renderNewPage(initialEntries: string[] = ['/board/new']) {
   return renderWithProviders(
@@ -161,5 +165,73 @@ describe('BoardNewPage 新建议题页', () => {
 
     fireEvent.change(screen.getByLabelText('议题描述'), { target: { value: '一二三四五' } });
     expect(screen.getByText('5 字')).toBeDefined();
+  });
+
+  it('?issue= 从议题发起 → 预填议题文本且创建请求携带 issue_id', async () => {
+    mockIssueGet.mockResolvedValue({
+      id: 'issue-1',
+      project_id: 'p1',
+      title: 'push 端点增加重试',
+      body: '建议指数退避。',
+      source: 'user',
+      status: 'open',
+      priority: 70,
+    } as never);
+    mockApiPost.mockImplementation((path: string) => {
+      if (path === '/meetings') return Promise.resolve({ meeting_id: 'm-issue' });
+      return Promise.resolve({});
+    });
+
+    renderNewPage(['/board/new?issue=issue-1']);
+
+    await waitFor(() => {
+      expect(screen.getByText('从议题发起')).toBeDefined();
+    });
+    const textarea = screen.getByLabelText('议题描述') as HTMLTextAreaElement;
+    await waitFor(() => {
+      expect(textarea.value).toBe('push 端点增加重试\n\n建议指数退避。');
+    });
+    // 可绑定提示条：告知发起后议题转为进行中
+    expect(screen.getByText(/发起后议题将转为进行中/)).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: /发起会议/ }));
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        '/meetings',
+        expect.objectContaining({ issue_id: 'issue-1' }),
+      );
+    });
+  });
+
+  it('?issue= 议题已闭环 → 警示提示且创建请求不携带 issue_id（非正向）', async () => {
+    mockIssueGet.mockResolvedValue({
+      id: 'issue-2',
+      project_id: 'p1',
+      title: '已闭环的议题',
+      body: null,
+      source: 'user',
+      status: 'resolved',
+      priority: 50,
+    } as never);
+    mockApiPost.mockImplementation((path: string) => {
+      if (path === '/meetings') return Promise.resolve({ meeting_id: 'm-nobind' });
+      return Promise.resolve({});
+    });
+
+    renderNewPage(['/board/new?issue=issue-2']);
+
+    await waitFor(() => {
+      expect(screen.getByText(/当前状态不可绑定会议/)).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /发起会议/ }));
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        '/meetings',
+        expect.not.objectContaining({ issue_id: expect.anything() }),
+      );
+    });
   });
 });

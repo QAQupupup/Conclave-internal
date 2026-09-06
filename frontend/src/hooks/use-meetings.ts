@@ -271,6 +271,8 @@ export interface StartMeetingPayload {
   debate_depth?: string;
   role_ids?: string[];
   reference_meeting_ids?: string[];
+  /** ADR-017 Phase 2：从议题发起会议（仅 open/scheduled 可绑定，后端驱动状态机 → in_progress） */
+  issue_id?: string;
   model?: string;
   auto_iterate?: boolean;
   max_iterations?: number;

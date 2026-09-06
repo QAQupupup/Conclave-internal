@@ -1,5 +1,18 @@
 import { useAuthStore } from '@/stores/auth-slice';
-import type { Artifact, ArtifactListResponse, ArtifactLineageResponse } from '@/types';
+import type {
+  Artifact,
+  ArtifactListResponse,
+  ArtifactLineageResponse,
+  CreateIssueRequest,
+  CreateProjectRequest,
+  Issue,
+  IssueListResponse,
+  Project,
+  ProjectDetail,
+  ProjectListResponse,
+  UpdateIssueRequest,
+  UpdateProjectRequest,
+} from '@/types';
 import { isDemoMode, mockApi } from './mock-data';
 
 const API_BASE = '';
@@ -121,6 +134,280 @@ export class ApiError extends Error {
 // ---------------------------------------------------------------------------
 // Demo mode mock responses
 // ---------------------------------------------------------------------------
+
+// ---- Projects / Issues 内存态 mock（ADR-017 Phase 2，仅演示模式使用） ----
+
+interface DemoProject {
+  id: string;
+  slug: string;
+  name: string;
+  repo_url: string | null;
+  default_branch: string;
+  description: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface DemoIssue {
+  id: string;
+  project_id: string;
+  title: string;
+  body: string | null;
+  source: string;
+  source_meeting_id: string | null;
+  status: string;
+  priority: number;
+  assigned_meeting_id: string | null;
+  resolution_artifact_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const demoProjects: DemoProject[] = [
+  {
+    id: 'demo-proj-conclave',
+    slug: 'conclave',
+    name: 'Conclave 多智能体平台',
+    repo_url: 'https://github.com/example/conclave',
+    default_branch: 'main',
+    description: 'Git 驱动的多智能体协作决策平台',
+    created_by: 'admin',
+    created_at: '2026-08-20T09:00:00Z',
+    updated_at: '2026-09-01T10:30:00Z',
+  },
+  {
+    id: 'demo-proj-docs',
+    slug: 'docs-site',
+    name: '文档站重构',
+    repo_url: null,
+    default_branch: 'main',
+    description: '纯文档型项目（无绑定仓库）',
+    created_by: 'admin',
+    created_at: '2026-08-28T14:00:00Z',
+    updated_at: '2026-08-28T14:00:00Z',
+  },
+];
+
+const demoIssues: DemoIssue[] = [
+  {
+    id: 'demo-issue-1',
+    project_id: 'demo-proj-conclave',
+    title: '产物 push 端点缺少重试机制',
+    body: '网络抖动时 push 失败无自动重试，建议增加指数退避。',
+    source: 'user',
+    source_meeting_id: null,
+    status: 'open',
+    priority: 70,
+    assigned_meeting_id: null,
+    resolution_artifact_id: null,
+    created_by: 'admin',
+    created_at: '2026-09-02T08:00:00Z',
+    updated_at: '2026-09-02T08:00:00Z',
+  },
+  {
+    id: 'demo-issue-2',
+    project_id: 'demo-proj-conclave',
+    title: '测试沙箱执行超时阈值评估',
+    body: null,
+    source: 'meeting',
+    source_meeting_id: 'demo-meeting-9',
+    status: 'in_progress',
+    priority: 50,
+    assigned_meeting_id: 'demo-meeting-12',
+    resolution_artifact_id: null,
+    created_by: 'admin',
+    created_at: '2026-09-03T11:20:00Z',
+    updated_at: '2026-09-04T09:00:00Z',
+  },
+  {
+    id: 'demo-issue-3',
+    project_id: 'demo-proj-docs',
+    title: 'API 参考文档补齐议题池端点',
+    body: null,
+    source: 'user',
+    source_meeting_id: null,
+    status: 'resolved',
+    priority: 40,
+    assigned_meeting_id: 'demo-meeting-8',
+    resolution_artifact_id: 'demo-artifact-77',
+    created_by: 'admin',
+    created_at: '2026-08-30T16:00:00Z',
+    updated_at: '2026-09-01T10:30:00Z',
+  },
+];
+
+// 与后端 issue_service.ALLOWED_TRANSITIONS 对齐（演示模式保持行为一致）
+const DEMO_ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  open: ['scheduled', 'in_progress', 'wontfix'],
+  scheduled: ['in_progress', 'open', 'wontfix'],
+  in_progress: ['resolved', 'open', 'wontfix'],
+  resolved: [],
+  wontfix: [],
+};
+
+let demoIdSeq = 0;
+function nextDemoId(prefix: string): string {
+  demoIdSeq += 1;
+  return `${prefix}-demo-${Date.now()}-${demoIdSeq}`;
+}
+
+function demoNow(): string {
+  return new Date().toISOString();
+}
+
+/** Projects / Issues 演示模式路由分发（未覆盖的变更操作 → 501） */
+function getProjectIssueMock<T>(path: string, method: string, body?: unknown): T | null {
+  const cleanPath = path.split('?')[0];
+  const query = new URLSearchParams(path.includes('?') ? path.split('?')[1] : '');
+
+  // GET /api/projects —— 分页列表（附议题总数）
+  if (method === 'GET' && cleanPath === '/api/projects') {
+    const limit = Number(query.get('limit') ?? 50);
+    const offset = Number(query.get('offset') ?? 0);
+    const sorted = [...demoProjects].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const items = sorted.slice(offset, offset + limit).map((p) => ({
+      ...p,
+      issue_total: demoIssues.filter((i) => i.project_id === p.id).length,
+    }));
+    return { items, total: sorted.length } as unknown as T;
+  }
+
+  // POST /api/projects —— 创建项目
+  if (method === 'POST' && cleanPath === '/api/projects') {
+    const payload = body as Partial<DemoProject>;
+    if (demoProjects.some((p) => p.slug === payload.slug)) {
+      throw new ApiError(`项目标识已存在: ${payload.slug}`, 409);
+    }
+    const project: DemoProject = {
+      id: nextDemoId('proj'),
+      slug: payload.slug ?? '',
+      name: payload.name ?? '',
+      repo_url: payload.repo_url ?? null,
+      default_branch: payload.default_branch || 'main',
+      description: payload.description ?? null,
+      created_by: 'admin',
+      created_at: demoNow(),
+      updated_at: demoNow(),
+    };
+    demoProjects.push(project);
+    return project as unknown as T;
+  }
+
+  // GET /api/projects/:id/issues —— 项目议题列表
+  const projectIssuesMatch = cleanPath.match(/^\/api\/projects\/([^/]+)\/issues$/);
+  if (projectIssuesMatch && method === 'GET') {
+    const projectId = projectIssuesMatch[1];
+    if (!demoProjects.some((p) => p.id === projectId)) throw new ApiError('项目不存在', 404);
+    const statusFilter = query.get('status');
+    const limit = Number(query.get('limit') ?? 50);
+    const offset = Number(query.get('offset') ?? 0);
+    const sorted = demoIssues
+      .filter((i) => i.project_id === projectId && (!statusFilter || i.status === statusFilter))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return { items: sorted.slice(offset, offset + limit), total: sorted.length } as unknown as T;
+  }
+
+  // POST /api/projects/:id/issues —— 议题入池
+  if (projectIssuesMatch && method === 'POST') {
+    const projectId = projectIssuesMatch[1];
+    if (!demoProjects.some((p) => p.id === projectId)) throw new ApiError('项目不存在', 404);
+    const payload = body as Partial<DemoIssue>;
+    if (payload.source === 'meeting' && !payload.source_meeting_id) {
+      throw new ApiError('会议来源议题必须挂 source_meeting_id', 400);
+    }
+    const issue: DemoIssue = {
+      id: nextDemoId('issue'),
+      project_id: projectId,
+      title: payload.title ?? '',
+      body: payload.body ?? null,
+      source: payload.source || 'user',
+      source_meeting_id: payload.source_meeting_id ?? null,
+      status: 'open',
+      priority: payload.priority ?? 50,
+      assigned_meeting_id: null,
+      resolution_artifact_id: null,
+      created_by: 'admin',
+      created_at: demoNow(),
+      updated_at: demoNow(),
+    };
+    demoIssues.push(issue);
+    return issue as unknown as T;
+  }
+
+  // GET /api/projects/:id —— 项目详情（含议题状态分组统计）
+  const projectDetailMatch = cleanPath.match(/^\/api\/projects\/([^/]+)$/);
+  if (projectDetailMatch && method === 'GET') {
+    const project = demoProjects.find((p) => p.id === projectDetailMatch[1]);
+    if (!project) throw new ApiError('项目不存在', 404);
+    const issues = demoIssues.filter((i) => i.project_id === project.id);
+    const stats: Record<string, number> = { total: issues.length };
+    for (const i of issues) stats[i.status] = (stats[i.status] ?? 0) + 1;
+    return { ...project, issue_stats: stats } as unknown as T;
+  }
+
+  // PATCH /api/projects/:id —— 更新项目
+  if (projectDetailMatch && method === 'PATCH') {
+    const project = demoProjects.find((p) => p.id === projectDetailMatch[1]);
+    if (!project) throw new ApiError('项目不存在', 404);
+    const payload = body as Partial<DemoProject>;
+    Object.assign(project, payload, { updated_at: demoNow() });
+    return project as unknown as T;
+  }
+
+  // DELETE /api/projects/:id —— 删除项目（议题级联删）
+  if (projectDetailMatch && method === 'DELETE') {
+    const idx = demoProjects.findIndex((p) => p.id === projectDetailMatch[1]);
+    if (idx < 0) throw new ApiError('项目不存在', 404);
+    const [removed] = demoProjects.splice(idx, 1);
+    for (let i = demoIssues.length - 1; i >= 0; i--) {
+      if (demoIssues[i].project_id === removed.id) demoIssues.splice(i, 1);
+    }
+    return { deleted: removed.id } as unknown as T;
+  }
+
+  // GET /api/issues/:id
+  const issueMatch = cleanPath.match(/^\/api\/issues\/([^/]+)$/);
+  if (issueMatch && method === 'GET') {
+    const issue = demoIssues.find((i) => i.id === issueMatch[1]);
+    if (!issue) throw new ApiError('议题不存在', 404);
+    return issue as unknown as T;
+  }
+
+  // PATCH /api/issues/:id —— 字段更新 / 状态机流转
+  if (issueMatch && method === 'PATCH') {
+    const issue = demoIssues.find((i) => i.id === issueMatch[1]);
+    if (!issue) throw new ApiError('议题不存在', 404);
+    const payload = body as Partial<DemoIssue>;
+    const { status: target, resolution_artifact_id, ...fields } = payload;
+    Object.assign(issue, fields);
+    if (target !== undefined) {
+      if (!(DEMO_ALLOWED_TRANSITIONS[issue.status] ?? []).includes(target)) {
+        throw new ApiError(`非法流转: ${issue.status} → ${target}`, 409);
+      }
+      if (target === 'resolved' && !(resolution_artifact_id || issue.resolution_artifact_id)) {
+        throw new ApiError('resolved 必须挂 resolution_artifact_id（闭环凭证）', 409);
+      }
+      issue.status = target;
+      if (resolution_artifact_id) issue.resolution_artifact_id = resolution_artifact_id;
+    } else if (resolution_artifact_id !== undefined) {
+      issue.resolution_artifact_id = resolution_artifact_id;
+    }
+    issue.updated_at = demoNow();
+    return issue as unknown as T;
+  }
+
+  // DELETE /api/issues/:id
+  if (issueMatch && method === 'DELETE') {
+    const idx = demoIssues.findIndex((i) => i.id === issueMatch[1]);
+    if (idx < 0) throw new ApiError('议题不存在', 404);
+    const [removed] = demoIssues.splice(idx, 1);
+    return { deleted: removed.id } as unknown as T;
+  }
+
+  return null;
+}
 
 // Check if we should use mock data for this path
 function getMockResponse<T>(path: string, method: string, body?: unknown): T | null {
@@ -476,6 +763,14 @@ function getMockResponse<T>(path: string, method: string, body?: unknown): T | n
   }
 
   // -----------------------------------------------------------------------
+  // Projects / Issues（ADR-017 Phase 2，演示模式内存态 mock）
+  // -----------------------------------------------------------------------
+
+  if (path.startsWith('/api/projects') || path.startsWith('/api/issues')) {
+    return getProjectIssueMock<T>(path, method, body);
+  }
+
+  // -----------------------------------------------------------------------
   // Catch-all:
   // GET → null (let it fall through to real fetch, which will 404 in demo)
   // POST/PUT/PATCH/DELETE → throw ApiError (no more fake success for unhandled mutations)
@@ -820,6 +1115,47 @@ export const api = {
     get: (id: string) => request<Artifact>(`/artifacts/${id}`, { method: 'GET' }),
     /** 产物上游血缘图（深度上限防环） */
     lineage: (id: string) => request<ArtifactLineageResponse>(`/artifacts/${id}/lineage`, { method: 'GET' }),
+  },
+  /** 项目（ADR-017 Phase 2）：议题池的命名空间容器 */
+  projects: {
+    /** 分页查询项目（租户过滤，最新在上，附议题总数） */
+    list: (params?: { limit?: number; offset?: number }) => {
+      const query: Record<string, number> = {};
+      if (params?.limit !== undefined) query.limit = params.limit;
+      if (params?.offset !== undefined) query.offset = params.offset;
+      return request<ProjectListResponse>(`/api/projects${buildQueryString(query)}`, { method: 'GET' });
+    },
+    /** 项目详情（含议题状态分组统计） */
+    get: (id: string) => request<ProjectDetail>(`/api/projects/${id}`, { method: 'GET' }),
+    /** 创建项目（slug 租户内唯一，冲突 → 409） */
+    create: (data: CreateProjectRequest) =>
+      request<Project>('/api/projects', { method: 'POST', body: JSON.stringify(data) }),
+    /** 更新项目（白名单字段，只更新传入项） */
+    update: (id: string, data: UpdateProjectRequest) =>
+      request<Project>(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    /** 删除项目（议题级联删；会议/产物关联置 NULL） */
+    delete: (id: string) => request<{ deleted: string }>(`/api/projects/${id}`, { method: 'DELETE' }),
+    /** 项目议题列表（可按状态过滤，最新在上） */
+    listIssues: (projectId: string, params?: { status?: string; limit?: number; offset?: number }) => {
+      const query: Record<string, string | number> = {};
+      if (params?.status) query.status = params.status;
+      if (params?.limit !== undefined) query.limit = params.limit;
+      if (params?.offset !== undefined) query.offset = params.offset;
+      return request<IssueListResponse>(`/api/projects/${projectId}/issues${buildQueryString(query)}`, { method: 'GET' });
+    },
+    /** 议题入池（source=user 手动；source=meeting 须挂 source_meeting_id） */
+    createIssue: (projectId: string, data: CreateIssueRequest) =>
+      request<Issue>(`/api/projects/${projectId}/issues`, { method: 'POST', body: JSON.stringify(data) }),
+  },
+  /** 议题平铺端点（ADR-017 Phase 2）：创建走 projects.createIssue */
+  issues: {
+    /** 单条议题 */
+    get: (id: string) => request<Issue>(`/api/issues/${id}`, { method: 'GET' }),
+    /** 更新字段 / 状态流转（状态机校验，非法流转 → 409） */
+    update: (id: string, data: UpdateIssueRequest) =>
+      request<Issue>(`/api/issues/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    /** 删除议题（会议侧关联外键 SET NULL） */
+    delete: (id: string) => request<{ deleted: string }>(`/api/issues/${id}`, { method: 'DELETE' }),
   },
 };
 

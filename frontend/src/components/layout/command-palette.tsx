@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/ui-slice';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
   LayoutDashboard,
+  Layers,
   FolderKanban,
   Network,
   FileText,
@@ -99,6 +100,9 @@ export function CommandPalette() {
               </CommandItem>
               <CommandItem onSelect={() => runCommand(() => navigate('/board/new'))} icon={<Plus className="h-4 w-4" />}>
                 新建议题
+              </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => navigate('/projects'))} icon={<Layers className="h-4 w-4" />}>
+                项目与议题池
               </CommandItem>
               <CommandItem onSelect={() => runCommand(() => navigate('/workspace'))} icon={<FolderKanban className="h-4 w-4" />}>
                 工作区
