@@ -5,6 +5,8 @@
   Commits、临时文件排除）。无 ``.git`` 时先 init。
 - ``diff_summary``：未提交变更 + 未推送提交数摘要（供 push dry-run 展示）。
 - ``push_repo``：推送到远端（路由层要求显式确认参数，ADR-017 D8）。
+- 路径级原语（ADR-017 D11 合入流程）：``commit_repo`` / ``push_branch``，
+  对 workspace 内任意仓库目录操作（越界防护同会议级）。
 
 安全约束：
 - 子进程参数列表无 shell（对齐 ``routers/code.py:_run_git`` 模式）
@@ -104,6 +106,21 @@ def _ensure_gitignore(ws: Path) -> None:
         f.write("\n".join(missing) + "\n")
 
 
+async def ensure_bot_identity(repo: Path | str) -> None:
+    """仓库本地配置 bot 身份（--local，不污染全局，I12）。
+
+    提交/合并类操作的共同前置：容器通常无全局 git 配置，任何产生提交的
+    合并（含 ``--no-commit`` 干跑——git 准备 MERGE_MSG 时提前校验身份）
+    都会因 "Committer identity unknown" 直接 rc=128 失败。
+    """
+    rc, _, err = await _run_git(Path(repo), ["config", "--local", "user.name", GIT_BOT_NAME], GIT_COMMIT_TIMEOUT)
+    if rc != 0:
+        raise GitServiceError(f"git user.name 配置失败: {err[:200]}")
+    rc, _, err = await _run_git(Path(repo), ["config", "--local", "user.email", GIT_BOT_EMAIL], GIT_COMMIT_TIMEOUT)
+    if rc != 0:
+        raise GitServiceError(f"git user.email 配置失败: {err[:200]}")
+
+
 async def commit_workspace(meeting_id: str, topic: str = "") -> dict[str, Any]:
     """会议工作区自动提交（bot 身份 + Conventional Commits + 临时文件排除）。
 
@@ -122,8 +139,7 @@ async def commit_workspace(meeting_id: str, topic: str = "") -> dict[str, Any]:
         if rc != 0:
             raise GitServiceError(f"git init 失败: {err[:200]}")
     # bot 身份仅本地配置（I12）
-    await _run_git(ws, ["config", "--local", "user.name", GIT_BOT_NAME], GIT_COMMIT_TIMEOUT)
-    await _run_git(ws, ["config", "--local", "user.email", GIT_BOT_EMAIL], GIT_COMMIT_TIMEOUT)
+    await ensure_bot_identity(ws)
     _ensure_gitignore(ws)
 
     rc, _, err = await _run_git(ws, ["add", "-A"], GIT_COMMIT_TIMEOUT)
@@ -207,6 +223,80 @@ async def push_repo(meeting_id: str) -> dict[str, Any]:
     if not branch or branch == "HEAD":
         raise GitPushError("工作区处于游离头指针状态，无法推送")
     rc, out, err = await _run_git(ws, ["push", remote, branch], GIT_PUSH_TIMEOUT)
+    if rc != 0:
+        raise GitPushError(f"push 失败: {(err or out)[:300]}")
+    return {"pushed_to": f"{remote}/{branch}", "output": (out + "\n" + err)[-500:]}
+
+
+# ---------- 路径级原语（ADR-017 D11 议题合入流程，Phase 4） ----------
+
+
+def resolve_repo_dir(repo_path: Path | str) -> Path:
+    """路径级仓库目录校验与防穿越：必须存在、是 git 仓库、落在 workspace_root 内。
+
+    与 ``_workspace_dir`` 同级的安全边界，但不绑定 meeting_id——
+    供合入流程操作会议仓库克隆与项目共享克隆。
+    """
+    from app.config import settings
+
+    ws_root = Path(settings.workspace_root).resolve()
+    p = Path(repo_path).resolve()
+    try:
+        p.relative_to(ws_root)
+    except ValueError:
+        raise GitServiceError("仓库路径越界（不在工作区根目录内）") from None
+    if not p.is_dir():
+        raise GitServiceError("仓库目录不存在")
+    if not (p / ".git").exists():
+        raise GitServiceError("目标目录不是 git 仓库")
+    return p
+
+
+async def commit_repo(repo_path: Path | str, message: str) -> dict[str, Any]:
+    """路径级提交：bot 身份 + 调用方给定消息（Conventional Commits 语义由调用方保证）。
+
+    与 ``commit_workspace`` 的差异：不自动 init（合入源/目标必须已是仓库）、
+    不绑定会议字符集、消息完整由调用方提供。无变更时返回 ``{"committed": False}``。
+
+    Returns:
+        ``{committed, commit_sha?, message?}``；commit_sha 为 12 位短哈希。
+
+    Raises:
+        GitServiceError: 路径越界/非仓库/空消息/git 命令失败。
+    """
+    repo = resolve_repo_dir(repo_path)
+    if not message or not message.strip():
+        raise GitServiceError("提交消息不能为空")
+    # bot 身份仅本地配置（I12 同策略）
+    await ensure_bot_identity(repo)
+    rc, _, err = await _run_git(repo, ["add", "-A"], GIT_COMMIT_TIMEOUT)
+    if rc != 0:
+        raise GitServiceError(f"git add 失败: {err[:200]}")
+    rc, status_out, _ = await _run_git(repo, ["status", "--porcelain"], GIT_COMMIT_TIMEOUT)
+    if rc == 0 and not status_out.strip():
+        return {"committed": False, "reason": "no_changes"}
+    rc, _, err = await _run_git(repo, ["commit", "-m", message.strip(), "--quiet"], GIT_COMMIT_TIMEOUT)
+    if rc != 0:
+        raise GitServiceError(f"git commit 失败: {err[:200]}")
+    _, sha_out, _ = await _run_git(repo, ["rev-parse", "HEAD"], GIT_COMMIT_TIMEOUT)
+    return {"committed": True, "commit_sha": sha_out.strip()[:12], "message": message.strip()}
+
+
+async def push_branch(repo_path: Path | str, remote: str = "origin", branch: str | None = None) -> dict[str, Any]:
+    """路径级推送：把指定（或当前）分支推到远端。
+
+    D8 红线：显式确认必须由调用方链路强制（合入流程的 confirm 参数）。
+
+    Raises:
+        GitPushError: 游离头指针/推送失败。
+    """
+    repo = resolve_repo_dir(repo_path)
+    if branch is None:
+        _, branch_out, _ = await _run_git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], GIT_COMMIT_TIMEOUT)
+        branch = branch_out.strip()
+    if not branch or branch == "HEAD":
+        raise GitPushError("处于游离头指针状态，无法推送")
+    rc, out, err = await _run_git(repo, ["push", remote, branch], GIT_PUSH_TIMEOUT)
     if rc != 0:
         raise GitPushError(f"push 失败: {(err or out)[:300]}")
     return {"pushed_to": f"{remote}/{branch}", "output": (out + "\n" + err)[-500:]}
