@@ -3,13 +3,16 @@
  *
  * 设计要点：
  * - 页头：返回 + 项目信息 + 编辑入口（复用 ProjectFormDialog）
- * - 状态过滤 pills：全部 + 五状态，带计数（来自项目详情 issue_stats）
+ * - 状态过滤 pills：全部 + 六状态，带计数（来自项目详情 issue_stats）
  * - 议题行：状态徽章、优先级、来源标签、行内状态流转（只暴露合法流转目标）
  * - 闭环红线：流转到 resolved 必须填闭环凭证（弹 Dialog 输入产物 ID）
- * - 发起会议：仅 open/scheduled 可绑定，跳转 /board/new?issue=<id>
+ * - 发起会议：仅 open/scheduled/conflict 可绑定，跳转 /board/new?issue=<id>
+ * - 合入 main（ADR-017 D11）：in_progress/conflict 可发起，两阶段确认
+ *   （MergeDialog 先干跑预览，用户确认后正式合并推送）
  */
 import * as React from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -19,12 +22,16 @@ import {
   useCreateIssue,
   useUpdateIssue,
   useDeleteIssue,
+  useMergeIssue,
   allowedTransitions,
   isBindable,
+  isMergeable,
+  projectKeys,
   ISSUE_STATUSES,
   ISSUE_STATUS_LABELS,
 } from '@/hooks/use-projects';
-import type { Issue, IssueStatus } from '@/types';
+import { api } from '@/lib/api';
+import type { Issue, IssueStatus, MergePreviewResponse } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -52,21 +59,25 @@ import {
   ChevronLeftIcon,
   PlusIcon,
   GitBranchIcon,
+  GitMergeIcon,
   MoreHorizontalIcon,
   EditIcon,
   TrashIcon,
   PlayIcon,
   CheckCircleIcon,
   LinkIcon,
+  SpinnerIcon,
 } from '@/components/ui/svg-icons';
 import { ProjectFormDialog } from './project-form-dialog';
+import { extractMergeConflicts } from './merge-utils';
 
 // ===== 状态徽章 =====
 
-const STATUS_BADGE_VARIANT: Record<IssueStatus, 'outline' | 'secondary' | 'default' | 'success' | 'warning'> = {
+const STATUS_BADGE_VARIANT: Record<IssueStatus, 'outline' | 'secondary' | 'default' | 'success' | 'warning' | 'destructive'> = {
   open: 'outline',
   scheduled: 'warning',
   in_progress: 'default',
+  conflict: 'destructive',
   resolved: 'success',
   wontfix: 'secondary',
 };
@@ -283,19 +294,169 @@ function ResolveDialog({ issue, onClose }: ResolveDialogProps) {
   );
 }
 
+// ===== 合入 main Dialog（ADR-017 D11 两阶段确认） =====
+
+interface MergeDialogProps {
+  /** 非 null 即打开；仅 in_progress/conflict 态议题可传入 */
+  issue: Issue | null;
+  onClose: () => void;
+}
+
+/**
+ * 合入两阶段确认弹窗：
+ * 1. 打开即自动干跑预览（confirm=false，不落状态）——展示目标分支/变更清单；
+ * 2. 用户确认后正式合入（confirm=true）——合并 + push + 议题闭环；
+ * 3. 预览有冲突 → 禁用确认；执行遇冲突 → 议题已被后端置 conflict 态，
+ *    展示冲突清单并失效缓存刷新列表。
+ */
+export function MergeDialog({ issue, onClose }: MergeDialogProps) {
+  const qc = useQueryClient();
+  const [preview, setPreview] = React.useState<MergePreviewResponse | null>(null);
+  const [previewError, setPreviewError] = React.useState('');
+  const [executing, setExecuting] = React.useState(false);
+  const merge = useMergeIssue();
+
+  // 第一阶段：打开即干跑预览（议题切换时重置现场）
+  React.useEffect(() => {
+    if (!issue) return;
+    let cancelled = false;
+    setPreview(null);
+    setPreviewError('');
+    setExecuting(false);
+    api.issues
+      .merge(issue.id, false)
+      .then((res) => {
+        if (!cancelled) setPreview(res as MergePreviewResponse);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setPreviewError(err instanceof Error ? err.message : '预览失败，请稍后重试');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [issue]);
+
+  // 第二阶段：用户确认后正式合入
+  const handleConfirm = async () => {
+    if (!issue || !preview?.mergeable || executing) return;
+    setExecuting(true);
+    try {
+      const res = await merge.mutateAsync({ id: issue.id, confirm: true });
+      if (res.mode === 'execute') {
+        toast({
+          title: '已合入 main',
+          description: `${issue.title} → ${res.pushed_to}（${res.merge_commit_sha}）`,
+        });
+      }
+      onClose();
+    } catch (err: unknown) {
+      const conflicts = extractMergeConflicts(err);
+      if (conflicts.length > 0 && preview) {
+        // 合入冲突：议题已被后端置 conflict 态，展示清单并刷新列表
+        setPreview({ ...preview, mergeable: false, conflicts });
+        qc.invalidateQueries({ queryKey: projectKeys.detail(issue.project_id) });
+        qc.invalidateQueries({ queryKey: projectKeys.lists() });
+      } else {
+        setPreviewError(err instanceof Error ? err.message : '合入失败，请稍后重试');
+      }
+      setExecuting(false);
+    }
+  };
+
+  const mergeable = preview?.mergeable === true;
+
+  return (
+    <Dialog open={issue !== null} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg" showClose>
+        <DialogHeader className="pb-2">
+          <DialogTitle>合入 main</DialogTitle>
+          <DialogDescription>
+            「{issue?.title ?? ''}」将合入项目仓库 {preview?.branch ?? 'main'} 分支并推送远端
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 px-6 pb-2">
+          {!preview && !previewError && (
+            <div className="flex items-center gap-2 py-6 text-xs text-text-tertiary">
+              <SpinnerIcon size={14} className="animate-spin" />
+              正在干跑合入预览…
+            </div>
+          )}
+
+          {previewError && (
+            <div className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">{previewError}</div>
+          )}
+
+          {preview && (
+            <>
+              {/* 预览摘要 */}
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-tertiary">
+                <span>目标分支：{preview.branch}</span>
+                <span>变更文件：{preview.changed_files.length}</span>
+                {preview.source_committed && <span>会议仓库未提交变更已自动提交</span>}
+              </div>
+
+              {mergeable ? (
+                <div className="max-h-48 overflow-y-auto rounded-md border border-border-soft bg-bg-secondary/40 px-3 py-2">
+                  {preview.changed_files.length === 0 ? (
+                    <p className="text-xs text-text-tertiary">无文件变更（空合并）</p>
+                  ) : (
+                    preview.changed_files.map((line) => (
+                      <p key={line} className="font-mono text-[11px] leading-5 text-text-secondary">
+                        {line}
+                      </p>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div className="max-h-48 overflow-y-auto rounded-md border border-danger/30 bg-danger/5 px-3 py-2">
+                  <p className="mb-1 text-xs font-medium text-danger">
+                    合并冲突（{preview.conflicts.length} 个文件），议题已置「合入冲突」态
+                  </p>
+                  {preview.conflicts.map((f) => (
+                    <p key={f} className="font-mono text-[11px] leading-5 text-text-secondary">
+                      {f}
+                    </p>
+                  ))}
+                  <p className="mt-1.5 text-[11px] text-text-tertiary">
+                    请先解决冲突：可重新发起会议重做，或在仓库中手动解决后重试合入
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <DialogFooter className="px-6 pb-5">
+          <Button variant="outline" onClick={onClose} disabled={executing}>
+            {mergeable ? '取消' : '关闭'}
+          </Button>
+          {mergeable && (
+            <Button onClick={handleConfirm} disabled={executing || !preview}>
+              {executing ? '合入中…' : '确认合入'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ===== 议题行 =====
 
 interface IssueRowProps {
   issue: Issue;
   onTransition: (target: IssueStatus) => void;
   onStartMeeting: () => void;
+  onMerge: () => void;
   onDelete: () => void;
 }
 
-function IssueRow({ issue, onTransition, onStartMeeting, onDelete }: IssueRowProps) {
+function IssueRow({ issue, onTransition, onStartMeeting, onMerge, onDelete }: IssueRowProps) {
   const navigate = useNavigate();
   const transitions = allowedTransitions(issue.status);
   const bindable = isBindable(issue.status);
+  const mergeable = isMergeable(issue.status);
   // resolved 走凭证 Dialog，其余直接流转
   const directTargets = transitions.filter((t) => t !== 'resolved');
   const canResolve = transitions.includes('resolved');
@@ -344,7 +505,7 @@ function IssueRow({ issue, onTransition, onStartMeeting, onDelete }: IssueRowPro
       </div>
 
       {/* 行操作 */}
-      <div className="flex flex-shrink-0 items-center gap-1">
+      <div className="flex w-[176px] flex-shrink-0 items-center justify-end gap-1">
         {bindable && (
           <Button
             variant="outline"
@@ -355,6 +516,18 @@ function IssueRow({ issue, onTransition, onStartMeeting, onDelete }: IssueRowPro
           >
             <PlayIcon size={11} />
             发起会议
+          </Button>
+        )}
+        {mergeable && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 px-2 text-xs"
+            onClick={onMerge}
+            title="合入项目仓库主分支（两阶段确认：先预览变更，确认后合并推送）"
+          >
+            <GitMergeIcon size={11} />
+            合入
           </Button>
         )}
         <DropdownMenu>
@@ -417,6 +590,7 @@ export default function ProjectDetailPage() {
   const [editOpen, setEditOpen] = React.useState(false);
   const [issueFormOpen, setIssueFormOpen] = React.useState(false);
   const [resolvingIssue, setResolvingIssue] = React.useState<Issue | null>(null);
+  const [mergingIssue, setMergingIssue] = React.useState<Issue | null>(null);
   const [deletingIssue, setDeletingIssue] = React.useState<Issue | null>(null);
   const [confirmDeleteProject, setConfirmDeleteProject] = React.useState(false);
 
@@ -473,7 +647,7 @@ export default function ProjectDetailPage() {
     }
   };
 
-  // 过滤 pills：全部 + 五状态（计数来自 issue_stats）
+  // 过滤 pills：全部 + 六状态（计数来自 issue_stats）
   const filterPills: Array<{ value: string; label: string; count: number }> = [
     { value: '', label: '全部', count: stats.total ?? 0 },
     ...ISSUE_STATUSES.map((s) => ({ value: s, label: ISSUE_STATUS_LABELS[s], count: stats[s] ?? 0 })),
@@ -571,7 +745,7 @@ export default function ProjectDetailPage() {
           <span className="hidden w-12 text-center md:block">优先级</span>
           <span className="hidden w-14 lg:block">来源</span>
           <span className="hidden w-24 lg:block">创建时间</span>
-          <span className="w-[104px]" />
+          <span className="w-[176px]" />
         </div>
 
         {issuesLoading ? (
@@ -608,6 +782,7 @@ export default function ProjectDetailPage() {
                 issue={issue}
                 onTransition={(target) => handleTransition(issue, target)}
                 onStartMeeting={() => navigate(`/board/new?issue=${issue.id}`)}
+                onMerge={() => setMergingIssue(issue)}
                 onDelete={() => setDeletingIssue(issue)}
               />
             ))}
@@ -623,6 +798,7 @@ export default function ProjectDetailPage() {
       <ProjectFormDialog open={editOpen} onOpenChange={setEditOpen} project={project ?? null} />
       {id && <IssueFormDialog open={issueFormOpen} onOpenChange={setIssueFormOpen} projectId={id} />}
       <ResolveDialog issue={resolvingIssue} onClose={() => setResolvingIssue(null)} />
+      <MergeDialog issue={mergingIssue} onClose={() => setMergingIssue(null)} />
 
       {/* 议题删除确认 */}
       <ConfirmDialog

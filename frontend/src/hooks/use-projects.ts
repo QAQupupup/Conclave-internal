@@ -16,6 +16,8 @@ import type {
   CreateProjectRequest,
   Issue,
   IssueStatus,
+  MergeExecuteResponse,
+  MergePreviewResponse,
   ProjectDetail,
   UpdateIssueRequest,
   UpdateProjectRequest,
@@ -23,27 +25,37 @@ import type {
 
 // === 状态机元数据（与后端 issue_service 对齐） ===
 
-export const ISSUE_STATUSES: IssueStatus[] = ['open', 'scheduled', 'in_progress', 'resolved', 'wontfix'];
+export const ISSUE_STATUSES: IssueStatus[] = ['open', 'scheduled', 'in_progress', 'conflict', 'resolved', 'wontfix'];
 
 export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {
   open: '待处理',
   scheduled: '已排期',
   in_progress: '进行中',
+  conflict: '合入冲突',
   resolved: '已闭环',
   wontfix: '不修复',
 };
 
-/** 合法流转表：current → 允许的 target 集合（镜像后端校验，减少无效请求） */
+/**
+ * 合法流转表：current → 允许的 target 集合（镜像后端校验，减少无效请求）。
+ * 有意省略 in_progress → conflict：该流转仅由合入流程在冲突时系统置入，
+ * 不是用户可发起的动作，UI 不暴露。
+ */
 export const ALLOWED_TRANSITIONS: Record<IssueStatus, IssueStatus[]> = {
   open: ['scheduled', 'in_progress', 'wontfix'],
   scheduled: ['in_progress', 'open', 'wontfix'],
   in_progress: ['resolved', 'open', 'wontfix'],
+  // 合入冲突交回用户处置（D11）：回池 / 重新绑会 / 重试合入成功闭环 / 放弃
+  conflict: ['open', 'in_progress', 'resolved', 'wontfix'],
   resolved: [],
   wontfix: [],
 };
 
-/** 可绑定会议发起的状态（后端 bind_meeting：open/scheduled → in_progress） */
-export const BINDABLE_STATUSES: IssueStatus[] = ['open', 'scheduled'];
+/** 可绑定会议发起的状态（后端 bind_meeting：open/scheduled/conflict → in_progress） */
+export const BINDABLE_STATUSES: IssueStatus[] = ['open', 'scheduled', 'conflict'];
+
+/** 可发起合入的状态（镜像后端 merge_service.MERGEABLE_STATUSES） */
+export const MERGEABLE_STATUSES: IssueStatus[] = ['in_progress', 'conflict'];
 
 export function allowedTransitions(status: string): IssueStatus[] {
   return ALLOWED_TRANSITIONS[status as IssueStatus] ?? [];
@@ -51,6 +63,10 @@ export function allowedTransitions(status: string): IssueStatus[] {
 
 export function isBindable(status: string): boolean {
   return BINDABLE_STATUSES.includes(status as IssueStatus);
+}
+
+export function isMergeable(status: string): boolean {
+  return MERGEABLE_STATUSES.includes(status as IssueStatus);
 }
 
 // === Query Keys ===
@@ -177,6 +193,26 @@ export function useDeleteIssue() {
     onSuccess: (_data, vars) => {
       qc.removeQueries({ queryKey: issueKeys.detail(vars.id) });
       invalidateProjectScope(qc, vars.projectId);
+    },
+  });
+}
+
+/**
+ * 议题合入 main（ADR-017 D11 两阶段确认）。
+ *
+ * - confirm=false：预览（干跑合并，不落状态，无需失效缓存）；
+ * - confirm=true：执行（合并 + push + 议题闭环），成功后失效议题详情与
+ *   项目域缓存（议题状态 → resolved，统计随之变化）。
+ */
+export function useMergeIssue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, confirm }: { id: string; confirm: boolean }) => api.issues.merge(id, confirm),
+    onSuccess: (result: MergePreviewResponse | MergeExecuteResponse) => {
+      if (result.mode === 'execute') {
+        qc.invalidateQueries({ queryKey: issueKeys.detail(result.issue_id) });
+        invalidateProjectScope(qc, result.project_id);
+      }
     },
   });
 }

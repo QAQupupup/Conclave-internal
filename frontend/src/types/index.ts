@@ -52,6 +52,9 @@ export type {
   IssueListResponse,
   CreateIssueRequest,
   UpdateIssueRequest,
+  MergeIssueRequest,
+  MergePreviewResponse,
+  MergeExecuteResponse,
 } from './api';
 
 // RBAC / Team 多租户

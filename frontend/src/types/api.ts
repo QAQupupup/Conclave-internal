@@ -74,7 +74,7 @@ export interface ArtifactLineageResponse {
 // ---------------------------------------------------------------------------
 
 /** 议题状态（与后端 ISSUE_STATUS_VALUES 对齐） */
-export type IssueStatus = 'open' | 'scheduled' | 'in_progress' | 'resolved' | 'wontfix';
+export type IssueStatus = 'open' | 'scheduled' | 'in_progress' | 'conflict' | 'resolved' | 'wontfix';
 
 /** 项目（projects 表） */
 export interface Project {
@@ -164,4 +164,44 @@ export interface UpdateIssueRequest {
   priority?: number;
   status?: IssueStatus | string;
   resolution_artifact_id?: string | null;
+}
+
+/** 议题合入 main 请求（ADR-017 D11 两阶段确认：false=预览 / true=执行） */
+export interface MergeIssueRequest {
+  confirm: boolean;
+}
+
+/** 合入预览响应（confirm=false：干跑合并，不落状态） */
+export interface MergePreviewResponse {
+  mode: 'preview';
+  issue_id: string;
+  project_id: string;
+  meeting_id: string;
+  /** 合入目标分支（项目 default_branch） */
+  branch: string;
+  /** 会议仓库未提交变更是否已自动提交（D8：commit 可自动） */
+  source_committed: boolean;
+  /** 干跑合并是否可无冲突合入 */
+  mergeable: boolean;
+  /** 变更文件清单（"M\tpath" 格式，≤200 条） */
+  changed_files: string[];
+  /** 冲突文件清单（mergeable=false 时非空） */
+  conflicts: string[];
+}
+
+/** 合入执行响应（confirm=true：合并 + push + 议题闭环 + D13 重摄挂钩） */
+export interface MergeExecuteResponse {
+  mode: 'execute';
+  merged: boolean;
+  issue_id: string;
+  project_id: string;
+  meeting_id: string;
+  branch: string;
+  /** 合并提交短 SHA（12 位） */
+  merge_commit_sha: string;
+  /** 推送目标（如 origin/main） */
+  pushed_to: string;
+  changed_files: string[];
+  /** 闭环后议题状态（resolved） */
+  issue_status: string;
 }

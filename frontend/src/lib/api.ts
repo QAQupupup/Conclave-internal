@@ -7,6 +7,8 @@ import type {
   CreateProjectRequest,
   Issue,
   IssueListResponse,
+  MergeExecuteResponse,
+  MergePreviewResponse,
   Project,
   ProjectDetail,
   ProjectListResponse,
@@ -216,7 +218,8 @@ const demoIssues: DemoIssue[] = [
     status: 'in_progress',
     priority: 50,
     assigned_meeting_id: 'demo-meeting-12',
-    resolution_artifact_id: null,
+    // 会议闭环凭证已挂、待合入 main（D11：合入式闭环，合入成功后才置 resolved）
+    resolution_artifact_id: 'demo-artifact-88',
     created_by: 'admin',
     created_at: '2026-09-03T11:20:00Z',
     updated_at: '2026-09-04T09:00:00Z',
@@ -242,10 +245,15 @@ const demoIssues: DemoIssue[] = [
 const DEMO_ALLOWED_TRANSITIONS: Record<string, string[]> = {
   open: ['scheduled', 'in_progress', 'wontfix'],
   scheduled: ['in_progress', 'open', 'wontfix'],
-  in_progress: ['resolved', 'open', 'wontfix'],
+  in_progress: ['resolved', 'open', 'wontfix', 'conflict'],
+  // 合入冲突交回用户处置（D11）：回池 / 重新绑会 / 重试合入成功闭环 / 放弃
+  conflict: ['open', 'in_progress', 'resolved', 'wontfix'],
   resolved: [],
   wontfix: [],
 };
+
+// 允许发起合入的议题状态（镜像后端 merge_service.MERGEABLE_STATUSES）
+const DEMO_MERGEABLE_STATUSES = ['in_progress', 'conflict'];
 
 let demoIdSeq = 0;
 function nextDemoId(prefix: string): string {
@@ -404,6 +412,59 @@ function getProjectIssueMock<T>(path: string, method: string, body?: unknown): T
     if (idx < 0) throw new ApiError('议题不存在', 404);
     const [removed] = demoIssues.splice(idx, 1);
     return { deleted: removed.id } as unknown as T;
+  }
+
+  // POST /api/issues/:id/merge —— 合入 main（D11 两阶段确认，演示模拟）
+  const issueMergeMatch = cleanPath.match(/^\/api\/issues\/([^/]+)\/merge$/);
+  if (issueMergeMatch && method === 'POST') {
+    const issue = demoIssues.find((i) => i.id === issueMergeMatch[1]);
+    if (!issue) throw new ApiError('议题不存在', 404);
+    const project = demoProjects.find((p) => p.id === issue.project_id);
+    const payload = body as { confirm?: boolean };
+    // 上下文校验（镜像后端 validate_merge_context 的拒绝路径）
+    if (!DEMO_MERGEABLE_STATUSES.includes(issue.status)) {
+      throw new ApiError(`议题当前状态 ${issue.status} 不可合入（仅 ${DEMO_MERGEABLE_STATUSES.join('/')}）`, 409);
+    }
+    if (!issue.assigned_meeting_id) {
+      throw new ApiError('议题未绑定执行会议，无法定位合入源', 409);
+    }
+    if (!project?.repo_url) {
+      throw new ApiError('项目未绑定仓库，无需合入', 409);
+    }
+    const branch = project.default_branch || 'main';
+    const changedFiles = ['M\tREADME.md', 'A\tdocs/issue-notes.md'];
+    if (!payload.confirm) {
+      // 预览：干跑合并，不落状态
+      return {
+        mode: 'preview',
+        issue_id: issue.id,
+        project_id: project.id,
+        meeting_id: issue.assigned_meeting_id,
+        branch,
+        source_committed: true,
+        mergeable: true,
+        changed_files: changedFiles,
+        conflicts: [],
+      } as unknown as T;
+    }
+    // 执行：闭环凭证红线（镜像后端 execute_merge）
+    if (!issue.resolution_artifact_id) {
+      throw new ApiError('缺少闭环凭证（resolution_artifact_id），拒绝合入', 409);
+    }
+    issue.status = 'resolved';
+    issue.updated_at = demoNow();
+    return {
+      mode: 'execute',
+      merged: true,
+      issue_id: issue.id,
+      project_id: project.id,
+      meeting_id: issue.assigned_meeting_id,
+      branch,
+      merge_commit_sha: `demo${Date.now().toString(16).slice(-8)}`,
+      pushed_to: `origin/${branch}`,
+      changed_files: changedFiles,
+      issue_status: 'resolved',
+    } as unknown as T;
   }
 
   return null;
@@ -1156,6 +1217,17 @@ export const api = {
       request<Issue>(`/api/issues/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     /** 删除议题（会议侧关联外键 SET NULL） */
     delete: (id: string) => request<{ deleted: string }>(`/api/issues/${id}`, { method: 'DELETE' }),
+    /**
+     * 合入 main（ADR-017 D11 两阶段确认）：
+     * confirm=false 干跑预览（返回变更/冲突清单，不落状态）；
+     * confirm=true 正式合并 + push + 议题闭环 + D13 索引重摄。
+     * 冲突 → 409（议题已置 conflict 态，冲突清单在 error.details.conflicts）。
+     */
+    merge: (id: string, confirm: boolean) =>
+      request<MergePreviewResponse | MergeExecuteResponse>(`/api/issues/${id}/merge`, {
+        method: 'POST',
+        body: JSON.stringify({ confirm }),
+      }),
   },
 };
 
