@@ -3,6 +3,7 @@
 - GET /api/issues/{id}：单条（租户过滤，不存在/跨租户 → 404）
 - PATCH /api/issues/{id}：更新字段 / 状态流转（状态机校验，非法流转 → 409）
 - DELETE /api/issues/{id}：删除（会议侧 issue_id 外键 SET NULL）
+- POST /api/issues/{id}/merge：合入 main 流程（ADR-017 D11，两阶段确认）
 
 创建议题走项目嵌套端点 POST /api/projects/{id}/issues（routers/projects.py）。
 路径挂 /api 前缀避免与前端 SPA 路由冲突（同 /api/admin 范式）。
@@ -15,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.dao import issue_dao
-from app.schemas.issue import IssueResponse, UpdateIssueRequest
+from app.schemas.issue import IssueResponse, MergeIssueRequest, UpdateIssueRequest
 from app.services.issue_service import IssueTransitionError, transition_issue
 
 router = APIRouter(prefix="/api/issues", tags=["issues"])
@@ -68,6 +69,38 @@ async def update_issue_api(issue_id: str, req: UpdateIssueRequest) -> dict[str, 
             raise HTTPException(status_code=404, detail="议题不存在")
         updated = issue
     return updated
+
+
+@router.post("/{issue_id}/merge")
+async def merge_issue_api(issue_id: str, req: MergeIssueRequest) -> dict[str, Any]:
+    """议题合入 main 流程（ADR-017 D11，两阶段确认，同 D8 push 护栏哲学）。
+
+    - ``confirm=False``：预览——干跑合入，返回变更摘要/冲突清单，不落状态；
+    - ``confirm=True``：正式合入共享克隆 ``default_branch`` 并 push，议题置
+      resolved（闭环凭证必挂），触发 ADR-018 D13 索引增量重摄。
+
+    错误映射：议题/项目不存在 → 404；状态不可合入/凭证缺失/合入冲突 → 409
+    （冲突时附文件清单，议题已置 conflict 态）。
+    """
+    from app.services.git_service import GitPushError, GitServiceError
+    from app.services.merge_service import (
+        MergeConflictError,
+        MergeNotFoundError,
+        MergeServiceError,
+        execute_merge,
+        preview_merge,
+    )
+
+    try:
+        if req.confirm:
+            return await execute_merge(issue_id)
+        return await preview_merge(issue_id)
+    except MergeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MergeConflictError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "conflicts": exc.conflicts}) from exc
+    except (MergeServiceError, IssueTransitionError, GitServiceError, GitPushError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/{issue_id}")
