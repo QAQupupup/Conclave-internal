@@ -24,11 +24,17 @@ _database_url = settings.database_url
 
 
 def _create_async_engine(url: str) -> AsyncEngine:
-    """创建 PostgreSQL 异步引擎。"""
+    """创建 PostgreSQL 异步引擎。
+
+    连接池上限 = pool_size + max_overflow = 20：测试以 pytest-xdist
+    4 worker 并行（见 docker-compose.test.yml），4 × 20 = 80 < PG 默认
+    max_connections=100，预留余量给管理连接；此前 10+20=30/worker，
+    4 × 30 = 120 超限，并行高压下连接被拒引发 CI flake。
+    """
     return create_async_engine(
         url,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=5,
+        max_overflow=15,
         pool_pre_ping=True,
         pool_recycle=3600,
         echo=False,

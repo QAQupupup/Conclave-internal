@@ -22,7 +22,8 @@
 文件：`engine.py`
 
 - 仅支持 PostgreSQL 后端，连接串由 `settings.database_url` 配置
-- 连接池参数：`pool_size=10`、`max_overflow=20`、`pool_pre_ping=True`、`pool_recycle=3600`
+- 连接池参数：`pool_size=5`、`max_overflow=15`、`pool_pre_ping=True`、`pool_recycle=3600`
+  - 单引擎上限 20 连接：测试以 pytest-xdist 4 worker 并行，4 × 20 = 80 < PG 默认 `max_connections=100`（此前 10+20 超限曾引发 CI 并行 flake）
 - **循环感知单例**：`_ensure_engine()` 在首次调用或事件循环切换/关闭时自动重建引擎
   - 使用 `threading.Lock` 做 double-check 防止并发重建
   - 旧引擎直接丢弃引用由 GC 回收，不在同步代码中调用 `engine.dispose()`（避免跨循环报错）
