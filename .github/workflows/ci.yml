@@ -123,9 +123,10 @@ jobs:
 
       - name: Create swap (防 OOM 杀 pytest worker)
         run: |
-          # GitHub runner 仅 7GB 内存且默认无 swap。测试栈同时跑
-          # postgres + redis + qdrant + 2 个 xdist worker（各自 import
-          # 全量应用栈），尾段内存峰值会触发 OOM killer，表现为
+          # GitHub Linux runner 仅 2 vCPU / 7GB 内存且默认无 swap。测试栈同时跑
+          # postgres + redis + qdrant + 4 个 xdist worker（各自 import
+          # 全量应用栈；worker 数 -n 4 见 docker-compose.test.yml），尾段
+          # 内存峰值会触发 OOM killer，表现为
           # "worker 'gwX' crashed / node down: Not properly terminated"
           # （2026-09-04 起多次随机击中不同轻量测试，本地 Docker 全绿）。
           # 补 4G swap 兜底，容器进程与宿主共享内核，swap 对容器生效。
