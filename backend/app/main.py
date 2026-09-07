@@ -18,13 +18,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth import init_auth as init_jwt_auth  # noqa: F401  # 保留供外部引用，实际初始化由 auth 插件完成
 from app.core.exceptions import AppException
-from app.db.base import Base
 from app.db.engine import async_session_factory
 from app.db.redis import close_redis, init_redis
 from app.events import start_event_bus, stop_event_bus
 from app.logging_config import setup_logging
 from app.middleware import setup_trace_middleware
-from app.net_auth import init_auth_table
 from app.plugins import PluginRegistry, set_global_registry
 from app.routers import admin as admin_router
 from app.routers import agent_roles as agent_roles_router
@@ -90,17 +88,13 @@ def _cleanup_orphaned_workspaces() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库 + 崩溃恢复 + 后台指标采集"""
-    # 建表单一入口：ORM 表走 Base.metadata.create_all()（见下方 db_mode 分支），
-    # 增量变更走 Alembic；raw SQL ensure 函数仅用于少数 legacy 表（见 docs/sql-development-rules.md §5）
-    await init_auth_table()
-    # 注意：JWT 用户认证系统（init_auth）由 auth CORE 插件 on_startup 处理，此处不再直接调用
-
+    # ===== ADR-019: 建表单一真相收敛为 Alembic =====
+    # 所有 ORM 表 + 原生表（net_auth_requests / notifications / system_settings）
+    # 统一由 `alembic upgrade head` 在 entrypoint.sh 启动 uvicorn 之前创建。
+    # 本模块不再调用 Base.metadata.create_all() 或 init_auth_table() 等 raw SQL 建表逻辑，
+    # 消除 ORM 与原生 DDL 双源建表的 schema drift 风险（见 docs/design/adr/019）。
+    # 注意：JWT 用户认证系统（init_auth）由 auth CORE 插件 on_startup 处理，此处不直接调用。
     from app.config import settings
-
-    # PostgreSQL 表结构初始化（SQLAlchemy ORM，含记忆子系统表）
-    if settings.db_mode == "postgresql":
-        async with async_session_factory() as session, session.bind.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)  # type: ignore[union-attr]
 
     # RBAC 多租户：建表 + Casbin 初始化
     try:
@@ -145,15 +139,15 @@ async def lifespan(app: FastAPI):
         logger.error("RBAC 初始化失败（致命）: %s: %s", type(e).__name__, str(e)[:300])
         raise
 
-    # Schema 一致性校验（防止 ORM 与 raw SQL DDL 双源真相）
-    # 仅在 PostgreSQL 模式且非测试环境下做硬校验；测试环境在 conftest 中单独调用
+    # Schema 一致性校验（防止 ORM 与 raw SQL DDL 双源真相）。
+    # 仅 PostgreSQL 模式且非测试环境执行；测试环境用 CONCLAVE_TEST_MODE=1 跳过
+    # （conftest.py 以 Base.metadata.create_all() 建全新 schema，无需校验）。
+    # fail-fast：硬错误（ORM 声明列在 DB 缺失 / NOT NULL 约束不匹配）直接 raise 终止启动，
+    # 避免"启动通过、运行期才崩"这种晦涩失败；软警告（NOT NULL 无 server_default）仍只告警。
     if settings.db_mode == "postgresql" and not os.environ.get("CONCLAVE_TEST_MODE"):
-        try:
-            from app.db.schema_verify import verify_schema_consistency
+        from app.db.schema_verify import verify_schema_consistency
 
-            await verify_schema_consistency(raise_on_error=False)  # 启动时仅警告，不阻断
-        except Exception as e:
-            logger.warning("Schema 校验执行失败（非致命）: %s", e)
+        await verify_schema_consistency(raise_on_error=True)
 
     # 记忆子系统初始化（从 PG 恢复画像/特征/原始发言到内存）
     from app.memory.store import memory_store

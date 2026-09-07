@@ -29,3 +29,5 @@ class UserModel(Base):
     tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+    # 最近登录时间（原生 _init_users_table 曾通过 ALTER 补列，ADR-019 收敛为 ORM 真相）
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

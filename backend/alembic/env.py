@@ -13,27 +13,13 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
+# 导入所有 ORM 模型以确保 Base.metadata 包含全部表。
+# `app.db.models.__init__` 会 re-export 全部模型并将其注册到 Base.metadata；
+# 整包导入即可，避免逐个列名导致 future autogenerate 漏表。
+import app.db.models  # noqa: F401
 from alembic import context  # context 由 alembic CLI 注入
 from app.config import settings
 from app.db.base import Base
-
-# 导入所有 ORM 模型以确保 Base.metadata 包含全部表
-from app.db.models import (  # noqa: F401
-    AgentRoleModel,
-    ApiKeyModel,
-    AuditLogModel,
-    CostRecordModel,
-    DocumentModel,
-    EventModel,
-    FeatureMemoryModel,
-    MeetingAuxModel,
-    MeetingModel,
-    MeetingTagModel,
-    MessageModel,
-    ProfileMemoryModel,
-    RawMemoryModel,
-    UserPreferenceModel,
-)
 
 # Alembic Config 对象
 config = context.config
