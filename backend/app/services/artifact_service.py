@@ -74,6 +74,34 @@ def _extract_title(artifact: dict[str, Any], artifact_type: str) -> str | None:
     return None
 
 
+async def _close_issue_after_publish(issue_id: str, artifact_id: str) -> None:
+    """议题闭环挂钩（ADR-017 Phase 2 第 4 条 + D11 分支）。
+
+    - 绑定仓库的项目：闭环推迟到合入 main 成功（D11：「合入成功后议题置
+      resolved」），发布时仅预挂闭环凭证，供合入流程流转使用；
+    - 纯文档型项目（未绑仓库）：无合入环节，发布即闭环（Phase 2 原语义）。
+
+    议题不存在/已终态时静默跳过（与 resolve_issue 的容忍语义一致）。
+    """
+    from app.dao import issue_dao, project_dao
+
+    issue = await issue_dao.get_issue(issue_id)
+    if issue is None:
+        return
+    project = await project_dao.get_project(str(issue["project_id"]))
+    if project is not None and project.get("repo_url"):
+        await issue_dao.update_issue_fields(issue_id, {"resolution_artifact_id": artifact_id})
+        log_bus.info(
+            "仓库绑定项目议题：闭环凭证已预挂，闭环推迟至合入 main 成功（D11）",
+            logger="services.artifact_service",
+            extra={"issue_id": issue_id, "resolution_artifact_id": artifact_id},
+        )
+        return
+    from app.services.issue_service import resolve_issue
+
+    await resolve_issue(issue_id, artifact_id)
+
+
 async def publish_meeting_artifact(state: MeetingState) -> dict[str, Any] | None:
     """会议成功终态后发布产物入表（幂等）。
 
@@ -141,15 +169,14 @@ async def publish_meeting_artifact(state: MeetingState) -> dict[str, Any] | None
         },
     )
 
-    # ADR-017 Phase 2 第 4 条：议题闭环挂钩——会议绑定议题时，
-    # 以本次发布的产物为闭环凭证闭环议题（→ resolved）。
-    # 已终态/已闭环的议题由 resolve_issue 静默跳过；失败仅记日志，不阻断产物发布。
+    # ADR-017 Phase 2 第 4 条 + D11 分支：议题闭环挂钩——会议绑定议题时，
+    # 以本次发布的产物为闭环凭证。绑定仓库的项目闭环推迟到合入 main 成功
+    # （D11：合入成功才置 resolved），此处仅预挂凭证；纯文档项目即时闭环。
+    # 已终态/已闭环的议题静默跳过；失败仅记日志，不阻断产物发布。
     issue_id = getattr(state, "issue_id", None)
     if issue_id:
-        from app.services.issue_service import resolve_issue
-
         try:
-            await resolve_issue(issue_id, str(published["id"]))
+            await _close_issue_after_publish(issue_id, str(published["id"]))
         except Exception as e:
             log_bus.warning(
                 f"议题闭环失败（不影响产物发布）: {str(e)[:150]}",

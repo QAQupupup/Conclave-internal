@@ -4,7 +4,8 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 # 合法状态（状态机流转由服务层校验，见 services/issue_service.py）
-ISSUE_STATUS_VALUES = ("open", "scheduled", "in_progress", "resolved", "wontfix")
+# conflict：ADR-017 D11 合入 main 冲突态，交回用户处置
+ISSUE_STATUS_VALUES = ("open", "scheduled", "in_progress", "conflict", "resolved", "wontfix")
 
 
 class CreateIssueRequest(BaseModel):
@@ -55,3 +56,15 @@ class IssueListResponse(BaseModel):
 
     items: list[IssueResponse]
     total: int
+
+
+class MergeIssueRequest(BaseModel):
+    """议题合入 main 请求（ADR-017 D11，两阶段确认，同 D8 push 护栏哲学）
+
+    - ``confirm=False``（默认）：仅预览——干跑合入并返回 diff 摘要/冲突清单，
+      不改变任何状态；
+    - ``confirm=True``：正式合入共享克隆 ``default_branch`` 并 push（进入共享
+      空间的不可逆操作，必须以显式确认触发）。
+    """
+
+    confirm: bool = Field(False, description="false=仅预览（干跑，不落状态）；true=正式合入并推送")

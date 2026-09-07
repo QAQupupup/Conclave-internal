@@ -3,14 +3,19 @@
 状态机（合法流转）::
 
     open ──→ scheduled ──→ in_progress ──→ resolved
-      │          │               │
-      │          └──→ open（解绑）│
-      └──────────────────────────┴──→ wontfix
+      │          │            │  │
+      │          └→ open（解绑）│  └──→ conflict（合入冲突，D11）
+      │                        │            │
+      │                        │            ├→ open / in_progress（处置后重试）
+      │                        │            └→ resolved（重试合入成功）
+      └────────────────────────┴────────────────→ wontfix
 
 - ``resolved`` 必须挂 ``resolution_artifact_id``（闭环凭证红线，缺失拒绝）。
 - ``resolved`` / ``wontfix`` 为终态，不可再流转。
+- ``conflict``（ADR-017 D11）：合入 main 冲突时由合入流程置入，不自动解决、
+  交回用户处置；可回池（open）、重新绑会（in_progress）或合入重试成功后闭环（resolved）。
 - 会议生命周期挂钩：
-  - 创会绑定议题 → ``bind_meeting``（open/scheduled → in_progress）；
+  - 创会绑定议题 → ``bind_meeting``（open/scheduled/conflict → in_progress）；
   - 会议成功终态且产物已发布 → ``resolve_issue``（挂闭环凭证）；
   - 会议中止 → ``release_issue``（in_progress → open，议题回池待重办）。
 
@@ -24,14 +29,16 @@ from typing import Any
 from app.dao import issue_dao
 from app.observability.log_bus import log_bus
 
-# 全部合法状态
-ISSUE_STATUSES = ("open", "scheduled", "in_progress", "resolved", "wontfix")
+# 全部合法状态（conflict：ADR-017 D11 合入冲突态）
+ISSUE_STATUSES = ("open", "scheduled", "in_progress", "conflict", "resolved", "wontfix")
 
 # 合法流转表：current → 允许的 target 集合
 ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "open": frozenset({"scheduled", "in_progress", "wontfix"}),
     "scheduled": frozenset({"in_progress", "open", "wontfix"}),
-    "in_progress": frozenset({"resolved", "open", "wontfix"}),
+    "in_progress": frozenset({"resolved", "open", "wontfix", "conflict"}),
+    # 合入冲突交回用户处置（D11）：回池 / 重新绑会 / 重试合入成功闭环 / 放弃
+    "conflict": frozenset({"open", "in_progress", "resolved", "wontfix"}),
     "resolved": frozenset(),
     "wontfix": frozenset(),
 }
@@ -94,14 +101,15 @@ async def transition_issue(
 
 
 async def bind_meeting(issue_id: str, meeting_id: str) -> dict[str, Any] | None:
-    """会议创建时绑定议题：open/scheduled → in_progress + 记录执行会议。
+    """会议创建时绑定议题：open/scheduled/conflict → in_progress + 记录执行会议。
 
     创会路径调用。议题已处于其他状态（含已绑定其他会议）时返回 None，
-    由调用方决定是否阻断创会。
+    由调用方决定是否阻断创会。conflict 态允许重新绑会（D11：合入冲突后
+    用户可开新会议重做）。
     """
     updated = await issue_dao.transition_status(
         issue_id,
-        expected_statuses=("open", "scheduled"),
+        expected_statuses=("open", "scheduled", "conflict"),
         new_status="in_progress",
         extra_fields={"assigned_meeting_id": meeting_id},
     )

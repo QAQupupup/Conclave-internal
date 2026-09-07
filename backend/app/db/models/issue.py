@@ -4,9 +4,10 @@
 - ``source=user``：用户手动入池；
 - ``source=meeting``：会议候选议题经用户确认后入池（挂 source_meeting_id）。
 
-状态机 ``open | scheduled | in_progress | resolved | wontfix``，
+状态机 ``open | scheduled | in_progress | conflict | resolved | wontfix``，
 合法流转由服务层（services/issue_service.py）校验；
-``resolved`` 必须挂 ``resolution_artifact_id``（闭环凭证红线）。
+``resolved`` 必须挂 ``resolution_artifact_id``（闭环凭证红线）；
+``conflict`` 为 ADR-017 D11 合入 main 冲突态（交回用户处置）。
 
 跨模块关联一律通过显式 join 实现，不使用 relationship
 （见 docs/sql-development-rules.md §1.2 红线）。
@@ -44,7 +45,7 @@ class IssueModel(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantScopeMixin):
         ForeignKey("meetings.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # 状态机：open|scheduled|in_progress|resolved|wontfix（服务层校验流转）
+    # 状态机：open|scheduled|in_progress|conflict|resolved|wontfix（服务层校验流转）
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", server_default=text("'open'"))
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50, server_default=text("50"))
     # 当前绑定的执行会议（议题 → 会议；会议删除后置 NULL）
