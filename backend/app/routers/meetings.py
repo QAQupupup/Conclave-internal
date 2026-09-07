@@ -279,26 +279,22 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
             },
         )
 
-    # ADR-017 Phase 2：从议题发起会议——校验议题 → 绑定（状态机）→ 回填项目归属。
-    # 绑定失败（议题不存在/跨租户/状态不允许/并发竞争）直接拒绝创建，
-    # 避免产生未绑定成功的孤儿会议。
+    # ADR-017 Phase 2：从议题发起会议——校验议题 → 持久化会议 → 绑定（状态机）→ 回填归属。
+    # 顺序约束：issues.assigned_meeting_id FK 指向 meetings.id，必须先落库会议再绑定，
+    # 否则 FK 违规。绑定失败（状态并发变更）则硬删已落库会议，避免孤儿会议。
+    # conflict 态允许重新绑会（D11：合入冲突后开新会议重做）。
     bound_issue: dict[str, Any] | None = None
+    issue_row: dict[str, Any] | None = None
     if req.issue_id:
         from app.dao import issue_dao
-        from app.services.issue_service import bind_meeting
 
         issue_row = await issue_dao.get_issue(req.issue_id)
         if issue_row is None:
             raise HTTPException(status_code=404, detail="议题不存在")
-        if issue_row["status"] not in ("open", "scheduled"):
+        if issue_row["status"] not in ("open", "scheduled", "conflict"):
             raise HTTPException(status_code=409, detail=f"议题当前状态不可绑定会议: {issue_row['status']}")
-        bound_issue = await bind_meeting(issue_row["id"], meeting_id)
-        if bound_issue is None:
-            raise HTTPException(status_code=409, detail="议题绑定失败（状态已并发变更），请刷新后重试")
-        state.project_id = str(bound_issue["project_id"])
-        state.issue_id = str(bound_issue["id"])
 
-    # 持久化
+    # 持久化（先于议题绑定，见上方顺序约束）
     await save_meeting(
         meeting_id=meeting_id,
         topic=req.topic,
@@ -310,6 +306,28 @@ async def create_meeting(req: CreateMeetingRequest, request: Request) -> CreateM
         project_id=state.project_id,
         issue_id=state.issue_id,
     )
+
+    if issue_row is not None:
+        from app.services.issue_service import bind_meeting
+
+        bound_issue = await bind_meeting(issue_row["id"], meeting_id)
+        if bound_issue is None:
+            await hard_delete_meeting(meeting_id)
+            raise HTTPException(status_code=409, detail="议题绑定失败（状态已并发变更），请刷新后重试")
+        state.project_id = str(bound_issue["project_id"])
+        state.issue_id = str(bound_issue["id"])
+        # 回填项目归属/议题关联（upsert 第二次保存；首次保存时 FK 未就绪不能携带）
+        await save_meeting(
+            meeting_id=meeting_id,
+            topic=req.topic,
+            status=state.status.value,
+            stage=state.stage.value,
+            created_at=state.created_at,
+            payload=state.snapshot(),
+            owner_username=username,
+            project_id=state.project_id,
+            issue_id=state.issue_id,
+        )
     # ADR-017 Phase 2 第 3 条：议题会议创建后，项目绑定仓库后台摄入会议 workspace。
     # fire-and-forget：摄入失败仅记日志，不阻断会议创建。
     if bound_issue is not None:
