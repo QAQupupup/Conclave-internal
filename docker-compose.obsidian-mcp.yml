@@ -1,9 +1,11 @@
 # Obsidian MCP Server — 会话上下文持久化（独立组件）
 #
 # 这个 MCP Server 是独立组件，不隶属于 Conclave 项目仓库。
-# vault 存储在 D 盘，不进 Git，不推 GitHub。
+# vault 存储在 Trae 本地数据目录（真实落盘宿主机），不进 Git，不推 GitHub。
 #
-# 存储位置：D:\conclave-knowledge-vault\
+# 存储位置：c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\
+#   （2026-09-13 从 D:\conclave-knowledge-vault\ 迁入，原因：D 盘沙箱快照
+#    导致写入不回写宿主机，见 session-checkpoint skill 事故专节）
 # 部署：docker compose -f docker-compose.obsidian-mcp.yml up -d
 # 验证：curl http://localhost:3010/health
 # 连接：Trae 设置 → MCP → SSE 端点 http://localhost:3010/sse
@@ -14,9 +16,9 @@ services:
     container_name: conclave-obsidian-mcp
     restart: unless-stopped
     volumes:
-      # vault 挂载到 D 盘独立目录，完全脱离项目仓库
+      # vault 挂载到 Trae 本地数据目录（真实落盘宿主机），完全脱离项目仓库
       # 这是个人 AI 记忆，不进 Git，不推 GitHub
-      - D:/conclave-knowledge-vault:/vault:rw
+      - C:/Users/Huawei/.trae-cn/KnowledgeVault/conclave:/vault:rw
     ports:
       # 端口 3010 避免与 Conclave 其他服务冲突
       # dev: 5173(前端) 8000(后端) 5432(PG) 6379(Redis) 6333(Qdrant)
