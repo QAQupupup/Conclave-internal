@@ -1,7 +1,7 @@
 # Vault 导出模块：将评估结果导出到 Obsidian knowledge vault
 #
 # 目录结构：
-#   D:\conclave-knowledge-vault\eval-runs\
+#   c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\eval-runs\
 #   ├── index.json                           # 全局索引：所有运行记录的元数据
 #   └── {YYYY-MM-DD}/                        # 按日期分目录
 #       └── {YYYYMMDD-HHMMSS}/               # 单次运行
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 # vault 根目录（与 session-checkpoint 共用同一个 vault）
-_DEFAULT_VAULT_ROOT = r"D:\conclave-knowledge-vault"
+_DEFAULT_VAULT_ROOT = r"c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave"
 EVAL_RUNS_DIRNAME = "eval-runs"
 
 

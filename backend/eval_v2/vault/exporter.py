@@ -1,6 +1,7 @@
 """Vault exporter for Obsidian knowledge vault integration.
 
-Exports evaluation results to D:\\conclave-knowledge-vault\\eval-history\\
+Exports evaluation results to
+c:\\Users\\Huawei\\.trae-cn\\KnowledgeVault\\conclave\\eval-history\\
 as Markdown files, following ADR-012 session checkpoint conventions.
 """
 
@@ -13,7 +14,7 @@ from typing import Any
 
 from eval_v2.models.result import SuiteResult
 
-DEFAULT_VAULT_ROOT = Path(r"D:\conclave-knowledge-vault")
+DEFAULT_VAULT_ROOT = Path(r"c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave")
 EVAL_DIR_NAME = "eval-history"
 
 

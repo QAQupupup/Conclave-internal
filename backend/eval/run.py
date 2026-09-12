@@ -307,7 +307,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--vault-export",
         action="store_true",
-        help="export results to Obsidian knowledge vault (D:\\conclave-knowledge-vault\\eval-runs\\)",
+        help="export results to Obsidian knowledge vault (KnowledgeVault\\conclave\\eval-runs\\)",
     )
     parser.add_argument(
         "--run-label",

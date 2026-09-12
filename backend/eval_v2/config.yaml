@@ -149,7 +149,7 @@ report:
 # Vault 导出
 vault:
   enabled: true
-  vault_root: "D:/conclave-knowledge-vault/eval-runs"
+  vault_root: "C:/Users/Huawei/.trae-cn/KnowledgeVault/conclave/eval-runs"
   export_html: true
   export_json: true
   max_history: 100
