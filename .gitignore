@@ -116,10 +116,11 @@ quality-trace-proposal/
 docs/retrospectives/vault-2layer-audit/
 ms.md
 
-# ===== Obsidian Vault (独立组件，存储在 D 盘，不进 Git) =====
-# vault 实际存储在 D:\conclave-knowledge-vault\，通过 Docker volume 挂载
+# ===== Obsidian Vault (独立组件，不进 Git) =====
+# vault 实际存储在 c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\
+# （2026-09-13 从 D:\conclave-knowledge-vault\ 迁入，原因见 session-checkpoint skill 事故专节）
 # 项目内的 obsidian-vault/ 目录仅用于开发时临时映射，不提交
 obsidian-vault/
 # 会话检查点文件包含个人沟通内容，禁止推到 GitHub
-# 检查点存储在 D:\conclave-knowledge-vault\sessions\，不在此处
+# 检查点存储在 KnowledgeVault\conclave\sessions\，不在此处
 docs/sessions/checkpoint-*.md

@@ -18,7 +18,7 @@
 8. **如果要写/改文档（README/ADR/待办）**，必须先读 `docs/pitfalls.md` P21（文档真实性核查）。每一条事实性声明必须 grep 核验，禁止凭记忆写文档。
 9. **如果要回应代码审查/外部评审**，必须先读 `docs/pitfalls.md` P22（问题评估与绕过检查）。逐条 grep 核验问题是否真实存在，禁止"声明式修复"。
 10. **如果要碰异步/数据库/Docker/测试/编排器代码**，根据 §4 类别索引读 `docs/pitfalls.md` 对应章节；**任何 DB 读写/查询/分页/迁移代码，先读 `docs/sql-development-rules.md`（SQL 开发守则）**。
-11. **新会话恢复上下文**：如果用户说"继续"/"恢复"/"上次说到哪了"，先读 `D:\conclave-knowledge-vault\project-context\current-status.md` 获取最新检查点指针，再读检查点文件恢复上下文（见 §9）。
+11. **新会话恢复上下文**：如果用户说"继续"/"恢复"/"上次说到哪了"，先读 `c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\project-context\current-status.md` 获取最新检查点指针，再读检查点文件恢复上下文（见 §9）。
 
 ---
 
@@ -301,7 +301,9 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 > 完整流程见 `session-checkpoint` skill（`.trae/skills/session-checkpoint/SKILL.md`）和 ADR-012。
 > 本节只保留快速参考。
 
-**核心机制**：Index+Raw 2 层架构，检查点写入 `D:\conclave-knowledge-vault\`（不进 Git）。
+**核心机制**：Index+Raw 2 层架构，检查点写入 `c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\`（不进 Git）。
+
+> ⚠️ 2026-09-13 迁移：vault 原位于 `D:\conclave-knowledge-vault\`，因 Trae 沙箱快照机制（写入只落副本、不回写宿主机）导致 9 月全部 checkpoint 静默丢失，已迁移至上述真实落盘路径。事故详情与防范纪律见 `session-checkpoint` skill「D 盘沙箱数据丢失事故」专节。
 
 **存档触发**：用户说"存档"/"保存进度"/"checkpoint"/"切换窗口"/阶段性任务完成。
 **恢复触发**：用户说"继续"/"恢复"/"上次说到哪了"/"resume"。

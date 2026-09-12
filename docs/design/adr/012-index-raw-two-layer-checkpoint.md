@@ -4,6 +4,8 @@
 
 Accepted — 2026-07-27
 
+> **后续演进（2026-09-13）**：vault 存储位置已从 `D:\conclave-knowledge-vault\` 迁移至 `c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\`。原因：Trae 沙箱快照机制导致 D 盘写入不回写宿主机，2026 年 9 月全部 checkpoint 静默丢失。本 ADR 下文中的 `D:\conclave-knowledge-vault\` 均为历史路径，现行位置以 `session-checkpoint` skill 为准。
+
 ## 背景
 
 ### 演进路径
