@@ -144,16 +144,16 @@ pnpm config set registry https://registry.npmmirror.com
 
 ### 4.2 提交归档（强制要求）
 
-**每次提交必须伴随归档文件**，记录以下内容：
+**P0/P1 Bug 与系统性修复必须伴随修复报告**（规范见 `docs/RETROSPECTIVE_CONVENTIONS.md`，与 `AGENTS.md` §3.2 一致），记录以下内容：
 
 1. **问题描述**：修复了什么 / 实现了什么
 2. **修复/变更内容**：具体改了什么，涉及哪些文件
 3. **变更原因**：为什么这样改，设计决策的权衡
 
-**归档文件位置**：`docs/audits/` 或 `docs/sessions/`，按日期命名：
-- 审计修复：`docs/audits/audit-fix-report-YYYY-MM-DD.md`
-- 会话归档：`docs/sessions/session-archive-YYYY-MM-DD-N.md`
-- 项目审查：`docs/audits/project-review-YYYY-MM-DD.md`
+**归档位置（2026-09 现状）**：
+- 修复报告（强制）：`docs/retrospectives/YYYY-MM-DD-{slug}.html`，通过 html-report skill 生成，标注 commit 区间，commit message footer 用 `Refs:` 引用
+- `docs/audits/`：本地一次性审计产物目录，已在 `.gitignore` 中，不入库
+- 会话检查点：存储在 KnowledgeVault（`c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\`，ADR-012），`docs/sessions/` 不入库
 
 **归档文件模板**：
 ```markdown

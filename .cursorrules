@@ -4,7 +4,7 @@
 
 ## 关键速记
 
-- 技术栈：Python 3.12 + FastAPI + asyncio + SQLAlchemy async（后端）；React 18 + TS + Vite + Ant Design（前端）；PostgreSQL + Redis + Qdrant；Docker Compose 部署。
+- 技术栈：Python 3.12 + FastAPI + asyncio + SQLAlchemy async（后端）；React 19 + TS + Vite + Tailwind CSS v4 + Radix UI + Zustand + TanStack Query（前端，入口 app.html）；PostgreSQL + Redis + Qdrant；Docker Compose 部署。
 - 提交前必须跑：后端 `ruff check` + `mypy`；前端 `eslint` + `tsc --noEmit` + `npm run build`；集成测试 `docker compose -f docker-compose.test.yml up --build --exit-code-from backend-test`。
 - Commit 必须 Conventional Commits：`feat/fix/refactor/docs/test/chore/perf/style/ci(scope): 中文描述`。
 - 禁止本地直接跑服务/测试，必须走 Docker Compose。
