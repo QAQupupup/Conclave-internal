@@ -8,7 +8,7 @@
 
 <p align="center">
 
-**Open-source Community Edition: [QAQupupup/Conclave](https://github.com/QAQupupup/Conclave)**
+**This repository is the open-source Community Edition of [Conclave-internal](https://github.com/QAQupupup/Conclave-internal)**
 
 </p>
 
@@ -20,11 +20,10 @@
 
 <p align="center">
 
-<a href="https://github.com/QAQupupup/Conclave-internal/actions"><img alt="CI" src="https://github.com/QAQupupup/Conclave-internal/actions/workflows/ci.yml/badge.svg"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-AGPL%20v3-18a497?style=flat-square"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/QAQupupup/Conclave-internal?style=social"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/issues"><img alt="Issues" src="https://img.shields.io/github/issues/QAQupupup/Conclave-internal"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/QAQupupup/Conclave-internal"></a>
+<a href="https://github.com/QAQupupup/Conclave/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-AGPL%20v3-18a497?style=flat-square"></a>
+<a href="https://github.com/QAQupupup/Conclave/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/QAQupupup/Conclave?style=social"></a>
+<a href="https://github.com/QAQupupup/Conclave/issues"><img alt="Issues" src="https://img.shields.io/github/issues/QAQupupup/Conclave"></a>
+<a href="https://github.com/QAQupupup/Conclave/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/QAQupupup/Conclave"></a>
 
 </p>
 
@@ -211,8 +210,8 @@ Each stage has an independent quality gate: if the result fails to meet the bar,
 ### One-command startup
 
 ```bash
-git clone https://github.com/QAQupupup/Conclave-internal.git
-cd Conclave-internal
+git clone https://github.com/QAQupupup/Conclave.git
+cd Conclave
 docker compose up -d --build
 ```
 
@@ -221,11 +220,11 @@ docker compose up -d --build
 
 | Service | Address |
 |---|---|
-| Frontend | http://localhost:5173 |
-| Backend API docs | http://localhost:8000/docs |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
-| Qdrant | localhost:6333 |
+| Frontend | http://localhost:5174 |
+| Backend API docs | http://localhost:8001/docs |
+| PostgreSQL | localhost:5433 |
+| Redis | localhost:6380 |
+| Qdrant | localhost:6335 |
 
 </details>
 
@@ -242,7 +241,7 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 
 ### Usage
 
-1. Open http://localhost:5173
+1. Open http://localhost:5174
 2. Enter a topic and choose a deliverable type (PRD / research report / business report / design doc / deployable service / data analysis)
 3. Click "Start Meeting" and watch the six stages execute automatically
 4. View the result in the "Output" panel when the meeting completes
@@ -275,9 +274,9 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 
 ## Open Source & Usage
 
-This repository is the **development repository (full edition)** of Conclave, containing the complete decision algorithms and all advanced capabilities. The community open-source edition (Community Edition) is published at [QAQupupup/Conclave](https://github.com/QAQupupup/Conclave) under **AGPL v3** for demonstration, learning, and secondary development.
+This repository is the **open-source Community Edition** of [Conclave-internal](https://github.com/QAQupupup/Conclave-internal), published under **AGPL v3** for demonstration, learning, and secondary development. The six-stage decision pipeline, 7 built-in roles, and RAG evidence retrieval are all open-sourced here; the core algorithm implementations are distributed as compiled binary extensions, while the full source code and advanced capabilities are maintained in the development repository [Conclave-internal](https://github.com/QAQupupup/Conclave-internal).
 
-Under AGPL, any derivative work based on the public parts of the open-source edition must be released under the same license.
+Under AGPL, any derivative work based on the public parts of this repository must be released under the same license.
 
 ## Contributing & Support
 

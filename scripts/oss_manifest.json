@@ -77,11 +77,11 @@
       "dst": ".env.example"
     },
     {
-      "src": "README.md",
+      "src": "README.oss.md",
       "dst": "README.md"
     },
     {
-      "src": "README.en.md",
+      "src": "README.en.oss.md",
       "dst": "README.en.md"
     },
     {
@@ -349,9 +349,7 @@
     "frontend/src/theme/antdTheme.ts": "03e1a01e8d2be589d5c0c6bd70da701fdf9993347f7c8abfad38f18702d2bb5c",
     "frontend/src/types/events.ts": "252995ccc5f0a80ae93bbdd0f682e6f322b9f04152ed71bb7a9893032270621d",
     "frontend/src/types/graph.ts": "c59eba4a54404dc22fe6f824d162ae12d0e3133b7c15a76fe5390ebe030f732a",
-    "docker-compose.yml": "eabfea7bdcf7e59b0afa698d7d281c48bc9fe3ea53cb76e0d0171c7179c9aa15",
     ".env.example": "7fa303069e87bb73cc99db6eabc0d22f1a6a8529ad0efefd06eb931ae836cce9",
-    "README.md": "8cdad76d642eedd09a6b2a3c2aa61745a5d68c9429fa97b540cca617eb93e2d5",
     "backend/workspace/constraints.yaml": "31b569c252bfaf03d07f3698752a2c05d6a879fb15c1926d16dbbf3f0481ee7d",
     "docker/Dockerfile.postgres": "d5a515f5de9073fa61a149d749e8442100fe8f4bee763a36d44cb8f76032f5bc",
     "docker/Dockerfile.qdrant": "3304808af2bbf874f3370c4c76d785d460c3d7ff050a21e1d2d0cde73834e5c4",

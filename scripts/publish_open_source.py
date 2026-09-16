@@ -412,7 +412,7 @@ def _generate_audit_report(
         "## 说明",
         "",
         "本报告由 `scripts/publish_open_source.py` 自动生成，记录了从开发仓库到开源仓库的发布动作。",
-        "核心算法逻辑以编译后的二进制扩展形式存在，源码保留在私有开发仓库。",
+        "核心算法逻辑以编译后的二进制扩展形式存在，完整源码在开发仓库 Conclave-internal 中维护。",
         "",
     ])
 

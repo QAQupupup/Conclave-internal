@@ -38,8 +38,8 @@
 
 **这个项目是完全开源吗？**
 
-本仓库是 [Conclave-internal](https://github.com/QAQupupup/Conclave-internal) 的**开源简化版（Community Edition）**，以 AGPL v3 协议开放核心能力，用于演示、学习与二次开发。六阶段决策管线、7 种内置角色、RAG 证据检索等均在此开源；完整版的全部决策算法与高级能力保留在私有仓库中。详见 [开源说明](../README.md)。
+Conclave 的开源社区版（Community Edition）发布在 [QAQupupup/Conclave](https://github.com/QAQupupup/Conclave)，以 AGPL v3 协议开放核心能力，用于演示、学习与二次开发。六阶段决策管线、7 种内置角色、RAG 证据检索等均在该仓库开源；完整开发版在 [Conclave-internal](https://github.com/QAQupupup/Conclave-internal) 中维护。详见 [开源说明](../README.md)。
 
 **我可以基于它做商业项目吗？**
 
-在遵守 AGPL v3 的前提下可以。注意：基于本仓库公开部分的任何衍生作品必须以相同协议开源源代码。涉及核心算法的私有实现不受本仓库代码约束，但请自行评估合规边界。
+在遵守 AGPL v3 的前提下可以。注意：基于本仓库公开部分的任何衍生作品必须以相同协议开源源代码。核心算法实现以编译后的二进制扩展形式分发，不受本仓库源码协议约束，但请自行评估合规边界。

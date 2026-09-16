@@ -8,7 +8,7 @@
 
 <p align="center">
 
-**开源社区版（Community Edition）：[QAQupupup/Conclave](https://github.com/QAQupupup/Conclave)**
+**本仓库是 [Conclave-internal](https://github.com/QAQupupup/Conclave-internal) 的开源简化版（Community Edition）**
 
 </p>
 
@@ -20,11 +20,10 @@
 
 <p align="center">
 
-<a href="https://github.com/QAQupupup/Conclave-internal/actions"><img alt="CI" src="https://github.com/QAQupupup/Conclave-internal/actions/workflows/ci.yml/badge.svg"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-AGPL%20v3-18a497?style=flat-square"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/QAQupupup/Conclave-internal?style=social"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/issues"><img alt="Issues" src="https://img.shields.io/github/issues/QAQupupup/Conclave-internal"></a>
-<a href="https://github.com/QAQupupup/Conclave-internal/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/QAQupupup/Conclave-internal"></a>
+<a href="https://github.com/QAQupupup/Conclave/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-AGPL%20v3-18a497?style=flat-square"></a>
+<a href="https://github.com/QAQupupup/Conclave/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/QAQupupup/Conclave?style=social"></a>
+<a href="https://github.com/QAQupupup/Conclave/issues"><img alt="Issues" src="https://img.shields.io/github/issues/QAQupupup/Conclave"></a>
+<a href="https://github.com/QAQupupup/Conclave/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/QAQupupup/Conclave"></a>
 
 </p>
 
@@ -37,7 +36,7 @@
 <a href="https://www.postgresql.org/"><img alt="PostgreSQL 16" src="https://img.shields.io/badge/PostgreSQL%2016-4169E1?style=for-the-badge&logo=postgresql&logoColor=white"></a>
 <a href="https://github.com/pgvector/pgvector"><img alt="pgvector" src="https://img.shields.io/badge/pgvector-316192?style=for-the-badge"></a>
 <a href="https://redis.io/"><img alt="Redis" src="https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white"></a>
-<a href="https://qdrant.tech/"><img alt="Qdrant" src="https://img.shields.io/badge/Qdrant-0081CF?style=for-the-badge&logo=qdrant&logoColor=white"></a>
+<a href="https://qdrant.tech/"><img alt="Qdrant" src="https://img.shields.io/badge/Qdrant-0081CF?style=for-the-badge"></a>
 <a href="https://casbin.org/"><img alt="Casbin" src="https://img.shields.io/badge/Casbin-18a497?style=for-the-badge"></a>
 
 </p>
@@ -211,8 +210,8 @@ flowchart LR
 ### 一键启动
 
 ```bash
-git clone https://github.com/QAQupupup/Conclave-internal.git
-cd Conclave-internal
+git clone https://github.com/QAQupupup/Conclave.git
+cd Conclave
 docker compose up -d --build
 ```
 
@@ -221,11 +220,11 @@ docker compose up -d --build
 
 | 服务 | 地址 |
 |---|---|
-| 前端界面 | http://localhost:5173 |
-| 后端 API 文档 | http://localhost:8000/docs |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
-| Qdrant 向量库 | localhost:6333 |
+| 前端界面 | http://localhost:5174 |
+| 后端 API 文档 | http://localhost:8001/docs |
+| PostgreSQL | localhost:5433 |
+| Redis | localhost:6380 |
+| Qdrant 向量库 | localhost:6335 |
 
 </details>
 
@@ -242,7 +241,7 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 
 ### 使用
 
-1. 打开 http://localhost:5173
+1. 打开 http://localhost:5174
 2. 输入议题，选择产出物类型（PRD / 研究报告 / 商业报告 / 设计文档 / 可部署服务 / 数据分析）
 3. 点击「开始会议」，观察六阶段自动执行
 4. 结束后在「产出」面板查看结果
@@ -275,9 +274,9 @@ CONCLAVE_LLM_MODEL=deepseek-ai/DeepSeek-V3.2
 
 ## 开源与使用
 
-本仓库是 Conclave 的**开发仓库（完整版本）**，包含全部决策算法与高级能力。面向社区的开源简化版（Community Edition）发布在 [QAQupupup/Conclave](https://github.com/QAQupupup/Conclave)，以 **AGPL v3** 协议提供，用于演示、学习与二次开发。
+本仓库是 [Conclave-internal](https://github.com/QAQupupup/Conclave-internal) 的**开源简化版（Community Edition）**，以 **AGPL v3** 协议发布，用于演示、学习与二次开发。六阶段决策管线、7 种内置角色、RAG 证据检索等核心能力均在此开源；核心算法实现以编译后的二进制扩展形式分发，完整源码与高级能力在开发仓库 [Conclave-internal](https://github.com/QAQupupup/Conclave-internal) 中维护。
 
-受 AGPL 保护，任何基于开源版公开部分的衍生作品须以相同协议开源。
+受 AGPL 保护，任何基于本仓库公开部分的衍生作品须以相同协议开源。
 
 ## 贡献与支持
 
