@@ -3,7 +3,7 @@
 > 状态：Proposed · 日期：2026-08-06
 > 性质：修复前的完整底数梳理 + 目标设计 + 分期方案。本文档是后续所有知识层/RAG/编排器改造的唯一依据。
 > 证据基础：编排器探查（runner/stage_runners/nodes/routing）、记忆系统探查（memory/）、文档与话题关系探查（document.py/topic_decomposer/graph.py）、RAG 探查（rag/chunker.py/store.py/retriever.py）。
-> 关联文档：mock-data-redline.md（红线）、frontend-fusion-plan.md（前端）、CONCLAVE-REVIEW-AND-RAG-REQUIREMENTS-2026-08-06.md（总审查）。
+> 关联文档：mock-data-redline.md（红线）、frontend-fusion-plan.md（前端）、../archive/CONCLAVE-REVIEW-AND-RAG-REQUIREMENTS-2026-08-06.md（总审查，已归档）。
 
 ---
 
