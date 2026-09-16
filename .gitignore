@@ -89,6 +89,8 @@ backend/data/
 # ===== Temp files =====
 Qwen*/
 docs/audits/
+docs/issue-reports/
+docs/frontend-design-audit/
 .tmp/
 # 调试脚本和测试凭证（禁止提交）
 cookies.txt
@@ -121,6 +123,6 @@ ms.md
 # （2026-09-13 从 D:\conclave-knowledge-vault\ 迁入，原因见 session-checkpoint skill 事故专节）
 # 项目内的 obsidian-vault/ 目录仅用于开发时临时映射，不提交
 obsidian-vault/
-# 会话检查点文件包含个人沟通内容，禁止推到 GitHub
-# 检查点存储在 KnowledgeVault\conclave\sessions\，不在此处
-docs/sessions/checkpoint-*.md
+# 会话归档/检查点包含沟通内容，禁止推到 GitHub
+# 检查点存储在 KnowledgeVault\conclave\sessions\（ADR-012），项目内 docs/sessions/ 仅本地留存
+docs/sessions/
