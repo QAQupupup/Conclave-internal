@@ -256,7 +256,7 @@ type: `feat`/`fix`/`refactor`/`docs`/`test`/`chore`/`perf`/`style`/`ci`。scope:
 | `docs/sql-development-rules.md` | **SQL 开发守则**（五级标签：模型/查询/写入/分页/迁移/原生SQL例外） |
 | `docs/testing-rules.md` | **测试开发守则**（五级标签：验证真实代码/断言/往返测试/安全函数/外部状态/回归/快乐路径） |
 | `docs/design/design-principles.md` | 11 条固化设计原则（RAG五原则、借调三问法、MVP三问等） |
-| `docs/design/adr/001-018` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移/论点提纯/会话检查点/状态机契约/动态工作流/prompt回归测试/代码知识图谱/产物链与议题池/代码库理解层） |
+| `docs/design/adr/001-020` | 架构决策记录（插件化/JSONB/插件分级/钩子/排序/JWT/配额/sections 迁移/论点提纯/会话检查点/状态机契约/动态工作流/prompt回归测试/代码知识图谱/产物链与议题池/代码库理解层/schema 单一真相/契约优先与借调重叠检测） |
 | `docs/RETROSPECTIVE_CONVENTIONS.md` | 修复报告归档规范（HTML 格式、commit 区间、13 种错误模式） |
 | `docs/ci-stability-guide.md` | CI 稳定性详细指南（双层 Hook 体系、历史修复记录，P15 的补充） |
 | `docs/conclave-sandbox-directory-standard.md` | 沙箱目录规范 |
