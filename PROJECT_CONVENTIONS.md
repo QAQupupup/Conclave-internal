@@ -153,7 +153,7 @@ pnpm config set registry https://registry.npmmirror.com
 **归档位置（2026-09 现状）**：
 - 修复报告（强制）：`docs/retrospectives/YYYY-MM-DD-{slug}.html`，通过 html-report skill 生成，标注 commit 区间，commit message footer 用 `Refs:` 引用
 - `docs/audits/`：本地一次性审计产物目录，已在 `.gitignore` 中，不入库
-- 会话检查点：存储在 KnowledgeVault（`c:\Users\Huawei\.trae-cn\KnowledgeVault\conclave\`，ADR-012），`docs/sessions/` 不入库
+- 会话检查点：存储在 KnowledgeVault（`<vault_root>/conclave/`，ADR-012；vault 根目录为本地 `.trae-cn/KnowledgeVault/`，不进 Git），`docs/sessions/` 不入库
 
 **归档文件模板**：
 ```markdown
