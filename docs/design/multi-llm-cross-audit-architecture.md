@@ -167,6 +167,8 @@ conclave-audit skill 触发后，自动调用 audit-deepseek、audit-minimax、a
 ```
 audit-cross-verify skill 触发，逐条 grep 核验。
 
+> 注：`docs/audits/` 为本地一次性 HTML 产物目录（2026-09 起不入库）；此处是 skill 调用示例，命令中的路径对应当事审计时的本地文件位置。
+
 ### 5.4 多模型交叉质证
 
 ```

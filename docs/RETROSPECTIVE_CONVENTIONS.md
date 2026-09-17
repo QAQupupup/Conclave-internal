@@ -49,7 +49,7 @@ docs/retrospectives/
 
 ### 2.3 历史报告处理
 
-历史报告（之前存放在 `docs/audits/` 下）保持原位不动，新报告统一放 `docs/retrospectives/`。
+历史报告（之前存放在 `docs/audits/` 下）保留在本地原位但自 2026-09 起不再纳入 Git（该目录已在 `.gitignore`）；新报告统一放 `docs/retrospectives/`。其中有长期参考价值的 markdown 分析应提炼到 `docs/research/` 等正式目录入库。
 
 ---
 

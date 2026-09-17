@@ -330,11 +330,14 @@ pnpm config set registry https://registry.npmmirror.com
 
 | 目录 | 内容 |
 |------|------|
-| `docs/design/` | 设计文档（ideal-design、design-principles、iteration-1-design） |
-| `docs/audits/` | 审计报告和修复归档 |
-| `docs/research/` | 调研文档（skill-system-architecture、optimization-backlog） |
-| `docs/sessions/` | 会话归档 |
+| `docs/design/` | 设计文档与 ADR（design-principles、`adr/001-020`、各迭代设计与评审） |
 | `docs/retrospectives/` | 修复报告归档（HTML，见 `docs/RETROSPECTIVE_CONVENTIONS.md`） |
+| `docs/research/` | 调研文档（skill-system-architecture、model-benchmark、多模型交叉质证等） |
+| `docs/archive/` | 已完成使命的一次性历史分析/评审文档（2026-09 起归档） |
+| `docs/development/` / `docs/product/` / `docs/specs/` | 开发笔记、产品规划、规格说明 |
+| `docs/skills/` / `docs/llm-context/` | Skill 生态调研；LLM 上下文笔记（踩坑模式索引） |
+| `docs/audits/`、`docs/issue-reports/`、`docs/frontend-design-audit/` | **不入库**：一次性 HTML 审计/报告产物（`.gitignore` 已忽略，仅本地留存；有长期价值的 md 提炼到 `docs/research/`） |
+| `docs/sessions/` | **不入库**：会话归档存 KnowledgeVault（ADR-012），项目内此目录仅本地 |
 
 > `.trae/` 目录（skills、documents 等）是 AI 助手的本地工作区，**不进 Git**（`.gitignore` 已忽略）。
 > 值得长期保留的实施计划/完成报告应放入 `docs/` 对应子目录，而非 `.trae/documents/`。
